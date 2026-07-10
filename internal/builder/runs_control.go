@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/google/uuid"
 )
@@ -88,11 +89,12 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 		}
 		evt := events.NewRootIngressEvent(uuid.NewString(), events.EventType(eventName), "builder", "", encoded, 0, runID, "", events.EventEnvelope{EntityID: entityID}, time.Now().UTC())
 		if err := rt.Bus.Publish(ctx, evt); err != nil {
+			failure := runtimefailures.Normalize(err, "builder.run_hub", "publish_run_input")
 			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
 				"type":      "run.failed",
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
-				"payload":   map[string]any{"run_id": runID, "error": err.Error()},
+				"payload":   map[string]any{"run_id": runID, "failure": builderFailureValue(failure)},
 			})
 			h.deleteRun(runID)
 			return err
@@ -357,7 +359,11 @@ func (h *runHub) awaitCompletion(runID string) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
-		err := session.runtime.WaitForQuiescence(ctx)
+		waitForQuiescence := session.runtime.WaitForQuiescence
+		if session.waitForQuiescence != nil {
+			waitForQuiescence = session.waitForQuiescence
+		}
+		err := waitForQuiescence(ctx)
 		cancel()
 		if err != nil {
 			if h.isTerminal(runID) {
@@ -369,16 +375,17 @@ func (h *runHub) awaitCompletion(runID string) {
 				// be active. Keep waiting until authoritative quiescence is true.
 				continue
 			}
-			if _, persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
+			failure := runtimefailures.Normalize(err, "builder.run_hub", "wait_for_quiescence")
+			if _, persistErr := h.persistTerminalState(runID, "failed", &failure, time.Now().UTC()); persistErr != nil {
 				h.markTerminal(runID)
+				persistenceFailure := runTerminalPersistenceFailure("failed")
 				h.emitControl(runID, map[string]any{
 					"id":        uuid.NewString(),
 					"type":      "run.failed",
 					"timestamp": time.Now().UTC().Format(time.RFC3339),
 					"payload": map[string]any{
-						"run_id":            runID,
-						"error":             err.Error(),
-						"persistence_error": persistErr.Error(),
+						"run_id":  runID,
+						"failure": builderFailureValue(persistenceFailure),
 					},
 				})
 				return
@@ -390,17 +397,17 @@ func (h *runHub) awaitCompletion(runID string) {
 		if h.isTerminal(runID) {
 			return
 		}
-		snapshot, err := h.persistTerminalState(runID, "completed", "", time.Now().UTC())
+		snapshot, err := h.persistTerminalState(runID, "completed", nil, time.Now().UTC())
 		if err != nil {
 			h.markTerminal(runID)
+			persistenceFailure := runTerminalPersistenceFailure("completed")
 			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
 				"type":      "run.failed",
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
 				"payload": map[string]any{
-					"run_id":            runID,
-					"error":             "persisting canonical run completion failed",
-					"persistence_error": err.Error(),
+					"run_id":  runID,
+					"failure": builderFailureValue(persistenceFailure),
 				},
 			})
 			return
@@ -464,7 +471,7 @@ func (h *runHub) runControl(runID string) (*runtimeruncontrol.Controller, error)
 	return nil, fmt.Errorf("run control owner is not configured")
 }
 
-func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
+func (h *runHub) persistTerminalState(runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
 	session := h.session(runID)
 	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not configured")
@@ -473,14 +480,30 @@ func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedA
 	if !ok || writer == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not supported")
 	}
-	if err := writer.MarkRunTerminal(context.Background(), runID, status, errorSummary, endedAt); err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, err
+	return writer.MarkRunTerminal(context.Background(), runID, status, failure, endedAt)
+}
+
+func runTerminalPersistenceFailure(attemptedStatus string) runtimefailures.Envelope {
+	return runtimefailures.Normalize(
+		runtimefailures.New(
+			runtimefailures.ClassOutcomeUncertain,
+			"run_terminal_persistence_unconfirmed",
+			"builder.run_hub",
+			"mark_run_terminal",
+			map[string]any{"attempted_status": strings.TrimSpace(attemptedStatus)},
+		),
+		"builder.run_hub",
+		"mark_run_terminal",
+	)
+}
+
+func builderFailureValue(failure runtimefailures.Envelope) map[string]any {
+	value, err := runtimefailures.EnvelopeValue(failure)
+	if err != nil {
+		fallback := runtimefailures.Normalize(err, "builder.run_hub", "encode_failure")
+		value, _ = runtimefailures.EnvelopeValue(fallback)
 	}
-	reader, ok := session.runtime.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
-	if !ok || reader == nil {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle snapshot persistence is not supported")
-	}
-	return reader.LoadRunLifecycleSnapshot(context.Background(), runID)
+	return value
 }
 
 func durationMillis(snapshot runtimebus.RunLifecycleSnapshot) int64 {

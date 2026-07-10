@@ -10,6 +10,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -99,7 +100,7 @@ type runtimeLoggerHook struct {
 	logger *RuntimeLogger
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func (h runtimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
 	if h.logger == nil {
 		return nil
 	}
@@ -115,7 +116,7 @@ func (h runtimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message
 		SessionID:   sessionID,
 		Correlation: correlation,
 		Detail:      detail,
-		Error:       errText,
+		Failure:     runtimefailures.CloneEnvelope(failure),
 		DurationUS:  durationUS,
 	})
 }

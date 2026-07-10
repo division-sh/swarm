@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 )
 
@@ -533,7 +534,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 			run := validDiagnosticRunHeader("run-terminal")
 			run["status"] = "failed"
 			run["ended_at"] = "2026-05-13T10:01:00Z"
-			run["error_summary"] = "workflow failed"
+			run["failure"] = testRuntimeFailureClass(runtimefailures.ClassInternalFailure, "workflow_failed")
 			return map[string]any{"run": run}
 		},
 	})
@@ -548,7 +549,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	if !strings.Contains(stdout.String(), "run terminal: run_id=run-terminal status=failed") || !strings.Contains(stdout.String(), "workflow failed") {
+	if !strings.Contains(stdout.String(), "run terminal: run_id=run-terminal status=failed") || !strings.Contains(stdout.String(), "platform.internal_failure/workflow_failed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }

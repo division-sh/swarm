@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
@@ -109,7 +111,7 @@ func TestProjectRunOperationalStatus_EmitsDeadLetterHeuristic(t *testing.T) {
 			{SubscriberID: "agent-1", Status: "in_progress", Count: 1},
 		},
 		DeadLetters: []RunDebugDeadLetter{
-			{OriginalEvent: "evt-1", FailureType: "handler_error"},
+			{OriginalEvent: "evt-1", Failure: testFailureEnvelope(runtimefailures.ClassInternalFailure, "test_handler_failure", nil)},
 		},
 	}
 

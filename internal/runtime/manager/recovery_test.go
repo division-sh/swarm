@@ -17,6 +17,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -110,7 +111,7 @@ func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error
 }
 func (s *recoveryTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (s *recoveryTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+func (s *recoveryTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 func (s *recoveryTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
@@ -603,11 +604,11 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 	if err != nil {
 		t.Fatalf("RecoverWithStartupReplayDiagnostics: %v", err)
 	}
-	if summary.ReplayedCount != 1 || summary.SkippedCount != 3 || summary.DroppedCount != 1 {
-		t.Fatalf("summary = %#v, want replayed=1 skipped=3 dropped=1", summary)
+	if summary.ReplayedCount != 1 || summary.SkippedCount != 2 || summary.DroppedCount != 2 {
+		t.Fatalf("summary = %#v, want replayed=1 skipped=2 dropped=2", summary)
 	}
-	if !strings.Contains(summary.FirstDroppedError, "boom") {
-		t.Fatalf("summary.FirstDroppedError = %q, want boom", summary.FirstDroppedError)
+	if summary.FirstDroppedFailure == nil || summary.FirstDroppedFailure.Detail.Code != "unclassified_runtime_error" {
+		t.Fatalf("summary.FirstDroppedFailure = %#v, want unclassified_runtime_error", summary.FirstDroppedFailure)
 	}
 	if len(bus.runtimeLogs) != 5 {
 		t.Fatalf("runtime log count = %d, want 5", len(bus.runtimeLogs))
@@ -635,7 +636,7 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 	assertReplayAftermathLog("evt-replay", "replayed", string(startupManagerReplayReasonReplayed))
 	assertReplayAftermathLog("evt-receipt", "skipped", string(startupManagerReplayReasonReceiptProcessed))
 	assertReplayAftermathLog("evt-inflight", "skipped", string(startupManagerReplayReasonDuplicateInFlight))
-	assertReplayAftermathLog("evt-leased", "skipped", string(startupManagerReplayReasonSessionLeased))
+	assertReplayAftermathLog("evt-leased", "dropped", string(startupManagerReplayReasonProcessFailed))
 	assertReplayAftermathLog("evt-drop", "dropped", string(startupManagerReplayReasonProcessFailed))
 	for _, entry := range bus.runtimeLogs {
 		if strings.TrimSpace(entry.Action) == "pending_replay_failed" || strings.TrimSpace(entry.Action) == "pending_replay_event_failed" {

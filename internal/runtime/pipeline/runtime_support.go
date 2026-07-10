@@ -13,10 +13,27 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 type RuntimeLogEntry = diaglog.RunEntry
+
+func pipelineRuntimeFailure(err error, component, operation string) *runtimefailures.Envelope {
+	if err == nil {
+		return nil
+	}
+	failure := runtimefailures.Normalize(err, component, operation)
+	return &failure
+}
+
+func pipelineDependencyFailure(err error, detailCode, component, operation string) *runtimefailures.Envelope {
+	if err == nil {
+		return nil
+	}
+	failure := runtimefailures.Normalize(runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, detailCode, component, operation, nil, err), component, operation)
+	return &failure
+}
 
 type Bus interface {
 	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
@@ -313,7 +330,7 @@ type pipelineReceiptOverrideKey struct{}
 
 type PipelineReceiptOverride struct {
 	Status  string
-	ErrText string
+	Failure *runtimefailures.Envelope
 }
 
 func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
@@ -478,7 +495,7 @@ func WithPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptO
 	return withPipelineReceiptOverride(ctx, override)
 }
 
-func setPipelineReceiptOverride(ctx context.Context, status, errText string) bool {
+func setPipelineReceiptOverride(ctx context.Context, status string, failure *runtimefailures.Envelope) bool {
 	if ctx == nil {
 		return false
 	}
@@ -487,24 +504,24 @@ func setPipelineReceiptOverride(ctx context.Context, status, errText string) boo
 		return false
 	}
 	override.Status = strings.TrimSpace(strings.ToLower(status))
-	override.ErrText = strings.TrimSpace(errText)
+	override.Failure = runtimefailures.CloneEnvelope(failure)
 	return true
 }
 
-func PipelineReceiptOverrideFromContext(ctx context.Context) (status string, errText string, ok bool) {
+func PipelineReceiptOverrideFromContext(ctx context.Context) (status string, failure *runtimefailures.Envelope, ok bool) {
 	if ctx == nil {
-		return "", "", false
+		return "", nil, false
 	}
 	override, ok := ctx.Value(pipelineReceiptOverrideKey{}).(*PipelineReceiptOverride)
 	if !ok || override == nil {
-		return "", "", false
+		return "", nil, false
 	}
 	status = strings.TrimSpace(strings.ToLower(override.Status))
-	errText = strings.TrimSpace(override.ErrText)
-	if status == "" && errText == "" {
-		return "", "", false
+	failure = runtimefailures.CloneEnvelope(override.Failure)
+	if status == "" && failure == nil {
+		return "", nil, false
 	}
-	return status, errText, true
+	return status, failure, true
 }
 
 func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {

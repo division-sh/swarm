@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"context"
 	"sync"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -20,6 +21,7 @@ type runHub struct {
 type runSession struct {
 	runID              string
 	runtime            *runtimepkg.Runtime
+	waitForQuiescence  func(context.Context) error
 	entityIDs          map[string]struct{}
 	breakpoints        map[string]struct{}
 	trippedBreakpoints map[string]struct{}

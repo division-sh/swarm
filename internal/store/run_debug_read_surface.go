@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -69,12 +71,11 @@ type RunDebugMutation struct {
 }
 
 type RunDebugDeadLetter struct {
-	OriginalEvent string    `json:"original_event"`
-	EntityID      string    `json:"entity_id,omitempty"`
-	FailureType   string    `json:"failure_type"`
-	ErrorMessage  string    `json:"error_message,omitempty"`
-	HandlerNode   string    `json:"handler_node,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	OriginalEvent string                   `json:"original_event"`
+	EntityID      string                   `json:"entity_id,omitempty"`
+	Failure       runtimefailures.Envelope `json:"failure"`
+	HandlerNode   string                   `json:"handler_node,omitempty"`
+	CreatedAt     time.Time                `json:"created_at"`
 }
 
 type RunDebugFailureDelivery struct {
@@ -87,7 +88,7 @@ type RunDebugFailureDelivery struct {
 	SessionID      string                     `json:"session_id,omitempty"`
 	Status         string                     `json:"status"`
 	ReasonCode     string                     `json:"reason_code,omitempty"`
-	LastError      string                     `json:"last_error,omitempty"`
+	Failure        *runtimefailures.Envelope  `json:"failure,omitempty"`
 	RetryCount     int                        `json:"retry_count"`
 	RetryEligible  bool                       `json:"retry_eligible"`
 	Terminal       bool                       `json:"terminal"`
@@ -105,17 +106,17 @@ type RunDebugAgentTurn struct {
 }
 
 type RunDebugRuntimeLog struct {
-	EventID   string          `json:"event_id,omitempty"`
-	Level     string          `json:"level"`
-	Message   string          `json:"message,omitempty"`
-	Component string          `json:"component"`
-	Action    string          `json:"action"`
-	EventType string          `json:"event_type,omitempty"`
-	AgentID   string          `json:"agent_id,omitempty"`
-	EntityID  string          `json:"entity_id,omitempty"`
-	Error     string          `json:"error,omitempty"`
-	Detail    json.RawMessage `json:"detail,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
+	EventID   string                    `json:"event_id,omitempty"`
+	Level     string                    `json:"level"`
+	Message   string                    `json:"message,omitempty"`
+	Component string                    `json:"component"`
+	Action    string                    `json:"action"`
+	EventType string                    `json:"event_type,omitempty"`
+	AgentID   string                    `json:"agent_id,omitempty"`
+	EntityID  string                    `json:"entity_id,omitempty"`
+	Failure   *runtimefailures.Envelope `json:"failure,omitempty"`
+	Detail    json.RawMessage           `json:"detail,omitempty"`
+	CreatedAt time.Time                 `json:"created_at"`
 }
 
 type RunDebugRuntimeSummary struct {
@@ -138,7 +139,8 @@ type RunDebugReport struct {
 	RunTableStatus    string                    `json:"run_table_status,omitempty"`
 	RootEventID       string                    `json:"root_event_id,omitempty"`
 	RootEventType     string                    `json:"root_event_type,omitempty"`
-	ErrorSummary      string                    `json:"error_summary,omitempty"`
+	Failure           *runtimefailures.Envelope `json:"failure,omitempty"`
+	ControlReason     string                    `json:"control_reason,omitempty"`
 	StartedAt         time.Time                 `json:"started_at,omitempty"`
 	LastEventAt       time.Time                 `json:"last_event_at,omitempty"`
 	EndedAt           *time.Time                `json:"ended_at,omitempty"`
@@ -175,43 +177,43 @@ type RunDebugTraceFilter struct {
 }
 
 type RunDebugTraceRow struct {
-	EventID               string     `json:"event_id,omitempty"`
-	EventName             string     `json:"event_name,omitempty"`
-	SourceEventID         string     `json:"source_event_id,omitempty"`
-	EntityID              string     `json:"entity_id,omitempty"`
-	EventSource           string     `json:"event_source,omitempty"`
-	EventSourceType       string     `json:"event_source_type,omitempty"`
-	EventCreatedAt        time.Time  `json:"event_created_at"`
-	DeliveryID            string     `json:"delivery_id,omitempty"`
-	SubscriberType        string     `json:"subscriber_type,omitempty"`
-	SubscriberID          string     `json:"subscriber_id,omitempty"`
-	DeliveryStatus        string     `json:"delivery_status,omitempty"`
-	DeliveryReasonCode    string     `json:"delivery_reason_code,omitempty"`
-	ReplyContextID        string     `json:"reply_context_id,omitempty"`
-	DeliveryLastError     string     `json:"delivery_last_error,omitempty"`
-	DeliveryRetryCount    int        `json:"delivery_retry_count,omitempty"`
-	DeliveryRetryEligible bool       `json:"delivery_retry_eligible,omitempty"`
-	DeliveryTerminal      bool       `json:"delivery_terminal,omitempty"`
-	ActiveSessionID       string     `json:"active_session_id,omitempty"`
-	DeliveryCreatedAt     *time.Time `json:"delivery_created_at,omitempty"`
-	DeliveryStartedAt     *time.Time `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt   *time.Time `json:"delivery_delivered_at,omitempty"`
-	SessionID             string     `json:"session_id,omitempty"`
-	SessionKind           string     `json:"session_kind,omitempty"`
-	SessionRuntimeMode    string     `json:"session_runtime_mode,omitempty"`
-	SessionStatus         string     `json:"session_status,omitempty"`
-	SessionUpdatedAt      *time.Time `json:"session_updated_at,omitempty"`
-	TurnID                string     `json:"turn_id,omitempty"`
-	TurnTriggerEventID    string     `json:"turn_trigger_event_id,omitempty"`
-	TurnTriggerEventType  string     `json:"turn_trigger_event_type,omitempty"`
-	TurnRuntimeMode       string     `json:"turn_runtime_mode,omitempty"`
-	TurnScopeKey          string     `json:"turn_scope_key,omitempty"`
-	TurnEntityID          string     `json:"turn_entity_id,omitempty"`
-	TurnTaskID            string     `json:"turn_task_id,omitempty"`
-	TurnParseOK           bool       `json:"turn_parse_ok,omitempty"`
-	TurnRetryCount        int        `json:"turn_retry_count,omitempty"`
-	TurnError             string     `json:"turn_error,omitempty"`
-	TurnCreatedAt         *time.Time `json:"turn_created_at,omitempty"`
+	EventID               string                    `json:"event_id,omitempty"`
+	EventName             string                    `json:"event_name,omitempty"`
+	SourceEventID         string                    `json:"source_event_id,omitempty"`
+	EntityID              string                    `json:"entity_id,omitempty"`
+	EventSource           string                    `json:"event_source,omitempty"`
+	EventSourceType       string                    `json:"event_source_type,omitempty"`
+	EventCreatedAt        time.Time                 `json:"event_created_at"`
+	DeliveryID            string                    `json:"delivery_id,omitempty"`
+	SubscriberType        string                    `json:"subscriber_type,omitempty"`
+	SubscriberID          string                    `json:"subscriber_id,omitempty"`
+	DeliveryStatus        string                    `json:"delivery_status,omitempty"`
+	DeliveryReasonCode    string                    `json:"delivery_reason_code,omitempty"`
+	ReplyContextID        string                    `json:"reply_context_id,omitempty"`
+	DeliveryFailure       *runtimefailures.Envelope `json:"delivery_failure,omitempty"`
+	DeliveryRetryCount    int                       `json:"delivery_retry_count,omitempty"`
+	DeliveryRetryEligible bool                      `json:"delivery_retry_eligible,omitempty"`
+	DeliveryTerminal      bool                      `json:"delivery_terminal,omitempty"`
+	ActiveSessionID       string                    `json:"active_session_id,omitempty"`
+	DeliveryCreatedAt     *time.Time                `json:"delivery_created_at,omitempty"`
+	DeliveryStartedAt     *time.Time                `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt   *time.Time                `json:"delivery_delivered_at,omitempty"`
+	SessionID             string                    `json:"session_id,omitempty"`
+	SessionKind           string                    `json:"session_kind,omitempty"`
+	SessionRuntimeMode    string                    `json:"session_runtime_mode,omitempty"`
+	SessionStatus         string                    `json:"session_status,omitempty"`
+	SessionUpdatedAt      *time.Time                `json:"session_updated_at,omitempty"`
+	TurnID                string                    `json:"turn_id,omitempty"`
+	TurnTriggerEventID    string                    `json:"turn_trigger_event_id,omitempty"`
+	TurnTriggerEventType  string                    `json:"turn_trigger_event_type,omitempty"`
+	TurnRuntimeMode       string                    `json:"turn_runtime_mode,omitempty"`
+	TurnScopeKey          string                    `json:"turn_scope_key,omitempty"`
+	TurnEntityID          string                    `json:"turn_entity_id,omitempty"`
+	TurnTaskID            string                    `json:"turn_task_id,omitempty"`
+	TurnParseOK           bool                      `json:"turn_parse_ok,omitempty"`
+	TurnRetryCount        int                       `json:"turn_retry_count,omitempty"`
+	TurnFailure           *runtimefailures.Envelope `json:"turn_failure,omitempty"`
+	TurnCreatedAt         *time.Time                `json:"turn_created_at,omitempty"`
 }
 
 func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions {
@@ -287,11 +289,12 @@ func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog 
 		return fmt.Errorf("run debug read surface requires canonical agent_turns.run_id")
 	}
 	required := map[string][]string{
-		"runs":             {"run_id", "status", "error_summary", "started_at", "ended_at", "entity_count"},
-		"entity_state":     {"run_id", "entity_id"},
-		"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "last_error", "active_session_id", "created_at", "started_at", "delivered_at"},
-		"dead_letters":     {"dead_letter_id", "original_event_id", "original_event", "entity_id", "failure_type", "error_message", "retry_count", "chain_depth", "handler_node", "created_at"},
-		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "old_value", "new_value", "caused_by_event", "writer_type", "writer_id", "handler_step", "created_at"},
+		"runs":              {"run_id", "status", "failure", "started_at", "ended_at", "entity_count"},
+		"run_control_state": {"run_id", "reason"},
+		"entity_state":      {"run_id", "entity_id"},
+		"event_deliveries":  {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "failure", "active_session_id", "created_at", "started_at", "delivered_at"},
+		"dead_letters":      {"dead_letter_id", "original_event_id", "original_event", "entity_id", "failure", "retry_count", "chain_depth", "handler_node", "created_at"},
+		"entity_mutations":  {"mutation_id", "run_id", "entity_id", "field", "old_value", "new_value", "caused_by_event", "writer_type", "writer_id", "handler_step", "created_at"},
 	}
 	for tableName, columns := range required {
 		if catalog.hasColumns(tableName, columns...) {
@@ -442,29 +445,40 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	report := RunDebugReport{RunID: runID}
 
 	var (
-		runStatus    string
-		errorSummary string
-		started      sql.NullTime
-		ended        sql.NullTime
-		entityCount  sql.NullInt64
+		runStatus     string
+		failureRaw    []byte
+		controlReason string
+		started       sql.NullTime
+		ended         sql.NullTime
+		entityCount   sql.NullInt64
 	)
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(r.status, ''),
-			COALESCE(r.error_summary, ''),
+			r.failure,
+			COALESCE(rc.reason, ''),
 			r.started_at,
 			r.ended_at,
 			COALESCE(entity_summary.entity_count, 0)
 		FROM runs r
+		LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
 		LEFT JOIN LATERAL (
 			SELECT COUNT(DISTINCT es.entity_id)::int AS entity_count
 			FROM entity_state es
 			WHERE es.run_id = r.run_id
 		) entity_summary ON TRUE
 		WHERE r.run_id = $1::uuid
-	`, report.RunID).Scan(&runStatus, &errorSummary, &started, &ended, &entityCount); err == nil {
+	`, report.RunID).Scan(&runStatus, &failureRaw, &controlReason, &started, &ended, &entityCount); err == nil {
 		report.RunTableStatus = strings.TrimSpace(runStatus)
-		report.ErrorSummary = strings.TrimSpace(errorSummary)
+		report.ControlReason = strings.TrimSpace(controlReason)
+		failure, decodeErr := decodeStoredFailure(failureRaw)
+		if decodeErr != nil {
+			return RunDebugReport{}, decodeErr
+		}
+		report.Failure = failure
+		if evidenceErr := storerunlifecycle.ValidateStatusFailure(report.RunTableStatus, report.Failure); evidenceErr != nil {
+			return RunDebugReport{}, fmt.Errorf("run %s terminal evidence: %w", report.RunID, evidenceErr)
+		}
 		if started.Valid {
 			report.StartedAt = started.Time
 		}
@@ -585,8 +599,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		SELECT
 			COALESCE(dl.original_event, ''),
 			COALESCE(dl.entity_id::text, ''),
-			COALESCE(dl.failure_type, ''),
-			COALESCE(dl.error_message, ''),
+			dl.failure,
 			COALESCE(dl.handler_node, ''),
 			dl.created_at
 		FROM dead_letters dl
@@ -601,9 +614,15 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	defer deadRows.Close()
 	for deadRows.Next() {
 		var item RunDebugDeadLetter
-		if err := deadRows.Scan(&item.OriginalEvent, &item.EntityID, &item.FailureType, &item.ErrorMessage, &item.HandlerNode, &item.CreatedAt); err != nil {
+		var rawFailure []byte
+		if err := deadRows.Scan(&item.OriginalEvent, &item.EntityID, &rawFailure, &item.HandlerNode, &item.CreatedAt); err != nil {
 			return RunDebugReport{}, fmt.Errorf("scan dead letters: %w", err)
 		}
+		failure, err := decodeStoredFailure(rawFailure)
+		if err != nil || failure == nil {
+			return RunDebugReport{}, fmt.Errorf("decode run dead letter failure")
+		}
+		item.Failure = *failure
 		report.DeadLetters = append(report.DeadLetters, item)
 	}
 	if err := deadRows.Err(); err != nil {
@@ -611,7 +630,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	}
 
 	turnRows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id, COUNT(*), COUNT(*) FILTER (WHERE COALESCE(error, '') <> ''), MAX(created_at)
+		SELECT agent_id, COUNT(*), COUNT(*) FILTER (WHERE failure IS NOT NULL), MAX(created_at)
 		FROM agent_turns
 		WHERE run_id = $1::uuid
 		GROUP BY agent_id
@@ -758,7 +777,7 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 			COALESCE(d.active_session_id::text, ''),
 			COALESCE(d.status, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'::jsonb),
 			COALESCE(d.retry_count, 0),
 			d.created_at,
 			d.started_at,
@@ -778,6 +797,7 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 	out := []RunDebugFailureDelivery{}
 	for rows.Next() {
 		var item RunDebugFailureDelivery
+		var rawFailure []byte
 		var createdAt, startedAt, finishedAt sql.NullTime
 		if err := rows.Scan(
 			&item.EventID,
@@ -789,13 +809,17 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 			&item.SessionID,
 			&item.Status,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&createdAt,
 			&startedAt,
 			&finishedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan run failed delivery: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, fmt.Errorf("decode run failed delivery failure: %w", err)
 		}
 		item.CreatedAt = nullTimePtr(createdAt)
 		item.StartedAt = nullTimePtr(startedAt)
@@ -822,7 +846,6 @@ func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
 	}
 	item.Status = strings.TrimSpace(item.Status)
 	item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-	item.LastError = strings.TrimSpace(item.LastError)
 	item.RetryEligible = OperatorDeliveryRetryEligible(item.Status)
 	item.Terminal = OperatorDeliveryTerminal(item.Status)
 }
@@ -955,7 +978,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
 				%s,
-				COALESCE(d.last_error, ''),
+				COALESCE(d.failure, 'null'::jsonb),
 				COALESCE(d.retry_count, 0),
 				COALESCE(d.active_session_id::text, ''),
 				d.created_at,
@@ -975,7 +998,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			COALESCE(t.task_id, ''),
 			COALESCE(t.parse_ok, false),
 			COALESCE(t.retry_count, 0),
-			COALESCE(t.error, ''),
+			COALESCE(t.failure, 'null'::jsonb),
 			t.created_at
 		FROM events e
 		LEFT JOIN event_deliveries d
@@ -1025,6 +1048,8 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			deliveryDeliveredAt sql.NullTime
 			sessionUpdatedAt    sql.NullTime
 			turnCreatedAt       sql.NullTime
+			rawDeliveryFailure  []byte
+			rawTurnFailure      []byte
 		)
 		if err := rows.Scan(
 			&item.EventID,
@@ -1040,7 +1065,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			&item.DeliveryStatus,
 			&item.DeliveryReasonCode,
 			&item.ReplyContextID,
-			&item.DeliveryLastError,
+			&rawDeliveryFailure,
 			&item.DeliveryRetryCount,
 			&item.ActiveSessionID,
 			&deliveryCreatedAt,
@@ -1060,10 +1085,18 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			&item.TurnTaskID,
 			&item.TurnParseOK,
 			&item.TurnRetryCount,
-			&item.TurnError,
+			&rawTurnFailure,
 			&turnCreatedAt,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan run debug trace: %w", err)
+		}
+		item.DeliveryFailure, err = decodeStoredFailure(rawDeliveryFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode run trace delivery failure: %w", err)
+		}
+		item.TurnFailure, err = decodeStoredFailure(rawTurnFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode run trace turn failure: %w", err)
 		}
 		item.DeliveryCreatedAt = nullableTimePtr(deliveryCreatedAt)
 		item.DeliveryStartedAt = nullableTimePtr(deliveryStartedAt)
@@ -1261,7 +1294,7 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 			COALESCE(payload->'details'->>'event_type', ''),
 			COALESCE(payload->'details'->>'agent_id', ''),
 			COALESCE(payload->'details'->>'entity_id', ''),
-			COALESCE(payload->'details'->>'error', ''),
+			COALESCE(payload->'details'->'failure', 'null'::jsonb),
 			COALESCE(payload->'details', '{}'::jsonb),
 			created_at
 		FROM events
@@ -1279,9 +1312,15 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	for logRows.Next() {
 		var item RunDebugRuntimeLog
 		var detail []byte
-		if err := logRows.Scan(&item.EventID, &item.Level, &item.Message, &item.Component, &item.Action, &item.EventType, &item.AgentID, &item.EntityID, &item.Error, &detail, &item.CreatedAt); err != nil {
+		var failureRaw []byte
+		if err := logRows.Scan(&item.EventID, &item.Level, &item.Message, &item.Component, &item.Action, &item.EventType, &item.AgentID, &item.EntityID, &failureRaw, &detail, &item.CreatedAt); err != nil {
 			return fmt.Errorf("scan runtime logs: %w", err)
 		}
+		failure, err := decodeStoredFailure(failureRaw)
+		if err != nil {
+			return fmt.Errorf("decode runtime log failure: %w", err)
+		}
+		item.Failure = failure
 		item.Detail = append(json.RawMessage(nil), detail...)
 		report.RuntimeLogs = append(report.RuntimeLogs, item)
 	}

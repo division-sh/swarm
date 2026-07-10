@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -136,7 +138,8 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 		RunTableStatus: header.Status,
 		RootEventID:    header.TriggerEventID,
 		RootEventType:  header.TriggerEventType,
-		ErrorSummary:   header.ErrorSummary,
+		Failure:        runtimefailures.CloneEnvelope(header.Failure),
+		ControlReason:  header.ControlReason,
 		StartedAt:      header.StartedAt,
 		EndedAt:        header.EndedAt,
 		EventCount:     header.EventCount,
@@ -289,14 +292,17 @@ SELECT
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.forked_from_run_id, ''),
-	COALESCE(r.error_summary, '')
+	r.failure,
+	COALESCE(rc.reason, '')
 FROM runs r
+	LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
 `
 }
 
 func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 	var header RunHeader
 	var startedRaw, endedRaw any
+	var failureRaw any
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
@@ -307,7 +313,8 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&startedRaw,
 		&endedRaw,
 		&header.ForkedFromRunID,
-		&header.ErrorSummary,
+		&failureRaw,
+		&header.ControlReason,
 	); err != nil {
 		return RunHeader{}, err
 	}
@@ -327,7 +334,15 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
 	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
 	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
-	header.ErrorSummary = strings.TrimSpace(header.ErrorSummary)
+	header.ControlReason = strings.TrimSpace(header.ControlReason)
+	failure, err := decodeStoredFailure(failureRaw)
+	if err != nil {
+		return RunHeader{}, err
+	}
+	header.Failure = failure
+	if err := storerunlifecycle.ValidateStatusFailure(header.Status, header.Failure); err != nil {
+		return RunHeader{}, fmt.Errorf("run %s terminal evidence: %w", header.RunID, err)
+	}
 	return header, nil
 }
 
@@ -407,7 +422,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 			COALESCE(d.active_session_id, ''),
 			COALESCE(d.status, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'),
 			COALESCE(d.retry_count, 0),
 			d.created_at,
 			d.started_at,
@@ -427,6 +442,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 	out := []RunDebugFailureDelivery{}
 	for rows.Next() {
 		var item RunDebugFailureDelivery
+		var rawFailure any
 		var createdRaw, startedRaw, finishedRaw any
 		if err := rows.Scan(
 			&item.EventID,
@@ -438,13 +454,17 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 			&item.SessionID,
 			&item.Status,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&createdRaw,
 			&startedRaw,
 			&finishedRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite run failed delivery: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, fmt.Errorf("decode sqlite run failed delivery failure: %w", err)
 		}
 		item.CreatedAt = sqliteTraceTimePtr(createdRaw)
 		item.StartedAt = sqliteTraceTimePtr(startedRaw)
@@ -533,7 +553,9 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugRuntimeLogs(ctx context.Context, runI
 		} else if ok {
 			log.TS = at
 		}
-		applySQLiteRuntimeLogPayload(&log, sqliteJSONRawMessage(payloadRaw))
+		if err := applySQLiteRuntimeLogPayload(&log, sqliteJSONRawMessage(payloadRaw)); err != nil {
+			return nil, fmt.Errorf("decode sqlite run debug runtime log: %w", err)
+		}
 		detail, _ := json.Marshal(log.Details)
 		item := RunDebugRuntimeLog{
 			EventID:   strings.TrimSpace(log.LogID),
@@ -544,7 +566,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugRuntimeLogs(ctx context.Context, runI
 			EventType: strings.TrimSpace(sqliteObservabilityString(log.Details["event_type"])),
 			AgentID:   strings.TrimSpace(log.Source),
 			EntityID:  strings.TrimSpace(log.EntityID),
-			Error:     strings.TrimSpace(log.ErrorCode),
+			Failure:   runtimefailures.CloneEnvelope(log.Failure),
 			Detail:    json.RawMessage(detail),
 			CreatedAt: log.TS.UTC(),
 		}

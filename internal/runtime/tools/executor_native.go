@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,7 +71,7 @@ func (e *Executor) execNativeBash(ctx context.Context, actor models.AgentConfig,
 	start := time.Now()
 	stdout, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, timeout, "", "sh", "-lc", command)
 	duration := time.Since(start)
-	if execErr != nil && (ctx.Err() != nil || strings.Contains(strings.ToLower(execErr.Error()), "deadline exceeded")) {
+	if execErr != nil && (ctx.Err() != nil || errors.Is(execErr, context.DeadlineExceeded)) {
 		return nil, execErr
 	}
 	if execErr != nil && exitCode == -1 {

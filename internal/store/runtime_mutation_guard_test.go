@@ -680,6 +680,9 @@ func classifyRuntimeWriterCallSites(sites []runtimeWriterCallSite) ([]runtimeWri
 }
 
 func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Path == "internal/store/failure_schema_migration.go" {
+		return classDifferentConcept, "boot-time canonical failure schema migration owns its isolated transaction", true
+	}
 	if site.Kind == primitiveBoundary {
 		switch site.Primitive {
 		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "RunEventTransaction", "RunEventMutation":

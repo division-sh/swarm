@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/google/uuid"
@@ -49,7 +50,7 @@ type eventReplayDelivery struct {
 	SessionID        string                           `json:"session_id,omitempty"`
 	Status           string                           `json:"status"`
 	ReasonCode       string                           `json:"reason_code,omitempty"`
-	LastError        string                           `json:"last_error,omitempty"`
+	Failure          *runtimefailures.Envelope        `json:"failure,omitempty"`
 	Attempt          int                              `json:"attempt"`
 	RetryCount       int                              `json:"retry_count"`
 	RetryEligible    bool                             `json:"retry_eligible"`
@@ -537,7 +538,7 @@ func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDe
 		SessionID:        published.SessionID,
 		Status:           published.Status,
 		ReasonCode:       published.ReasonCode,
-		LastError:        published.LastError,
+		Failure:          runtimefailures.CloneEnvelope(published.Failure),
 		Attempt:          published.Attempt,
 		RetryCount:       published.RetryCount,
 		RetryEligible:    published.RetryEligible,
@@ -564,8 +565,8 @@ func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorE
 	if reason := strings.TrimSpace(delivery.ReasonCode); reason != "" {
 		data["reason_code"] = reason
 	}
-	if lastError := strings.TrimSpace(delivery.LastError); lastError != "" {
-		data["last_error"] = lastError
+	if delivery.Failure != nil {
+		data["failure"] = *delivery.Failure
 	}
 	return data
 }

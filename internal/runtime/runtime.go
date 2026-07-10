@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -679,10 +680,11 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			}
 		},
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
-		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
+		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			_, err := rt.RuntimeIngress.SafetyPause(ctx, runtimeingress.TransitionRequest{
 				Reason:       reason,
 				ControlledBy: "runtime",
+				LastFailure:  failure,
 			})
 			return err
 		},
@@ -853,11 +855,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if err != nil {
 		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 		startupRecoveryDecision.ReasonCode = startupRecoveryReasonInspectFailed
-		startupRecoveryDecision.ErrorText = err.Error()
-		startupRecoveryDecision.InspectionError = err.Error()
+		startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "startup_recovery_inspection_failed", "inspect_recovery_state", nil, err)
+		startupRecoveryDecision.InspectionFailure = runtimefailures.CloneEnvelope(startupRecoveryDecision.Failure)
 	}
 	if denyErr := startupRecoveryDecision.denialError(); denyErr != nil {
-		startupRecoveryDecision.ErrorText = denyErr.Error()
+		startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassSchemaInvalid, "startup_recovery_disabled_with_work", "admit_recovery", map[string]any{"work_classes": startupRecoveryDecision.Snapshot.StartupBlockingWorkClasses()}, denyErr)
 		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 		rt.emitBootProgress(7, "recovery_decision", "FAILED", denyErr.Error())
 		return denyErr
@@ -894,7 +896,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
 		results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
-		timerReplayCount, timerSkipCount, timerDropCount, timerRecoveryErrText := summarizeStartupTimerRecovery(results)
+		timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
 		startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
 		startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
 		startupRecoveryDecision.ScheduleDropCount = timerDropCount
@@ -911,11 +913,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
 			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 			startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
-			if strings.TrimSpace(timerRecoveryErrText) != "" {
-				startupRecoveryDecision.ErrorText = timerRecoveryErrText
-			} else {
-				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleDropCount)
-			}
+			startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "schedule_restore_failed", "restore_schedules", map[string]any{"dropped_count": startupRecoveryDecision.ScheduleDropCount}, nil)
 		}
 		rt.emitBootProgress(10, "schedule_restoration", "ok", fmt.Sprintf("%d schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
 	} else {
@@ -932,20 +930,20 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err != nil {
 			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
-			startupRecoveryDecision.ErrorText = err.Error()
+			startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "startup_manager_recovery_failed", "recover_manager", nil, err)
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err))
 			}
 			startupRecoveryDecision.ManagerResetAttempted = true
 			if resetErr := rt.Manager.ResetRuntimeStateWithSource("startup_recovery_failed"); resetErr != nil {
-				startupRecoveryDecision.ManagerResetError = resetErr.Error()
+				startupRecoveryDecision.ManagerResetFailure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_reset_failed", "reset_manager", nil, resetErr)
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))
 				}
 			}
 			if rt.Stores.MailboxStore != nil {
 				ctxPayload := mustJSON(map[string]any{
-					"error":       err.Error(),
+					"failure":     *startupRecoveryDecision.Failure,
 					"instruction": "Runtime recovery failed. Reinitialize or repair persisted runtime state before restart.",
 				})
 				if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -962,7 +960,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				}
 			}
 			payload := mustJSON(map[string]any{
-				"error":           err.Error(),
+				"failure":         *startupRecoveryDecision.Failure,
 				"failed_event_id": nil,
 				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 			})
@@ -985,10 +983,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		} else if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ManagerDropCount > 0 {
 			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
-			if strings.TrimSpace(managerReplaySummary.FirstDroppedError) != "" {
-				startupRecoveryDecision.ErrorText = strings.TrimSpace(managerReplaySummary.FirstDroppedError)
-			} else {
-				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to replay %d pending event(s) during startup recovery", startupRecoveryDecision.ManagerDropCount)
+			startupRecoveryDecision.Failure = runtimefailures.CloneEnvelope(managerReplaySummary.FirstDroppedFailure)
+			if startupRecoveryDecision.Failure == nil {
+				startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_replay_dropped_without_failure", "recover_manager", map[string]any{"dropped_count": startupRecoveryDecision.ManagerDropCount}, nil)
 			}
 		}
 		status := "ok"

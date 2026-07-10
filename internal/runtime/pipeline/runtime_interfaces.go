@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -64,8 +65,8 @@ type SystemNodeReceiptPersistence interface {
 	SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error)
 	SystemNodeDeliveryQuiesced(ctx context.Context, nodeID, eventID string) (bool, error)
 	MarkSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error
-	MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error
-	MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error
+	MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error
+	MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error
 	MarkSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error
 }
 
@@ -73,8 +74,8 @@ type SystemNodeTargetReceiptPersistence interface {
 	SystemNodeDeliveryAuthorizedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, retryLimit int) (bool, error)
 	SystemNodeProcessedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity) (bool, error)
 	MarkSystemNodeDeliveryInProgressForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, retryLimit int) error
-	MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount, retryLimit int) error
-	MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount int, sideEffects string) error
+	MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error
+	MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error
 	MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, sideEffects string) error
 }
 

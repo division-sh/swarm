@@ -58,6 +58,12 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	mcpServersPayload := normalizeJSONObject(rec.MCPServers)
 	mcpToolsListedPayload := normalizeJSONArray(rec.MCPToolsListed)
 	mcpToolsVisiblePayload := normalizeJSONArray(rec.MCPToolsVisible)
+	failurePayload := ""
+	if encodedFailure, err := encodeStoredFailure(rec.Failure); err != nil {
+		return fmt.Errorf("encode agent turn failure: %w", err)
+	} else if encodedFailure != nil {
+		failurePayload = encodedFailure.(string)
+	}
 	latencyMS := int(rec.Latency / time.Millisecond)
 	if latencyMS < 0 {
 		latencyMS = 0
@@ -75,7 +81,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 					'parse_ok', to_jsonb($7::boolean),
 					'latency_ms', to_jsonb($8::integer),
 					'retry_count', to_jsonb($9::integer),
-					'error', to_jsonb(NULLIF($10, '')::text),
+					'failure', CASE WHEN $10 = '' THEN NULL ELSE $10::jsonb END,
 					'updated_at', to_jsonb(now())
 				)
 			),
@@ -95,7 +101,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.ParseOK,
 		latencyMS,
 		rec.RetryCount,
-		rec.Error,
+		failurePayload,
 	}
 	if hasConversationRunID {
 		if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
@@ -112,7 +118,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 						'parse_ok', to_jsonb($8::boolean),
 						'latency_ms', to_jsonb($9::integer),
 						'retry_count', to_jsonb($10::integer),
-						'error', to_jsonb(NULLIF($11, '')::text),
+						'failure', CASE WHEN $11 = '' THEN NULL ELSE $11::jsonb END,
 						'updated_at', to_jsonb(now())
 					)
 				),
@@ -134,7 +140,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.ParseOK,
 			latencyMS,
 			rec.RetryCount,
-			rec.Error,
+			failurePayload,
 		}
 	}
 	if !runtimeMode.IsStateless() {
@@ -211,7 +217,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, error
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure
 		) VALUES (
 			$1,
 			$2::uuid,
@@ -232,7 +238,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			$17,
 			$18,
 			$19,
-			NULLIF($20, '')
+			CASE WHEN $20 = '' THEN NULL ELSE $20::jsonb END
 		)
 	`
 	insertArgs := []any{
@@ -255,7 +261,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.ParseOK,
 		latencyMS,
 		rec.RetryCount,
-		rec.Error,
+		failurePayload,
 	}
 	if hasTurnBlocks {
 		insertTurn = `
@@ -263,7 +269,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 				emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error
+				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure
 			) VALUES (
 				$1,
 				$2::uuid,
@@ -285,7 +291,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				$18,
 				$19,
 				$20,
-				NULLIF($21, '')
+				CASE WHEN $21 = '' THEN NULL ELSE $21::jsonb END
 			)
 		`
 		insertArgs = []any{
@@ -309,7 +315,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.ParseOK,
 			latencyMS,
 			rec.RetryCount,
-			rec.Error,
+			failurePayload,
 		}
 	}
 	if hasRunID {
@@ -321,7 +327,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 				emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-				request_payload, response_payload, parse_ok, latency_ms, retry_count, error
+				request_payload, response_payload, parse_ok, latency_ms, retry_count, failure
 			) VALUES (
 				NULLIF($1,'')::uuid,
 				$2,
@@ -343,7 +349,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				$18,
 				$19,
 				$20,
-				NULLIF($21, '')
+				CASE WHEN $21 = '' THEN NULL ELSE $21::jsonb END
 			)
 		`
 		insertArgs = []any{
@@ -367,7 +373,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.ParseOK,
 			latencyMS,
 			rec.RetryCount,
-			rec.Error,
+			failurePayload,
 		}
 		if hasTurnBlocks {
 			insertTurn = `
@@ -375,7 +381,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 					run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 					trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 					emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-					request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error
+					request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure
 				) VALUES (
 					NULLIF($1,'')::uuid,
 					$2,
@@ -398,7 +404,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 					$19,
 					$20,
 					$21,
-					NULLIF($22, '')
+					CASE WHEN $22 = '' THEN NULL ELSE $22::jsonb END
 				)
 			`
 			insertArgs = []any{
@@ -423,7 +429,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				rec.ParseOK,
 				latencyMS,
 				rec.RetryCount,
-				rec.Error,
+				failurePayload,
 			}
 		}
 	}

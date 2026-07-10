@@ -2,14 +2,18 @@ package builder
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -18,15 +22,27 @@ type snapshotRunStore struct {
 	snapshot    runtimebus.RunLifecycleSnapshot
 	events      []store.OperatorEventFull
 	runtimeLogs []store.OperatorRuntimeLogEntry
+	appendErr   error
+	terminalErr error
 }
 
-func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status, errorSummary string, endedAt time.Time) error {
+func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt events.Event) error {
+	if s.appendErr != nil {
+		return s.appendErr
+	}
+	return s.InMemoryEventStore.AppendEvent(ctx, evt)
+}
+
+func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
+	if s.terminalErr != nil {
+		return runtimebus.RunLifecycleSnapshot{}, s.terminalErr
+	}
 	s.snapshot.RunID = runID
 	s.snapshot.Status = status
-	s.snapshot.ErrorSummary = errorSummary
+	s.snapshot.Failure = runtimefailures.CloneEnvelope(failure)
 	ended := endedAt
 	s.snapshot.EndedAt = &ended
-	return nil
+	return s.snapshot, nil
 }
 
 func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error) {
@@ -108,6 +124,32 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 	}
 }
 
+func TestRunHubStartRunPublishFailureUsesCanonicalEnvelopeOnly(t *testing.T) {
+	store := &snapshotRunStore{appendErr: errors.New("raw publish secret")}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eb}
+	var observed RunEventEnvelope
+	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
+	hub.sessions["run-123"] = &runSession{subs: map[string]func(RunEventEnvelope){"test": func(event RunEventEnvelope) { observed = cloneRunEvent(event) }}}
+
+	if err := hub.startRun(context.Background(), "run-123", map[string]any{"review.requested": map[string]any{"entity_id": "ent-1"}}, nil); err == nil {
+		t.Fatal("startRun succeeded, want planted publish failure")
+	}
+	payload, _ := observed["payload"].(map[string]any)
+	failureValue, ok := payload["failure"].(map[string]any)
+	if !ok || failureValue["class"] != string(runtimefailures.ClassInternalFailure) {
+		t.Fatalf("publish failure payload = %#v", payload)
+	}
+	for _, retired := range []string{"error", "persistence_error"} {
+		if _, exists := payload[retired]; exists {
+			t.Fatalf("publish failure payload retained %s: %#v", retired, payload)
+		}
+	}
+}
+
 func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFails(t *testing.T) {
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
@@ -142,8 +184,44 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFail
 		t.Fatalf("last event type = %q, want run.failed", got)
 	}
 	payload, _ := last["payload"].(map[string]any)
-	if _, ok := payload["persistence_error"]; !ok {
-		t.Fatalf("last payload = %#v, want persistence_error", payload)
+	failureValue, ok := payload["failure"].(map[string]any)
+	if !ok || failureValue["class"] != string(runtimefailures.ClassOutcomeUncertain) {
+		t.Fatalf("last payload = %#v, want canonical outcome-uncertain failure", payload)
+	}
+	if _, ok := payload["persistence_error"]; ok {
+		t.Fatalf("last payload = %#v, persistence_error must be retired", payload)
+	}
+}
+
+func TestRunHubAwaitCompletionFailedTerminalPersistenceOmitsOriginalFailure(t *testing.T) {
+	store := &snapshotRunStore{terminalErr: errors.New("raw persistence secret")}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eb}
+	hub := &runHub{sessions: map[string]*runSession{"run-123": {
+		runID:             "run-123",
+		runtime:           rt,
+		waitForQuiescence: func(context.Context) error { return errors.New("raw execution secret") },
+		subs:              map[string]func(RunEventEnvelope){},
+	}}}
+
+	hub.awaitCompletion("run-123")
+	session := hub.session("run-123")
+	if session == nil || len(session.controlEvents) != 1 {
+		t.Fatalf("control events = %#v", session)
+	}
+	payload, _ := session.controlEvents[0]["payload"].(map[string]any)
+	failureValue, _ := payload["failure"].(map[string]any)
+	detail, _ := failureValue["detail"].(map[string]any)
+	attributes, _ := detail["attributes"].(map[string]any)
+	if failureValue["class"] != string(runtimefailures.ClassOutcomeUncertain) || detail["code"] != "run_terminal_persistence_unconfirmed" || attributes["attempted_status"] != "failed" {
+		t.Fatalf("terminal persistence failure = %#v", failureValue)
+	}
+	raw, _ := json.Marshal(payload)
+	if strings.Contains(string(raw), "raw execution secret") || strings.Contains(string(raw), "raw persistence secret") {
+		t.Fatalf("raw cause leaked: %s", raw)
 	}
 }
 

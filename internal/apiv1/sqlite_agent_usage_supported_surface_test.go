@@ -93,11 +93,11 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, created_at
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at
 		) VALUES (
-			?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', ?
+			?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', ?, ?
 		)
-	`, deliveryID, runID, eventID, now); err != nil {
+	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailure("temporary_failure")), now); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 

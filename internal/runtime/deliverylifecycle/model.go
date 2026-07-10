@@ -1,6 +1,10 @@
 package deliverylifecycle
 
-import "strings"
+import (
+	"strings"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+)
 
 type State string
 
@@ -21,7 +25,7 @@ type Transition struct {
 	PreviousState   State
 	Reason          string
 	TerminalOutcome string
-	Error           string
+	Failure         *runtimefailures.Envelope
 	RetryCount      int
 }
 

@@ -2,11 +2,11 @@ package manager
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -60,7 +60,7 @@ type startupManagerReplayRecord struct {
 	AgentID    string
 	Outcome    startupManagerReplayOutcome
 	ReasonCode startupManagerReplayReasonCode
-	ErrorText  string
+	Failure    *runtimefailures.Envelope
 }
 
 func (r startupManagerReplayRecord) detail() map[string]any {
@@ -76,9 +76,8 @@ func (r startupManagerReplayRecord) detail() map[string]any {
 		"parent_event_id":      strings.TrimSpace(r.Event.ParentEventID()),
 		"persisted_run_id":     strings.TrimSpace(r.Event.RunID()),
 	}
-	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
-		detail["error"] = errText
-		detail["error_code"] = string(r.ReasonCode)
+	if r.Failure != nil {
+		detail["failure"] = *r.Failure
 	}
 	return detail
 }
@@ -115,15 +114,14 @@ func logStartupManagerReplayAftermath(ctx context.Context, bus Bus, record start
 		AgentID:   strings.TrimSpace(record.AgentID),
 		EntityID:  record.Event.EntityID(),
 		Detail:    record.detail(),
-		Error:     strings.TrimSpace(record.ErrorText),
 	})
 }
 
 type StartupReplaySummary struct {
-	ReplayedCount     int
-	SkippedCount      int
-	DroppedCount      int
-	FirstDroppedError string
+	ReplayedCount       int
+	SkippedCount        int
+	DroppedCount        int
+	FirstDroppedFailure *runtimefailures.Envelope
 }
 
 func (s *StartupReplaySummary) observe(record startupManagerReplayRecord) {
@@ -137,11 +135,12 @@ func (s *StartupReplaySummary) observe(record startupManagerReplayRecord) {
 		s.SkippedCount++
 	case startupManagerReplayOutcomeDropped:
 		s.DroppedCount++
-		if strings.TrimSpace(s.FirstDroppedError) == "" {
-			if errText := strings.TrimSpace(record.ErrorText); errText != "" {
-				s.FirstDroppedError = errText
+		if s.FirstDroppedFailure == nil {
+			if record.Failure != nil {
+				s.FirstDroppedFailure = runtimefailures.CloneEnvelope(record.Failure)
 			} else {
-				s.FirstDroppedError = fmt.Sprintf("startup manager replay dropped persisted work for agent %s", strings.TrimSpace(record.AgentID))
+				fallback := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "startup_replay_dropped_without_failure", "agent-manager", "startup_replay", map[string]any{"agent_id": strings.TrimSpace(record.AgentID)}), "agent-manager", "startup_replay")
+				s.FirstDroppedFailure = &fallback
 			}
 		}
 	}
@@ -154,22 +153,7 @@ func (s *StartupReplaySummary) merge(other StartupReplaySummary) {
 	s.ReplayedCount += other.ReplayedCount
 	s.SkippedCount += other.SkippedCount
 	s.DroppedCount += other.DroppedCount
-	if strings.TrimSpace(s.FirstDroppedError) == "" {
-		s.FirstDroppedError = strings.TrimSpace(other.FirstDroppedError)
-	}
-}
-
-func transientReplayReason(err error) startupManagerReplayReasonCode {
-	if err == nil {
-		return startupManagerReplayReasonTransientAgentError
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	switch {
-	case strings.Contains(msg, "session currently leased"):
-		return startupManagerReplayReasonSessionLeased
-	case strings.Contains(msg, "budget emergency"):
-		return startupManagerReplayReasonBudgetEmergency
-	default:
-		return startupManagerReplayReasonTransientAgentError
+	if s.FirstDroppedFailure == nil {
+		s.FirstDroppedFailure = runtimefailures.CloneEnvelope(other.FirstDroppedFailure)
 	}
 }

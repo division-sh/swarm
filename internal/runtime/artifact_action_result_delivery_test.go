@@ -518,11 +518,11 @@ repo_scaffold.repo_commit_failed:
   display_slug: string
   request_id: string
   source_event_id: string
-  failure_reason: string
+  failure: platform.failure/v1 envelope
   provenance: ArtifactProvenance
   result_kind: string
   request_copy: string
-  required: [repo_id, namespace, request_id, source_event_id, failure_reason, provenance, result_kind]
+  required: [repo_id, namespace, request_id, source_event_id, failure, provenance, result_kind]
 `,
 		"flows/repo-scaffold/nodes.yaml": `repo-scaffold-node:
   id: repo-scaffold-node
@@ -575,7 +575,7 @@ repo_scaffold.repo_commit_failed:
             current_ref: current_ref
             file_manifest: file_manifest
             status: status
-            failure_reason: failure_reason
+            failure: failure
             last_request_id: last_request_id
             last_source_event_id: last_source_event_id
           limits:

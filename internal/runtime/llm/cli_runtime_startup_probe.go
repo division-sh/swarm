@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -74,21 +75,7 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	}
 
 	resp, err := r.runUntilCLIStartupInit(ctx, args, target, cliStartupProbePrompt)
-	if err == nil {
-		return resp, nil
-	}
-	if !isUnsupportedCLIFlagError(err) {
-		return nil, err
-	}
-
-	args, contextToken, rebuildErr := buildArgs(false)
-	if contextToken != "" {
-		defer r.mcpTurns.UnregisterTurnContext(contextToken)
-	}
-	if rebuildErr != nil {
-		return nil, rebuildErr
-	}
-	return r.runUntilCLIStartupInit(ctx, args, target, buildInitialPrompt(s, cliStartupProbePrompt))
+	return resp, err
 }
 
 func ObservedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
@@ -150,61 +137,22 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 		cancel()
 	}
 	waitErr := cmd.Wait()
-	stderrLines := <-stderrCh
+	<-stderrCh
 
 	if result.err != nil {
 		return nil, result.err
 	}
 	if result.found {
 		if waitErr != nil && !errors.Is(runCtx.Err(), context.Canceled) {
-			stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
-			stdoutText := ""
-			if result.resp != nil {
-				stdoutText = strings.TrimSpace(string(result.resp.Raw))
-			}
-			if isClaudeAuthOutput(stderrText) || isClaudeAuthOutput(stdoutText) {
-				msg := summarizeCLIErrorOutput(stderrText)
-				if msg == "" {
-					msg = summarizeCLIErrorOutput(stdoutText)
-				}
-				if msg == "" {
-					msg = "not logged in"
-				}
-				return nil, fmt.Errorf("%w: %s", ErrClaudeAuthRequired, msg)
-			}
-			errOut := summarizeCLIErrorOutput(stderrText)
-			if errOut == "" {
-				errOut = summarizeCLIErrorOutput(stdoutText)
-			}
-			if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
-				return nil, fmt.Errorf("claude cli startup probe failed: %w", diag)
-			}
-			if errOut != "" {
-				return nil, fmt.Errorf("claude cli startup probe failed: %w, stderr=%s", waitErr, errOut)
-			}
+			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_startup_probe_failed", "claude-cli-adapter", "startup_probe", nil, waitErr)
 		}
 		return result.resp, nil
 	}
 
-	stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
-	if isClaudeAuthOutput(stderrText) {
-		msg := summarizeCLIErrorOutput(stderrText)
-		if msg == "" {
-			msg = "not logged in"
-		}
-		return nil, fmt.Errorf("%w: %s", ErrClaudeAuthRequired, msg)
-	}
 	if waitErr != nil {
-		errOut := summarizeCLIErrorOutput(stderrText)
-		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText)); diag != nil {
-			return nil, fmt.Errorf("claude cli startup probe failed: %w", diag)
-		}
-		if errOut == "" {
-			return nil, fmt.Errorf("claude cli startup probe failed: %w", waitErr)
-		}
-		return nil, fmt.Errorf("claude cli startup probe failed: %w, stderr=%s", waitErr, errOut)
+		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_startup_probe_failed", "claude-cli-adapter", "startup_probe", nil, waitErr)
 	}
-	return nil, errors.New("claude cli startup probe saw no init surface")
+	return nil, runtimefailures.New(runtimefailures.ClassConnectorFailure, "claude_cli_startup_surface_missing", "claude-cli-adapter", "startup_probe", nil)
 }
 
 func readCLIStartupInit(rc io.ReadCloser) cliStartupProbeResult {

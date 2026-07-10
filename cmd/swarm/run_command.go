@@ -886,8 +886,11 @@ func writeRunCommandTerminalSummary(out io.Writer, run diagnosticRunHeader) {
 	}
 	fmt.Fprintf(out, "run terminal: run_id=%s status=%s trigger=%s event_count=%d entity_count=%d\n",
 		run.RunID, run.Status, run.TriggerEventType, intValue(run.EventCount), intValue(run.EntityCount))
-	if run.ErrorSummary != "" {
-		fmt.Fprintf(out, "error=%s\n", run.ErrorSummary)
+	if run.Failure != nil {
+		fmt.Fprintf(out, "failure=%s/%s message=%s remediation=%s\n", run.Failure.Class, run.Failure.Detail.Code, run.Failure.Message, run.Failure.Remediation)
+	}
+	if run.ControlReason != "" {
+		fmt.Fprintf(out, "control_reason=%s\n", run.ControlReason)
 	}
 }
 

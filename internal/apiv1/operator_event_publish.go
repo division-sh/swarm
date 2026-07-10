@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -33,7 +34,7 @@ type eventPublishDelivery struct {
 	SessionID      string                           `json:"session_id,omitempty"`
 	Status         string                           `json:"status"`
 	ReasonCode     string                           `json:"reason_code,omitempty"`
-	LastError      string                           `json:"last_error,omitempty"`
+	Failure        *runtimefailures.Envelope        `json:"failure,omitempty"`
 	Attempt        int                              `json:"attempt"`
 	RetryCount     int                              `json:"retry_count"`
 	RetryEligible  bool                             `json:"retry_eligible"`
@@ -799,7 +800,7 @@ func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPu
 		SessionID:      strings.TrimSpace(delivery.SessionID),
 		Status:         status,
 		ReasonCode:     strings.TrimSpace(delivery.ReasonCode),
-		LastError:      strings.TrimSpace(delivery.LastError),
+		Failure:        runtimefailures.CloneEnvelope(delivery.Failure),
 		Attempt:        attempt,
 		RetryCount:     delivery.RetryCount,
 		RetryEligible:  delivery.RetryEligible || store.OperatorDeliveryRetryEligible(status),

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -206,7 +207,7 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
 		if r.budget.IsEntityEmergency(entityID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
+			return nil, budgetEmergencyFailure(entityID)
 		}
 	}
 
@@ -218,7 +219,7 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
-			return nil, err
+			return nil, sessionAcquireFailure(err, s.AgentID)
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
@@ -283,7 +284,7 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_compatible_turn"),
 		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
@@ -305,7 +306,7 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_compatible_usage"),
 		}, nil))
 		return nil, err
 	}
@@ -321,7 +322,7 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_compatible_decode"),
 		}, nil))
 		return nil, err
 	}
@@ -480,28 +481,27 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, openAICompatibleResponse{}, fmt.Errorf("openai-compatible request failed: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, openAICompatibleResponse{}, runtimefailures.Wrap(runtimefailures.ClassTimeout, "openai_compatible_request_timeout", "openai-compatible-adapter", "send_request", nil, err)
+		}
+		return nil, openAICompatibleResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_compatible_transport_failure", "openai-compatible-adapter", "send_request", nil, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, openAICompatibleResponse{}, fmt.Errorf("read openai-compatible response: %w", err)
+		return nil, openAICompatibleResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_compatible_response_read_failed", "openai-compatible-adapter", "read_response", nil, err)
 	}
 
 	var parsed openAICompatibleResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, openAICompatibleResponse{}, fmt.Errorf("decode openai-compatible response: %w", err)
+		return body, openAICompatibleResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_compatible_response_invalid", "openai-compatible-adapter", "decode_response", nil, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		msg := strings.TrimSpace(parsed.Error.Message)
-		if msg == "" {
-			msg = strings.TrimSpace(string(body))
-		}
-		return body, parsed, openAICompatibleHTTPError{StatusCode: httpResp.StatusCode, Message: msg}
+		return body, parsed, providerStatusFailure("openai_compatible", httpResp.StatusCode)
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, fmt.Errorf("openai-compatible error: %s", parsed.Error.Message)
+		return body, parsed, runtimefailures.New(runtimefailures.ClassConnectorFailure, "openai_compatible_provider_error", "openai-compatible-adapter", "decode_response", nil)
 	}
 	return body, parsed, nil
 }
@@ -649,19 +649,6 @@ func openAICompatibleUsage(parsed openAICompatibleResponse) (UsageTokens, bool) 
 		OutputTokens: *parsed.Usage.CompletionTokens,
 		Model:        strings.TrimSpace(parsed.Model),
 	}, true
-}
-
-type openAICompatibleHTTPError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e openAICompatibleHTTPError) Error() string {
-	msg := strings.TrimSpace(e.Message)
-	if msg == "" {
-		msg = "request failed"
-	}
-	return fmt.Sprintf("openai-compatible status %d: %s", e.StatusCode, msg)
 }
 
 type openAICompatibleRequest struct {

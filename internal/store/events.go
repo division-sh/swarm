@@ -14,6 +14,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -324,11 +325,11 @@ func (s *PostgresStore) UpsertCommittedReplayScopeTx(
 	return nil
 }
 
-func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
-func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -341,7 +342,7 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if status == "" {
 		status = "processed"
 	}
-	if strings.TrimSpace(errText) != "" && status == "processed" {
+	if failure != nil && status == "processed" {
 		status = "error"
 	}
 	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
@@ -350,7 +351,7 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 		}
 		return unsupportedSchemaCapability("events", caps.Events.Log)
 	}
-	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, errText)
+	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, failure)
 }
 
 func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
@@ -1221,9 +1222,13 @@ func committedReplayScopeFromReasonCode(reasonCode string) (runtimereplayclaim.C
 	}
 }
 
-func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
-	reasonCode := pipelineReceiptReasonCode(status, errText)
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode, errText))
+func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
+	reasonCode := pipelineReceiptReasonCode(status, failure)
+	failureJSON, err := encodeStoredFailure(failure)
+	if err != nil {
+		return err
+	}
+	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode))
 	if err != nil {
 		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)
 	}
@@ -1231,11 +1236,11 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	const q = `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
+			outcome, reason_code, failure, side_effects, processed_at
 		)
 		SELECT
 			e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
-			$2, NULLIF($3,''), $4::jsonb, now()
+			$2, NULLIF($3,''), $4::jsonb, $5::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		  AND NOT EXISTS (
@@ -1243,20 +1248,21 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 			FROM event_deliveries d
 			WHERE d.event_id = e.event_id
 			  AND d.status = 'dead_letter'
-			  AND d.reason_code IN ($5, $6)
+			  AND d.reason_code IN ($6, $7)
 		  )
 		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
+			failure = EXCLUDED.failure,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
-		WHERE COALESCE(event_receipts.reason_code, '') NOT IN ($5, $6)
+		WHERE COALESCE(event_receipts.reason_code, '') NOT IN ($6, $7)
 	`
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, string(sideEffects), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode); err != nil {
+	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, failureJSON, string(sideEffects), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode); err != nil {
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
 	}
 	return nil
@@ -1335,9 +1341,9 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if !caps.Events.LogRunID {
-			record.ReplayError = "missing run_id schema capability"
+			record.ReplayFailure = replayAdmissionFailure("missing_run_id_schema_capability")
 		} else if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayError = "missing canonical run_id"
+			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
 	}
@@ -1417,7 +1423,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayError = "missing canonical run_id"
+			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
 	}
@@ -1499,7 +1505,7 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayError = "missing canonical run_id"
+			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
 	}
@@ -1587,41 +1593,59 @@ func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID stri
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
 	return runtimebus.RunLifecycleSnapshot{
-		RunID:        snap.RunID,
-		Status:       snap.Status,
-		EventCount:   snap.EventCount,
-		EntityCount:  snap.EntityCount,
-		ErrorSummary: snap.ErrorSummary,
-		StartedAt:    snap.StartedAt,
-		EndedAt:      snap.EndedAt,
+		RunID:       snap.RunID,
+		Status:      snap.Status,
+		EventCount:  snap.EventCount,
+		EntityCount: snap.EntityCount,
+		Failure:     runtimefailures.CloneEnvelope(snap.Failure),
+		StartedAt:   snap.StartedAt,
+		EndedAt:     snap.EndedAt,
 	}, nil
 }
 
-func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error {
+func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
-		return err
+		return runtimebus.RunLifecycleSnapshot{}, err
 	}
 	runID = nullUUIDString(runID)
 	if runID == "" {
-		return fmt.Errorf("run_id is required")
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run_id is required")
 	}
 	if !caps.Events.HasRuns {
-		return fmt.Errorf("runs table is required")
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("runs table is required")
+	}
+	if !caps.Events.RunTerminalFields {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence requires canonical runs.failure and ended_at")
 	}
 	status, err = canonicalRunTerminalStatus(status)
 	if err != nil {
-		return err
-	}
-	errorSummary = strings.TrimSpace(errorSummary)
-	if status != "failed" {
-		errorSummary = ""
+		return runtimebus.RunLifecycleSnapshot{}, err
 	}
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	_, err = storerunlifecycle.MarkTerminal(ctx, s.DB, runID, status, errorSummary, endedAt, runLifecycleOptions(caps))
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("begin run terminal tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	snap, err := storerunlifecycle.MarkTerminal(ctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("commit run terminal tx: %w", err)
+	}
+	return runtimebus.RunLifecycleSnapshot{
+		RunID:       snap.RunID,
+		Status:      snap.Status,
+		EventCount:  snap.EventCount,
+		EntityCount: snap.EntityCount,
+		Failure:     runtimefailures.CloneEnvelope(snap.Failure),
+		StartedAt:   snap.StartedAt,
+		EndedAt:     snap.EndedAt,
+	}, nil
 }
 
 func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
@@ -1776,7 +1800,7 @@ func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	if active {
 		return nil
 	}
-	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", "", time.Now().UTC(), runLifecycleOptions(caps))
+	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps))
 	if err != nil {
 		return fmt.Errorf("converge standalone runtime platform run: %w", err)
 	}
@@ -1961,10 +1985,10 @@ func mapPipelineStatusToOutcome(status string) string {
 	}
 }
 
-func pipelineReceiptReasonCode(status, errText string) string {
+func pipelineReceiptReasonCode(status string, failure *runtimefailures.Envelope) string {
 	status = strings.TrimSpace(strings.ToLower(status))
-	if strings.TrimSpace(errText) != "" {
-		return "pipeline_error"
+	if failure != nil {
+		return strings.TrimSpace(failure.Detail.Code)
 	}
 	switch status {
 	case "dead_letter":

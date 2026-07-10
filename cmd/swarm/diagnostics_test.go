@@ -548,6 +548,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 						"event_created_at":    "2026-05-13T10:00:06Z",
 						"delivery_id":         "delivery-3",
 						"delivery_status":     "failed",
+						"delivery_failure":    testRuntimeFailure("handler_failed"),
 						"delivery_created_at": "2026-05-13T10:00:06Z",
 						"subscriber_type":     "node",
 						"subscriber_id":       "node-1",
@@ -1759,5 +1760,15 @@ func validDiagnosticRunDiagnosis(runID, state, layer, reason string, heuristics 
 func validDiagnosticRunHeaderWithStatus(runID, status string) map[string]any {
 	run := validDiagnosticRunHeader(runID)
 	run["status"] = status
+	switch status {
+	case "failed":
+		run["ended_at"] = "2026-05-13T10:01:00Z"
+		run["failure"] = testRuntimeFailure("workflow_failed")
+	case "cancelled":
+		run["ended_at"] = "2026-05-13T10:01:00Z"
+		run["control_reason"] = "operator_stopped"
+	case "completed", "forked":
+		run["ended_at"] = "2026-05-13T10:01:00Z"
+	}
 	return run
 }

@@ -2,11 +2,11 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -32,7 +32,7 @@ type startupTimerRecoveryResult struct {
 	Schedule   runtimepipeline.Schedule
 	Outcome    startupTimerRecoveryOutcome
 	ReasonCode startupTimerRecoveryReasonCode
-	ErrorText  string
+	Failure    *runtimefailures.Envelope
 }
 
 func (r startupTimerRecoveryResult) detail() map[string]any {
@@ -51,9 +51,8 @@ func (r startupTimerRecoveryResult) detail() map[string]any {
 	if !sc.At.IsZero() {
 		detail["scheduled_fire_at"] = sc.At.UTC().Format(time.RFC3339Nano)
 	}
-	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
-		detail["error"] = errText
-		detail["error_code"] = string(r.ReasonCode)
+	if r.Failure != nil {
+		detail["failure"] = *r.Failure
 	}
 	return detail
 }
@@ -89,7 +88,7 @@ func logStartupTimerRecoveryAftermath(ctx context.Context, logger *RuntimeLogger
 		AgentID:   strings.TrimSpace(result.Schedule.AgentID),
 		EntityID:  result.Schedule.EffectiveEntityID(),
 		Detail:    result.detail(),
-		Error:     strings.TrimSpace(result.ErrorText),
+		Failure:   runtimefailures.CloneEnvelope(result.Failure),
 	}
 	handleRuntimeLogPersistenceError("scheduler", startupTimerRecoveryAction, logger.Log(ctx, entry))
 }
@@ -98,11 +97,19 @@ func restoreStartupTimerSchedule(ctx context.Context, store runtimepipeline.Sche
 	claimed, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, sc)
 	switch {
 	case err != nil:
+		failure := runtimefailures.Normalize(runtimefailures.Wrap(
+			runtimefailures.ClassDependencyUnavailable,
+			"schedule_restore_failed",
+			"scheduler",
+			"restore_startup_timer",
+			map[string]any{"event_type": strings.TrimSpace(sc.EventType), "task_id": strings.TrimSpace(sc.TaskID)},
+			err,
+		), "scheduler", "restore_startup_timer")
 		result := startupTimerRecoveryResult{
 			Schedule:   sc,
 			Outcome:    startupTimerRecoveryOutcomeDropped,
 			ReasonCode: startupTimerRecoveryReasonRestoreFailed,
-			ErrorText:  err.Error(),
+			Failure:    &failure,
 		}
 		logStartupTimerRecoveryAftermath(ctx, logger, result)
 		return result
@@ -133,7 +140,7 @@ func restoreStartupTimerSchedules(ctx context.Context, store runtimepipeline.Sch
 	return results
 }
 
-func summarizeStartupTimerRecovery(results []startupTimerRecoveryResult) (replayed, skipped, dropped int, errText string) {
+func summarizeStartupTimerRecovery(results []startupTimerRecoveryResult) (replayed, skipped, dropped int, firstFailure *runtimefailures.Envelope) {
 	for _, result := range results {
 		switch result.Outcome {
 		case startupTimerRecoveryOutcomeReplayed:
@@ -142,13 +149,20 @@ func summarizeStartupTimerRecovery(results []startupTimerRecoveryResult) (replay
 			skipped++
 		case startupTimerRecoveryOutcomeDropped:
 			dropped++
-			if strings.TrimSpace(errText) == "" && strings.TrimSpace(result.ErrorText) != "" {
-				errText = strings.TrimSpace(result.ErrorText)
+			if firstFailure == nil && result.Failure != nil {
+				firstFailure = runtimefailures.CloneEnvelope(result.Failure)
 			}
 		}
 	}
-	if dropped > 0 && strings.TrimSpace(errText) == "" {
-		errText = fmt.Sprintf("failed to restore %d active schedule(s)", dropped)
+	if dropped > 0 && firstFailure == nil {
+		fallback := runtimefailures.Normalize(runtimefailures.New(
+			runtimefailures.ClassInternalFailure,
+			"schedule_restore_dropped_without_failure",
+			"scheduler",
+			"summarize_startup_timer_recovery",
+			map[string]any{"dropped_count": dropped},
+		), "scheduler", "summarize_startup_timer_recovery")
+		firstFailure = &fallback
 	}
-	return replayed, skipped, dropped, errText
+	return replayed, skipped, dropped, firstFailure
 }

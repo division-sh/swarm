@@ -19,6 +19,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -104,8 +105,8 @@ func (m *targetRouteMemoryEventMutation) UpsertCommittedReplayScope(_ context.Co
 	return nil
 }
 
-func (m *targetRouteMemoryEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return m.store.UpsertPipelineReceipt(ctx, eventID, status, errText)
+func (m *targetRouteMemoryEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return m.store.UpsertPipelineReceipt(ctx, eventID, status, failure)
 }
 
 func (*targetRouteMemoryEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
@@ -2447,8 +2448,8 @@ func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClo
 	if got := store.receipts[eventID]; got != "dead_letter" {
 		t.Fatalf("pipeline receipt = %q, want dead_letter target-delivery receipt", got)
 	}
-	if got, want := store.receiptErrs[eventID], "pin routing target delivery failed: target_not_subscribed"; got != want {
-		t.Fatalf("pipeline receipt error = %q, want %q", got, want)
+	if got := store.receiptErrs[eventID]; got == nil || got.Detail.Code != "target_not_subscribed" {
+		t.Fatalf("pipeline receipt failure = %#v, want target_not_subscribed", got)
 	}
 	requireNoConnectRoutePlanBusEvent(t, sourceCh, "source/raw subscriber fallback")
 }

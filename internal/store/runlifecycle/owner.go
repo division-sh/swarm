@@ -1,12 +1,15 @@
 package runlifecycle
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type DBTX interface {
@@ -15,13 +18,13 @@ type DBTX interface {
 }
 
 type Snapshot struct {
-	RunID        string
-	Status       string
-	EventCount   int
-	EntityCount  int
-	ErrorSummary string
-	StartedAt    time.Time
-	EndedAt      *time.Time
+	RunID       string
+	Status      string
+	EventCount  int
+	EntityCount int
+	Failure     *runtimefailures.Envelope
+	StartedAt   time.Time
+	EndedAt     *time.Time
 }
 
 type EnsureActiveOptions struct {
@@ -174,16 +177,16 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		}
 	}
 	reopenStatus := "runs.status"
-	reopenErrorSummary := ""
+	reopenFailure := ""
 	reopenEndedAt := ""
 	if opts.ReopenCompleted {
 		reopenStatus = "CASE WHEN runs.status = 'completed' THEN 'running' ELSE runs.status END"
 		if opts.HasTerminalCols {
-			reopenErrorSummary = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.error_summary END"
+			reopenFailure = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.failure END"
 			reopenEndedAt = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.ended_at END"
 		}
 	} else if opts.HasTerminalCols {
-		reopenErrorSummary = "runs.error_summary"
+		reopenFailure = "runs.failure"
 		reopenEndedAt = "runs.ended_at"
 	}
 	insertCols := []string{"run_id", "status"}
@@ -218,7 +221,7 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			status = ` + reopenStatus
 	if opts.HasTerminalCols {
 		query += `,
-			error_summary = ` + reopenErrorSummary + `,
+			failure = ` + reopenFailure + `,
 			ended_at = ` + reopenEndedAt
 	}
 	if opts.HasBundleHashCol {
@@ -330,9 +333,10 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		return Snapshot{}, fmt.Errorf("run lifecycle entity count requires canonical run-scoped entity_state")
 	}
 	var (
-		snap      Snapshot
-		startedAt sql.NullTime
-		endedAt   sql.NullTime
+		snap       Snapshot
+		failureRaw []byte
+		startedAt  sql.NullTime
+		endedAt    sql.NullTime
 	)
 	query := `
 		SELECT
@@ -340,7 +344,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 			COALESCE(status, ''),
 			0,
 			0,
-			'',
+			NULL::jsonb,
 			NULL::timestamptz,
 			NULL::timestamptz
 		FROM runs
@@ -371,10 +375,10 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		}
 		if opts.HasTerminalCols {
 			query += `
-			COALESCE(error_summary, ''),`
+			failure,`
 		} else {
 			query += `
-			'',`
+			NULL::jsonb,`
 		}
 		if opts.HasStartedAtCol {
 			query += `
@@ -400,7 +404,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		&snap.Status,
 		&snap.EventCount,
 		&snap.EntityCount,
-		&snap.ErrorSummary,
+		&failureRaw,
 		&startedAt,
 		&endedAt,
 	); err != nil {
@@ -411,7 +415,16 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 	}
 	snap.RunID = strings.TrimSpace(snap.RunID)
 	snap.Status = strings.TrimSpace(snap.Status)
-	snap.ErrorSummary = strings.TrimSpace(snap.ErrorSummary)
+	if len(failureRaw) > 0 {
+		failure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("load run snapshot failure: %w", err)
+		}
+		snap.Failure = &failure
+	}
+	if err := ValidateStatusFailure(snap.Status, snap.Failure); err != nil {
+		return Snapshot{}, fmt.Errorf("load run snapshot: %w", err)
+	}
 	if startedAt.Valid {
 		snap.StartedAt = startedAt.Time
 	}
@@ -422,7 +435,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 	return snap, nil
 }
 
-func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary string, endedAt time.Time, opts EnsureActiveOptions) (Snapshot, error) {
+func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time, opts EnsureActiveOptions) (Snapshot, error) {
 	if db == nil {
 		return Snapshot{}, fmt.Errorf("run lifecycle persistence is not configured")
 	}
@@ -435,9 +448,15 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 	if err != nil {
 		return Snapshot{}, err
 	}
-	errorSummary = strings.TrimSpace(errorSummary)
-	if status != "failed" {
-		errorSummary = ""
+	if err := ValidateStatusFailure(status, failure); err != nil {
+		return Snapshot{}, err
+	}
+	var failureJSON []byte
+	if failure != nil {
+		failureJSON, err = runtimefailures.MarshalEnvelope(*failure)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("mark run terminal failure: %w", err)
+		}
 	}
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
@@ -463,16 +482,20 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 	args := []any{runID, status}
 	if opts.HasTerminalCols {
 		setClauses = append(setClauses,
-			"error_summary = NULLIF($3, '')",
+			"failure = $3::jsonb",
 			"ended_at = COALESCE(ended_at, $4)",
 		)
-		args = append(args, errorSummary, endedAt.UTC())
+		args = append(args, nullableFailureJSON(failureJSON), endedAt.UTC())
+	}
+	terminalPredicate := "status IN ('running', 'paused') OR status = $2"
+	if opts.HasTerminalCols {
+		terminalPredicate = "status IN ('running', 'paused') OR (status = $2 AND failure IS NOT DISTINCT FROM $3::jsonb)"
 	}
 	result, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET `+strings.Join(setClauses, ", ")+`
 		WHERE run_id = $1::uuid
-		  AND (status IN ('running', 'paused') OR status = $2)
+		  AND (`+terminalPredicate+`)
 	`, args...)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("mark run terminal: %w", err)
@@ -485,7 +508,43 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 		if current.Status != status {
 			return Snapshot{}, fmt.Errorf("run %s already terminal with status %s", runID, current.Status)
 		}
+		if !sameFailure(current.Failure, failure) {
+			return Snapshot{}, fmt.Errorf("run %s already terminal with conflicting failure", runID)
+		}
 		return current, nil
 	}
 	return LoadSnapshot(ctx, db, runID, opts)
+}
+
+func ValidateStatusFailure(status string, failure *runtimefailures.Envelope) error {
+	status = strings.TrimSpace(strings.ToLower(status))
+	if status == "failed" {
+		if failure == nil {
+			return fmt.Errorf("failed run requires canonical failure")
+		}
+		if err := runtimefailures.ValidateEnvelope(*failure); err != nil {
+			return fmt.Errorf("failed run failure is invalid: %w", err)
+		}
+		return nil
+	}
+	if failure != nil {
+		return fmt.Errorf("run status %s forbids failure", status)
+	}
+	return nil
+}
+
+func nullableFailureJSON(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
+}
+
+func sameFailure(left, right *runtimefailures.Envelope) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftRaw, leftErr := runtimefailures.MarshalEnvelope(*left)
+	rightRaw, rightErr := runtimefailures.MarshalEnvelope(*right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftRaw, rightRaw)
 }

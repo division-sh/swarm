@@ -368,12 +368,12 @@ func insertSQLiteTraceTurnWithMode(t *testing.T, ctx context.Context, sqliteStor
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
 		) VALUES (
 			?, ?, ?, ?, ?, 'global', NULL,
 			?, ?, 'task-1', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', '[]', 1, 0, 0, '', ?
+			'{}', '{}', '[]', 1, 0, 0, NULL, ?
 		)
 	`, turnID, runID, agentID, sessionID, runtimeMode, eventID, eventName, createdAt); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)

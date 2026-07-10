@@ -1008,7 +1008,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
 		t.Fatalf("fork replay scope = %q, want direct", scope)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 		t.Fatalf("mark source event pipeline receipt: %v", err)
 	}
 	eb, err := runtimebus.NewEventBus(pg)

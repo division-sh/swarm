@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -33,7 +34,7 @@ type AgentManager struct {
 	budget                          BudgetGuard
 	resetRuntimeOwnedState          func()
 	runtimeShutdownAdmissionClosed  func() bool
-	runtimeIngressSafetyPause       func(context.Context, string) error
+	runtimeIngressSafetyPause       func(context.Context, string, *runtimefailures.Envelope) error
 	nativeToolAdmissionValidator    func(context.Context, models.AgentConfig) error
 	runtimeMode                     string
 	llmBackend                      string
@@ -65,6 +66,11 @@ type AgentManager struct {
 	deadLetterLastRaised map[string]time.Time
 }
 
+var (
+	ErrAgentAlreadyExists = errors.New("agent already exists")
+	ErrAgentNotFound      = errors.New("agent not found")
+)
+
 const (
 	poisonPanicQuarantineAt       = 3
 	poisonEventEntityThreshold    = 3
@@ -80,7 +86,7 @@ type deadLetterEscalationSample struct {
 	agentID    string
 	entityID   string
 	retryCount int
-	errText    string
+	failure    *runtimefailures.Envelope
 }
 
 func normalizeManagerLLMBackend(raw string) string {
@@ -241,7 +247,7 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 	baseCfg, ok := am.agentCfg[baseAgentID]
 	am.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("base agent not found: %s", baseAgentID)
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, baseAgentID)
 	}
 	cloneCfg := baseCfg
 	cloneCfg.ID = cloneAgentID
@@ -256,7 +262,7 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 		StartedAt:     time.Now().UTC(),
 	}
 	if err := am.spawnAgentInternal(am.runtimeContext(), rec, true); err != nil {
-		if strings.Contains(err.Error(), "agent already exists") {
+		if errors.Is(err, ErrAgentAlreadyExists) {
 			return nil
 		}
 		return err
@@ -285,7 +291,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	am.mu.Lock()
 	if _, exists := am.agents[a.ID()]; exists {
 		am.mu.Unlock()
-		return fmt.Errorf("agent already exists: %s", a.ID())
+		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
 	am.agents[a.ID()] = a
 	am.agentCfg[a.ID()] = rec.Config
@@ -409,7 +415,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	current, ok := am.agentCfg[agentID]
 	am.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("agent not found: %s", agentID)
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
 
 	updated := mergeAgentConfig(current, cfg)
@@ -500,7 +506,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	_, exists := am.agents[agentID]
 	if !exists {
 		am.mu.Unlock()
-		return fmt.Errorf("agent not found: %s", agentID)
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
 	delete(am.agents, agentID)
 	delete(am.agentCfg, agentID)

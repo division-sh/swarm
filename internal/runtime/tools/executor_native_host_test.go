@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -515,9 +516,7 @@ func TestNativeWorkspaceCommandRequiresActorBashAuthorization(t *testing.T) {
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
 	_, err := exec.Execute(actorCtx, "bash", map[string]any{"command": "printf should-not-run > denied.txt"})
-	if err == nil || !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("Execute bash without native_tools.bash error = %v, want authorization denial", err)
-	}
+	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	if _, statErr := os.Stat(filepath.Join(workspaceDir, "denied.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("unauthorized host bash created file; stat err=%v", statErr)
 	}

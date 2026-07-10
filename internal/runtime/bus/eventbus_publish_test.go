@@ -20,6 +20,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -274,7 +275,7 @@ type recordedLogEntry struct {
 	HasSource  bool
 }
 
-func (h *recordingLoggerHook) Log(ctx context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
+func (h *recordingLoggerHook) Log(ctx context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ *runtimefailures.Envelope, _ int) error {
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
 	sourceFact, hasSource := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail, Lineage: lineage, HasLineage: ok, SourceFact: sourceFact, HasSource: hasSource})
@@ -568,9 +569,9 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("event deliveries = %d, want 1", got)
 	}
-	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
-	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
-		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)
+	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
+	if outcome != "dead_letter" || failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "normal_run_completion_failed" {
+		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want dead_letter with canonical failure", outcome, failure)
 	}
 	if !hasRuntimeLogAction(logger.entries, "publish_post_commit_convergence_failed") {
 		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
@@ -586,17 +587,17 @@ type failStandalonePipelineReceiptOnceStore struct {
 	err error
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	if tx == nil && s.err != nil {
 		err := s.err
 		s.err = nil
 		return err
 	}
-	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, errText)
+	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, failure)
 }
 
 type failNormalRunCompletionStore struct {
@@ -608,19 +609,27 @@ func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Conte
 	return s.err
 }
 
-func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string) {
+func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, *runtimefailures.Envelope) {
 	t.Helper()
-	var outcome, errText string
+	var outcome string
+	var raw []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(side_effects->>'error', '')
+		SELECT outcome, failure
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'platform'
 		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &errText); err != nil {
+	`, eventID).Scan(&outcome, &raw); err != nil {
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
-	return outcome, errText
+	if len(raw) == 0 {
+		return outcome, nil
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
+	}
+	return outcome, &failure
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
@@ -932,8 +941,9 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		time.Now().UTC(),
 	),
 		[]string{"agent-a"})
-	if err == nil || !strings.Contains(err.Error(), "authoritative delivery incomplete") {
-		t.Fatalf("PublishDirect missing recipient error = %v, want authoritative delivery incomplete", err)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassTargetUnreachable || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" {
+		t.Fatalf("PublishDirect failure = %#v, want authoritative delivery incomplete", failure)
 	}
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
 }
@@ -1460,18 +1470,18 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Publish error = %v, want %v", err, wantErr)
 	}
-	var outcome, reasonCode, receiptError string
+	var outcome, failureClass, detailCode string
 	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, ''), COALESCE(side_effects->>'error', '')
+		SELECT outcome, COALESCE(failure->>'class', ''), COALESCE(failure->'detail'->>'code', '')
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'platform'
 		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &reasonCode, &receiptError); err != nil {
+	`, eventID).Scan(&outcome, &failureClass, &detailCode); err != nil {
 		t.Fatalf("load pipeline receipt: %v", err)
 	}
-	if outcome != "dead_letter" || reasonCode != "pipeline_error" || receiptError != wantErr.Error() {
-		t.Fatalf("pipeline receipt = outcome:%q reason:%q error:%q, want dead_letter/pipeline_error/%q", outcome, reasonCode, receiptError, wantErr.Error())
+	if outcome != "dead_letter" || failureClass != string(runtimefailures.ClassInternalFailure) || detailCode != "event_interceptor_failed" {
+		t.Fatalf("pipeline receipt = outcome:%q class:%q detail:%q, want canonical event_interceptor_failed", outcome, failureClass, detailCode)
 	}
 }
 
@@ -1559,10 +1569,10 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 
 	var reason, targetContext string
 	if err := db.QueryRowContext(ctx, `
-		SELECT target_failure_reason, target_context::text
+		SELECT failure->'detail'->>'code', COALESCE((failure->'detail'->'attributes'->'target')::text, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-		  AND failure_type = 'target_resolution_failed'
+		  AND failure->>'class' = 'platform.target_unreachable'
 		  AND handler_node = 'pin_routing'
 	`, eventID).Scan(&reason, &targetContext); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
@@ -1634,10 +1644,10 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 
 	var reason, targetContext string
 	if err := sqliteStore.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(target_failure_reason, ''), COALESCE(target_context, '')
+		SELECT COALESCE(json_extract(failure, '$.detail.code'), ''), COALESCE(json_extract(failure, '$.detail.attributes.target'), '')
 		FROM dead_letters
 		WHERE original_event_id = ?
-		  AND failure_type = 'target_resolution_failed'
+		  AND json_extract(failure, '$.class') = 'platform.target_unreachable'
 		  AND handler_node = 'pin_routing'
 	`, eventID).Scan(&reason, &targetContext); err != nil {
 		t.Fatalf("query sqlite dead_letters: %v", err)
@@ -1969,7 +1979,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("pre-receipt state for %s = delivery:%q run:%q, want pending/running", tc.eventType, deliveryStatus, runStatus)
 			}
 
-			if err := pg.UpsertEventReceipt(ctx, tc.eventID, agentID, runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+			if err := pg.UpsertEventReceipt(ctx, tc.eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 				t.Fatalf("UpsertEventReceipt(%s): %v", tc.eventType, err)
 			}
 
@@ -2615,7 +2625,7 @@ func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want st
 		}
 		deadLetters := make([]string, 0)
 		deadRows, err := db.QueryContext(context.Background(), `
-			SELECT COALESCE(handler_node, ''), COALESCE(failure_type, ''), COALESCE(error_message, '')
+			SELECT COALESCE(handler_node, ''), COALESCE(failure->>'class', ''), COALESCE(failure->'detail'->>'code', '')
 			FROM dead_letters
 			WHERE original_event_id = $1::uuid
 			ORDER BY created_at ASC
@@ -2627,7 +2637,7 @@ func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want st
 				if err := deadRows.Scan(&node, &failure, &message); err != nil {
 					t.Fatalf("scan dead letter dump: %v", err)
 				}
-				deadLetters = append(deadLetters, node+" failure="+failure+" error="+message)
+				deadLetters = append(deadLetters, node+" failure="+failure+" detail="+message)
 			}
 			if err := deadRows.Err(); err != nil {
 				t.Fatalf("iterate dead letter dump: %v", err)

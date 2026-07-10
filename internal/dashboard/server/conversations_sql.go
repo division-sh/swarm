@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -233,7 +234,7 @@ func conversationTurnFromOperator(item store.OperatorConversationTurn) Conversat
 		ParseOK:                item.ParseOK,
 		LatencyMS:              item.LatencyMS,
 		RetryCount:             item.RetryCount,
-		Error:                  strings.TrimSpace(item.Error),
+		Failure:                runtimefailures.CloneEnvelope(item.Failure),
 		CreatedAt:              formatTime(item.CreatedAt),
 	}
 }

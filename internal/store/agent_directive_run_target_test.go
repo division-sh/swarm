@@ -87,7 +87,7 @@ func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *Postg
 			trigger_event_type TEXT,
 			event_count INTEGER NOT NULL DEFAULT 0,
 			entity_count INTEGER NOT NULL DEFAULT 0,
-			error_summary TEXT,
+			failure JSONB,
 			ended_at TIMESTAMPTZ,
 			bundle_fingerprint TEXT
 		);

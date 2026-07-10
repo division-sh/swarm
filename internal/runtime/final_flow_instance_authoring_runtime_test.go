@@ -177,7 +177,7 @@ func finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t *testing.T, target even
 func dumpFinalFlowInstanceAuthoringRuntimeProofState(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
 	t.Helper()
 	rows, err := db.QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(last_error, ''),
+		SELECT subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure::text, ''),
 		       COALESCE(delivery_target_route::text, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -189,12 +189,12 @@ func dumpFinalFlowInstanceAuthoringRuntimeProofState(t *testing.T, ctx context.C
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var subscriberType, subscriberID, status, reason, lastError, target string
-		if err := rows.Scan(&subscriberType, &subscriberID, &status, &reason, &lastError, &target); err != nil {
+		var subscriberType, subscriberID, status, reason, failure, target string
+		if err := rows.Scan(&subscriberType, &subscriberID, &status, &reason, &failure, &target); err != nil {
 			t.Logf("event_deliveries diagnostic scan failed: %v", err)
 			return
 		}
-		t.Logf("event_delivery: type=%s id=%s status=%s reason=%s error=%s target=%s", subscriberType, subscriberID, status, reason, lastError, target)
+		t.Logf("event_delivery: type=%s id=%s status=%s reason=%s failure=%s target=%s", subscriberType, subscriberID, status, reason, failure, target)
 	}
 	if err := rows.Err(); err != nil {
 		t.Logf("event_deliveries diagnostic rows failed: %v", err)

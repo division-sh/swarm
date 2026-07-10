@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
 )
@@ -21,7 +22,7 @@ type normalRunCompletionTestStore struct {
 	flowTerms        map[string][]string
 }
 
-func (s *normalRunCompletionTestStore) UpsertPipelineReceipt(_ context.Context, eventID, _, _ string) error {
+func (s *normalRunCompletionTestStore) UpsertPipelineReceipt(_ context.Context, eventID, _ string, _ *runtimefailures.Envelope) error {
 	s.pipelineReceipts = append(s.pipelineReceipts, eventID)
 	return nil
 }
@@ -49,7 +50,7 @@ func TestEventBusMarkPipelineReceiptConvergesNormalRunCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.markPipelineReceipt(context.Background(), "event-1", "processed", ""); err != nil {
+	if err := eb.markPipelineReceipt(context.Background(), "event-1", "processed", nil); err != nil {
 		t.Fatalf("markPipelineReceipt: %v", err)
 	}
 	if len(store.pipelineReceipts) != 1 || store.pipelineReceipts[0] != "event-1" {

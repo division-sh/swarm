@@ -2,9 +2,11 @@ package bootverify
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -338,7 +340,7 @@ func validateArtifactRepoActionSpec(source semanticview.Source, flowID, nodeID, 
 		{"output.current_ref", spec.Output.CurrentRef},
 		{"output.file_manifest", spec.Output.FileManifest},
 		{"output.status", spec.Output.Status},
-		{"output.failure_reason", spec.Output.FailureReason},
+		{"output.failure", spec.Output.Failure},
 		{"output.last_request_id", spec.Output.LastRequestID},
 		{"output.last_source_event_id", spec.Output.LastSourceEventID},
 	} {
@@ -442,6 +444,12 @@ func validateArtifactRepoResultRuntimePayloadFieldTypes(source semanticview.Sour
 		if !ok {
 			continue
 		}
+		if field == "failure" {
+			if !artifactRepoJSONSchemaIsCanonicalFailure(prop) {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s runtime-owned field failure must be %s envelope", label, resultEvent, runtimefailures.EnvelopeSchemaVersion)))
+			}
+			continue
+		}
 		if !artifactRepoJSONSchemaAllowsKind(prop, expected) {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s runtime-owned field %s must be %s-compatible, got %s", label, resultEvent, field, expected, artifactRepoJSONSchemaKindSummary(prop))))
 		}
@@ -449,11 +457,25 @@ func validateArtifactRepoResultRuntimePayloadFieldTypes(source semanticview.Sour
 	return findings
 }
 
+func artifactRepoJSONSchemaIsCanonicalFailure(raw any) bool {
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	got := make(map[string]any, len(schema))
+	for key, value := range schema {
+		if key != "description" {
+			got[key] = value
+		}
+	}
+	return reflect.DeepEqual(got, runtimefailures.EnvelopeJSONSchema())
+}
+
 func artifactRepoResultRuntimePayloadFieldKind(field string) string {
 	switch strings.TrimSpace(field) {
-	case "file_manifest", "provenance":
+	case "file_manifest", "provenance", "failure":
 		return "object"
-	case "repo_id", "namespace", "partition_key", "display_slug", "request_id", "source_event_id", "repo_url", "current_ref", "failure_reason":
+	case "repo_id", "namespace", "partition_key", "display_slug", "request_id", "source_event_id", "repo_url", "current_ref":
 		return "string"
 	default:
 		return ""
@@ -571,14 +593,14 @@ func artifactRepoResultRuntimePayloadFields(label string, spec *runtimecontracts
 		fields["current_ref"] = struct{}{}
 		fields["file_manifest"] = struct{}{}
 	case "failure":
-		fields["failure_reason"] = struct{}{}
+		fields["failure"] = struct{}{}
 	}
 	return fields
 }
 
 func artifactRepoResultPayloadFieldReserved(field string) bool {
 	switch strings.TrimSpace(field) {
-	case "repo_id", "namespace", "partition_key", "display_slug", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "failure_reason", "provenance":
+	case "repo_id", "namespace", "partition_key", "display_slug", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "failure", "provenance":
 		return true
 	default:
 		return false

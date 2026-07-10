@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -241,7 +242,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Status:            "pending",
 				RetryCount:        1,
 				ReasonCode:        "retry_scheduled",
-				LastError:         "temporary failure",
+				Failure:           testFailure("temporary_failure"),
 				DeliveryCreatedAt: now.Add(-3 * time.Minute),
 			}},
 			NextCursor: "lifecycle-next",
@@ -260,7 +261,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				EntityID:   "entity-1",
 				Status:     "failed",
 				ReasonCode: "handler_error",
-				LastError:  "boom",
+				Failure:    testFailure("handler_failed"),
 				RetryCount: 2,
 				OccurredAt: now.Add(-time.Minute),
 			}},
@@ -273,13 +274,12 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				EntityID:   "entity-1",
 				Status:     "dead_letter",
 				ReasonCode: "retry_exhausted",
-				LastError:  "terminal",
+				Failure:    testFailure("retry_exhausted"),
 				RetryCount: 3,
 				OccurredAt: now.Add(-2 * time.Minute),
 				DeadLetterRecords: []store.OperatorDeadLetterRecord{{
 					DeadLetterID: "dead-letter-1",
-					FailureType:  "retry_exhausted",
-					ErrorMessage: "terminal",
+					Failure:      *testFailure("retry_exhausted"),
 					RetryCount:   3,
 					ChainDepth:   0,
 					HandlerNode:  "agent-1",
@@ -712,10 +712,8 @@ func assertConversationRunIDErrorSanitized(t *testing.T, resp rpcResponse) {
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 	text := strings.ToLower(resp.Error.Message + " " + fmt.Sprint(resp.Error.Data))
-	if !strings.Contains(text, "operator conversation read surface run_id capability unavailable") {
-		t.Fatalf("error data = %s, want stable run_id capability error", text)
-	}
 	for _, forbidden := range []string{"pq:", `column "run_id"`, "42703", "position"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("error data leaked %q: %s", forbidden, text)
@@ -911,9 +909,7 @@ func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.usage owner returned malformed result") {
-		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
@@ -943,9 +939,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.diagnose owner returned malformed result") {
-		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *testing.T) {
@@ -989,9 +983,7 @@ func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *test
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.delivery_diagnostics owner returned malformed result") {
-		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testing.T) {
@@ -1022,9 +1014,7 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.delivery_lifecycle owner returned malformed result") {
-		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing.T) {
@@ -1060,10 +1050,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
-	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "runtime_state.watchdog") {
-		t.Fatalf("error = %#v, want malformed runtime_state.watchdog owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T) {
@@ -1093,10 +1080,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T
 	if resp.Error.Code != codeInternalError {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
-	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
-	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "active.turn_id") {
-		t.Fatalf("error = %#v, want malformed active owner result", resp.Error)
-	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 }
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *testing.T) {
@@ -1164,10 +1148,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 			if resp.Error.Code != codeInternalError {
 				t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 			}
-			errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
-			if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, tc.want) {
-				t.Fatalf("error = %#v, want malformed last_tool_outcome owner result containing %q", resp.Error, tc.want)
-			}
+			requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 		})
 	}
 }

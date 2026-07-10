@@ -2909,7 +2909,7 @@ handler_specification:
               values; content_type is yaml, markdown, or text. The resolved path must be allowlisted. yaml files must declare
               schema.type must be object; schema.required_fields names top-level keys that must be present before commit.
             limits: optional max_yaml_bytes, max_markdown_bytes, max_text_bytes, and max_repo_bytes.
-            output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure_reason,
+            output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure,
               last_request_id, and last_source_event_id.
             success_event: optional event name emitted after runtime has produced a verified git ref and persisted the declared
               committed output fields. The event is action-owned readiness publication for the committed artifact result.
@@ -2919,11 +2919,11 @@ handler_specification:
             failure_event: optional event name emitted transactionally with failed output state when runtime execution fails
               after request/source identity resolution.
             failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
-              includes repo_id, namespace, request_id, source_event_id, failure_reason, provenance, and optional partition_key
+              includes repo_id, namespace, request_id, source_event_id, failure, provenance, and optional partition_key
               and display_slug when declared/resolved.
             result_payload_rules: 'success_payload and failure_payload are strict. Declared fields must resolve, must validate
               against the target event payload schema, and must not override runtime-owned result fields: repo_id, namespace,
-              partition_key, display_slug, request_id, source_event_id, repo_url, current_ref, file_manifest, failure_reason,
+              partition_key, display_slug, request_id, source_event_id, repo_url, current_ref, file_manifest, failure,
               or provenance. The target result-event schema must allow every runtime-owned field the action will emit and
               every required target field must be supplied by runtime-owned fields or declared result payload fields.
               Unsupported result-event declarations fail closed at verify/runtime.'
@@ -2943,8 +2943,8 @@ handler_specification:
             scoped below the runtime artifact root defined by `runtime_storage.artifact_root`, and must not encode
             product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
-            contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
-            runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
+            contract must declare the output fields it wants persisted; status is committed or failed, failure records the
+            canonical platform.failure/v1 envelope when present, and current_ref updates only after git commit/ref verification succeeds.
             Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
             request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
@@ -2991,7 +2991,7 @@ handler_specification:
           generated result-event name that collides with an authored event or another generated activity result event after
           event-name normalization.
         success_payload: activity_id, tool, effect_class, attempt, result. The result field is shaped by the tool output_schema.
-        failure_payload: activity_id, tool, effect_class, attempt, error.
+        failure_payload: activity_id, tool, effect_class, attempt, failure (required platform.failure/v1 envelope).
       durable_request_event:
         event_name: platform.activity_requested
         owner: platform_events.catalog["platform.activity_requested"]
@@ -5620,6 +5620,285 @@ engine:
     - entity.kill_reason != null
   error_model:
     description: How the platform handles failures at each layer.
+    failure_taxonomy:
+      owner: platform-spec.yaml#engine.error_model.failure_taxonomy
+      executable_owner: internal/runtime/failures
+      namespace: platform.*
+      namespace_rule: The platform.* failure namespace is closed and reserved. Product contracts cannot mint classes or selectors in it.
+      triage_rule: Author-contract mistakes are bootverify findings. Runtime classes represent only facts that can arise after a valid contract is admitted.
+      deterministic_definition: Given the same recorded execution inputs and pinned runtime facts, re-execution produces the same failure class and semantic detail.
+      authority:
+        rule: A valid wire spelling is not authority. Provenance is established before an envelope may control class, selector membership, disposition, stamped decisions, or rendering.
+        sources:
+          same_process:
+            status: authoritative
+            requirement: The envelope is created by internal/runtime/failures; its registry owns class, detail validation, retryability, determinism, message, and remediation.
+          persisted_or_replayed:
+            status: authoritative_after_current_version_validation
+            requirement: The envelope is loaded through the hard-migrated local persistence, replay, or fork path and passes strict current-schema validation without prose reclassification.
+          local_gateway_server:
+            status: authoritative_at_server_boundary
+            requirement: Served /tools and /mcp responses serialize a same-process envelope; presentation text is never semantic authority.
+          managed_startup_local_gateway:
+            status: authoritative_with_construction_provenance
+            requirement: Exact preservation requires an in-memory, unexported marker minted from a runtime-owned listener binding only after generated-token validation and fresh turn-context registration. Public binding fields, URL shape, copied token values, or payload spelling cannot establish provenance.
+          generic_external_mcp:
+            status: untrusted_provider_evidence
+            requirement: HTTP and stdio mcp_servers responses always translate through the local constructor. Remote class, decisions, templates, component, operation, arbitrary attributes, and prose cannot become canonical evidence. No local-looking URL or token heuristic upgrades trust.
+          federated_swarm_peer:
+            status: unsupported
+            requirement: Exact cross-runtime preservation requires a separately approved registry-version, peer-identity, attestation, downgrade, and migration protocol. No trust flag or implicit federation mode exists.
+      envelope:
+        schema_version: platform.failure/v1
+        required:
+        - schema_version
+        - class
+        - detail
+        - retryable
+        - deterministic
+        - message
+        - remediation
+        fields:
+          schema_version: constant platform.failure/v1
+          class: one exact key from classes
+          detail:
+            required:
+            - code
+            fields:
+              code: stable lowercase identifier matching ^[a-z][a-z0-9_]*$
+              attributes: class-owned typed JSON object; provider-specific values remain detail and cannot mint classes
+          retryable: stamped decision derived by the executable registry; producers cannot set it
+          deterministic: stamped decision derived by the executable registry using deterministic_definition; producers cannot set it
+          message: registry-owned template rendered with the detail code; producers cannot supply prose
+          remediation: registry-owned template rendered with the detail code; producers cannot supply prose
+          component: optional runtime component identity
+          operation: optional stable runtime operation identity
+      selectors:
+        platform.any:
+          members:
+          - platform.timeout
+          - platform.connector_failure
+          - platform.compute_failure
+          - platform.outcome_uncertain
+          - platform.retry_exhausted
+          - platform.budget_exhausted
+          - platform.data_limit_exceeded
+          - platform.authentication_required
+          - platform.authorization_denied
+          - platform.target_unreachable
+          - platform.target_ambiguous
+          - platform.fan_out_bound_exceeded
+          - platform.chain_depth_exceeded
+          - platform.early_arrival
+          - platform.stale_arrival
+          - platform.unexpected_arrival
+          - platform.conflicting_duplicate
+          - platform.reply_already_terminal
+          - platform.schema_invalid
+          - platform.dependency_unavailable
+          - platform.internal_failure
+          exclusions: []
+        platform.any_task_failure:
+          members:
+          - platform.timeout
+          - platform.connector_failure
+          - platform.compute_failure
+          - platform.outcome_uncertain
+          - platform.retry_exhausted
+          - platform.budget_exhausted
+          - platform.data_limit_exceeded
+          - platform.authentication_required
+          - platform.authorization_denied
+          - platform.target_unreachable
+          - platform.target_ambiguous
+          - platform.fan_out_bound_exceeded
+          - platform.chain_depth_exceeded
+          - platform.schema_invalid
+          - platform.dependency_unavailable
+          - platform.internal_failure
+          exclusions:
+          - platform.early_arrival
+          - platform.stale_arrival
+          - platform.unexpected_arrival
+          - platform.conflicting_duplicate
+          - platform.reply_already_terminal
+          exclusion_reason: Temporal/cardinality arrivals are event-admission failures, not task executions.
+      matching_rule: Selector matching is exact positive-set membership. Prefix, suffix, substring, and prose matching are forbidden.
+      classes:
+        platform.timeout:
+          family: task_execution
+          task_failure: true
+          retryable: true
+          deterministic: false
+          message_template: Runtime deadline exceeded (%s).
+          remediation_template: Retry after confirming the dependency can complete within the declared deadline (%s).
+        platform.connector_failure:
+          family: task_execution
+          task_failure: true
+          retryable: true
+          deterministic: false
+          decision_overrides: provider_credit_exhausted is non-retryable and deterministic; typed status 408, 429, and 5xx are retryable
+          message_template: External connector failed (%s).
+          remediation_template: Inspect the connector status and typed failure detail (%s).
+        platform.compute_failure:
+          family: task_execution
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Compute module failed (%s).
+          remediation_template: Correct the module or its declared resource limits (%s).
+        platform.outcome_uncertain:
+          family: task_execution
+          task_failure: true
+          retryable: false
+          deterministic: false
+          message_template: Operation outcome is uncertain (%s).
+          remediation_template: Reconcile the authoritative operation state before retrying (%s).
+          detail_contracts:
+            run_terminal_persistence_unconfirmed:
+              owner: internal/runtime/failures plus internal/builder run terminal adapter
+              attributes:
+                attempted_status:
+                  required: true
+                  enum:
+                  - failed
+                  - completed
+              additional_attributes: false
+              cause_policy: The original execution failure, storage error text, nested envelopes, and ad hoc persistence fields are forbidden. The persisted outcome must be reconciled before retry.
+        platform.retry_exhausted:
+          family: task_execution
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Retry policy was exhausted (%s).
+          remediation_template: Resolve the underlying failure before starting a new execution (%s).
+        platform.budget_exhausted:
+          family: task_execution
+          task_failure: true
+          retryable: false
+          deterministic: true
+          detail_required:
+          - budget_kind
+          budget_kind:
+          - spend
+          - agent_turns
+          - tool_rounds
+          message_template: Execution budget was exhausted (%s).
+          remediation_template: Increase or reset the declared budget before starting a new execution (%s).
+        platform.data_limit_exceeded:
+          family: task_execution
+          task_failure: true
+          retryable: false
+          deterministic: true
+          detail_required:
+          - limit_kind
+          - limit
+          - actual
+          message_template: Runtime data limit was exceeded (%s).
+          remediation_template: Reduce the result size or raise the declared limit (%s).
+        platform.authentication_required:
+          family: access
+          task_failure: true
+          retryable: false
+          deterministic: true
+          detail_required:
+          - auth_kind
+          message_template: Authentication is required (%s).
+          remediation_template: Provide or refresh the required credential (%s).
+        platform.authorization_denied:
+          family: access
+          task_failure: true
+          retryable: false
+          deterministic: true
+          detail_required:
+          - action
+          message_template: Authorization was denied (%s).
+          remediation_template: Grant the required authority or use an authorized principal (%s).
+        platform.target_unreachable:
+          family: routing_control
+          task_failure: true
+          retryable: false
+          deterministic: false
+          message_template: Runtime target is unreachable (%s).
+          remediation_template: Restore or select a reachable target (%s).
+        platform.target_ambiguous:
+          family: routing_control
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Runtime target is ambiguous (%s).
+          remediation_template: Make target selection resolve to exactly one target (%s).
+        platform.fan_out_bound_exceeded:
+          family: routing_control
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Fan-out bound was exceeded (%s).
+          remediation_template: Reduce the collection or raise the declared bound (%s).
+        platform.chain_depth_exceeded:
+          family: routing_control
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Event chain depth was exceeded (%s).
+          remediation_template: Break the causal event cycle or reduce its depth (%s).
+        platform.early_arrival:
+          family: temporal_cardinality
+          task_failure: false
+          retryable: false
+          deterministic: true
+          message_template: Event arrived before its admitted window (%s).
+          remediation_template: Retry only through the owning temporal policy (%s).
+        platform.stale_arrival:
+          family: temporal_cardinality
+          task_failure: false
+          retryable: false
+          deterministic: true
+          message_template: Event arrived after its owning lifecycle closed (%s).
+          remediation_template: Start a new lifecycle rather than reusing the closed one (%s).
+        platform.unexpected_arrival:
+          family: temporal_cardinality
+          task_failure: false
+          retryable: false
+          deterministic: true
+          message_template: Event is not admitted by the active contract (%s).
+          remediation_template: Send an event admitted by the active request or join (%s).
+        platform.conflicting_duplicate:
+          family: temporal_cardinality
+          task_failure: false
+          retryable: false
+          deterministic: true
+          message_template: Duplicate identity carries conflicting content (%s).
+          remediation_template: Reuse the original content or mint a new identity (%s).
+        platform.reply_already_terminal:
+          family: temporal_cardinality
+          task_failure: false
+          retryable: false
+          deterministic: true
+          message_template: Request already has a terminal reply (%s).
+          remediation_template: Do not send a second distinct terminal reply (%s).
+        platform.schema_invalid:
+          family: boundary_platform
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Runtime input violates its schema (%s).
+          remediation_template: Correct the runtime input to match the declared schema (%s).
+        platform.dependency_unavailable:
+          family: boundary_platform
+          task_failure: true
+          retryable: true
+          deterministic: false
+          message_template: Required runtime dependency is unavailable (%s).
+          remediation_template: Restore the dependency and retry the execution (%s).
+        platform.internal_failure:
+          family: boundary_platform
+          task_failure: true
+          retryable: false
+          deterministic: false
+          decision_overrides: typed_read_result_marshal_failed is deterministic
+          message_template: The platform encountered an internal failure (%s).
+          remediation_template: Inspect the typed detail and runtime diagnostics (%s).
     event_validation_failure:
       behavior: Reject event. Log error. Do not deliver. No retry.
       visibility: Error logged with event name, payload, and validation error.
@@ -5629,9 +5908,8 @@ engine:
         max_retries: 3
         backoff: exponential with configurable base. Default base 1s (delays 1s, 2s, 4s). Configurable via policy.yaml
           handler_retry_base_seconds. Production deployments may use longer bases (e.g., 60s for 1min, 5min, 30min delays).
-        retry_on: transient errors (DB timeout, lock contention)
-        no_retry_on: guard failures, validation errors, business logic failures
-      dead_letter: After max_retries exhausted, emit platform.dead_letter with original event, error details, and retry history.
+        decision_owner: engine.FailureDisposition consumes the canonical envelope's registry-stamped retryable value; error prose is never classified
+      dead_letter: After max_retries exhausted, emit platform.dead_letter with the canonical failure envelope and retry history.
         Dead letter events are root-scoped.
     agent_session_failure:
       behavior: Agent exceeds turn budget or crashes. Session terminated.
@@ -5657,14 +5935,9 @@ engine:
         target: object — original singular event.target route identity when one was resolved
         target_set: list — original event.target_set route identities when fan-out targeting was resolved
         delivered_to: list — routing-execution recipients selected before failure, including each recipient delivery target when applicable
-        entity_id: string — receiver-context projection for compatibility with older dead-letter readers
-        flow_instance: string — receiver flow instance projection for compatibility with older dead-letter readers
-        failure_type: 'string — handler_error (non-retryable failure: validation error, business logic error, guard-escalated
-          error — goes to dead letter immediately without retry) | target_resolution_failed (pin-routing target failed with
-          target_failure_reason) | chain_depth_exceeded (emission intercepted at depth limit) | retry_exhausted (retried max_retries times, all failed)'
-        target_failure_reason: optional typed reason from engine.cross_flow_routing.target_resolution_failure_taxonomy
-        target_context: optional diagnostic object for target resolution failures
-        error_message: string — human-readable error description
+        entity_id: string — receiver-context projection
+        flow_instance: string — receiver flow instance projection
+        failure: required platform.failure/v1 envelope; target and routing details live in failure.detail.attributes
         retry_count: integer — number of retries attempted before dead-lettering
         chain_depth: integer — current chain depth (for chain_depth_exceeded)
         handler_node: string — which system node was handling (if handler_error)
@@ -5673,8 +5946,7 @@ engine:
       description: 'What happens when chain_depth exceeds the limit (default: 50).'
       intercepted_event: The event that would exceed the limit is NOT emitted. It is intercepted before entering the event
         loop. It does NOT appear in emitted_events.
-      dead_letter_record: 'A dead_letters row is created with failure_type: chain_depth_exceeded, containing the intercepted
-        event name, payload, and the chain depth at interception.'
+      dead_letter_record: 'A dead_letters row is created with a platform.chain_depth_exceeded failure envelope, containing the intercepted event name, payload, and the chain depth at interception.'
       triggering_handler_outcome: 'The handler that attempted to emit the chain-exceeding event gets outcome: success. The
         handler itself succeeded — it is the EMITTED event that was intercepted. The handler''s other side effects (state
         changes, gate sets, data writes) still commit.'
@@ -9504,7 +9776,7 @@ platform_tables:
         request events, the existing row is consumed before static or managed credential resolution, token refresh, or outbound
         preparation. response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and long_running remain
         split/fail-closed.'
-      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    error             TEXT,\n    input_hash        TEXT NOT NULL,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND error IS NULL AND completed_at IS NULL) OR (status IN ('succeeded', 'failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
+      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
@@ -9552,7 +9824,7 @@ platform_tables:
         \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
         \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    delivery_context JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
         \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
-        \    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
+        \    failure           JSONB,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
         \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\
         \ status) WHERE run_id IS NOT NULL,\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event\
         \ (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
@@ -9573,7 +9845,7 @@ platform_tables:
         \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
         \ IN ('node', 'agent', 'platform')),\n    subscriber_id     TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    outcome           TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate',\
-        \ 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    reason_code       TEXT,\n    state_before      TEXT,\n    state_after       TEXT,\n    side_effects      JSONB\
+        \ 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    reason_code       TEXT,\n    state_before      TEXT,\n    state_after       TEXT,\n    failure           JSONB,\n    side_effects      JSONB\
         \ NOT NULL DEFAULT '{}',\n    duration_ms       INTEGER,\n    idempotency_key   TEXT,\n    processed_at      TIMESTAMPTZ\
         \ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_type, subscriber_id),\n    INDEX idx_receipts_entity (entity_id) WHERE\
         \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\
@@ -9685,7 +9957,7 @@ platform_tables:
         \    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible\
         \  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload   JSONB,\n    turn_blocks      JSONB NOT NULL DEFAULT '[]',\n    parse_ok      \
         \     BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT 0,\n    retry_count       \
-        \ INTEGER NOT NULL DEFAULT 0,\n    error              TEXT,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
+        \ INTEGER NOT NULL DEFAULT 0,\n    failure            JSONB,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
         \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
         \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_event\
         \ (trigger_event_id) WHERE trigger_event_id IS NOT NULL\n);"
@@ -9841,7 +10113,8 @@ platform_tables:
       description: 'Durable per-run operator lifecycle-control state owned by the canonical run-control owner. It distinguishes
         operator-paused runs from fork-materialized paused rows, records stop/pause/continue transition reason and actor, and
         is consumed by run.stop, run.pause, run.continue, EventBus run-scoped dispatch gating, and legacy Builder adapters.
-        Runtime ingress pause/resume does not consume this owner.'
+        Runtime ingress pause/resume does not consume this owner. reason is the sole non-failure cancellation/control-reason
+        owner; it never names or reconstructs a runtime failure class.'
       ddl: "CREATE TABLE run_control_state (\n    run_id         UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n\
         \    control_status TEXT NOT NULL CHECK (control_status IN ('running', 'paused', 'stopped')),\n    reason         TEXT,\n\
         \    controlled_by  TEXT NOT NULL,\n    paused_at      TIMESTAMPTZ,\n    stopped_at     TIMESTAMPTZ,\n    updated_at\
@@ -9901,15 +10174,13 @@ platform_tables:
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
     dead_letters:
-      description: Failed events after target resolution failure, retry exhaustion, or chain depth overflow.
+      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; lifecycle and retry counters remain dead-letter-owned facts.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
         \ UUID REFERENCES events(event_id),\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
-        \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure_type      TEXT NOT NULL CHECK\
-        \ (failure_type IN ('handler_error', 'target_resolution_failed', 'chain_depth_exceeded', 'retry_exhausted')),\n   \
-        \ target_failure_reason TEXT,\n    target_context  JSONB NOT NULL DEFAULT '{}',\n    error_message     TEXT,\n   \
+        \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure           JSONB NOT NULL,\n   \
         \ retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
         \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_dead_letters_flow (flow_instance,\
-        \ created_at),\n    INDEX idx_dead_letters_type (failure_type)\n);"
+        \ created_at),\n    INDEX idx_dead_letters_class ((failure->>'class'))\n);"
     runs:
       description: 'Platform run registry. A run is a top-level execution context — everything that happens from a
         system.started event or a fork operation. Every event, delivery, session, and turn belongs to exactly one run.
@@ -9921,7 +10192,7 @@ platform_tables:
         \    bundle_source      TEXT NOT NULL DEFAULT 'legacy' CHECK (bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy')),\n\
         \    bundle_fingerprint TEXT,\n    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
         \    forked_from_event_id UUID,\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
-        \ NOT NULL DEFAULT 0,\n    error_summary     TEXT,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \ NOT NULL DEFAULT 0,\n    failure           JSONB,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    ended_at          TIMESTAMPTZ,\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
         \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,\n    INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,\n\
         \    INDEX idx_runs_bundle_source_status (bundle_source, status, started_at),\n    INDEX idx_runs_bundle_delete_planning\
@@ -9934,6 +10205,58 @@ platform_tables:
         cancelled: Admin-terminated. In-flight events drained but no new processing.
         forked: 'A new run was forked from this one. Original run is frozen at the fork point.
           The forked run continues execution independently.'
+      terminal_evidence:
+        canonical_owner: internal/store/runlifecycle plus internal/runtime/failures
+        store_enforcement:
+          postgres: Hard status/failure and status/ended_at constraints installed by the canonical failure migration owner.
+          sqlite: Equivalent fail-closed insert/update triggers installed by the canonical failure migration owner because the shared DDL translator does not interpret table-level named checks.
+        status_matrix:
+          running:
+            failure: forbidden
+            ended_at: forbidden
+            control_reason: optional last continue/control transition evidence only
+          paused:
+            failure: forbidden
+            ended_at: forbidden
+            control_reason: optional for fork-materialized pause; required on an operator-paused control row
+          completed:
+            failure: forbidden
+            ended_at: required
+            control_reason: historical control evidence only, never completion cause
+          failed:
+            failure: required_valid_platform_failure_v1
+            ended_at: required
+            control_reason: historical control evidence only; runs.failure solely explains failed status
+          cancelled:
+            failure: forbidden
+            ended_at: required
+            control_reason: required_nonempty_with_control_status_stopped; sole terminal cancellation reason
+          forked:
+            failure: forbidden
+            ended_at: required
+            control_reason: historical control evidence only; fork lineage explains the status
+        persistence_operation: MarkRunTerminal accepts a typed failure and returns the authoritative persisted snapshot from one store-owned transaction. Builder and other callers must not perform a second semantic readback.
+        immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
+        migration:
+          failed_rows: Migrate only a strictly valid platform.failure/v1 value. Empty or prose-only evidence aborts with status, count, and run IDs; no text heuristic exists.
+          cancelled_rows: Never map to failure. A legacy value migrates only when it is a closed preservation reason and exactly matches an existing stopped run_control_state.reason; missing or conflicting evidence aborts.
+          other_rows: running, paused, completed, and forked rows with failure or legacy error evidence abort.
+          removal: runs.error_summary is dropped from both stores and every interface/readback. No alias, fallback, compatibility reader, or dual-write survives.
+      terminal_event_identity:
+        owner: internal/runtime/failures.SemanticFingerprint consumed by Builder run debug projection
+        fields:
+        - schema_version
+        - class
+        - detail.code
+        - canonically encoded detail.attributes
+        - retryable
+        - deterministic
+        - component
+        - operation
+        excluded:
+        - message
+        - remediation
+        rule: Failed terminal event identity is run_id plus status plus ended_at plus the semantic fingerprint. Non-failed terminal identity is run_id plus status plus ended_at. Presentation wording never changes identity.
       run_id_propagation: 'run_id is set once at event creation time and propagated through the causal chain.
         When a handler emits a new event, the child event inherits run_id from the parent event.
         External events (API, webhook, admin CLI) start a new run or join an existing one
@@ -9997,12 +10320,12 @@ platform_tables:
       payload_fields:
         log_level: string (debug, info, warn, error, fatal)
         message: human-readable summary written by the producer; not a machine key
-        details: object (structured source of truth; includes component, action, error, timing, and runtime context fields)
+        details: object (structured source of truth; includes component, action, optional canonical failure, timing, and runtime context fields)
         stack_trace: string (for errors only)
       design_rules:
       - message is for humans; details is the machine-readable source of truth
       - component and action live in details, not as top-level runtime_log fields
-      - error text lives in details.error; message may summarize the failure but is not the raw error string
+      - failure-bearing entries carry details.failure as a platform.failure/v1 envelope; details.error is forbidden and message is not a semantic classifier
       - readers and debug UIs should filter and render structured runtime diagnostics from details
       - >
         Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
@@ -11387,8 +11710,8 @@ multi_bundle_persistence:
           fails serve before cleanup/readiness. Mixed persisted-missing and orphanable active rows must not apply
           partial preservation cleanup.
         orphan_cleanup_scope: >
-          Active ephemeral, deleted, and legacy runs are cancelled with the bundle orphan reason in
-          runs.error_summary, run_control_state is stopped, pending/in-progress same-run agent/node deliveries are
+          Active ephemeral, deleted, and legacy runs are cancelled with no failure envelope; the bundle orphan reason is
+          written only to stopped run_control_state.reason. Pending/in-progress same-run agent/node deliveries are
           dead-lettered with receipts, active/suspended agent sessions terminate with reason orphaned and the bundle
           cause as detail, active run-scoped timers are cancelled, and run-scoped managed containers are stopped when
           their managed identity proves the affected run_id.
@@ -11849,7 +12172,7 @@ platform_events:
         agent_id: string
         flow_instance: string
         entity_id: string (nullable)
-        error: string
+        failure: platform.failure/v1 envelope
         retry_count: integer
         last_event_type: string
         timestamp: string (ISO 8601)
@@ -11867,7 +12190,7 @@ platform_events:
         agent_id: string
         flow_instance: string
         entity_id: string (nullable)
-        error: string
+        failure: platform.failure/v1 envelope
         stack_trace: string
         conversation_id: string (nullable)
         timestamp: string (ISO 8601)
@@ -11883,9 +12206,10 @@ platform_events:
       scope: global
       payload:
         event_name: string
-        quarantine_reason: string
+        reason_code: string (repeated_agent_panic; operational disposition, not failure identity)
+        panic_count: integer
         affected_entity_count: integer
-        sample_error: string
+        last_failure: platform.failure/v1 envelope
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.dead_letter_escalation:
@@ -11970,7 +12294,7 @@ platform_events:
         flow_instance: string
         tool_name: string (nullable)
         action: string
-        reason: string
+        failure: platform.failure/v1 envelope
         timestamp: string (ISO 8601)
       required:
       - agent_id
@@ -11978,7 +12302,7 @@ platform_events:
       - flow_instance
       - tool_name
       - action
-      - reason
+      - failure
       - timestamp
       produced_by_type: platform
     platform.budget_threshold_crossed:
@@ -12022,6 +12346,7 @@ platform_events:
       payload:
         reason: string
         paused_by: string
+        last_failure: platform.failure/v1 envelope (nullable; present for safety-triggered pauses and absent for operator control pauses)
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.resumed:
@@ -12126,7 +12451,7 @@ platform_events:
           manager_replay_count: integer
           manager_skip_count: integer
           manager_drop_count: integer
-          error_text: string
+          failure: optional platform.failure/v1 envelope
         static_agents_started: array<string>
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
@@ -12164,7 +12489,7 @@ platform_events:
       routing_class: event_loop_routable
       scope: global
       payload:
-        error: string
+        failure: platform.failure/v1 envelope
         failed_event_id: string (nullable)
         timestamp: string (ISO 8601)
       produced_by_type: platform
@@ -18688,7 +19013,7 @@ cli_specification:
       output:
         header: Agent <agent-id> deliveries
         empty: No deliveries match the filter.
-        row_fields: delivery_id, event_name, event_id, run_id, entity_id, status, delivery_created_at, delivery_started_at, delivery_delivered_at, retry_count, reason_code, last_error
+        row_fields: delivery_id, event_name, event_id, run_id, entity_id, status, delivery_created_at, delivery_started_at, delivery_delivered_at, retry_count, reason_code, failure
         pagination: next_cursor=<cursor> when the owner returns a cursor
         json: --json emits AgentDeliveryLifecycleList exactly, with no CLI wrapper
       exit_codes:
@@ -20378,6 +20703,73 @@ api_specification:
 
       '
     schemas:
+      FailureClass:
+        type: string
+        enum:
+        - platform.timeout
+        - platform.connector_failure
+        - platform.compute_failure
+        - platform.outcome_uncertain
+        - platform.retry_exhausted
+        - platform.budget_exhausted
+        - platform.data_limit_exceeded
+        - platform.authentication_required
+        - platform.authorization_denied
+        - platform.target_unreachable
+        - platform.target_ambiguous
+        - platform.fan_out_bound_exceeded
+        - platform.chain_depth_exceeded
+        - platform.early_arrival
+        - platform.stale_arrival
+        - platform.unexpected_arrival
+        - platform.conflicting_duplicate
+        - platform.reply_already_terminal
+        - platform.schema_invalid
+        - platform.dependency_unavailable
+        - platform.internal_failure
+      FailureDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - code
+        properties:
+          code:
+            type: string
+            pattern: ^[a-z][a-z0-9_]*$
+          attributes:
+            type: object
+            additionalProperties: true
+      FailureEnvelope:
+        type: object
+        additionalProperties: false
+        required:
+        - schema_version
+        - class
+        - detail
+        - retryable
+        - deterministic
+        - message
+        - remediation
+        properties:
+          schema_version:
+            type: string
+            const: platform.failure/v1
+          class:
+            $ref: '#/components/schemas/FailureClass'
+          detail:
+            $ref: '#/components/schemas/FailureDetail'
+          retryable:
+            type: boolean
+          deterministic:
+            type: boolean
+          message:
+            type: string
+          remediation:
+            type: string
+          component:
+            type: string
+          operation:
+            type: string
       Timestamp:
         type: string
         format: date-time
@@ -20833,9 +21225,12 @@ api_specification:
           forked_from_run_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Present only if status indicates a fork.
-          error_summary:
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
+            description: Required exactly when status is failed; forbidden for every other status.
+          control_reason:
             type: string
-            description: Present only if a top-level error terminated the run.
+            description: Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.
       OperationalState:
         type: string
         description: 'Operational state of a run. Source of truth:
@@ -20921,8 +21316,8 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -21154,8 +21549,8 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -21216,8 +21611,8 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           attempt:
             type: integer
             minimum: 1
@@ -21320,8 +21715,8 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           attempt:
             type: integer
             minimum: 1
@@ -21440,21 +21835,15 @@ api_specification:
         additionalProperties: false
         required:
         - dead_letter_id
-        - failure_type
+        - failure
         - retry_count
         - chain_depth
         - created_at
         properties:
           dead_letter_id:
             $ref: '#/components/schemas/OpaqueId'
-          failure_type:
-            type: string
-            enum:
-            - handler_error
-            - chain_depth_exceeded
-            - retry_exhausted
-          error_message:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -21792,8 +22181,8 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
           parse_ok:
             type: boolean
-          error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       AgentDetail:
         type: object
         additionalProperties: false
@@ -21909,9 +22298,9 @@ api_specification:
           reason_code:
             type: string
             description: Canonical event_deliveries.reason_code summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.
-          last_error:
-            type: string
-            description: Canonical event_deliveries.last_error summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
+            description: Canonical event_deliveries.failure envelope. No read surface may reconstruct it from reason_code or prose.
           delivery_created_at:
             $ref: '#/components/schemas/Timestamp'
             description: Canonical ordering watermark from event_deliveries.created_at.
@@ -22255,8 +22644,8 @@ api_specification:
             description: Failed-delivery subfact from the canonical event_deliveries delivery status owner.
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -22292,8 +22681,8 @@ api_specification:
             description: Terminal dead-letter delivery subfact from the canonical event_deliveries delivery status owner.
           reason_code:
             type: string
-          last_error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -22408,8 +22797,8 @@ api_specification:
           latency_ms:
             type: integer
             minimum: 0
-          error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       ConversationTurnDispatchMetadata:
         type: object
         additionalProperties: false
@@ -22470,8 +22859,8 @@ api_specification:
             type: string
           parse_ok:
             type: boolean
-          error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           retry_count:
             type: integer
             minimum: 0
@@ -22707,8 +23096,8 @@ api_specification:
           latency_ms:
             type: integer
             minimum: 0
-          error:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       ConversationForkEntitySnapshot:
         description: Entity projection reconstructed from source-run entity_mutations at the fork point for forkchat read-only tools.
         type: object
@@ -22881,6 +23270,8 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           error_code:
             type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           message:
             type: string
           details:
@@ -22956,8 +23347,8 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           delivery_reason_code:
             type: string
-          delivery_last_error:
-            type: string
+          delivery_failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           delivery_retry_count:
             type: integer
             minimum: 0
@@ -23002,8 +23393,8 @@ api_specification:
           turn_retry_count:
             type: integer
             minimum: 0
-          turn_error:
-            type: string
+          turn_failure:
+            $ref: '#/components/schemas/FailureEnvelope'
           turn_created_at:
             $ref: '#/components/schemas/Timestamp'
       RunTraceListResult:
@@ -25287,7 +25678,7 @@ api_specification:
         matching the supplied run. delivery_status filters are exact
         event_deliveries.status values. Empty lists are represented as empty
         arrays. The method reports only lifecycle summaries
-        (status/timestamps/retry_count/reason_code/last_error); it does not
+        (status/timestamps/retry_count/reason_code/failure); it does not
         include dead-letter records, route target details, retry-policy
         recommendations, status hints, trace reconstruction, event rendering,
         or CLI/dashboard presentation semantics.

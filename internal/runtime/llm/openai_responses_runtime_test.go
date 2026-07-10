@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -188,8 +189,9 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
-	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
-		t.Fatalf("ContinueSession error = %v, want missing OPENAI_API_KEY", err)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
+		t.Fatalf("ContinueSession failure = %#v, want authentication required", failure)
 	}
 	if requests != 0 {
 		t.Fatalf("requests = %d, want fail closed before HTTP request", requests)

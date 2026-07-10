@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -207,7 +208,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
 		if r.budget.IsEntityEmergency(entityID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
+			return nil, budgetEmergencyFailure(entityID)
 		}
 	}
 
@@ -219,7 +220,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
-			return nil, err
+			return nil, sessionAcquireFailure(err, s.AgentID)
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
@@ -284,7 +285,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_responses_turn"),
 		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
@@ -306,7 +307,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_responses_usage"),
 		}, nil))
 		return nil, err
 	}
@@ -322,7 +323,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "openai_responses_decode"),
 		}, nil))
 		return nil, err
 	}
@@ -476,28 +477,27 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, fmt.Errorf("openai-responses request failed: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassTimeout, "openai_responses_request_timeout", "openai-responses-adapter", "send_request", nil, err)
+		}
+		return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_transport_failure", "openai-responses-adapter", "send_request", nil, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, fmt.Errorf("read openai-responses response: %w", err)
+		return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_response_read_failed", "openai-responses-adapter", "read_response", nil, err)
 	}
 
 	var parsed openAIResponsesResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, openAIResponsesResponse{}, fmt.Errorf("decode openai-responses response: %w", err)
+		return body, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_response_invalid", "openai-responses-adapter", "decode_response", nil, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		msg := strings.TrimSpace(parsed.Error.Message)
-		if msg == "" {
-			msg = strings.TrimSpace(string(body))
-		}
-		return body, parsed, openAIResponsesHTTPError{StatusCode: httpResp.StatusCode, Message: msg}
+		return body, parsed, providerStatusFailure("openai_responses", httpResp.StatusCode)
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, fmt.Errorf("openai-responses error: %s", parsed.Error.Message)
+		return body, parsed, runtimefailures.New(runtimefailures.ClassConnectorFailure, "openai_responses_provider_error", "openai-responses-adapter", "decode_response", nil)
 	}
 	return body, parsed, nil
 }
@@ -746,11 +746,7 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 			resp := evt.Response
 			completed = &resp
 		case "response.failed":
-			msg := strings.TrimSpace(evt.Response.Error.Message)
-			if msg == "" {
-				msg = "openai-responses stream failed"
-			}
-			return errors.New(msg)
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "openai_responses_stream_failed", "openai-responses-adapter", "read_stream", nil)
 		}
 		return nil
 	}
@@ -767,7 +763,7 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return Response{}, err
+		return Response{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_stream_read_failed", "openai-responses-adapter", "read_stream", nil, err)
 	}
 	if err := process(); err != nil {
 		return Response{}, err
@@ -905,19 +901,6 @@ func openAIResponsesPendingToolCalls(order []string, pending map[string]*openAIR
 		})
 	}
 	return calls
-}
-
-type openAIResponsesHTTPError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e openAIResponsesHTTPError) Error() string {
-	msg := strings.TrimSpace(e.Message)
-	if msg == "" {
-		msg = "request failed"
-	}
-	return fmt.Sprintf("openai-responses status %d: %s", e.StatusCode, msg)
 }
 
 type openAIResponsesRequest struct {

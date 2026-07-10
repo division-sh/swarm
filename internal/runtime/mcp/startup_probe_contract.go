@@ -25,12 +25,9 @@ const (
 )
 
 type StartupProbeResult struct {
-	Contract         string              `json:"contract"`
-	Outcome          StartupProbeOutcome `json:"outcome"`
-	ToolName         string              `json:"tool_name,omitempty"`
-	RuntimeErrorCode string              `json:"runtime_error_code,omitempty"`
-	CauseCode        string              `json:"cause_code,omitempty"`
-	Message          string              `json:"message,omitempty"`
+	Contract string              `json:"contract"`
+	Outcome  StartupProbeOutcome `json:"outcome"`
+	ToolName string              `json:"tool_name,omitempty"`
 }
 
 func DecodeStartupProbeRequest(raw any) (*StartupProbeRequest, error) {
@@ -42,7 +39,7 @@ func DecodeStartupProbeRequest(raw any) (*StartupProbeRequest, error) {
 		return nil, fmt.Errorf("encode startup probe request: %w", err)
 	}
 	var req StartupProbeRequest
-	if err := json.Unmarshal(encoded, &req); err != nil {
+	if err := decodeStrictJSON(encoded, &req); err != nil {
 		return nil, fmt.Errorf("decode startup probe request: %w", err)
 	}
 	req.Contract = strings.TrimSpace(req.Contract)
@@ -64,14 +61,11 @@ func DecodeStartupProbeResult(raw any) (*StartupProbeResult, error) {
 		return nil, fmt.Errorf("encode startup probe result: %w", err)
 	}
 	var result StartupProbeResult
-	if err := json.Unmarshal(encoded, &result); err != nil {
+	if err := decodeStrictJSON(encoded, &result); err != nil {
 		return nil, fmt.Errorf("decode startup probe result: %w", err)
 	}
 	result.Contract = strings.TrimSpace(result.Contract)
 	result.ToolName = strings.TrimSpace(result.ToolName)
-	result.RuntimeErrorCode = strings.TrimSpace(result.RuntimeErrorCode)
-	result.CauseCode = strings.TrimSpace(result.CauseCode)
-	result.Message = strings.TrimSpace(result.Message)
 	if result.Contract != StartupProbeContractManagedAgentCallable {
 		return nil, fmt.Errorf("unsupported startup probe result contract %q", result.Contract)
 	}
@@ -99,17 +93,15 @@ func StartupProbeResultForRuntimeError(contract, toolName string, runtimeErr *Ru
 	if runtimeErr == nil {
 		return nil, fmt.Errorf("runtime error payload is required")
 	}
+	if runtimeErr.Failure == nil {
+		return nil, fmt.Errorf("startup probe execution failure requires canonical failure envelope")
+	}
 	result := &StartupProbeResult{
-		Contract:         contract,
-		Outcome:          StartupProbeOutcomeExecutionFailure,
-		ToolName:         strings.TrimSpace(toolName),
-		RuntimeErrorCode: strings.TrimSpace(runtimeErr.Code),
-		Message:          strings.TrimSpace(runtimeErr.Message),
+		Contract: contract,
+		Outcome:  StartupProbeOutcomeExecutionFailure,
+		ToolName: strings.TrimSpace(toolName),
 	}
-	if runtimeErr.Cause != nil {
-		result.CauseCode = strings.TrimSpace(runtimeErr.Cause.Code)
-	}
-	if result.CauseCode == "invalid_tool_input" {
+	if runtimeErr.Failure.Class == "platform.schema_invalid" && runtimeErr.Failure.Detail.Code == "invalid_tool_input" {
 		result.Outcome = StartupProbeOutcomeValidationOnly
 	}
 	return result, nil

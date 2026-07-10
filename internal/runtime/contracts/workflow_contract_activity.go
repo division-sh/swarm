@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const (
@@ -188,13 +189,13 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 	}
 	if status == ActivityResultStatusFailed {
 		description = "Generated durable activity failure event"
-		required = []string{"activity_id", "tool", "effect_class", "attempt", "error"}
+		required = []string{"activity_id", "tool", "effect_class", "attempt", "failure"}
 		properties = map[string]EventFieldSpec{
 			"activity_id":  {Type: "string", Description: "Generated durable activity id."},
 			"tool":         {Type: "string", Description: "Authored tools.yaml tool id attempted by the activity."},
 			"effect_class": {Type: "string", Description: "Authored durable activity effect class."},
 			"attempt":      {Type: "integer", Description: "One-based activity attempt number."},
-			"error":        {Type: "string", Description: "Durable activity execution error."},
+			"failure":      {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", Description: "Canonical durable activity failure envelope."},
 		}
 	}
 	return EventCatalogEntry{
@@ -244,13 +245,13 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 			Schema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
-				"required":             []string{"activity_id", "tool", "effect_class", "attempt", "error"},
+				"required":             []string{"activity_id", "tool", "effect_class", "attempt", "failure"},
 				"properties": map[string]any{
 					"activity_id":  map[string]any{"type": "string"},
 					"tool":         map[string]any{"type": "string"},
 					"effect_class": map[string]any{"type": "string"},
 					"attempt":      map[string]any{"type": "integer"},
-					"error":        map[string]any{"type": "string"},
+					"failure":      runtimefailures.EnvelopeJSONSchema(),
 				},
 			},
 		},

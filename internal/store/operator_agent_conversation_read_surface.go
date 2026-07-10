@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -108,10 +109,10 @@ type OperatorSessionRef struct {
 }
 
 type OperatorTurnRef struct {
-	TurnID      string    `json:"turn_id"`
-	CompletedAt time.Time `json:"completed_at"`
-	ParseOK     bool      `json:"parse_ok"`
-	Error       string    `json:"error,omitempty"`
+	TurnID      string                    `json:"turn_id"`
+	CompletedAt time.Time                 `json:"completed_at"`
+	ParseOK     bool                      `json:"parse_ok"`
+	Failure     *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type OperatorAgentDetail struct {
@@ -264,7 +265,7 @@ type OperatorConversationDeepTurn struct {
 	DurationMS                  int                                  `json:"duration_ms"`
 	Outcome                     string                               `json:"outcome,omitempty"`
 	ParseOK                     bool                                 `json:"parse_ok"`
-	Error                       string                               `json:"error,omitempty"`
+	Failure                     *runtimefailures.Envelope            `json:"failure,omitempty"`
 	RetryCount                  int                                  `json:"retry_count,omitempty"`
 	DispatchMetadata            OperatorConversationDispatchMetadata `json:"dispatch_metadata"`
 	AdvertisedTools             []string                             `json:"advertised_tools"`
@@ -394,7 +395,7 @@ type OperatorConversationTurn struct {
 	TurnBlocks       []OperatorConversationTurnBlock `json:"turn_blocks,omitempty"`
 	ParseOK          bool                            `json:"parse_ok"`
 	LatencyMS        int                             `json:"latency_ms"`
-	Error            string                          `json:"error,omitempty"`
+	Failure          *runtimefailures.Envelope       `json:"failure,omitempty"`
 
 	AgentID                string                           `json:"-"`
 	SessionID              string                           `json:"-"`
@@ -790,7 +791,7 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorConversationTurn(ctx 
 			DurationMS:  selected.LatencyMS,
 			Outcome:     selected.Outcome,
 			ParseOK:     selected.ParseOK,
-			Error:       selected.Error,
+			Failure:     runtimefailures.CloneEnvelope(selected.Failure),
 			RetryCount:  selected.RetryCount,
 			DispatchMetadata: OperatorConversationDispatchMetadata{
 				TriggerEventID:   selected.TriggerEventID,
@@ -1090,7 +1091,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.entity_id::text, ''),
 			COALESCE(latest_turn.parse_ok, false),
-			COALESCE(latest_turn.error, ''),
+			COALESCE(latest_turn.failure, 'null'::jsonb),
 			latest_turn.created_at,
 			COALESCE(latest_turn.turn_blocks, '[]'::jsonb)
 		FROM agents a
@@ -1115,7 +1116,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 				COALESCE(task_id, '') AS task_id,
 				entity_id,
 				parse_ok,
-				COALESCE(error, '') AS error,
+				COALESCE(failure, 'null'::jsonb) AS failure,
 				created_at,
 				%s AS turn_blocks
 			FROM agent_turns
@@ -1146,7 +1147,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			latestTaskID     string
 			latestEntityID   string
 			latestParseOK    bool
-			latestError      string
+			latestFailureRaw []byte
 			latestCompleted  sql.NullTime
 			latestTurnRaw    []byte
 		)
@@ -1165,7 +1166,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			&latestTaskID,
 			&latestEntityID,
 			&latestParseOK,
-			&latestError,
+			&latestFailureRaw,
 			&latestCompleted,
 			&latestTurnRaw,
 		); err != nil {
@@ -1178,11 +1179,15 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			projection.LockExpiresAt = lockExpiresAt.Time
 		}
 		if latestCompleted.Valid && strings.TrimSpace(latestTurnID) != "" {
+			latestFailure, err := decodeStoredFailure(latestFailureRaw)
+			if err != nil {
+				return nil, fmt.Errorf("decode latest agent turn failure: %w", err)
+			}
 			projection.LastTurnRef = &OperatorTurnRef{
 				TurnID:      strings.TrimSpace(latestTurnID),
 				CompletedAt: latestCompleted.Time,
 				ParseOK:     latestParseOK,
-				Error:       strings.TrimSpace(latestError),
+				Failure:     latestFailure,
 			}
 		}
 		if err := enrichOperatorAgentProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
@@ -1948,7 +1953,7 @@ func (r *OperatorAgentConversationReadSurface) loadConversationTurns(ctx context
 			parse_ok,
 			COALESCE(latency_ms, 0),
 			COALESCE(retry_count, 0),
-			COALESCE(error, ''),
+			COALESCE(failure, 'null'::jsonb),
 			created_at
 		FROM agent_turns
 		WHERE agent_id = $1
@@ -1985,7 +1990,7 @@ func scanOperatorConversationTurn(scanner operatorRowScanner) (OperatorConversat
 		emittedEventsRaw, mcpServersRaw       []byte
 		mcpToolsListedRaw, mcpToolsVisibleRaw []byte
 		requestPayloadRaw, responsePayloadRaw []byte
-		turnBlocksRaw                         []byte
+		turnBlocksRaw, failureRaw             []byte
 	)
 	if err := scanner.Scan(
 		&item.TurnID,
@@ -2009,11 +2014,16 @@ func scanOperatorConversationTurn(scanner operatorRowScanner) (OperatorConversat
 		&item.ParseOK,
 		&item.LatencyMS,
 		&item.RetryCount,
-		&item.Error,
+		&failureRaw,
 		&item.CreatedAt,
 	); err != nil {
 		return OperatorConversationTurn{}, err
 	}
+	decodedFailure, err := decodeStoredFailure(failureRaw)
+	if err != nil {
+		return OperatorConversationTurn{}, fmt.Errorf("decode turn failure: %w", err)
+	}
+	item.Failure = decodedFailure
 	summary, hasSummary, err := decodeOperatorTurnSummaryProjection(turnBlocksRaw)
 	if err != nil {
 		return OperatorConversationTurn{}, err

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -94,7 +94,7 @@ func (s *flowActivationTestInstanceStore) Create(_ context.Context, instance run
 	ref := strings.TrimSpace(instance.StorageRef)
 	if ref != "" {
 		if _, ok := s.byStorageRef[ref]; ok {
-			return fmt.Errorf("flow instance already exists: %s", ref)
+			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "flow-activation-test", "create", map[string]any{"flow_instance": ref})
 		}
 	}
 	s.creates = append(s.creates, instance)
@@ -147,7 +147,7 @@ func (s *flowActivationTestStore) MarkAgentTerminated(_ context.Context, agentID
 	return s.terminateErr
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 func (*flowActivationTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
@@ -792,8 +792,9 @@ func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *test
 	firstAgents := len(store.upserts)
 
 	err := am.ActivateFlowInstance(context.Background(), req)
-	if err == nil || !strings.Contains(err.Error(), "flow instance already exists: review/inst-1") {
-		t.Fatalf("duplicate ActivateFlowInstance error = %v, want already-exists failure", err)
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" {
+		t.Fatalf("duplicate ActivateFlowInstance failure = %#v, want canonical already-exists failure", failure)
 	}
 	if len(instances.creates) != firstCreates {
 		t.Fatalf("creates = %d, want unchanged %d", len(instances.creates), firstCreates)
@@ -1225,8 +1226,8 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *
 	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
 		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
 	}
-	if !strings.Contains(log.Error, "agent terminate failed") {
-		t.Fatalf("runtime log error = %q, want agent termination failure", log.Error)
+	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassInternalFailure || log.Failure.Detail.Code != "unclassified_runtime_error" {
+		t.Fatalf("runtime log failure = %#v, want canonical internal failure", log.Failure)
 	}
 	if len(bus.removedPairs) != 0 {
 		t.Fatalf("removed routes after agent failure = %#v, want no route removal", bus.removedPairs)
@@ -1260,8 +1261,8 @@ func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *t
 	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
 		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
 	}
-	if !strings.Contains(log.Error, "route removal failed") {
-		t.Fatalf("runtime log error = %q, want route removal failure", log.Error)
+	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassInternalFailure || log.Failure.Detail.Code != "unclassified_runtime_error" {
+		t.Fatalf("runtime log failure = %#v, want canonical internal failure", log.Failure)
 	}
 	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
 		t.Fatalf("agent terminations after route failure = %#v, want reviewer-inst-1", managerStore.terminated)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +40,7 @@ type TransitionRequest struct {
 	Reason       string
 	ControlledBy string
 	Now          time.Time
+	LastFailure  *runtimefailures.Envelope
 }
 
 type TransitionResult struct {
@@ -170,7 +172,7 @@ func (c *Controller) transition(ctx context.Context, target Status, req Transiti
 	}
 	// Once the owner state has committed, callers must see the transition as
 	// successful so API idempotency can record and replay the completed write.
-	eventID, err := c.publishTransitionEvent(ctx, target, reason, controlledBy, now)
+	eventID, err := c.publishTransitionEvent(ctx, target, reason, controlledBy, req.LastFailure, now)
 	if err != nil {
 		return result, nil
 	}
@@ -254,7 +256,7 @@ func (c *Controller) setTransitionEvent(ctx context.Context, target Status, even
 	return true, nil
 }
 
-func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, reason, controlledBy string, now time.Time) (string, error) {
+func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, reason, controlledBy string, lastFailure *runtimefailures.Envelope, now time.Time) (string, error) {
 	if c.publisher == nil {
 		return "", nil
 	}
@@ -263,6 +265,12 @@ func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, 
 		"reason":    reason,
 		"paused_by": controlledBy,
 		"timestamp": now.Format(time.RFC3339Nano),
+	}
+	if lastFailure != nil {
+		if err := runtimefailures.ValidateEnvelope(*lastFailure); err != nil {
+			return "", fmt.Errorf("publish runtime pause failure: %w", err)
+		}
+		payload["last_failure"] = *lastFailure
 	}
 	if target == StatusRunning {
 		eventType = events.EventType("platform.resumed")

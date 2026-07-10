@@ -29,6 +29,58 @@ type Binding struct {
 	Token             string
 	LifecycleOwner    string
 	Source            string
+	runtimeOwned      *runtimeOwnedBinding
+}
+
+// runtimeOwnedBinding is intentionally unexported and never serialized. A
+// Binding assembled from configuration or copied URL/token values therefore
+// cannot acquire local runtime authority.
+type runtimeOwnedBinding struct {
+	transport         Transport
+	hostEndpoint      string
+	workspaceEndpoint string
+	token             string
+	lifecycleOwner    string
+	source            string
+}
+
+func NewRuntimeOwnedBinding(transport Transport, hostEndpoint, workspaceEndpoint, token, lifecycleOwner, source string) (Binding, error) {
+	binding := Binding{
+		Transport:         transport,
+		HostEndpoint:      hostEndpoint,
+		WorkspaceEndpoint: workspaceEndpoint,
+		Token:             token,
+		LifecycleOwner:    strings.TrimSpace(lifecycleOwner),
+		Source:            strings.TrimSpace(source),
+	}
+	if err := binding.Validate(); err != nil {
+		return Binding{}, err
+	}
+	switch {
+	case binding.LifecycleOwner == LifecycleOwnerServeBoot && binding.Source == SourceBoundMCPListener:
+	case binding.LifecycleOwner == LifecycleOwnerSelectedForkRuntime && binding.Source == SourceSelectedForkEphemeralGateway:
+	default:
+		return Binding{}, fmt.Errorf("tool gateway runtime ownership pair %q/%q is not supported", binding.LifecycleOwner, binding.Source)
+	}
+	binding.runtimeOwned = &runtimeOwnedBinding{
+		transport:         binding.Transport,
+		hostEndpoint:      binding.HostEndpoint,
+		workspaceEndpoint: binding.WorkspaceEndpoint,
+		token:             binding.Token,
+		lifecycleOwner:    binding.LifecycleOwner,
+		source:            binding.Source,
+	}
+	return binding, nil
+}
+
+func (b Binding) IsRuntimeOwned() bool {
+	return b.runtimeOwned != nil &&
+		b.Transport == b.runtimeOwned.transport &&
+		b.HostEndpoint == b.runtimeOwned.hostEndpoint &&
+		b.WorkspaceEndpoint == b.runtimeOwned.workspaceEndpoint &&
+		b.Token == b.runtimeOwned.token &&
+		b.LifecycleOwner == b.runtimeOwned.lifecycleOwner &&
+		b.Source == b.runtimeOwned.source
 }
 
 func (b Binding) Empty() bool {

@@ -2,10 +2,10 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
@@ -16,20 +16,20 @@ func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
 	pauseCalls := 0
 	var pauseReason string
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
-		RuntimeIngressSafetyPause: func(_ context.Context, reason string) error {
+		RuntimeIngressSafetyPause: func(_ context.Context, reason string, _ *runtimefailures.Envelope) error {
 			pauseCalls++
 			pauseReason = reason
 			return nil
 		},
 	})
 
-	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-1", errors.New("claude auth required"))
-	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-2", errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-1", testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-2", testAuthFailure())
 
 	if pauseCalls != 1 {
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)
 	}
-	if pauseReason != "claude_auth_required" {
-		t.Fatalf("runtime ingress safety pause reason = %q, want claude_auth_required", pauseReason)
+	if pauseReason != "authentication_intervention_required" {
+		t.Fatalf("runtime ingress safety pause reason = %q, want authentication_intervention_required", pauseReason)
 	}
 }

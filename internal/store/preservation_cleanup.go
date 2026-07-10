@@ -208,7 +208,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 	for _, run := range runs {
 		target := targetByRun[run.RunID]
-		if err := markUnavailableBundlePreservationRunTx(ctx, tx, run.RunID, target.ReasonCode, now); err != nil {
+		if err := markUnavailableBundlePreservationRunTx(ctx, tx, run.RunID, now); err != nil {
 			return preservationcleanup.Result{}, err
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, target.ReasonCode, controlledBy, now); err != nil {
@@ -415,16 +415,16 @@ func cancelUnavailableBundlePreservationTimerTx(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func markUnavailableBundlePreservationRunTx(ctx context.Context, tx *sql.Tx, runID, reasonCode string, at time.Time) error {
+func markUnavailableBundlePreservationRunTx(ctx context.Context, tx *sql.Tx, runID string, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE runs
 		SET
 			status = 'cancelled',
-			error_summary = $2,
-			ended_at = COALESCE(ended_at, $3)
+			failure = NULL,
+			ended_at = COALESCE(ended_at, $2)
 		WHERE run_id = $1::uuid
 		  AND lower(COALESCE(status, '')) IN ('running', 'paused')
-	`, runID, reasonCode, at.UTC()); err != nil {
+	`, runID, at.UTC()); err != nil {
 		return fmt.Errorf("mark unavailable bundle preservation run %s: %w", runID, err)
 	}
 	return nil

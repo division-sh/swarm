@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -247,8 +248,8 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 	if ok, _ := detail["ok"].(bool); ok {
 		t.Fatalf("ok = %#v, want false", detail["ok"])
 	}
-	if strings.TrimSpace(log.Error) == "" {
-		t.Fatal("expected error text in runtime log")
+	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassConnectorFailure || log.Failure.Detail.Code != "provider_http_status" {
+		t.Fatalf("failure = %#v, want canonical connector status failure", log.Failure)
 	}
 }
 
@@ -617,8 +618,8 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	if got := strings.TrimSpace(asString(detail["emitted_event_type"])); got != "category.assessed" {
 		t.Fatalf("emitted_event_type = %#v, want category.assessed", detail["emitted_event_type"])
 	}
-	if strings.TrimSpace(log.Error) == "" {
-		t.Fatal("expected error text on publish failure")
+	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassDependencyUnavailable || log.Failure.Detail.Code != "event_publish_failed" {
+		t.Fatalf("failure = %#v, want canonical event publish failure", log.Failure)
 	}
 }
 

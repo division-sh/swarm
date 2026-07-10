@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -388,7 +389,7 @@ func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
 	actor, ok := ActorFromContext(ctx)
 	if !ok {
-		err := errors.New("missing actor context for tool execution")
+		err := failures.New(failures.ClassInternalFailure, "tool_actor_context_missing", "tool-executor", "execute.context", map[string]any{"tool": strings.TrimSpace(name)})
 		e.emitToolExecutionEvent(ctx, models.AgentConfig{}, name, input, nil, err, 0, "context")
 		return nil, err
 	}
@@ -398,13 +399,12 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 		return nil, err
 	}
 	if err := e.validateRuntimeToolInput(actor, name, input); err != nil {
-		wrapped := WrapRuntimeError(
+		wrapped := failures.WrapDetail(
 			"invalid_tool_input",
 			"tool-executor",
 			"execute.validate_runtime_tool_input",
-			false,
+			map[string]any{"tool": name},
 			err,
-			"runtime tool input validation failed",
 		)
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, wrapped, 0, "validate")
 		return nil, wrapped
@@ -504,7 +504,7 @@ func (e *Executor) emitToolExecutionEvent(
 	action := "tool_execution_succeeded"
 	if execErr != nil {
 		level = "warn"
-		if errors.Is(execErr, ErrToolNotAllowed) {
+		if toolExecutionDenied(execErr) {
 			action = "tool_execution_denied"
 		} else {
 			action = "tool_execution_failed"
@@ -522,7 +522,7 @@ func (e *Executor) emitToolExecutionEvent(
 		AgentID:    strings.TrimSpace(actor.ID),
 		EntityID:   strings.TrimSpace(actor.EffectiveEntityID()),
 		Detail:     detail,
-		Error:      toolExecErrorText(execErr),
+		Failure:    toolExecFailure(execErr),
 		DurationUS: int(latency / time.Microsecond),
 	})
 }
@@ -535,7 +535,7 @@ func toolExecutionMessage(toolName string, execErr error) string {
 			return "Tool execution succeeded"
 		}
 		return fmt.Sprintf("Tool %s executed successfully", toolName)
-	case errors.Is(execErr, ErrToolNotAllowed):
+	case toolExecutionDenied(execErr):
 		if toolName == "" {
 			return "Tool execution was denied"
 		}
@@ -546,6 +546,11 @@ func toolExecutionMessage(toolName string, execErr error) string {
 		}
 		return fmt.Sprintf("Tool %s execution failed", toolName)
 	}
+}
+
+func toolExecutionDenied(err error) bool {
+	failure, ok := failures.As(err)
+	return ok && failure.Failure.Class == failures.ClassAuthorizationDenied
 }
 
 func toolExecutionDiagnosticDetail(ctx context.Context, toolName string, input any, result any, execErr error, phase string, fallbackDecision toolAuthorizationDecision) map[string]any {
@@ -601,18 +606,6 @@ func toolExecutionDiagnosticDetail(ctx context.Context, toolName string, input a
 			detail["denial_layer"] = "authorizer"
 		}
 	}
-	if runtimeErr, ok := AsRuntimeError(execErr); ok {
-		if v := strings.TrimSpace(runtimeErr.Code); v != "" {
-			detail["runtime_error_code"] = v
-		}
-		if v := strings.TrimSpace(runtimeErr.Operation); v != "" {
-			detail["runtime_error_operation"] = v
-		}
-		if v := strings.TrimSpace(runtimeErr.Component); v != "" {
-			detail["runtime_error_component"] = v
-		}
-		detail["retryable"] = runtimeErr.Retryable
-	}
 	if rateLimitDetail, ok := externalDispatchAdmissionDiagnosticDetail(ctx); ok {
 		for key, value := range rateLimitDetail {
 			detail[key] = value
@@ -621,11 +614,12 @@ func toolExecutionDiagnosticDetail(ctx context.Context, toolName string, input a
 	return detail
 }
 
-func toolExecErrorText(err error) string {
+func toolExecFailure(err error) *failures.Envelope {
 	if err == nil {
-		return ""
+		return nil
 	}
-	return SafeTelemetryText(FormatRuntimeError(err))
+	failure := failures.Normalize(err, "tool-executor", "execute")
+	return &failure
 }
 
 func (e *Executor) authorizeToolUsage(ctx context.Context, actor models.AgentConfig, toolName string) error {
@@ -634,9 +628,9 @@ func (e *Executor) authorizeToolUsage(ctx context.Context, actor models.AgentCon
 			if cap.Callable {
 				return nil
 			}
-			return fmt.Errorf("%w: tool %s is not allowed for agent %s", ErrToolNotAllowed, toolName, actor.ID)
+			return failures.New(failures.ClassAuthorizationDenied, "tool_not_allowed", "tool-executor", "authorize_tool", map[string]any{"action": "tool_execute", "tool": toolName, "actor_id": actor.ID})
 		}
-		return fmt.Errorf("%w: tool %s is not offered for agent %s", ErrToolNotAllowed, toolName, actor.ID)
+		return failures.New(failures.ClassAuthorizationDenied, "tool_not_offered", "tool-executor", "authorize_tool", map[string]any{"action": "tool_execute", "tool": toolName, "actor_id": actor.ID})
 	}
 	if e.authorizer == nil {
 		return nil
@@ -646,7 +640,7 @@ func (e *Executor) authorizeToolUsage(ctx context.Context, actor models.AgentCon
 
 func (e *Executor) dispatchTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 	if e.dispatcher == nil {
-		return nil, fmt.Errorf("tool dispatcher is not configured")
+		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "dispatch_tool", map[string]any{"dependency": "tool_dispatcher"})
 	}
 	return e.dispatcher.Dispatch(ctx, actor, name, input)
 }
@@ -779,10 +773,10 @@ func authorizeRouting(provider runtimeauthority.Provider, actor, target models.A
 func authorizeManage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {
 	_ = manager
 	if !runtimeauthority.SameFlowInstance(actor, target) {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return failures.New(failures.ClassAuthorizationDenied, "agent_management_cross_flow_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return failures.New(failures.ClassAuthorizationDenied, "agent_self_management_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
 	}
 	return runtimeauthority.ProviderOrNoop(provider).AuthorizeManagement(actor, target)
 }

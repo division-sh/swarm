@@ -26,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -303,7 +304,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if _, err := runtime.ContinueSession(newTurnContext(event1), session, runtimellm.Message{Role: "user", Content: "first"}); err != nil {
 		t.Fatalf("ContinueSession(first): %v", err)
 	}
-	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID(), "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID(), "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("UpsertEventReceipt(first): %v", err)
 	}
 
@@ -377,7 +378,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	}
 }
 
-func TestRotatedLiveSessionRebindsDeliveryFrontierToSuccessorSession(t *testing.T) {
+func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -472,23 +473,18 @@ printf '{"result":"ok"}'
 	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID(), "agent-1", ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress(prelaunch): %v", err)
 	}
-	resp, err := runtime.ContinueSession(newTurnContext(evt), session, runtimellm.Message{Role: "user", Content: "rotate me"})
-	if err != nil {
-		t.Fatalf("ContinueSession: %v", err)
+	_, err = runtime.ContinueSession(newTurnContext(evt), session, runtimellm.Message{Role: "user", Content: "do not classify stderr"})
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
+		t.Fatalf("ContinueSession failure = %v, want generic connector failure", err)
 	}
-	if resp == nil || strings.TrimSpace(resp.Message.Content) != "ok" {
-		t.Fatalf("response = %#v, want assistant ok", resp)
-	}
-	if session.ID == originalSessionID {
-		t.Fatalf("session ID did not rotate; got %q", session.ID)
+	if session.ID != originalSessionID {
+		t.Fatalf("session ID rotated from stderr prose: got %q, want %q", session.ID, originalSessionID)
 	}
 
 	var (
-		deliveryStatus         string
-		activeSessionID        string
-		predecessorStatus      string
-		successorStatus        string
-		successorRetriesFromID string
+		deliveryStatus  string
+		activeSessionID string
 	)
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
@@ -502,33 +498,15 @@ printf '{"result":"ok"}'
 	if deliveryStatus != "in_progress" {
 		t.Fatalf("delivery status = %q, want in_progress", deliveryStatus)
 	}
-	if activeSessionID != session.ID {
-		t.Fatalf("delivery active_session_id = %q, want %q", activeSessionID, session.ID)
+	if activeSessionID != originalSessionID {
+		t.Fatalf("delivery active_session_id = %q, want original %q", activeSessionID, originalSessionID)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, originalSessionID).Scan(&predecessorStatus); err != nil {
-		t.Fatalf("load predecessor session: %v", err)
+	var sessionCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'agent-1'`).Scan(&sessionCount); err != nil {
+		t.Fatalf("count sessions: %v", err)
 	}
-	if predecessorStatus != "terminated" {
-		t.Fatalf("predecessor status = %q, want terminated", predecessorStatus)
-	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(status, ''),
-			COALESCE(runtime_state->>'retries_from_session_id', '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, session.ID).Scan(&successorStatus, &successorRetriesFromID); err != nil {
-		t.Fatalf("load successor session: %v", err)
-	}
-	if successorStatus != "active" {
-		t.Fatalf("successor status = %q, want active", successorStatus)
-	}
-	if successorRetriesFromID != originalSessionID {
-		t.Fatalf("successor retries_from_session_id = %q, want %q", successorRetriesFromID, originalSessionID)
+	if sessionCount != 1 {
+		t.Fatalf("session count = %d, want no prose-triggered successor", sessionCount)
 	}
 }
 
@@ -689,6 +667,13 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	entityID := uuid.NewString()
 	parentEventID := uuid.NewString()
 	logger := runtimepkg.NewRuntimeLogger(pg)
+	failure := runtimefailures.Normalize(runtimefailures.New(
+		runtimefailures.ClassAuthorizationDenied,
+		"cross_flow_write_forbidden",
+		"tool-executor",
+		"tool_execution_denied",
+		map[string]any{"action": "entity_write"},
+	), "tool-executor", "tool_execution_denied")
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
@@ -699,12 +684,11 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 		AgentID:    "agent-1",
 		EntityID:   entityID,
 		SessionID:  "session-1",
-		Error:      "runtime_error code=cross_flow_write_forbidden",
+		Failure:    &failure,
 		DurationUS: 1200,
 		Detail: map[string]any{
 			"tool_name":       "save_entity_field",
 			"denial_layer":    "executor",
-			"error_code":      "cross_flow_write_forbidden",
 			"handler_id":      "tool-handler",
 			"parent_event_id": parentEventID,
 		},
@@ -1083,7 +1067,7 @@ func (s *conformanceManagerReplayStore) LoadAgents(context.Context) ([]runtimema
 
 func (*conformanceManagerReplayStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (*conformanceManagerReplayStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (s *conformanceManagerReplayStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *conformanceManagerReplayStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	if s.receipts == nil {
 		s.receipts = map[string]runtimemanager.EventReceipt{}
 	}
@@ -1091,7 +1075,7 @@ func (s *conformanceManagerReplayStore) UpsertEventReceipt(_ context.Context, ev
 		EventID: eventID,
 		AgentID: agentID,
 		Status:  status,
-		Error:   errText,
+		Failure: failure,
 	}
 	return nil
 }
@@ -1225,8 +1209,8 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	if log.Action != "startup_recovery_decision" {
 		t.Fatalf("log action = %q, want startup_recovery_decision", log.Action)
 	}
-	if log.ErrorCode != "recovery_disabled_with_persisted_work" {
-		t.Fatalf("log error_code = %q, want recovery_disabled_with_persisted_work", log.ErrorCode)
+	if log.ErrorCode != "startup_recovery_disabled_with_work" {
+		t.Fatalf("log error_code = %q, want canonical failure detail", log.ErrorCode)
 	}
 	detail, _ := log.Detail.(map[string]any)
 	if got := readString(detail["decision_outcome"]); got != "denied" {
@@ -1318,8 +1302,13 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	if err := json.Unmarshal(recoveryFailedPayloadRaw, &recoveryFailedPayload); err != nil {
 		t.Fatalf("unmarshal platform.recovery_failed payload: %v", err)
 	}
-	if got := readString(recoveryFailedPayload["error"]); !strings.Contains(got, "claim replay event") || !strings.Contains(got, "claim failed") {
-		t.Fatalf("platform.recovery_failed payload.error = %q, want replay claim failure", got)
+	failureRaw, err := json.Marshal(recoveryFailedPayload["failure"])
+	if err != nil {
+		t.Fatalf("marshal platform.recovery_failed failure: %v", err)
+	}
+	recoveryFailure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
+	if err != nil || recoveryFailure.Detail.Code != "startup_manager_recovery_failed" {
+		t.Fatalf("platform.recovery_failed failure = %#v err=%v, want startup_manager_recovery_failed", recoveryFailedPayload["failure"], err)
 	}
 }
 
@@ -1448,11 +1437,8 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 	if got := readString(droppedDetail["decision_reason_code"]); got != "schedule_restore_failed" {
 		t.Fatalf("dropped detail.decision_reason_code = %q, want schedule_restore_failed", got)
 	}
-	if readString(droppedDetail["error_code"]) != "schedule_restore_failed" {
-		t.Fatalf("dropped detail.error_code = %q, want schedule_restore_failed", readString(droppedDetail["error_code"]))
-	}
-	if strings.TrimSpace(dropped.Error) == "" {
-		t.Fatal("dropped timer recovery log missing explicit error text")
+	if dropped.Failure == nil || dropped.Failure.Detail.Code != "schedule_restore_failed" {
+		t.Fatalf("dropped timer recovery failure = %#v", dropped.Failure)
 	}
 }
 
@@ -1460,7 +1446,7 @@ type conformanceRuntimeLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
-func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
 	if h.logger == nil {
 		return nil
 	}
@@ -1476,7 +1462,7 @@ func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediag
 		SessionID:   sessionID,
 		Correlation: correlation,
 		Detail:      detail,
-		Error:       errText,
+		Failure:     runtimefailures.CloneEnvelope(failure),
 		DurationUS:  durationUS,
 	})
 }
@@ -1712,10 +1698,16 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("receipt skip detail.decision_reason_code = %q, want event_receipt_already_processed", got)
 	}
 
-	skippedLeased := logs[findByEventID("evt-leased")]
-	skippedLeasedDetail, _ := skippedLeased.Detail.(map[string]any)
-	if got := readString(skippedLeasedDetail["decision_reason_code"]); got != "session_currently_leased" {
-		t.Fatalf("leased skip detail.decision_reason_code = %q, want session_currently_leased", got)
+	droppedLeased := logs[findByEventID("evt-leased")]
+	droppedLeasedDetail, _ := droppedLeased.Detail.(map[string]any)
+	if got := readString(droppedLeasedDetail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("leased detail.decision_outcome = %q, want dropped without prose classification", got)
+	}
+	if got := readString(droppedLeasedDetail["decision_reason_code"]); got != "event_processing_failed" {
+		t.Fatalf("leased detail.decision_reason_code = %q, want event_processing_failed", got)
+	}
+	if droppedLeased.Failure == nil || droppedLeased.Failure.Detail.Code != "unclassified_runtime_error" {
+		t.Fatalf("leased failure = %#v, want generic internal failure", droppedLeased.Failure)
 	}
 
 	dropped := logs[findByEventID("evt-drop")]
@@ -1726,11 +1718,8 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if got := readString(droppedDetail["decision_reason_code"]); got != "event_processing_failed" {
 		t.Fatalf("dropped detail.decision_reason_code = %q, want event_processing_failed", got)
 	}
-	if readString(droppedDetail["error_code"]) != "event_processing_failed" {
-		t.Fatalf("dropped detail.error_code = %q, want event_processing_failed", readString(droppedDetail["error_code"]))
-	}
-	if strings.TrimSpace(dropped.Error) == "" {
-		t.Fatal("dropped startup manager replay log missing explicit error text")
+	if dropped.Failure == nil || dropped.Failure.Detail.Code != "unclassified_runtime_error" {
+		t.Fatalf("dropped startup manager replay failure = %#v", dropped.Failure)
 	}
 }
 
@@ -1772,7 +1761,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := pg.UpsertCommittedReplayScope(ctx, replayChildID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		t.Fatalf("UpsertCommittedReplayScope(replay child): %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(replay parent): %v", err)
 	}
 
@@ -1793,7 +1782,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := pg.UpsertCommittedReplayScope(ctx, skipChildID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		t.Fatalf("UpsertCommittedReplayScope(skip child): %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(skip parent): %v", err)
 	}
 
@@ -1867,11 +1856,8 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if got := readString(droppedDetail["decision_reason_code"]); got != "replay_quarantined" {
 		t.Fatalf("dropped detail.decision_reason_code = %q, want replay_quarantined", got)
 	}
-	if readString(droppedDetail["error_code"]) != "replay_quarantined" {
-		t.Fatalf("dropped detail.error_code = %q, want replay_quarantined", readString(droppedDetail["error_code"]))
-	}
-	if strings.TrimSpace(dropped.Error) == "" {
-		t.Fatal("dropped recovery aftermath log missing explicit error text")
+	if dropped.Failure == nil {
+		t.Fatal("dropped recovery aftermath log missing canonical failure")
 	}
 }
 

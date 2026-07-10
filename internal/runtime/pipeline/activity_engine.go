@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -101,7 +102,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	intent = intent.Normalized()
 	source := d.coordinator.SemanticSource()
 	if source == nil {
-		return fmt.Errorf("activity dispatcher requires semantic source")
+		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
 	client := d.client
 	if client == nil {
@@ -109,14 +110,18 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	}
 	tool, ok := source.ToolEntries()[intent.Tool]
 	if !ok {
-		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q is not declared", intent.Tool))
+		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
 	}
 	toolEffectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
 	if toolEffectClass != intent.EffectClass {
-		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q effect_class changed from request %q to %q", intent.Tool, intent.EffectClass, toolEffectClass))
+		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_changed", "activity-runtime", "execute_activity", map[string]any{
+			"tool": intent.Tool, "requested_effect_class": string(intent.EffectClass), "declared_effect_class": string(toolEffectClass),
+		}))
 	}
 	if !runtimecontracts.SupportedActivityEffectClass(toolEffectClass) {
-		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q effect_class %q is not executable in Stage 1", intent.Tool, toolEffectClass))
+		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_unsupported", "activity-runtime", "execute_activity", map[string]any{
+			"tool": intent.Tool, "effect_class": string(toolEffectClass),
+		}))
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.executeNonIdempotentActivityIntent(ctx, intent, tool)
@@ -150,14 +155,18 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 			return d.publishActivitySuccess(ctx, attemptIntent, result)
 		}
 		lastErr = err
+		failure := runtimefailures.FromError(err, "activity-runtime", "execute_http_tool")
 		d.logActivityRuntime(ctx, attemptIntent, "attempt_failed", map[string]any{
 			"activity_id":        attemptIntent.ActivityID,
 			"tool":               attemptIntent.Tool,
 			"effect_class":       string(attemptIntent.EffectClass),
 			"attempt":            attempt,
 			"retry_max_attempts": maxAttempts,
-			"error":              strings.TrimSpace(err.Error()),
+			"failure":            failure.Failure,
 		})
+		if runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
+			break
+		}
 		if attempt < maxAttempts {
 			if err := waitActivityRetryBackoff(ctx, intent.RetryBackoff, attempt); err != nil {
 				return err
@@ -171,7 +180,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) error {
 	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
-		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %s effect_class non_idempotent_write requires the activity_attempts journal", intent.Tool))
+		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
 	}
 	client := d.client
 	if client == nil {
@@ -180,7 +189,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	intent.Attempt = 1
 	requestEventID := activityRequestEventID(intent)
 	if existing, ok, err := d.coordinator.workflowStore.LoadActivityAttempt(ctx, requestEventID); err != nil {
-		return d.publishActivityFailure(ctx, intent, err)
+		return d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "load_activity_attempt"))
 	} else if ok {
 		return d.publishExistingActivityAttempt(ctx, intent, existing)
 	}
@@ -191,7 +200,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	startRecord := activityAttemptStartRecord(intent, prepared.inputHash)
 	started, inserted, err := d.coordinator.workflowStore.StartActivityAttempt(ctx, startRecord)
 	if err != nil {
-		return d.publishActivityFailure(ctx, intent, err)
+		return d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "start_activity_attempt"))
 	}
 	if !inserted {
 		return d.publishExistingActivityAttempt(ctx, intent, started)
@@ -200,17 +209,19 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	var terminal ActivityAttemptRecord
 	if err != nil {
 		redacted := runtimemanagedcredentials.RedactString(err.Error(), prepared.secrets...)
-		cause := fmt.Errorf("%s", redacted)
+		cause := runtimefailures.FromError(err, "activity-runtime", "execute_non_idempotent_http")
 		status := ActivityAttemptStatusFailed
 		if activityHTTPOutcomeUncertain(err) {
 			status = ActivityAttemptStatusUncertain
-			cause = fmt.Errorf("activity non_idempotent_write provider outcome is uncertain after dispatch: %s", redacted)
+			cause = runtimefailures.FromError(runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "activity_provider_outcome_uncertain", "activity-runtime", "execute_non_idempotent_http", map[string]any{
+				"activity_id": intent.ActivityID, "tool": intent.Tool, "redacted_cause": redacted,
+			}, err), "activity-runtime", "execute_non_idempotent_http")
 		}
 		payload := activityFailurePayload(intent, cause)
-		terminal = started.withTerminal(status, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, cause.Error())
+		terminal = started.withTerminal(status, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, &cause.Failure)
 	} else {
 		payload := activitySuccessPayload(intent, result)
-		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, "")
+		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, nil)
 	}
 	var stored ActivityAttemptRecord
 	if terminal.Status == ActivityAttemptStatusUncertain {
@@ -219,9 +230,16 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		stored, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
 	}
 	if err != nil {
-		return err
+		return activityDependencyFailure(err, intent.Tool, "complete_activity_attempt")
 	}
 	return d.publishJournaledActivityResult(ctx, intent, stored)
+}
+
+func activityDependencyFailure(err error, tool, operation string) error {
+	if _, ok := runtimefailures.As(err); ok {
+		return err
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "activity_journal_operation_failed", "activity-runtime", operation, map[string]any{"tool": strings.TrimSpace(tool)}, err)
 }
 
 type activityRecordedResult struct {
@@ -546,54 +564,54 @@ func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context,
 
 func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
 	if tool.HTTP == nil {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s is missing http block", intent.Tool)
+		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "http_block_missing")
 	}
 	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses rate_limit; activity HTTP rate-limit admission is not admitted in Stage 1", intent.Tool)
+		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "rate_limit_unsupported")
 	}
 	if len(tool.ResponseMapping) > 0 {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses response_mapping; activity HTTP response mapping is not admitted in Stage 1", intent.Tool)
+		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "response_mapping_unsupported")
 	}
 	credentials := map[string]any{}
 	secrets := []string{}
 	if len(tool.Credentials) > 0 && tool.ManagedCredential != nil {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s must not declare both static credentials and managed_credential", intent.Tool)
+		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "credential_owners_conflict")
 	}
 	if len(tool.Credentials) > 0 {
 		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write activities", intent.Tool)
+			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "static_credential_effect_class_unsupported")
 		}
 		resolved, secretValues, err := d.resolveActivityToolCredentials(ctx, intent, tool.Credentials)
 		if err != nil {
-			return preparedActivityHTTPTool{}, err
+			return preparedActivityHTTPTool{}, activityAuthenticationFailure(err, intent.Tool, "resolve_static_credentials", "activity_credential")
 		}
 		credentials = resolved
 		secrets = secretValues
 	}
 	if tool.ManagedCredential != nil {
 		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || !strings.EqualFold(strings.TrimSpace(tool.Category), "provider_connector") {
-			return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector activities", intent.Tool)
+			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "managed_credential_effect_class_unsupported")
 		}
 	}
 	input := cloneStringAnyMap(intent.Input)
 	env := map[string]any{"input": input, "credentials": credentials}
 	url, err := resolveActivityHTTPURLTemplate(tool.HTTP.URL, env)
 	if err != nil {
-		return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+		return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "url", secrets)
 	}
 	url = strings.TrimSpace(url)
 	if url == "" {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s resolved an empty url", intent.Tool)
+		return preparedActivityHTTPTool{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_url_empty", "activity-runtime", "prepare_http_request", map[string]any{"tool": strings.TrimSpace(intent.Tool)})
 	}
 	var body []byte
 	if tool.HTTP.Body != nil {
 		resolvedBody, err := resolveActivityTemplateTree(tool.HTTP.Body, env)
 		if err != nil {
-			return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "body", secrets)
 		}
 		raw, err := json.Marshal(resolvedBody)
 		if err != nil {
-			return preparedActivityHTTPTool{}, err
+			return preparedActivityHTTPTool{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "activity_body_invalid", "activity-runtime", "prepare_http_request", map[string]any{"tool": strings.TrimSpace(intent.Tool)}, redactActivityError(err, secrets))
 		}
 		body = raw
 	}
@@ -609,7 +627,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	for key, value := range tool.HTTP.Headers {
 		resolved, err := resolveActivityTemplateString(value, env)
 		if err != nil {
-			return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "header", secrets)
 		}
 		headers.Set(strings.TrimSpace(key), strings.TrimSpace(resolved))
 	}
@@ -621,11 +639,11 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	}
 	managedAuth, err := d.resolveActivityManagedCredential(ctx, client, intent, tool)
 	if err != nil {
-		return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+		return preparedActivityHTTPTool{}, activityAuthenticationFailure(redactActivityError(err, secrets), intent.Tool, "resolve_managed_credential", "managed_credential")
 	}
 	if managedAuth != nil {
 		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), false); err != nil {
-			return preparedActivityHTTPTool{}, redactActivityError(err, append(secrets, managedAuth.SecretValues()...))
+			return preparedActivityHTTPTool{}, activityAuthenticationFailure(redactActivityError(err, append(secrets, managedAuth.SecretValues()...)), intent.Tool, "apply_managed_credential", "managed_credential")
 		}
 		secrets = append(secrets, managedAuth.SecretValues()...)
 	}
@@ -644,6 +662,27 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	}, nil
 }
 
+func activityContractFailure(tool, reasonCode string) error {
+	return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_tool_contract_invalid", "activity-runtime", "prepare_http_request", map[string]any{
+		"tool": strings.TrimSpace(tool), "reason_code": strings.TrimSpace(reasonCode),
+	})
+}
+
+func activityTemplateFailure(err error, tool, field string, secrets []string) error {
+	return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "activity_template_invalid", "activity-runtime", "prepare_http_request", map[string]any{
+		"tool": strings.TrimSpace(tool), "field": strings.TrimSpace(field),
+	}, redactActivityError(err, secrets))
+}
+
+func activityAuthenticationFailure(err error, tool, operation, authKind string) error {
+	if _, ok := runtimefailures.As(err); ok {
+		return err
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "activity_credential_required", "activity-runtime", operation, map[string]any{
+		"auth_kind": strings.TrimSpace(authKind), "tool": strings.TrimSpace(tool),
+	}, err)
+}
+
 func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActivityHTTPTool) (any, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
 	defer cancel()
@@ -655,7 +694,7 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 		}
 		req, err := http.NewRequestWithContext(reqCtx, prepared.method, prepared.url, body)
 		if err != nil {
-			return nil, redactActivityError(err, prepared.secrets)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "activity_request_construction_failed", "activity-runtime", "construct_http_request", map[string]any{"tool": prepared.toolName}, redactActivityError(err, prepared.secrets))
 		}
 		for key, values := range prepared.headers {
 			for _, value := range values {
@@ -664,12 +703,16 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 		}
 		resp, err := prepared.client.Do(req)
 		if err != nil {
-			return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
+			cause := redactActivityError(err, prepared.secrets)
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "activity_http_timeout", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName}, cause)
+			}
+			return nil, activityHTTPUncertainError{err: runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "activity_http_transport_uncertain", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName}, cause)}
 		}
 		raw, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if readErr != nil {
-			return nil, activityHTTPUncertainError{err: redactActivityError(readErr, prepared.secrets)}
+			return nil, activityHTTPUncertainError{err: runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "activity_http_response_read_uncertain", "activity-runtime", "read_http_response", map[string]any{"tool": prepared.toolName}, redactActivityError(readErr, prepared.secrets))}
 		}
 		parsed := parseHTTPActivityResponse(raw)
 		parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
@@ -677,18 +720,18 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			refreshedAfterUnauthorized = true
 			token, record, refreshErr := prepared.managedAuth.TokenSource.Refresh(ctx, prepared.managedAuth.StoreKey)
 			if refreshErr != nil {
-				return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(prepared.secrets, record.SecretValues()...)...))
+				return nil, runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "managed_credential_refresh_failed", "activity-runtime", "refresh_managed_credential", map[string]any{"auth_kind": "managed_credential", "tool": prepared.toolName}, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(prepared.secrets, record.SecretValues()...)...)))
 			}
 			prepared.managedAuth.Token = token
 			prepared.managedAuth.Record = record
 			prepared.secrets = append(prepared.secrets, prepared.managedAuth.SecretValues()...)
 			if err := runtimemanagedcredentials.ApplyHTTPAuthorization(prepared.headers, prepared.managedAuth.HTTPAuthorization(), true); err != nil {
-				return nil, redactActivityError(err, prepared.secrets)
+				return nil, activityAuthenticationFailure(redactActivityError(err, prepared.secrets), prepared.toolName, "apply_refreshed_managed_credential", "managed_credential")
 			}
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("activity http tool %s returned status %d: %s", prepared.toolName, resp.StatusCode, strings.TrimSpace(asString(parsed)))
+			return nil, activityHTTPStatusFailure(prepared.toolName, resp.StatusCode)
 		}
 		responseEnv := map[string]any{
 			"response": map[string]any{
@@ -698,9 +741,27 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			},
 		}
 		if err := httpresponsesuccess.Evaluate("activity http tool "+strings.TrimSpace(prepared.toolName), prepared.success, responseEnv, prepared.secrets); err != nil {
-			return nil, err
+			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "activity-runtime", "validate_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
 		}
 		return parsed, nil
+	}
+}
+
+func activityHTTPStatusFailure(tool string, status int) error {
+	attributes := map[string]any{"tool": strings.TrimSpace(tool), "status": status}
+	switch status {
+	case http.StatusUnauthorized:
+		attributes["auth_kind"] = "provider_credential"
+		return runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized", "activity-runtime", "http_status", attributes)
+	case http.StatusForbidden:
+		attributes["action"] = "provider_request"
+		return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "provider_forbidden", "activity-runtime", "http_status", attributes)
+	case http.StatusPaymentRequired:
+		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "activity-runtime", "http_status", attributes)
+	case http.StatusRequestTimeout:
+		return runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "activity-runtime", "http_status", attributes)
+	default:
+		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_http_status", "activity-runtime", "http_status", attributes)
 	}
 }
 
@@ -802,7 +863,8 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		InstallationID: activityManagedCredentialInputValue(intent.Input, ref.InstallationIDInput),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
+		redacted := fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
+		return nil, activityAuthenticationFailure(redacted, intent.Tool, "access_managed_credential", "managed_credential")
 	}
 	return &activityManagedHTTPAuth{
 		StoreKey:    storeKey,
@@ -918,6 +980,9 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 func redactActivityError(err error, secrets []string) error {
 	if err == nil {
 		return nil
+	}
+	if _, ok := runtimefailures.As(err); ok {
+		return err
 	}
 	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), secrets...))
 }
@@ -1111,16 +1176,13 @@ func (d pipelineActivityDispatcher) publishActivityFailure(ctx context.Context, 
 }
 
 func activityFailurePayload(intent runtimeengine.ActivityIntent, cause error) map[string]any {
-	errText := ""
-	if cause != nil {
-		errText = strings.TrimSpace(cause.Error())
-	}
+	failure := runtimefailures.Normalize(cause, "activity-runtime", "activity_failure_payload")
 	return map[string]any{
 		"activity_id":  intent.ActivityID,
 		"tool":         intent.Tool,
 		"effect_class": string(intent.EffectClass),
 		"attempt":      intent.Attempt,
-		"error":        errText,
+		"failure":      failure,
 	}
 }
 
@@ -1224,13 +1286,13 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 	}
 }
 
-func (rec ActivityAttemptRecord) withTerminal(status, eventID, eventType string, payload map[string]any, errText string) ActivityAttemptRecord {
+func (rec ActivityAttemptRecord) withTerminal(status, eventID, eventType string, payload map[string]any, failure *runtimefailures.Envelope) ActivityAttemptRecord {
 	rec = rec.normalized()
 	rec.Status = status
 	rec.ResultEventID = strings.TrimSpace(eventID)
 	rec.ResultEventType = strings.TrimSpace(eventType)
 	rec.ResultPayload = cloneStringAnyMap(payload)
-	rec.Error = strings.TrimSpace(errText)
+	rec.Failure = runtimefailures.CloneEnvelope(failure)
 	return rec
 }
 

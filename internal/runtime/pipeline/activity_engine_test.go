@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -72,17 +73,18 @@ func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
 		body        string
 		policy      runtimecontracts.HTTPResponseSuccess
 		secrets     []string
-		wantErr     string
+		wantClass   runtimefailures.Class
+		wantDetail  string
 		forbidError string
 	}{
 		{name: "status 2xx", status: http.StatusNoContent, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}},
-		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantErr: "returned status 300"},
+		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantClass: runtimefailures.ClassConnectorFailure, wantDetail: "provider_http_status"},
 		{name: "boolean equality", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}},
 		{name: "string equality", status: http.StatusOK, body: `{"state":"accepted"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}},
 		{name: "numeric equality", status: http.StatusOK, body: `{"count":2}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.count", Equals: int64(2)}},
-		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantErr: "response_success failed"},
-		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantErr: `path "response.body.missing" did not resolve`},
-		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, secrets: []string{"provider-secret"}, wantErr: "[REDACTED]", forbidError: "provider-secret"},
+		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantClass: runtimefailures.ClassConnectorFailure, wantDetail: "provider_response_rejected"},
+		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantClass: runtimefailures.ClassConnectorFailure, wantDetail: "provider_response_rejected"},
+		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, secrets: []string{"provider-secret"}, wantClass: runtimefailures.ClassConnectorFailure, wantDetail: "provider_response_rejected", forbidError: "provider-secret"},
 	}
 
 	for _, tc := range tests {
@@ -106,17 +108,24 @@ func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
 				secrets:  tc.secrets,
 				success:  &policy,
 			})
-			if tc.wantErr == "" {
+			if tc.wantClass == "" {
 				if err != nil {
 					t.Fatalf("executePreparedActivityHTTPTool: %v", err)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("executePreparedActivityHTTPTool error = %v, want containing %q", err, tc.wantErr)
+			failure, ok := runtimefailures.As(err)
+			if err == nil || !ok || failure.Failure.Class != tc.wantClass || failure.Failure.Detail.Code != tc.wantDetail {
+				t.Fatalf("executePreparedActivityHTTPTool failure = %#v, want %s/%s", failure, tc.wantClass, tc.wantDetail)
 			}
-			if tc.forbidError != "" && strings.Contains(err.Error(), tc.forbidError) {
-				t.Fatalf("executePreparedActivityHTTPTool error leaked %q: %v", tc.forbidError, err)
+			if tc.forbidError != "" {
+				raw, marshalErr := runtimefailures.MarshalEnvelope(failure.Failure)
+				if marshalErr != nil {
+					t.Fatalf("marshal failure: %v", marshalErr)
+				}
+				if strings.Contains(string(raw), tc.forbidError) || strings.Contains(err.Error(), tc.forbidError) {
+					t.Fatalf("executePreparedActivityHTTPTool failure leaked %q: %s", tc.forbidError, raw)
+				}
 			}
 		})
 	}
@@ -340,8 +349,10 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	if got, _ := payload["error"].(string); !strings.Contains(got, "not executable in Stage 1") {
-		t.Fatalf("error = %q, want fail-closed unsupported write effect", got)
+	failure, _ := payload["failure"].(map[string]any)
+	detail, _ := failure["detail"].(map[string]any)
+	if failure["class"] != string(runtimefailures.ClassSchemaInvalid) || detail["code"] != "activity_effect_class_unsupported" {
+		t.Fatalf("failure = %#v, want fail-closed unsupported write effect", failure)
 	}
 }
 
@@ -761,9 +772,16 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	if err := json.Unmarshal(bus.publishes[0].Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	errText := strings.TrimSpace(asString(payload["error"]))
-	if !strings.Contains(errText, "outcome is uncertain") || !strings.Contains(errText, "connection reset after dispatch") {
-		t.Fatalf("failure error = %q, want uncertain transport outcome", errText)
+	failure, _ := payload["failure"].(map[string]any)
+	detail, _ := failure["detail"].(map[string]any)
+	if failure["class"] != string(runtimefailures.ClassOutcomeUncertain) || detail["code"] != "activity_provider_outcome_uncertain" {
+		t.Fatalf("failure = %#v, want uncertain transport outcome", failure)
+	}
+	if got := failure["message"]; got != "Operation outcome is uncertain (activity_provider_outcome_uncertain)." {
+		t.Fatalf("failure message = %#v, want registry-owned operation wording", got)
+	}
+	if got := failure["remediation"]; got != "Reconcile the authoritative operation state before retrying (activity_provider_outcome_uncertain)." {
+		t.Fatalf("failure remediation = %#v, want registry-owned operation wording", got)
 	}
 	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 	if err != nil {
@@ -975,6 +993,10 @@ func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
+	failure := requireActivityEventFailure(t, bus.publishes[0])
+	if failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Detail.Code != "activity_credential_required" {
+		t.Fatalf("failure = %s/%s, want authentication_required/activity_credential_required", failure.Class, failure.Detail.Code)
+	}
 }
 
 func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalAndDispatch(t *testing.T) {
@@ -1027,9 +1049,28 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalA
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
+	failure := requireActivityEventFailure(t, bus.publishes[0])
+	if failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Detail.Code != "activity_credential_required" {
+		t.Fatalf("failure = %s/%s, want authentication_required/activity_credential_required", failure.Class, failure.Detail.Code)
+	}
 	if strings.Contains(string(bus.publishes[0].Payload()), "provider-secret") {
 		t.Fatalf("failure payload leaked credential: %s", bus.publishes[0].Payload())
 	}
+}
+
+func requireActivityEventFailure(t testing.TB, evt events.Event) runtimefailures.Envelope {
+	t.Helper()
+	var payload struct {
+		Failure json.RawMessage `json:"failure"`
+	}
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal activity event payload: %v", err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(payload.Failure)
+	if err != nil {
+		t.Fatalf("decode activity failure envelope: %v", err)
+	}
+	return failure
 }
 
 func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
@@ -1241,7 +1282,7 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			result_event_id TEXT,
 			result_event_type TEXT,
 			result_payload TEXT,
-			error TEXT,
+			failure TEXT,
 			input_hash TEXT NOT NULL,
 			reply_context_id TEXT,
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

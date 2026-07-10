@@ -287,7 +287,7 @@ var artifactRepoOutputFieldOptions = map[string]struct{}{
 	"current_ref":          {},
 	"file_manifest":        {},
 	"status":               {},
-	"failure_reason":       {},
+	"failure":              {},
 	"last_request_id":      {},
 	"last_source_event_id": {},
 }

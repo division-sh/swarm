@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -192,7 +194,7 @@ type claudeStartupContextAwareToolSource interface {
 	ToolCapabilitiesForActorInContext(context.Context, runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
-func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, binding toolgateway.Binding, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
+func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	enabled, err := isClaudeCLIBackend(cfg)
 	if err != nil {
 		return err
@@ -216,13 +218,11 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 	if manager == nil {
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
-	gatewayURL := strings.TrimSpace(binding.HostMCPURL())
-	if gatewayURL == "" {
-		return fmt.Errorf("tool gateway binding host endpoint is required for claude cli runtime")
+	if err := gatewayBinding.Validate(); err != nil {
+		return fmt.Errorf("tool gateway binding is invalid for claude cli runtime: %w", err)
 	}
-	gatewayToken := strings.TrimSpace(binding.AuthToken())
-	if gatewayToken == "" {
-		return fmt.Errorf("tool gateway binding token is required for claude cli runtime")
+	if !gatewayBinding.IsRuntimeOwned() {
+		return fmt.Errorf("tool gateway binding is not runtime-owned for claude cli runtime")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	for _, agentCfg := range manager.ListAgentConfigs() {
@@ -260,7 +260,7 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		binding, enabled, err := llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
 			AgentID: agentID,
 			Tools:   sessionTools,
-		}, gatewayURL, gatewayToken)
+		}, gatewayBinding, llm.MCPGatewayHostEndpoint)
 		if err != nil {
 			return fmt.Errorf("build mcp startup probe transport for agent %s: %w", agentID, err)
 		}
@@ -289,7 +289,7 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		binding, enabled, err = llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
 			AgentID: agentID,
 			Tools:   sessionTools,
-		}, gatewayURL, gatewayToken)
+		}, gatewayBinding, llm.MCPGatewayHostEndpoint)
 		if err != nil {
 			return fmt.Errorf("build mcp startup call probe transport for agent %s: %w", agentID, err)
 		}
@@ -541,58 +541,55 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 	if probeResult.ToolName != strings.TrimSpace(name) {
 		return fmt.Errorf("tools/call returned startup probe result for unexpected tool %q", probeResult.ToolName)
 	}
-	isError, _ := result["isError"].(bool)
+	isError := false
+	if raw, present := result["isError"]; present {
+		var ok bool
+		isError, ok = raw.(bool)
+		if !ok {
+			return fmt.Errorf("tools/call returned non-boolean isError")
+		}
+	}
+	rawRuntimeError, hasRuntimeError := result["runtimeError"]
 	switch probeResult.Outcome {
-	case runtimemcp.StartupProbeOutcomeSuccess, runtimemcp.StartupProbeOutcomeValidationOnly:
-		if probeResult.Outcome == runtimemcp.StartupProbeOutcomeSuccess && isError {
+	case runtimemcp.StartupProbeOutcomeSuccess:
+		if isError {
 			return fmt.Errorf("tools/call returned inconsistent startup probe success result")
 		}
-		if probeResult.Outcome == runtimemcp.StartupProbeOutcomeValidationOnly && !isError {
-			return fmt.Errorf("tools/call returned inconsistent startup probe validation-only result")
+		if hasRuntimeError {
+			return fmt.Errorf("tools/call returned runtimeError with startup probe success")
 		}
 		return nil
-	case runtimemcp.StartupProbeOutcomeExecutionFailure:
+	case runtimemcp.StartupProbeOutcomeValidationOnly, runtimemcp.StartupProbeOutcomeExecutionFailure:
 		if !isError {
-			return fmt.Errorf("tools/call returned inconsistent startup probe execution-failure result")
+			return fmt.Errorf("tools/call returned inconsistent startup probe %s result", probeResult.Outcome)
 		}
-		if message := strings.TrimSpace(startupMCPErrorText(result)); message != "" {
-			return fmt.Errorf(message)
+		if !hasRuntimeError {
+			return fmt.Errorf("tools/call omitted canonical failure envelope for startup probe %s", probeResult.Outcome)
 		}
-		runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
-		if err == nil && runtimeErr != nil {
-			if strings.TrimSpace(runtimeErr.Message) != "" {
-				return fmt.Errorf("%s", strings.TrimSpace(runtimeErr.Message))
+		runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(rawRuntimeError)
+		if err != nil || runtimeErr == nil || runtimeErr.Failure == nil {
+			return fmt.Errorf("tools/call returned invalid canonical startup failure: %w", err)
+		}
+		isValidationFailure := runtimeErr.Failure.Class == failures.ClassSchemaInvalid && runtimeErr.Failure.Detail.Code == "invalid_tool_input"
+		if probeResult.Outcome == runtimemcp.StartupProbeOutcomeValidationOnly {
+			if !isValidationFailure {
+				return fmt.Errorf("tools/call validation-only probe requires platform.schema_invalid/invalid_tool_input")
 			}
-			return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
+			return nil
 		}
-		if code := strings.TrimSpace(probeResult.RuntimeErrorCode); code != "" {
-			return fmt.Errorf("tools/call returned runtime error code=%s", code)
+		if isValidationFailure {
+			return fmt.Errorf("tools/call execution-failure probe cannot carry validation-only failure")
 		}
-		return fmt.Errorf("tools/call returned startup probe execution failure")
+		return failures.FromEnvelope(*runtimeErr.Failure)
 	default:
 		return fmt.Errorf("tools/call returned unsupported startup probe outcome %q", probeResult.Outcome)
 	}
 }
 
-func startupMCPErrorText(result map[string]any) string {
-	content, ok := result["content"].([]any)
-	if !ok {
-		return ""
-	}
-	parts := make([]string, 0, len(content))
-	for _, item := range content {
-		typed, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		if text := strings.TrimSpace(asString(typed["text"])); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, " | ")
-}
-
 func startupCallMCP(ctx context.Context, client *http.Client, binding llm.MCPHTTPBinding, req runtimemcp.RPCRequest) (runtimemcp.RPCResponse, error) {
+	if !binding.IsRuntimeOwned() {
+		return runtimemcp.RPCResponse{}, fmt.Errorf("mcp startup transport requires runtime-owned construction provenance")
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return runtimemcp.RPCResponse{}, err
@@ -621,11 +618,30 @@ func startupCallMCP(ctx context.Context, client *http.Client, binding llm.MCPHTT
 	if req.Method == "notifications/initialized" {
 		return decoded, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, runtimemcp.MaxWireResponseBytes+1))
+	if err != nil {
+		return runtimemcp.RPCResponse{}, err
+	}
+	if len(raw) > runtimemcp.MaxWireResponseBytes {
+		return runtimemcp.RPCResponse{}, fmt.Errorf("mcp startup response exceeds %d bytes", runtimemcp.MaxWireResponseBytes)
+	}
+	decoded, err = runtimemcp.DecodeRPCResponse(raw, req.ID)
+	if err != nil {
 		return runtimemcp.RPCResponse{}, err
 	}
 	if decoded.Error != nil {
-		return runtimemcp.RPCResponse{}, fmt.Errorf(strings.TrimSpace(decoded.Error.Message))
+		if data, ok := decoded.Error.Data.(map[string]any); ok {
+			runtimeErr, decodeErr := runtimemcp.DecodeRuntimeErrorPayload(data["runtimeError"])
+			if decodeErr == nil && runtimeErr != nil {
+				if runtimeErr.Failure != nil {
+					return runtimemcp.RPCResponse{}, failures.FromEnvelope(*runtimeErr.Failure)
+				}
+				if runtimeErr.Protocol != nil {
+					return runtimemcp.RPCResponse{}, runtimemcp.NewProtocolError(runtimeErr.Protocol.Code, runtimeErr.Protocol.Operation, runtimeErr.Protocol.Message, runtimeErr.Protocol.Detail, nil)
+				}
+			}
+		}
+		return runtimemcp.RPCResponse{}, runtimemcp.NewProtocolError("mcp_rpc_error", strings.TrimSpace(req.Method), strings.TrimSpace(decoded.Error.Message), map[string]any{"jsonrpc_code": decoded.Error.Code}, nil)
 	}
 	return decoded, nil
 }

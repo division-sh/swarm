@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -153,9 +154,7 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 	body := eventReplayBody(original.EventID, nil, "idem-audit-failure")
 
 	first := rpcCall(t, handler, body)
-	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error.Data), "audit publish temporarily unavailable") {
-		t.Fatalf("first event.replay error = %#v, want audit publish failure", first.Error)
-	}
+	requireRPCFailure(t, first.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 	assertReplayEventDelivered(t, ch, latestEventIDByName(t, db, "scan.requested", original.EventID), original.EventID)
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after audit failure = %d, want original+replay", count)
@@ -197,8 +196,13 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	body := eventReplayBody(original.EventID, nil, "idem-direct-fanout-failure")
 
 	first := rpcCall(t, handler, body)
-	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error), "authoritative delivery incomplete") {
-		t.Fatalf("first event.replay error = %#v, want direct delivery incomplete", first.Error)
+	if first.Error == nil {
+		t.Fatal("first event.replay unexpectedly succeeded")
+	}
+	failure := asMap(t, asMap(t, asMap(t, first.Error.Data)["details"])["failure"])
+	detail := asMap(t, failure["detail"])
+	if failure["class"] != string(runtimefailures.ClassTargetUnreachable) || detail["code"] != "authoritative_delivery_incomplete" {
+		t.Fatalf("first event.replay failure = %#v, want canonical authoritative delivery failure", failure)
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after fanout error = %d, want original+replay", count)

@@ -207,7 +207,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 		t.Fatalf("InsertEventDeliveries(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, childID, runtimereplayclaim.CommittedReplayScopeSubscribed)
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 
@@ -340,7 +340,7 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
 		t.Fatalf("fork replay scope = %q, want direct", scope)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, sourceEventID, "processed", "source_outcome_after_fork"); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, sourceEventID, "processed", nil); err != nil {
 		t.Fatalf("mark source pipeline receipt: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -468,7 +468,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 		t.Fatalf("InsertEventDeliveries(good child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, goodEventID, runtimereplayclaim.CommittedReplayScopeSubscribed)
-	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(good parent): %v", err)
 	}
 	goodRecipientCh := bus.Subscribe(goodRecipientID)
@@ -505,15 +505,15 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	if badOutcome != "dead_letter" {
 		t.Fatalf("bad receipt outcome = %q, want dead_letter", badOutcome)
 	}
-	if badReason != "pipeline_error" {
-		t.Fatalf("bad receipt reason = %q, want pipeline_error", badReason)
+	if badReason != "persisted_replay_run_identity_invalid" {
+		t.Fatalf("bad receipt reason = %q, want persisted_replay_run_identity_invalid", badReason)
 	}
 	logEntry := findRecoveryAftermathLog(t, capture.logs, badEventID, "dropped", "replay_quarantined")
 	if logEntry.Level != "warn" {
 		t.Fatalf("recovery aftermath level = %q, want warn", logEntry.Level)
 	}
-	if got := strings.TrimSpace(logEntry.Error); got == "" {
-		t.Fatal("expected dropped recovery aftermath log to carry explicit error text")
+	if logEntry.Failure == nil || logEntry.Failure.Detail.Code != "persisted_replay_run_identity_invalid" {
+		t.Fatalf("dropped recovery failure = %#v, want persisted_replay_run_identity_invalid", logEntry.Failure)
 	}
 }
 
@@ -562,8 +562,8 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 	if outcome != "dead_letter" {
 		t.Fatalf("receipt outcome = %q, want dead_letter", outcome)
 	}
-	if reason != "pipeline_error" {
-		t.Fatalf("receipt reason = %q, want pipeline_error", reason)
+	if reason != "persisted_replay_run_identity_invalid" {
+		t.Fatalf("receipt reason = %q, want persisted_replay_run_identity_invalid", reason)
 	}
 }
 
@@ -596,7 +596,7 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 		t.Fatalf("InsertEventDeliveries(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg1, childID, runtimereplayclaim.CommittedReplayScopeSubscribed)
-	if err := pg1.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg1.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 
@@ -681,7 +681,7 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, childID, runtimereplayclaim.CommittedReplayScopeDirect)
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 
@@ -785,7 +785,7 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	)); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 	child := eventtest.RootIngress(
@@ -869,7 +869,7 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 	if err := pg.AppendEvent(ctx, eventtest.RootIngress(eventID,
@@ -920,7 +920,7 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
 	if err := pg.AppendEvent(ctx, eventtest.RootIngress(eventID,

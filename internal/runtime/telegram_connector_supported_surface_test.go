@@ -847,7 +847,7 @@ func assertTelegramConnectorSupportedSurfaceNoStoredSecret(t *testing.T, backend
 				WHERE run_id = ?
 				  AND (
 					COALESCE(result_payload, '') LIKE '%' || ? || '%'
-					OR COALESCE(error, '') LIKE '%' || ? || '%'
+					OR COALESCE(failure, '') LIKE '%' || ? || '%'
 				  )
 			`, backend.runID, secret, secret).Scan(&attemptLeaks)
 		}
@@ -865,7 +865,7 @@ func assertTelegramConnectorSupportedSurfaceNoStoredSecret(t *testing.T, backend
 				WHERE run_id = $1::uuid
 				  AND (
 					COALESCE(result_payload::text, '') LIKE '%' || $2 || '%'
-					OR COALESCE(error, '') LIKE '%' || $2 || '%'
+					OR COALESCE(failure::text, '') LIKE '%' || $2 || '%'
 				  )
 			`, backend.runID, secret).Scan(&attemptLeaks)
 		}
@@ -938,12 +938,12 @@ func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegram
 		parts = append(parts, fmt.Sprintf("%s=%d", r.name, count))
 	}
 	parts = append(parts, "delivery_status="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(last_error, '') FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`,
-		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(last_error, '') FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`,
+		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`,
+		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`,
 		backend.runID, telegramConnectorSupportedSurfaceNodeID))
 	parts = append(parts, "dead_letter="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(failure_type, '') || ':' || COALESCE(error_message, '') FROM dead_letters WHERE entity_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
-		`SELECT COALESCE(failure_type, '') || ':' || COALESCE(error_message, '') FROM dead_letters WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1`,
+		`SELECT COALESCE(failure->>'class', '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM dead_letters WHERE entity_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
+		`SELECT COALESCE(json_extract(failure, '$.class'), '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM dead_letters WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1`,
 		backend.entityID))
 	return strings.Join(parts, " ")
 }

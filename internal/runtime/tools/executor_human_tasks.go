@@ -12,6 +12,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -128,7 +129,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	cfg := e.cfg
 	e.mu.RUnlock()
 	if !runtimeauthority.ProviderOrNoop(e.authority).CanDecideHumanTasks(actor.Role) {
-		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
+		return nil, failures.New(failures.ClassAuthorizationDenied, "human_task_decision_forbidden", "tool-executor", "human_task_decide.authorize", map[string]any{"action": "human_task_decide", "actor_id": actor.ID, "role": actor.Role})
 	}
 
 	var in struct {

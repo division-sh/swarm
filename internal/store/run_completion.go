@@ -68,7 +68,7 @@ func (s *PostgresStore) ConvergeNormalRunCompletion(ctx context.Context, eventID
 		if err != nil || !ready {
 			return err
 		}
-		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, candidate.RunID, "completed", "", time.Now().UTC(), runLifecycleOptions(caps)); err != nil {
+		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, candidate.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps)); err != nil {
 			return fmt.Errorf("converge normal run completion: %w", err)
 		}
 		if err := tx.Commit(); err != nil {

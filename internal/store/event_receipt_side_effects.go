@@ -12,21 +12,18 @@ type agentReceiptSideEffects struct {
 	ManagerStatus runtimemanager.ReceiptStatus `json:"manager_status"`
 	ReasonCode    string                       `json:"reason_code,omitempty"`
 	RetryCount    int                          `json:"retry_count"`
-	Error         string                       `json:"error,omitempty"`
 }
 
 type pipelineReceiptSideEffects struct {
 	ManagerStatus string `json:"manager_status"`
 	ReasonCode    string `json:"reason_code,omitempty"`
-	Error         string `json:"error,omitempty"`
 }
 
-func newAgentReceiptSideEffects(status runtimemanager.ReceiptStatus, reasonCode string, retryCount int, errText string) agentReceiptSideEffects {
+func newAgentReceiptSideEffects(status runtimemanager.ReceiptStatus, reasonCode string, retryCount int) agentReceiptSideEffects {
 	return agentReceiptSideEffects{
 		ManagerStatus: runtimemanager.ReceiptStatus(strings.TrimSpace(string(status))),
 		ReasonCode:    strings.TrimSpace(reasonCode),
 		RetryCount:    retryCount,
-		Error:         strings.TrimSpace(errText),
 	}
 }
 
@@ -65,18 +62,16 @@ func decodeAgentReceiptSideEffects(raw []byte) (agentReceiptSideEffects, error) 
 		return payload, err
 	}
 	payload.ReasonCode = strings.TrimSpace(payload.ReasonCode)
-	payload.Error = strings.TrimSpace(payload.Error)
 	if err := payload.validate(); err != nil {
 		return payload, err
 	}
 	return payload, nil
 }
 
-func newPipelineReceiptSideEffects(status, reasonCode, errText string) pipelineReceiptSideEffects {
+func newPipelineReceiptSideEffects(status, reasonCode string) pipelineReceiptSideEffects {
 	return pipelineReceiptSideEffects{
 		ManagerStatus: strings.TrimSpace(status),
 		ReasonCode:    strings.TrimSpace(reasonCode),
-		Error:         strings.TrimSpace(errText),
 	}
 }
 

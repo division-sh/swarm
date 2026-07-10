@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
@@ -23,11 +24,11 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	}
 	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.schema", false, err, "resolve entity contract")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_search_entities.schema", entityReadTargetFailureAttributes(payload), err)
 	}
 	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.run_context", true, err, "resolve entity_state run context")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_search_entities.run_context", nil, err)
 	}
 	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
 	if currentStateFilter != "" {
@@ -38,16 +39,16 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 		if decoded, ok := rawFilter.(map[string]any); ok {
 			filterObject = decoded
 		} else if err := decodeToolInput(rawFilter, &filterObject); err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "decode filter")
+			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_search_entities.filter", nil, err)
 		}
 		for _, fieldName := range orderedEntityFieldNamesFromInput(mapKeys(filterObject)) {
 			field, err := schema.field(fieldName)
 			if err != nil {
-				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "validate filter field")
+				return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_search_entities.filter", map[string]any{"field": fieldName}, err)
 			}
 			value, err := normalizeEntityFieldValue(schema, field, filterObject[fieldName])
 			if err != nil {
-				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "validate filter field %s", fieldName)
+				return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_search_entities.filter", map[string]any{"field": fieldName}, err)
 			}
 			query.FieldEquals = append(query.FieldEquals, EntityFieldEquals{Path: field.Path, Value: value})
 		}
@@ -60,11 +61,11 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	query.OrderByCreatedDesc = true
 	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.query", true, err, "search entity_state")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_search_entities.query", nil, err)
 	}
 	rows, err = materializeEntityStateRows(source, rows)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.materialize", false, err, "materialize query results")
+		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_search_entities.materialize", nil, err)
 	}
 	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
 	total := len(rows)
@@ -90,29 +91,30 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	}
 	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.schema", false, err, "resolve entity contract")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_entities.schema", entityReadTargetFailureAttributes(payload), err)
 	}
 	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.run_context", true, err, "resolve entity_state run context")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_query_entities.run_context", nil, err)
 	}
 	query.OrderByCreatedDesc = true
 	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.query", true, err, "query entity_state")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_query_entities.query", nil, err)
 	}
 	rows, err = materializeEntityStateRows(source, rows)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.materialize", false, err, "materialize query results")
+		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_query_entities.materialize", nil, err)
 	}
 	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
-	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
+	filterExpression := strings.TrimSpace(asString(payload["filter"]))
+	filtered, err := filterEntityStateRowsCEL(filterExpression, rows, schema)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, err, "evaluate CEL filter")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_entities.filter", map[string]any{"expression": filterExpression}, err)
 	}
 	selectFields, err := decodeEntitySelect(payload["select"], schema)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.select", false, err, "decode select")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_entities.select", nil, err)
 	}
 	limit := defaultEntitySearchLimit(asInt(payload["limit"]))
 	if len(filtered) > limit {
@@ -121,7 +123,7 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	groupBy := strings.TrimSpace(asString(payload["group_by"]))
 	if groupBy != "" {
 		if err := validateEntitySelector(schema, groupBy); err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.group_by", false, err, "validate group_by")
+			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_entities.group_by", map[string]any{"field": groupBy}, err)
 		}
 		grouped := groupEntityStateRows(filtered, groupBy, selectFields)
 		return map[string]any{"results": grouped}, nil
@@ -137,57 +139,69 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	}
 	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.schema", false, err, "resolve entity contract")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.schema", entityReadTargetFailureAttributes(payload), err)
 	}
 	metric := strings.ToLower(strings.TrimSpace(asString(payload["metric"])))
 	if metric == "" {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.metric", false, "metric is required")
+		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.metric", map[string]any{"field": "metric"})
 	}
 	fieldName := strings.TrimSpace(asString(payload["field"]))
 	if metric != "count" && fieldName == "" {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.field", false, "field is required for metric %s", metric)
+		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.field", map[string]any{"metric": metric, "field": "field"})
 	}
 	if fieldName != "" {
 		if err := validateEntitySelector(schema, fieldName); err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.field", false, err, "validate metric field")
+			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.field", map[string]any{"field": fieldName}, err)
 		}
 	}
 	groupBy := strings.TrimSpace(asString(payload["group_by"]))
 	if groupBy != "" {
 		if err := validateEntitySelector(schema, groupBy); err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", false, err, "validate group_by")
+			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", map[string]any{"field": groupBy}, err)
 		}
 	}
 	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.run_context", true, err, "resolve entity_state run context")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_query_metrics.run_context", nil, err)
 	}
 	query.OrderByCreatedDesc = true
 	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.query", true, err, "query entity_state metrics")
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "exec_query_metrics.query", nil, err)
 	}
 	rows, err = materializeEntityStateRows(source, rows)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.materialize", false, err, "materialize query results")
+		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_query_metrics.materialize", nil, err)
 	}
 	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
-	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
+	filterExpression := strings.TrimSpace(asString(payload["filter"]))
+	filtered, err := filterEntityStateRowsCEL(filterExpression, rows, schema)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.filter", false, err, "evaluate CEL filter")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.filter", map[string]any{"expression": filterExpression}, err)
 	}
 	if groupBy == "" {
 		value, err := aggregateEntityMetric(metric, fieldName, filtered)
 		if err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.aggregate", false, err, "aggregate metric")
+			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.aggregate", map[string]any{"metric": metric, "field": fieldName}, err)
 		}
 		return map[string]any{"value": value}, nil
 	}
 	groups, err := aggregateEntityMetricGroups(metric, fieldName, groupBy, filtered)
 	if err != nil {
-		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.aggregate", false, err, "aggregate grouped metric")
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.aggregate", map[string]any{"metric": metric, "field": fieldName, "group_by": groupBy}, err)
 	}
 	return map[string]any{"groups": groups}, nil
+}
+
+func entityReadTargetFailureAttributes(payload map[string]any) map[string]any {
+	attributes := map[string]any{}
+	if entityType := strings.TrimSpace(asString(payload["entity_type"])); entityType != "" {
+		attributes["entity_type"] = entityType
+	}
+	if flowInstance := strings.TrimSpace(asString(payload["flow_instance"])); flowInstance != "" {
+		attributes["flow_instance"] = flowInstance
+	}
+	return attributes
 }
 
 func entityStateQueryForContractRun(ctx context.Context, source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) (EntityStateQuery, error) {

@@ -25,6 +25,7 @@ func TestClientCallWithCredentialKeyResolverUsesBoundDeploymentCredential(t *tes
 			"jsonrpc": "2.0",
 			"id":      req["id"],
 			"result": map[string]any{
+				"content":           []any{},
 				"structuredContent": map[string]any{"ok": true},
 			},
 		})

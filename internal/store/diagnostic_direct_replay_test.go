@@ -92,7 +92,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	for _, diagnosticID := range []string{runtimeLogID, inboundID, agentDirectiveID} {
 		assertNoSQLitePipelineReceipt(t, ctx, store, diagnosticID)
 	}
-	assertSQLitePipelineReceipt(t, ctx, store, executableID, "dead_letter", "pipeline_error")
+	assertSQLitePipelineReceipt(t, ctx, store, executableID, "dead_letter", "committed_replay_scope_missing")
 }
 
 func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEvents(t *testing.T) {
@@ -160,7 +160,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	for _, diagnosticID := range []string{runtimeLogID, inboundID, agentDirectiveID} {
 		assertNoPostgresPipelineReceipt(t, ctx, pg, diagnosticID)
 	}
-	assertPostgresPipelineReceipt(t, ctx, pg, executableID, "dead_letter", "pipeline_error")
+	assertPostgresPipelineReceipt(t, ctx, pg, executableID, "dead_letter", "committed_replay_scope_missing")
 }
 
 func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string) string {

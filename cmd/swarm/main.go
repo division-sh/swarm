@@ -35,6 +35,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -1556,12 +1557,11 @@ type runStatusEvent struct {
 }
 
 type runStatusDeadLetter struct {
-	OriginalEvent string    `json:"original_event"`
-	EntityID      string    `json:"entity_id,omitempty"`
-	FailureType   string    `json:"failure_type"`
-	ErrorMessage  string    `json:"error_message,omitempty"`
-	HandlerNode   string    `json:"handler_node,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	OriginalEvent string                   `json:"original_event"`
+	EntityID      string                   `json:"entity_id,omitempty"`
+	Failure       runtimefailures.Envelope `json:"failure"`
+	HandlerNode   string                   `json:"handler_node,omitempty"`
+	CreatedAt     time.Time                `json:"created_at"`
 }
 
 type runStatusAgentTurn struct {
@@ -1572,11 +1572,11 @@ type runStatusAgentTurn struct {
 }
 
 type runStatusRuntimeLog struct {
-	Level     string    `json:"level"`
-	Component string    `json:"component"`
-	Action    string    `json:"action"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Level     string                    `json:"level"`
+	Component string                    `json:"component"`
+	Action    string                    `json:"action"`
+	Failure   *runtimefailures.Envelope `json:"failure,omitempty"`
+	CreatedAt time.Time                 `json:"created_at"`
 }
 
 type runStatusRuntimeSummary struct {
@@ -2244,16 +2244,15 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 	if len(report.DeadLetters) > 0 {
 		fmt.Fprintln(w, "\nDead Letters:")
 		for _, item := range report.DeadLetters {
-			fmt.Fprintf(w, "  %s  entity=%s  type=%s  handler=%s  at=%s\n",
+			fmt.Fprintf(w, "  %s  entity=%s  failure=%s/%s  handler=%s  at=%s\n",
 				item.OriginalEvent,
 				item.EntityID,
-				item.FailureType,
+				item.Failure.Class,
+				item.Failure.Detail.Code,
 				item.HandlerNode,
 				item.CreatedAt.Format(time.RFC3339),
 			)
-			if strings.TrimSpace(item.ErrorMessage) != "" {
-				fmt.Fprintf(w, "    error=%s\n", item.ErrorMessage)
-			}
+			fmt.Fprintf(w, "    %s remediation=%s\n", item.Failure.Message, item.Failure.Remediation)
 		}
 	}
 	if len(report.RuntimeLogs) > 0 {
@@ -2276,8 +2275,8 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 				item.Action,
 				item.CreatedAt.Format(time.RFC3339),
 			)
-			if strings.TrimSpace(item.Error) != "" {
-				fmt.Fprintf(w, "    error=%s\n", item.Error)
+			if item.Failure != nil {
+				fmt.Fprintf(w, "    failure=%s/%s message=%s remediation=%s\n", item.Failure.Class, item.Failure.Detail.Code, item.Failure.Message, item.Failure.Remediation)
 			}
 		}
 	}
@@ -2321,7 +2320,7 @@ func runStatusReportFromStore(detail store.RunDebugReport) runStatusReport {
 			Level:     item.Level,
 			Component: item.Component,
 			Action:    item.Action,
-			Error:     item.Error,
+			Failure:   runtimefailures.CloneEnvelope(item.Failure),
 			CreatedAt: item.CreatedAt,
 		})
 	}
@@ -2342,7 +2341,13 @@ func runStatusReportFromStore(detail store.RunDebugReport) runStatusReport {
 		report.Mutations = append(report.Mutations, runStatusMutation(item))
 	}
 	for _, item := range detail.DeadLetters {
-		report.DeadLetters = append(report.DeadLetters, runStatusDeadLetter(item))
+		report.DeadLetters = append(report.DeadLetters, runStatusDeadLetter{
+			OriginalEvent: item.OriginalEvent,
+			EntityID:      item.EntityID,
+			Failure:       item.Failure,
+			HandlerNode:   item.HandlerNode,
+			CreatedAt:     item.CreatedAt,
+		})
 	}
 	for _, item := range detail.AgentTurns {
 		report.AgentTurns = append(report.AgentTurns, runStatusAgentTurn(item))
@@ -3290,18 +3295,14 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	if err != nil {
 		return toolgateway.Binding{}, fmt.Errorf("generate mcp gateway token: %w", err)
 	}
-	binding := toolgateway.Binding{
-		Transport:         toolgateway.TransportHTTP,
-		HostEndpoint:      mcpHostURL,
-		WorkspaceEndpoint: mcpContainerURL,
-		Token:             gatewayToken,
-		LifecycleOwner:    toolgateway.LifecycleOwnerServeBoot,
-		Source:            toolgateway.SourceBoundMCPListener,
-	}
-	if err := binding.Validate(); err != nil {
-		return toolgateway.Binding{}, err
-	}
-	return binding, nil
+	return toolgateway.NewRuntimeOwnedBinding(
+		toolgateway.TransportHTTP,
+		mcpHostURL,
+		mcpContainerURL,
+		gatewayToken,
+		toolgateway.LifecycleOwnerServeBoot,
+		toolgateway.SourceBoundMCPListener,
+	)
 }
 
 func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBundles []serveRuntimeBundle) error {

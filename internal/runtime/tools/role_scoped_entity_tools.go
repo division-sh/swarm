@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -396,41 +397,45 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 	forbidden := []string{"entity_id", "flow_instance", "field"}
 	for _, key := range forbidden {
 		if value, ok := payload[key]; ok && value != nil {
-			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.identity", false, "%s is resolved by the runtime and must not be supplied", key)
+			return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.identity", map[string]any{"field": key})
 		}
 	}
 	spec, contract, ok := roleScopedEntityToolSpecForActor(source, actor, name)
 	if !ok {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.resolve", false, "role-scoped entity tool is not available for actor %s: %s", strings.TrimSpace(actor.ID), strings.TrimSpace(name))
+		return nil, failures.New(failures.ClassAuthorizationDenied, "role_scoped_tool_forbidden", "tool-executor", "role_scoped_entity_tool.resolve", map[string]any{"action": "tool_execute", "actor_id": strings.TrimSpace(actor.ID), "tool": strings.TrimSpace(name)})
 	}
 	entityID := roleScopedCurrentEntityID(ctx)
 	if entityID == "" {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.current_entity", false, "current turn entity_id is required for %s", strings.TrimSpace(name))
+		return nil, failures.New(failures.ClassInternalFailure, "current_entity_context_missing", "tool-executor", "role_scoped_entity_tool.current_entity", map[string]any{"tool": strings.TrimSpace(name)})
 	}
 	row, found, err := loadEntityState(ctx, store, entityID)
 	if err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "role_scoped_entity_tool.lookup", true, err, "load current entity %s", entityID)
+		return nil, failures.WrapDetail("query_failed", "tool-executor", "role_scoped_entity_tool.lookup", map[string]any{"entity_id": entityID}, err)
 	}
 	if !found {
-		return nil, NewRuntimeError("not_found", "tool-executor", "role_scoped_entity_tool.lookup", false, "current entity %s not found", entityID)
+		return nil, failures.NewDetail("not_found", "tool-executor", "role_scoped_entity_tool.lookup", map[string]any{"entity_id": entityID})
 	}
 	if err := roleScopedEntityMatchesContract(source, row, contract); err != nil {
 		return nil, err
 	}
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return materializeEntityStateRow(source, row)
+		materialized, err := materializeEntityStateRow(source, row)
+		if err != nil {
+			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
+		}
+		return materialized, nil
 	case roleScopedEntityToolReadField:
 		materialized, err := materializeEntityStateRow(source, row)
 		if err != nil {
-			return nil, WrapRuntimeError("query_failed", "tool-executor", "role_scoped_entity_tool.materialize", false, err, "materialize current entity %s", entityID)
+			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
 		}
 		fields, _ := materialized["fields"].(map[string]any)
 		return fields[spec.Field], nil
 	case roleScopedEntityToolSaveField:
 		value, ok := payload["value"]
 		if !ok {
-			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", false, "value is required")
+			return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", map[string]any{"field": "value"})
 		}
 		return e.execSaveEntityField(ctx, actor, map[string]any{
 			"entity_id": entityID,
@@ -440,7 +445,7 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 	case roleScopedEntityToolUpdatePath:
 		value, ok := payload["value"]
 		if !ok {
-			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", false, "value is required")
+			return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", map[string]any{"field": "value"})
 		}
 		return e.execSaveEntityField(ctx, actor, map[string]any{
 			"entity_id": entityID,
@@ -448,7 +453,7 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 			"value":     value,
 		})
 	default:
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.kind", false, "unsupported role-scoped entity tool: %s", strings.TrimSpace(name))
+		return nil, failures.New(failures.ClassInternalFailure, "role_scoped_tool_kind_invalid", "tool-executor", "role_scoped_entity_tool.kind", map[string]any{"tool": strings.TrimSpace(name)})
 	}
 }
 
@@ -463,10 +468,10 @@ func roleScopedCurrentEntityID(ctx context.Context) string {
 func roleScopedEntityMatchesContract(source semanticview.Source, row map[string]any, contract entityruntime.Contract) error {
 	actual, ok := entityruntime.ResolveForEntityRow(source, row)
 	if !ok {
-		return NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.contract", false, "current entity does not resolve to a flow-owned entity contract")
+		return failures.New(failures.ClassInternalFailure, "entity_contract_unresolved", "tool-executor", "role_scoped_entity_tool.contract", nil)
 	}
 	if strings.TrimSpace(actual.FlowID) != strings.TrimSpace(contract.FlowID) || strings.TrimSpace(actual.EntityType) != strings.TrimSpace(contract.EntityType) {
-		return NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.contract", false, "current entity does not match actor entity contract")
+		return failures.New(failures.ClassAuthorizationDenied, "entity_contract_mismatch", "tool-executor", "role_scoped_entity_tool.contract", map[string]any{"action": "entity_access", "actual_flow": strings.TrimSpace(actual.FlowID), "required_flow": strings.TrimSpace(contract.FlowID)})
 	}
 	return nil
 }

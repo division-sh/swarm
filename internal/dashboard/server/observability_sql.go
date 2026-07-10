@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -38,12 +39,12 @@ type IncidentFilter struct {
 }
 
 type eventDeliveryRecord struct {
-	DeliveryID     string `json:"delivery_id,omitempty"`
-	SubscriberType string `json:"subscriber_type,omitempty"`
-	SubscriberID   string `json:"subscriber_id,omitempty"`
-	Status         string `json:"status,omitempty"`
-	Error          string `json:"error,omitempty"`
-	RetryCount     int    `json:"retry_count,omitempty"`
+	DeliveryID     string                    `json:"delivery_id,omitempty"`
+	SubscriberType string                    `json:"subscriber_type,omitempty"`
+	SubscriberID   string                    `json:"subscriber_id,omitempty"`
+	Status         string                    `json:"status,omitempty"`
+	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
+	RetryCount     int                       `json:"retry_count,omitempty"`
 }
 
 type deliveryLifecycleSummary struct {
@@ -90,31 +91,31 @@ type eventRecord struct {
 }
 
 type runtimeLogRecord struct {
-	ID            string `json:"id"`
-	EventID       string `json:"event_id,omitempty"`
-	TS            string `json:"ts,omitempty"`
-	Level         string `json:"level,omitempty"`
-	Component     string `json:"component,omitempty"`
-	Action        string `json:"action,omitempty"`
-	EventType     string `json:"event_type,omitempty"`
-	ParentEventID string `json:"parent_event_id,omitempty"`
-	HandlerID     string `json:"handler_id,omitempty"`
-	Error         string `json:"error,omitempty"`
-	ErrorCode     string `json:"error_code,omitempty"`
-	AgentID       string `json:"agent_id,omitempty"`
-	EntityID      string `json:"entity_id,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	DurationUS    int    `json:"duration_us,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Message       string `json:"message,omitempty"`
-	DeliveryState string `json:"delivery_state,omitempty"`
-	PreviousState string `json:"delivery_previous_state,omitempty"`
-	Transition    string `json:"delivery_transition,omitempty"`
-	Reason        string `json:"delivery_reason,omitempty"`
-	Terminal      string `json:"delivery_terminal_outcome,omitempty"`
-	RetryCount    int    `json:"delivery_retry_count,omitempty"`
-	Detail        any    `json:"detail,omitempty"`
-	Correlation   any    `json:"correlation,omitempty"`
+	ID            string                    `json:"id"`
+	EventID       string                    `json:"event_id,omitempty"`
+	TS            string                    `json:"ts,omitempty"`
+	Level         string                    `json:"level,omitempty"`
+	Component     string                    `json:"component,omitempty"`
+	Action        string                    `json:"action,omitempty"`
+	EventType     string                    `json:"event_type,omitempty"`
+	ParentEventID string                    `json:"parent_event_id,omitempty"`
+	HandlerID     string                    `json:"handler_id,omitempty"`
+	ErrorCode     string                    `json:"error_code,omitempty"`
+	Failure       *runtimefailures.Envelope `json:"failure,omitempty"`
+	AgentID       string                    `json:"agent_id,omitempty"`
+	EntityID      string                    `json:"entity_id,omitempty"`
+	SessionID     string                    `json:"session_id,omitempty"`
+	DurationUS    int                       `json:"duration_us,omitempty"`
+	Source        string                    `json:"source,omitempty"`
+	Message       string                    `json:"message,omitempty"`
+	DeliveryState string                    `json:"delivery_state,omitempty"`
+	PreviousState string                    `json:"delivery_previous_state,omitempty"`
+	Transition    string                    `json:"delivery_transition,omitempty"`
+	Reason        string                    `json:"delivery_reason,omitempty"`
+	Terminal      string                    `json:"delivery_terminal_outcome,omitempty"`
+	RetryCount    int                       `json:"delivery_retry_count,omitempty"`
+	Detail        any                       `json:"detail,omitempty"`
+	Correlation   any                       `json:"correlation,omitempty"`
 }
 
 type incidentRecord struct {
@@ -306,7 +307,7 @@ func dashboardEventRecord(event store.OperatorEventFull) eventRecord {
 			SubscriberType: delivery.SubscriberType,
 			SubscriberID:   delivery.SubscriberID,
 			Status:         delivery.Status,
-			Error:          delivery.LastError,
+			Failure:        runtimefailures.CloneEnvelope(delivery.Failure),
 			RetryCount:     delivery.RetryCount,
 		})
 		record.DeliveryLifecycle.record(delivery.Status)
@@ -332,8 +333,8 @@ func dashboardRuntimeLogRecord(log store.OperatorRuntimeLogEntry) runtimeLogReco
 		EventType:     firstString(readString(details["event_name"]), readString(details["event_type"])),
 		ParentEventID: readString(details["parent_event_id"]),
 		HandlerID:     readString(details["handler_id"]),
-		Error:         readString(details["error"]),
 		ErrorCode:     log.ErrorCode,
+		Failure:       runtimefailures.CloneEnvelope(log.Failure),
 		AgentID:       readString(details["agent_id"]),
 		EntityID:      log.EntityID,
 		SessionID:     firstString(log.SessionID, readString(details["session_id"])),

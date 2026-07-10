@@ -1,12 +1,12 @@
 package tools
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func authorizeDelegableAgentConfig(actor, current, proposed models.AgentConfig, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) error {
@@ -18,21 +18,21 @@ func authorizeDelegableAgentConfig(actor, current, proposed models.AgentConfig, 
 		if agentHasPermission(actor, perm) {
 			continue
 		}
-		return fmt.Errorf("delegated permission %q exceeds caller authority", perm)
+		return failures.New(failures.ClassAuthorizationDenied, "delegated_permission_forbidden", "tool-executor", "authorize_delegation", map[string]any{"action": "agent_delegate", "permission": perm})
 	}
 
 	for _, capability := range addedNativeToolCapabilities(current.NativeTools, proposed.NativeTools) {
 		if actor.NativeTools.Enabled(capability) {
 			continue
 		}
-		return fmt.Errorf("delegated native_tools.%s exceeds caller authority", capability)
+		return failures.New(failures.ClassAuthorizationDenied, "delegated_native_tool_forbidden", "tool-executor", "authorize_delegation", map[string]any{"action": "agent_delegate", "capability": capability})
 	}
 
 	for _, toolName := range addedCanonicalValues(current.Tools, proposed.Tools, normalizeNativeToolName) {
 		if classifyToolAuthorization(actor, toolName, provider, emitRegistry).allowed {
 			continue
 		}
-		return fmt.Errorf("delegated tool %q exceeds caller authority", toolName)
+		return failures.New(failures.ClassAuthorizationDenied, "delegated_tool_forbidden", "tool-executor", "authorize_delegation", map[string]any{"action": "agent_delegate", "tool": toolName})
 	}
 
 	actorEmitEvents := effectiveDelegableEmitEvents(actor, provider)
@@ -42,7 +42,7 @@ func authorizeDelegableAgentConfig(actor, current, proposed models.AgentConfig, 
 		if containsEquivalentEmitEvent(actorEmitEvents, eventType) {
 			continue
 		}
-		return fmt.Errorf("delegated emit authority %q exceeds caller authority", eventType)
+		return failures.New(failures.ClassAuthorizationDenied, "delegated_emit_forbidden", "tool-executor", "authorize_delegation", map[string]any{"action": "agent_delegate", "event": eventType})
 	}
 
 	return nil

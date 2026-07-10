@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
@@ -135,8 +136,8 @@ func (m *directRecipientEventMutation) RecordDeadLetter(context.Context, runtime
 	return m.store.deadLetterErr
 }
 
-func (m *directRecipientEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return m.store.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+func (m *directRecipientEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return m.store.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
 func (s *directRecipientTransactionalStore) AppendEventTx(_ context.Context, _ *sql.Tx, evt events.Event) error {
@@ -169,7 +170,7 @@ func (s *directRecipientTransactionalStore) InsertEventDeliveryRoutesTx(_ contex
 	return nil
 }
 
-func (*directRecipientTransactionalStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, string) error {
+func (*directRecipientTransactionalStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error {
 	return nil
 }
 
