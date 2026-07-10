@@ -339,8 +339,8 @@ func FromError(err error, component, operation string) *Error {
 	if err == nil {
 		return nil
 	}
-	if existing, ok := As(err); ok {
-		return existing
+	if existing, ok := asRaw(err); ok {
+		return validatedError(existing, component, operation)
 	}
 	return Wrap(
 		ClassInternalFailure,
@@ -353,6 +353,14 @@ func FromError(err error, component, operation string) *Error {
 }
 
 func As(err error) (*Error, bool) {
+	existing, ok := asRaw(err)
+	if !ok {
+		return nil, false
+	}
+	return validatedError(existing, existing.Failure.Component, existing.Failure.Operation), true
+}
+
+func asRaw(err error) (*Error, bool) {
 	if err == nil {
 		return nil, false
 	}
@@ -361,6 +369,25 @@ func As(err error) (*Error, bool) {
 		return out, true
 	}
 	return nil, false
+}
+
+func validatedError(existing *Error, component, operation string) *Error {
+	if existing == nil {
+		return nil
+	}
+	if err := ValidateEnvelope(existing.Failure); err != nil {
+		return &Error{
+			Failure: invalidConstructionEnvelope(
+				existing.Failure.Class,
+				existing.Failure.Detail.Code,
+				component,
+				operation,
+				err,
+			),
+			cause: errors.Join(existing.cause, err),
+		}
+	}
+	return existing
 }
 
 func EnvelopeFromError(err error) (Envelope, bool) {
@@ -435,18 +462,26 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	return nil
 }
 
+// CloneEnvelope copies evidence without establishing semantic authority.
+// Malformed evidence remains observable so the receiving authority can reject it.
 func CloneEnvelope(envelope *Envelope) *Envelope {
 	if envelope == nil {
 		return nil
 	}
-	raw, err := MarshalEnvelope(*envelope)
-	if err != nil {
-		return nil
+	raw, err := json.Marshal(envelope)
+	if err == nil {
+		var cloned Envelope
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&cloned); err == nil {
+			if err := requireJSONEOF(decoder); err == nil {
+				return &cloned
+			}
+		}
 	}
-	cloned, err := UnmarshalEnvelope(raw)
-	if err != nil {
-		return nil
-	}
+	// Invalid, non-JSON evidence still remains non-null for authority rejection.
+	cloned := *envelope
+	cloned.Detail.Attributes = cloneAttributes(envelope.Detail.Attributes)
 	return &cloned
 }
 

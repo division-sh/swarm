@@ -695,6 +695,11 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 	if logger == nil {
 		return nil
 	}
+	if failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*failure); err != nil {
+			return fmt.Errorf("validate runtime log failure: %w", err)
+		}
+	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
 	ctx = eb.withBundleFingerprint(ctx)
 	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, runtimefailures.CloneEnvelope(failure), durationUS); err != nil {
@@ -717,6 +722,11 @@ func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.Runtim
 	eb.mu.RUnlock()
 	if logger == nil {
 		return nil
+	}
+	if entry.Failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*entry.Failure); err != nil {
+			return fmt.Errorf("validate runtime log failure: %w", err)
+		}
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, entry.EventID, entry.EventType)
 	ctx = eb.withBundleFingerprint(ctx)

@@ -5632,7 +5632,7 @@ engine:
         sources:
           same_process:
             status: authoritative
-            requirement: The envelope is created by internal/runtime/failures; its registry owns class, detail validation, retryability, determinism, message, and remediation.
+            requirement: The envelope is created by internal/runtime/failures; its registry owns class, detail validation, retryability, determinism, message, and remediation. Every typed-error extraction and authority ingress revalidates the current envelope contract. A malformed same-process typed error is canonicalized to platform.internal_failure/invalid_failure_construction or rejected before persistence, disposition, logging, or readback.
           persisted_or_replayed:
             status: authoritative_after_current_version_validation
             requirement: The envelope is loaded through the hard-migrated local persistence, replay, or fork path and passes strict current-schema validation without prose reclassification.
@@ -5650,6 +5650,7 @@ engine:
             requirement: Exact cross-runtime preservation requires a separately approved registry-version, peer-identity, attestation, downgrade, and migration protocol. No trust flag or implicit federation mode exists.
       envelope:
         schema_version: platform.failure/v1
+        copy_rule: Copying an envelope neither establishes authority nor erases malformed non-null evidence. The receiving semantic owner validates before use.
         required:
         - schema_version
         - class

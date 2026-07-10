@@ -69,6 +69,72 @@ func TestFromErrorNeverDefaultsRawFailureToRetryable(t *testing.T) {
 	}
 }
 
+func TestTypedErrorExtractionRejectsMalformedEnvelopeAuthority(t *testing.T) {
+	malformed := func() error {
+		return &Error{Failure: Envelope{
+			SchemaVersion: EnvelopeSchemaVersion,
+			Class:         ClassConnectorFailure,
+			Detail:        Detail{Code: "provider_rate_limited"},
+			Retryable:     true,
+			Deterministic: false,
+			Message:       "forged presentation",
+			Remediation:   "forged remediation",
+			Component:     "forged",
+			Operation:     "classify",
+		}}
+	}
+	assertCanonical := func(t *testing.T, failure Envelope) {
+		t.Helper()
+		if err := ValidateEnvelope(failure); err != nil {
+			t.Fatalf("normalized failure is invalid: %v", err)
+		}
+		if failure.Class != ClassInternalFailure || failure.Detail.Code != "invalid_failure_construction" {
+			t.Fatalf("normalized failure = %#v, want invalid construction", failure)
+		}
+	}
+
+	t.Run("As", func(t *testing.T) {
+		failure, ok := As(malformed())
+		if !ok {
+			t.Fatal("As() did not recognize typed error")
+		}
+		assertCanonical(t, failure.Failure)
+	})
+	t.Run("FromError", func(t *testing.T) {
+		assertCanonical(t, FromError(malformed(), "test", "from_error").Failure)
+	})
+	t.Run("EnvelopeFromError", func(t *testing.T) {
+		failure, ok := EnvelopeFromError(malformed())
+		if !ok {
+			t.Fatal("EnvelopeFromError() did not recognize typed error")
+		}
+		assertCanonical(t, failure)
+	})
+	t.Run("Normalize", func(t *testing.T) {
+		assertCanonical(t, Normalize(malformed(), "test", "normalize"))
+	})
+}
+
+func TestCloneEnvelopePreservesMalformedEvidence(t *testing.T) {
+	malformed := &Envelope{SchemaVersion: "forged", Class: ClassConnectorFailure}
+	cloned := CloneEnvelope(malformed)
+	if cloned == nil {
+		t.Fatal("CloneEnvelope() erased malformed evidence")
+	}
+	if err := ValidateEnvelope(*cloned); err == nil {
+		t.Fatalf("CloneEnvelope() unexpectedly repaired malformed evidence: %#v", cloned)
+	}
+
+	valid := Normalize(New(ClassConnectorFailure, "provider_rate_limited", "test", "clone", map[string]any{
+		"nested": map[string]any{"value": "original"},
+	}), "test", "clone")
+	validClone := CloneEnvelope(&valid)
+	validClone.Detail.Attributes["nested"].(map[string]any)["value"] = "changed"
+	if got := valid.Detail.Attributes["nested"].(map[string]any)["value"]; got != "original" {
+		t.Fatalf("CloneEnvelope() aliased nested attributes: %v", got)
+	}
+}
+
 func TestClassSpecificDetailValidation(t *testing.T) {
 	tests := []struct {
 		name       string
