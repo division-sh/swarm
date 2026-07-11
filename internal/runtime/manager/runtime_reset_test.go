@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,11 +15,16 @@ import (
 )
 
 type resetTestBus struct {
-	entries   []runtimepipeline.RuntimeLogEntry
-	publishes []events.Event
+	entries    []runtimepipeline.RuntimeLogEntry
+	publishes  []events.Event
+	publishErr error
+	resetErr   error
 }
 
 func (b *resetTestBus) Publish(_ context.Context, evt events.Event) error {
+	if b.publishErr != nil {
+		return b.publishErr
+	}
 	b.publishes = append(b.publishes, evt)
 	return nil
 }
@@ -33,7 +39,7 @@ func (b *resetTestBus) Subscribe(string, ...events.EventType) <-chan events.Even
 }
 func (b *resetTestBus) Unsubscribe(string)           {}
 func (b *resetTestBus) Store() runtimebus.EventStore { return runtimebus.InMemoryEventStore{} }
-func (b *resetTestBus) ResetInMemoryState() error    { return nil }
+func (b *resetTestBus) ResetInMemoryState() error    { return b.resetErr }
 func (b *resetTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.entries = append(b.entries, entry)
 	return nil
@@ -187,4 +193,44 @@ func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminS
 			t.Fatalf("published event count = %d, want 0", len(bus.publishes))
 		}
 	})
+}
+
+func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
+	tests := []struct {
+		name          string
+		bus           *resetTestBus
+		source        string
+		wantCellAfter bool
+	}{
+		{name: "bus reset failure preserves lifecycle cells", bus: &resetTestBus{resetErr: errors.New("reset failed")}, wantCellAfter: true},
+		{name: "reset event failure finalizes cleared lifecycle cells", bus: &resetTestBus{publishErr: errors.New("publish failed")}, source: "admin_cli", wantCellAfter: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			am := NewAgentManagerWithOptions(tt.bus, nil, AgentManagerOptions{})
+			rec := lifecycleTestPersistedAgent()
+			if err := am.lifecycle.register(context.Background(), rec, false); err != nil {
+				t.Fatalf("register lifecycle cell: %v", err)
+			}
+
+			if err := am.ResetRuntimeStateWithSource(tt.source); err == nil {
+				t.Fatal("ResetRuntimeStateWithSource succeeded despite injected failure")
+			}
+			if phase := am.lifecycle.phaseSnapshot(); phase != runtimeLifecycleStopped {
+				t.Fatalf("lifecycle phase = %q, want stopped", phase)
+			}
+			am.lifecycle.mu.Lock()
+			_, cellExists := am.lifecycle.cells[rec.Config.ID]
+			am.lifecycle.mu.Unlock()
+			if cellExists != tt.wantCellAfter {
+				t.Fatalf("lifecycle cell exists = %v, want %v", cellExists, tt.wantCellAfter)
+			}
+			if _, started := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard); !started {
+				t.Fatal("runtime remained blocked after reset failure")
+			}
+			am.lifecycle.beginShutdownAdmission()
+			am.lifecycle.cancelShutdownWork()
+			am.lifecycle.finishShutdown()
+		})
+	}
 }

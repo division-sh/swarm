@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
@@ -139,6 +140,35 @@ func TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell(t *testing.T
 	coordinator.mu.Unlock()
 	if exists {
 		t.Fatal("spawn persistence failure published a lifecycle cell")
+	}
+}
+
+func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	epoch := runtimebus.CurrentRuntimeEpoch()
+	probe.cell = lifecycleProbeCell{Epoch: epoch, Generation: 0, Phase: AgentLifecycleRegistered}
+	probe.exists = true
+	coordinator := newAgentLifecycleCoordinator(probe)
+	rec := lifecycleTestPersistedAgent()
+	rec.LifecycleEpoch = epoch
+	rec.LifecycleGeneration = 0
+	rec.LifecyclePhase = AgentLifecycleRegistered
+	rec.LifecycleRunMode = AgentRunModeStopped
+	if err := coordinator.register(context.Background(), rec, false); err != nil {
+		t.Fatalf("register recovered agent: %v", err)
+	}
+	coordinator.beginRun(context.Background(), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil)
+	if err != nil {
+		t.Fatalf("start recovered generation zero: %v", err)
+	}
+	if token.Generation != 1 {
+		t.Fatalf("recovered generation = %d, want 1 after transition from durable zero", token.Generation)
+	}
+	coordinator.cancelShutdownWork()
+	<-loopCtx.Done()
+	if err := coordinator.releaseLoop(token, done); err != nil {
+		t.Fatalf("release recovered loop: %v", err)
 	}
 }
 
