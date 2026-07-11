@@ -123,9 +123,17 @@ type TypedPubSubRelations struct {
 }
 
 func (i TypedPubSubConsumerIssue) Message() string {
+	producerID := strings.TrimSpace(i.Producer.ID)
+	if producerID == "" {
+		return fmt.Sprintf(
+			"typed pub/sub delivery of declared event %s to %s has multiple distinct import authorization proofs",
+			strings.TrimSpace(i.Event.EventKey()),
+			strings.TrimSpace(i.Consumer.ID),
+		)
+	}
 	return fmt.Sprintf(
 		"typed pub/sub relation %s -> %s for %s has multiple distinct import authorization proofs",
-		strings.TrimSpace(i.Producer.ID),
+		producerID,
 		strings.TrimSpace(i.Consumer.ID),
 		strings.TrimSpace(i.Event.EventKey()),
 	)
@@ -253,6 +261,18 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubRelations() TypedPubSubRe
 		result.Matches = append(result.Matches, matches...)
 		result.Issues = append(result.Issues, issues...)
 	}
+	existingConflicts := map[string]struct{}{}
+	for _, issue := range result.Issues {
+		existingConflicts[typedPubSubAuthorizationConflictKey(issue)] = struct{}{}
+	}
+	for _, issue := range c.resolveDeclaredEventTypedPubSubAuthorizationConflicts() {
+		key := typedPubSubAuthorizationConflictKey(issue)
+		if _, exists := existingConflicts[key]; exists {
+			continue
+		}
+		existingConflicts[key] = struct{}{}
+		result.Issues = append(result.Issues, issue)
+	}
 	sort.SliceStable(result.Matches, func(i, j int) bool {
 		return typedPubSubConsumerMatchSortKey(result.Matches[i]) < typedPubSubConsumerMatchSortKey(result.Matches[j])
 	})
@@ -260,6 +280,90 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubRelations() TypedPubSubRe
 		return typedPubSubConsumerIssueSortKey(result.Issues[i]) < typedPubSubConsumerIssueSortKey(result.Issues[j])
 	})
 	return result
+}
+
+func (c AuthoredEventEndpointCensus) resolveDeclaredEventTypedPubSubAuthorizationConflicts() []TypedPubSubConsumerIssue {
+	if c.source == nil {
+		return nil
+	}
+	proofs := authoredTypedPubSubEventProofs(c.source)
+	issues := make([]TypedPubSubConsumerIssue, 0)
+	for _, consumer := range c.consumers {
+		if !consumer.Pattern {
+			continue
+		}
+		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(
+			c.source,
+			consumer.PackageKey,
+			consumer.FlowID,
+			"",
+			nil,
+			consumer.Event.Authored,
+		)
+		if !resolution.Scoped {
+			continue
+		}
+		for _, proof := range proofs {
+			if strings.TrimSpace(proof.FlowID) == strings.TrimSpace(consumer.FlowID) {
+				continue
+			}
+			authorizations := matchingTypedPubSubAuthorizations(resolution.Patterns, proof)
+			if len(authorizations) < 2 {
+				continue
+			}
+			issues = append(issues, TypedPubSubConsumerIssue{
+				Failure:        TypedPubSubFailureAuthorizationAmbiguous,
+				Consumer:       consumer,
+				Event:          proof,
+				Authorizations: authorizations,
+			})
+		}
+	}
+	sort.SliceStable(issues, func(i, j int) bool {
+		return typedPubSubConsumerIssueSortKey(issues[i]) < typedPubSubConsumerIssueSortKey(issues[j])
+	})
+	return issues
+}
+
+func authoredTypedPubSubEventProofs(source Source) []FlowEventProof {
+	if source == nil {
+		return nil
+	}
+	byIdentity := map[string]FlowEventProof{}
+	appendEvents := func(flowID string, events map[string]runtimecontracts.EventCatalogEntry) {
+		flowID = strings.TrimSpace(flowID)
+		for eventType := range events {
+			proof := ResolveFlowEventProof(source, flowID, eventType)
+			if proof.EventKey() == "" || !proof.HasSchema {
+				continue
+			}
+			byIdentity[flowID+"\x00"+proof.EventKey()] = proof
+		}
+	}
+	for _, scope := range source.ProjectScopes() {
+		appendEvents(scope.OwningFlowID, scope.Events)
+	}
+	for _, scope := range source.FlowScopes() {
+		appendEvents(scope.ID, scope.Events)
+	}
+	keys := make([]string, 0, len(byIdentity))
+	for key := range byIdentity {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]FlowEventProof, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, byIdentity[key])
+	}
+	return out
+}
+
+func typedPubSubAuthorizationConflictKey(issue TypedPubSubConsumerIssue) string {
+	return strings.Join([]string{
+		strings.TrimSpace(issue.Consumer.ID),
+		strings.TrimSpace(issue.Event.EventKey()),
+		strings.TrimSpace(issue.Failure),
+	}, "\x00")
 }
 
 // ResolveTypedPubSubConsumerMatches is the canonical static relation owner for
