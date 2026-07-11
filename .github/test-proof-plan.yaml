@@ -1,0 +1,72 @@
+version: 1
+module: github.com/division-sh/swarm
+planning:
+  target_seconds: 240
+  max_shards: 12
+  unknown_package_seconds: 30
+  max_imbalance: 0.25
+escalation_paths:
+  - ^internal/runtime/cataloge2e/
+  - ^internal/runtime/conformance/
+  - ^internal/runtime/contracts/
+  - ^tests/
+  - ^platform-spec\.yaml$
+  - ^\.github/workflows/
+  - ^\.github/test-
+  - ^internal/testutil/
+  - ^internal/testplanning/
+  - ^internal/testtiming/
+  - ^cmd/swarm-test-timing/
+special_packages:
+  - github.com/division-sh/swarm/internal/runtime/cataloge2e
+profiles:
+  pr-common:
+    count_mode: cache-default
+    environment_id: ci-postgres-gateway-empty-v1
+    units:
+      - catalog-required-smoke
+  pr-escalated:
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    units:
+      - catalog-full
+  full:
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    units:
+      - catalog-full
+  nightly:
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    units:
+      - catalog-full
+units:
+  catalog-required-smoke:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: ^TestCatalogRequiredSmoke$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  catalog-full:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  selected-store-fast:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+      - github.com/division-sh/swarm/cmd/swarm
+      - github.com/division-sh/swarm/internal/apiv1
+    run: TestSelectedStoreAbstractionGuardMatrix|TestSelectedStoreFacadeOwnsProducerBackendBranching|TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences
+    count_mode: count-1
+    environment_id: local-postgres-explicit-v1
+    budget_class: broad
+projections:
+  required-full:
+    profile: full
+  catalog-full:
+    unit: catalog-full
+  selected-store-fast:
+    unit: selected-store-fast

@@ -11,7 +11,7 @@ source:
 policy:
   closure_level: matrix_owner_first_slice_complete
   claims_parent_closure: false
-  named_full_conformance_command: SWARM_TOOL_GATEWAY_URL= SWARM_TOOL_GATEWAY_CONTAINER_URL= SWARM_TOOL_GATEWAY_TOKEN= go test ./internal/runtime/bus ./internal/runtime/pipeline ./internal/apiv1 ./cmd/swarm ./internal/dashboard/server ./internal/runtime/cataloge2e -count=1
+  full_proof_projection: required-full
   required_smoke_policy: >
     Required PR smoke proves the matrix owner, the RoutePlan contract/model,
     the covered publish/readback consumers, and the smallest SQLite-default plus
@@ -623,7 +623,7 @@ rows:
       - {kind: go_test, name: TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions}
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON}
       - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
-      - {kind: command, command: "SWARM_TOOL_GATEWAY_URL= SWARM_TOOL_GATEWAY_CONTAINER_URL= SWARM_TOOL_GATEWAY_TOKEN= go test ./internal/runtime/bus ./internal/runtime/pipeline ./internal/apiv1 ./cmd/swarm ./internal/dashboard/server ./internal/runtime/cataloge2e -count=1"}
+      - {kind: proof_projection, projection: required-full}
     notes: >
       This row belongs to full/touched-surface conformance. It should not expand
       every PR into a replay/fork/catalog Cartesian test suite.
@@ -638,7 +638,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestTier11FlowCompositionCatalogFixtures_RealRuntime}
       - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
-      - {kind: command, command: "go test ./internal/runtime/cataloge2e -count=1"}
+      - {kind: proof_projection, projection: catalog-full}
     notes: >
       Catalog E2E tiering stays the full behavior proof owner. #1346 only names
       how route-authority audits should cite it.
@@ -652,7 +652,7 @@ rows:
     owner_refs:
       - {kind: artifact, path: internal/runtime/cataloge2e/README.md}
     proof_refs:
-      - {kind: command, command: "go test ./internal/runtime/cataloge2e -count=1"}
+      - {kind: proof_projection, projection: catalog-full}
     notes: >
       Ad hoc probes can remain useful locally, but closure-bearing route proof
       should name the catalog tier row or the focused RoutePlan rows above.

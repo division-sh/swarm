@@ -2,16 +2,21 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches: [master, main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Proof profile to execute
+        required: false
+        default: full
+        type: choice
+        options: [full, nightly, pr-common, pr-escalated]
   schedule:
     - cron: "17 3 * * *"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -20,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      shard_matrix: ${{ steps.plan.outputs.shard_matrix }}
-      run_full_conformance: ${{ steps.plan.outputs.run_full_conformance }}
-      test_count_flag: ${{ steps.plan.outputs.test_count_flag }}
+      proof_matrix: ${{ steps.plan.outputs.proof_matrix }}
+      profile: ${{ steps.plan.outputs.profile }}
+      plan_digest: ${{ steps.plan.outputs.plan_digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,118 +40,77 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Plan test topology
+      - name: Plan proof topology
         id: plan
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FORCED_PROFILE: ${{ inputs.profile }}
         run: |
           set -euo pipefail
           mkdir -p test-results
           go list ./... > test-results/go-packages.txt
-          awk '$0 != "github.com/division-sh/swarm/internal/runtime/cataloge2e" { print }' \
-            test-results/go-packages.txt > test-results/go-packages-required.txt
-          if [ ! -s test-results/go-packages-required.txt ]; then
-            echo "no non-catalog Go packages discovered"
-            exit 1
-          fi
-
-          go run ./cmd/swarm-test-timing \
-            -check-shards \
-            -snapshot .github/test-shards/go-test-shards.json \
-            -packages test-results/go-packages-required.txt \
-            -shard-matrix test-results/shard-matrix.json
-
-          run_full=false
-          escalation_reason="none"
           : > test-results/changed-files.txt
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            run_full=true
-            escalation_reason="full-truth event: ${{ github.event_name }}"
-          else
-            git diff --name-only \
-              "${{ github.event.pull_request.base.sha }}" \
-              "${{ github.event.pull_request.head.sha }}" | tee test-results/changed-files.txt
-            if grep -Eq '^(internal/runtime/cataloge2e/|internal/runtime/conformance/|internal/runtime/contracts/|tests/|platform-spec\.yaml$|\.github/workflows/|internal/testutil/)' test-results/changed-files.txt; then
-              run_full=true
-              escalation_reason="changed-path escalation"
-            fi
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > test-results/changed-files.txt
           fi
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            test_count_flag=""
-          else
-            test_count_flag="-count=1"
+          profile_args=()
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$FORCED_PROFILE" ]; then
+            profile_args=(-profile "$FORCED_PROFILE")
           fi
+          go run ./cmd/swarm-test-timing \
+            -plan-ci \
+            -proof-policy .github/test-proof-plan.yaml \
+            -weight-model .github/test-timing-weights.json \
+            -packages test-results/go-packages.txt \
+            -changed-files test-results/changed-files.txt \
+            -event "$EVENT_NAME" \
+            -head-sha "$HEAD_SHA" \
+            -plan test-results/proof-plan.json \
+            -matrix test-results/proof-matrix.json \
+            -markdown test-results/proof-plan.md \
+            "${profile_args[@]}"
 
-          shard_matrix=$(cat test-results/shard-matrix.json)
-          echo "shard_matrix=${shard_matrix}" >> "$GITHUB_OUTPUT"
-          echo "run_full_conformance=${run_full}" >> "$GITHUB_OUTPUT"
-          echo "test_count_flag=${test_count_flag}" >> "$GITHUB_OUTPUT"
+          echo "proof_matrix=$(jq -c . test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
+          cat test-results/proof-plan.md >> "$GITHUB_STEP_SUMMARY"
 
-          {
-            echo "### CI plan"
-            echo
-            echo "- Event: \`${{ github.event_name }}\`"
-            echo "- PR common-path target: \`<=5m\`"
-            echo "- Broad shard count flag: \`${test_count_flag:-<cache-enabled default>}\`"
-            echo "- Full catalog/conformance: \`${run_full}\` (${escalation_reason})"
-            echo "- Changed-path escalation covers cataloge2e, conformance/contracts, tests, \`platform-spec.yaml\`, workflows, and \`internal/testutil\`."
-            echo "- Push-to-master full-truth failures use the #1899 revert-on-red playbook."
-            if [ -s test-results/changed-files.txt ]; then
-              echo
-              echo "Changed files considered for escalation:"
-              sed 's/^/- `/' test-results/changed-files.txt | sed 's/$/`/'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload CI plan artifacts
-        if: always()
+      - name: Upload proof plan
         uses: actions/upload-artifact@v4
         with:
           name: ci-plan
           path: |
             test-results/go-packages.txt
-            test-results/go-packages-required.txt
-            test-results/shard-matrix.json
             test-results/changed-files.txt
-          if-no-files-found: warn
+            test-results/proof-plan.json
+            test-results/proof-matrix.json
+            test-results/proof-plan.md
+          if-no-files-found: error
 
   static-checks:
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Show tool versions
-        run: |
-          go version
-          docker --version
-
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "Files not formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
+          test -z "$unformatted" || { echo "Files not formatted:"; echo "$unformatted"; exit 1; }
       - name: Build packages
         run: go build ./...
-
       - name: Build swarm binary
         run: go build ./cmd/swarm
-
       - name: Check OpenRPC artifact
         run: go run ./cmd/swarm-openrpc-gen --check
-
       - name: Vet
         run: go vet ./...
 
@@ -155,21 +119,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
       - name: Build swarm binary
         run: go build ./cmd/swarm
-
       - name: Build workspace image
         run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
-
       - name: Prove no-selector SQLite local run
         run: |
           payload=$(mktemp)
@@ -182,25 +140,25 @@ jobs:
             --payload "$payload" \
             --api-port 18091
 
-  test-shard:
-    name: Go test shard ${{ matrix.shard }}
-    needs:
-      - ci-plan
+  proof-unit:
+    name: Go proof ${{ matrix.unit }}
+    needs: [ci-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 18
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.ci-plan.outputs.shard_matrix) }}
+      matrix: ${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-
+      - name: Download exact proof plan
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results/plan
       - name: Restore measured Go cache
         id: go-cache-restore
         uses: actions/cache/restore@v4
@@ -208,125 +166,70 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-shard-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
+          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            go-test-${{ runner.os }}-shard-${{ matrix.shard }}-master-
-            go-test-${{ runner.os }}-shard-${{ matrix.shard }}-
+            go-test-${{ runner.os }}-${{ matrix.unit }}-master-
+            go-test-${{ runner.os }}-${{ matrix.unit }}-
             go-test-${{ runner.os }}-
-
-      - name: Report cache restore economics
+      - name: Run exact planned proof unit
         shell: bash
+        env:
+          UNIT_ID: ${{ matrix.unit }}
+          SWARM_TOOL_GATEWAY_URL: ""
+          SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
+          SWARM_TOOL_GATEWAY_TOKEN: ""
         run: |
           set -euo pipefail
-          {
-            echo "### Go cache restore shard ${{ matrix.shard }}"
-            echo
-            echo "- cache-hit: \`${{ steps.go-cache-restore.outputs.cache-hit }}\`"
-            echo "- matched-key: \`${{ steps.go-cache-restore.outputs.cache-matched-key }}\`"
-            echo "- primary-key: \`${{ steps.go-cache-restore.outputs.cache-primary-key }}\`"
-            echo "- GOCACHE: \`$(go env GOCACHE)\`"
-            echo "- GOPATH: \`$(go env GOPATH)\`"
-            du -sh "$(go env GOCACHE)" "$(go env GOPATH)/pkg/mod" 2>/dev/null | sed 's/^/- /' || true
-          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p test-results/evidence
+          plan=test-results/plan/proof-plan.json
+          unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
+          mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
+          test_pattern=$(jq -r '.run // empty' <<<"$unit")
+          count_mode=$(jq -r '.count_mode' <<<"$unit")
+          count_args=()
+          if [ "$count_mode" = "count-1" ]; then count_args=(-count=1); fi
+          run_args=()
+          if [ -n "$test_pattern" ]; then run_args=(-run "$test_pattern"); fi
+          primary_json="test-results/evidence/${UNIT_ID}-primary.json"
+          primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
 
-      - name: Run shard tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p test-results
-          go run ./cmd/swarm-test-timing \
-            -snapshot .github/test-shards/go-test-shards.json \
-            -shard-packages "${{ matrix.shard }}" > test-results/shard-packages.txt
-          if [ ! -s test-results/shard-packages.txt ]; then
-            echo "no packages assigned to shard ${{ matrix.shard }}"
-            exit 1
-          fi
-
-          test_packages=$(cat test-results/shard-packages.txt)
-          count_flag="${{ needs.ci-plan.outputs.test_count_flag }}"
-          count_mode="count-1"
-          if [ -z "$count_flag" ]; then
-            count_mode="cache-default"
-          fi
-          surface="shard-${{ matrix.shard }}"
-          environment_id="ci-postgres-role-proof-v1"
-          primary_json="test-results/go-test-shard-${{ matrix.shard }}.json"
-          primary_stderr="test-results/go-test-shard-${{ matrix.shard }}-stderr.txt"
-          primary_evidence="test-results/shard-${{ matrix.shard }}-primary-evidence.json"
-
-          start_epoch=$(date +%s)
+          start=$(date +%s)
           set +e
-          if [ -n "$count_flag" ]; then
-            go run ./cmd/swarm-test-postgres -- go test $test_packages "$count_flag" -json \
-              2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
-          else
-            go run ./cmd/swarm-test-postgres -- go test $test_packages -json \
-              2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
-          fi
+          go run ./cmd/swarm-test-postgres -- go test "${packages[@]}" "${run_args[@]}" "${count_args[@]}" -json | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
-          elapsed=$(( $(date +%s) - start_epoch ))
-          go run ./cmd/swarm-test-timing \
-            -record-evidence \
-            -input "$primary_json" \
-            -packages test-results/shard-packages.txt \
-            -evidence "$primary_evidence" \
-            -surface "$surface" \
-            -attempt primary \
-            -elapsed-seconds "$elapsed" \
-            -exit-code "$status" \
-            -environment-id "$environment_id" \
-            -count-mode "$count_mode"
+          elapsed=$(( $(date +%s) - start ))
+          go run ./cmd/swarm-test-timing -record-evidence \
+            -plan "$plan" -unit "$UNIT_ID" -attempt primary \
+            -input "$primary_json" -evidence "$primary_evidence" \
+            -elapsed-seconds "$elapsed" -exit-code "$status"
 
           confirmation_status=0
           if [ "$status" -eq 0 ]; then
-            needs_confirmation=$(go run ./cmd/swarm-test-timing \
-              -check-confirmation \
-              -policy .github/test-timing-budgets.yaml \
-              -evidence "$primary_evidence")
-            if [ "$needs_confirmation" = "true" ]; then
-              confirmation_json="test-results/go-test-shard-${{ matrix.shard }}-confirmation.json"
-              confirmation_stderr="test-results/go-test-shard-${{ matrix.shard }}-confirmation-stderr.txt"
-              confirmation_evidence="test-results/shard-${{ matrix.shard }}-confirmation-evidence.json"
-              confirmation_start_epoch=$(date +%s)
+            confirm=$(go run ./cmd/swarm-test-timing -check-confirmation \
+              -plan "$plan" -policy .github/test-timing-budgets.yaml -evidence "$primary_evidence")
+            if [ "$confirm" = "true" ]; then
+              confirmation_json="test-results/evidence/${UNIT_ID}-confirmation.json"
+              confirmation_evidence="test-results/evidence/${UNIT_ID}-confirmation-evidence.json"
+              confirmation_start=$(date +%s)
               set +e
-              go run ./cmd/swarm-test-postgres -- go test $test_packages -count=1 -json \
-                2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
+              go run ./cmd/swarm-test-postgres -- go test "${packages[@]}" "${run_args[@]}" -count=1 -json | tee "$confirmation_json"
               confirmation_status=${PIPESTATUS[0]}
               set -e
-              confirmation_elapsed=$(( $(date +%s) - confirmation_start_epoch ))
-              go run ./cmd/swarm-test-timing \
-                -record-evidence \
-                -input "$confirmation_json" \
-                -packages test-results/shard-packages.txt \
-                -evidence "$confirmation_evidence" \
-                -surface "$surface" \
-                -attempt confirmation \
-                -elapsed-seconds "$confirmation_elapsed" \
-                -exit-code "$confirmation_status" \
-                -environment-id "$environment_id" \
-                -count-mode count-1
-            elif [ "$needs_confirmation" != "false" ]; then
-              echo "invalid confirmation decision: $needs_confirmation" >&2
+              confirmation_elapsed=$(( $(date +%s) - confirmation_start ))
+              go run ./cmd/swarm-test-timing -record-evidence \
+                -plan "$plan" -unit "$UNIT_ID" -attempt confirmation \
+                -input "$confirmation_json" -evidence "$confirmation_evidence" \
+                -elapsed-seconds "$confirmation_elapsed" -exit-code "$confirmation_status"
+            elif [ "$confirm" != "false" ]; then
+              echo "invalid confirmation decision: $confirm" >&2
               exit 1
             fi
           fi
-
-          go run ./cmd/swarm-test-timing \
-            -input "$primary_json" \
-            -markdown "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
-          {
-            echo "### Shard ${{ matrix.shard }} timing"
-            echo
-            echo "- command elapsed: \`${elapsed}s\`"
-            echo "- count flag: \`${count_flag:-<cache-enabled default>}\`"
-            cat "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ]; then
-            exit "$status"
-          fi
-          exit "$confirmation_status"
-
+          go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
+          cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
+          test "$status" -eq 0
+          test "$confirmation_status" -eq 0
       - name: Save measured Go cache
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
@@ -334,340 +237,88 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-shard-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
-
-      - name: Upload shard timing artifact
+          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
+      - name: Upload proof evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: go-test-shard-${{ matrix.shard }}-timing
-          path: |
-            test-results/shard-packages.txt
-            test-results/go-test-shard-${{ matrix.shard }}.json
-            test-results/go-test-shard-${{ matrix.shard }}-stderr.txt
-            test-results/go-test-shard-${{ matrix.shard }}-confirmation.json
-            test-results/go-test-shard-${{ matrix.shard }}-confirmation-stderr.txt
-            test-results/go-test-shard-${{ matrix.shard }}-timing.md
-            test-results/shard-${{ matrix.shard }}-*-evidence.json
-          if-no-files-found: warn
+          name: proof-${{ matrix.unit }}-timing
+          path: test-results/evidence
+          if-no-files-found: error
 
   semantic-smoke:
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
       - name: Prove explicit Postgres opt-in selector
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p test-results
-          go run ./cmd/swarm-test-postgres -- go test ./cmd/swarm \
-            -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction \
-            -count=1 -json 2>&1 | tee test-results/semantic-smoke.json
-
+        run: go run ./cmd/swarm-test-postgres -- go test ./cmd/swarm -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction -count=1
       - name: Prove runner-owned Docker service
-        shell: bash
-        run: |
-          set -euo pipefail
-          go run ./cmd/swarm-test-postgres -- go test ./internal/testutil \
-            -run '^TestStartPostgres_Smoke$' \
-            -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
-
+        run: go run ./cmd/swarm-test-postgres -- go test ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
       - name: Prove runner failure, interrupt, and hard-death reconciliation
         shell: bash
         run: |
           set -euo pipefail
           runner="$RUNNER_TEMP/swarm-test-postgres"
           go build -o "$runner" ./cmd/swarm-test-postgres
-
           set +e
-          "$runner" -- sh -c 'exit 17'
-          child_status=$?
+          "$runner" -- sh -c 'exit 17'; child_status=$?
           set -e
           test "$child_status" -eq 17
-
-          interrupt_child_pid_file="$RUNNER_TEMP/swarm-test-postgres-interrupt-child.pid"
-          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$interrupt_child_pid_file" &
-          interrupt_runner=$!
-          for _ in $(seq 1 120); do
-            test -s "$interrupt_child_pid_file" && break
-            sleep 0.25
-          done
-          test -s "$interrupt_child_pid_file"
-          kill -TERM "$interrupt_runner"
-          wait "$interrupt_runner" || true
-          test -z "$(docker ps --all --filter label=com.division.swarm.test-postgres.managed=1 --format '{{.ID}}')"
-
-          child_pid_file="$RUNNER_TEMP/swarm-test-postgres-child.pid"
-          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$child_pid_file" &
-          hard_death_runner=$!
-          for _ in $(seq 1 120); do
-            test -s "$child_pid_file" && break
-            sleep 0.25
-          done
-          test -s "$child_pid_file"
-          kill -KILL "$hard_death_runner"
-          wait "$hard_death_runner" || true
-          kill -TERM "$(cat "$child_pid_file")" 2>/dev/null || true
-
+          interrupt_pid="$RUNNER_TEMP/interrupt.pid"
+          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$interrupt_pid" & runner_pid=$!
+          for _ in $(seq 1 120); do test -s "$interrupt_pid" && break; sleep 0.25; done
+          kill -TERM "$runner_pid"; wait "$runner_pid" || true
+          test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
+          hard_pid="$RUNNER_TEMP/hard.pid"
+          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$hard_pid" & runner_pid=$!
+          for _ in $(seq 1 120); do test -s "$hard_pid" && break; sleep 0.25; done
+          kill -KILL "$runner_pid"; wait "$runner_pid" || true
+          kill -TERM "$(cat "$hard_pid")" 2>/dev/null || true
           "$runner" -- true
-          test -z "$(docker ps --all --filter label=com.division.swarm.test-postgres.managed=1 --format '{{.ID}}')"
-
-      - name: Prove catalog required smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p test-results
-          go run ./cmd/swarm-test-postgres -- go test ./internal/runtime/cataloge2e \
-            -run '^TestCatalogRequiredSmoke$' \
-            -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
-
-      - name: Report semantic smoke timing
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -s test-results/semantic-smoke.json ]; then
-            echo "No semantic smoke timing was produced." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          go run ./cmd/swarm-test-timing \
-            -input test-results/semantic-smoke.json \
-            -markdown test-results/semantic-smoke-timing.md
-          cat test-results/semantic-smoke-timing.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload semantic smoke artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: semantic-smoke-timing
-          path: |
-            test-results/semantic-smoke.json
-            test-results/semantic-smoke-timing.md
-          if-no-files-found: warn
-
-  full-conformance:
-    name: Full catalog and conformance
-    if: needs.ci-plan.outputs.run_full_conformance == 'true'
-    needs:
-      - ci-plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run full catalog/conformance truth
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p test-results
-          full_packages=$(cat .github/test-shards/full-conformance-packages.txt)
-          environment_id="ci-postgres-gateway-empty-v1"
-          primary_json="test-results/full-conformance.json"
-          primary_stderr="test-results/full-conformance-stderr.txt"
-          primary_evidence="test-results/full-conformance-primary-evidence.json"
-          start_epoch=$(date +%s)
-          set +e
-          SWARM_TOOL_GATEWAY_URL= \
-          SWARM_TOOL_GATEWAY_CONTAINER_URL= \
-          SWARM_TOOL_GATEWAY_TOKEN= \
-          go run ./cmd/swarm-test-postgres -- go test $full_packages -count=1 -json \
-            2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
-          status=${PIPESTATUS[0]}
-          set -e
-          elapsed=$(( $(date +%s) - start_epoch ))
-          go run ./cmd/swarm-test-timing \
-            -record-evidence \
-            -input "$primary_json" \
-            -packages .github/test-shards/full-conformance-packages.txt \
-            -evidence "$primary_evidence" \
-            -surface full-conformance \
-            -attempt primary \
-            -elapsed-seconds "$elapsed" \
-            -exit-code "$status" \
-            -environment-id "$environment_id" \
-            -count-mode count-1
-
-          confirmation_status=0
-          if [ "$status" -eq 0 ]; then
-            needs_confirmation=$(go run ./cmd/swarm-test-timing \
-              -check-confirmation \
-              -policy .github/test-timing-budgets.yaml \
-              -evidence "$primary_evidence")
-            if [ "$needs_confirmation" = "true" ]; then
-              confirmation_json="test-results/full-conformance-confirmation.json"
-              confirmation_stderr="test-results/full-conformance-confirmation-stderr.txt"
-              confirmation_evidence="test-results/full-conformance-confirmation-evidence.json"
-              confirmation_start_epoch=$(date +%s)
-              set +e
-              SWARM_TOOL_GATEWAY_URL= \
-              SWARM_TOOL_GATEWAY_CONTAINER_URL= \
-              SWARM_TOOL_GATEWAY_TOKEN= \
-              go run ./cmd/swarm-test-postgres -- go test $full_packages -count=1 -json \
-                2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
-              confirmation_status=${PIPESTATUS[0]}
-              set -e
-              confirmation_elapsed=$(( $(date +%s) - confirmation_start_epoch ))
-              go run ./cmd/swarm-test-timing \
-                -record-evidence \
-                -input "$confirmation_json" \
-                -packages .github/test-shards/full-conformance-packages.txt \
-                -evidence "$confirmation_evidence" \
-                -surface full-conformance \
-                -attempt confirmation \
-                -elapsed-seconds "$confirmation_elapsed" \
-                -exit-code "$confirmation_status" \
-                -environment-id "$environment_id" \
-                -count-mode count-1
-            elif [ "$needs_confirmation" != "false" ]; then
-              echo "invalid confirmation decision: $needs_confirmation" >&2
-              exit 1
-            fi
-          fi
-
-          go run ./cmd/swarm-test-timing \
-            -input "$primary_json" \
-            -markdown test-results/full-conformance-timing.md
-          cat test-results/full-conformance-timing.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ]; then
-            exit "$status"
-          fi
-          exit "$confirmation_status"
-
-      - name: Upload full conformance artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-conformance-timing
-          path: |
-            test-results/full-conformance.json
-            test-results/full-conformance-stderr.txt
-            test-results/full-conformance-confirmation.json
-            test-results/full-conformance-confirmation-stderr.txt
-            test-results/full-conformance-*-evidence.json
-            test-results/full-conformance-timing.md
-          if-no-files-found: warn
-
-  nightly-extras:
-    name: Nightly Python and fork extras
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run nightly extras
-        shell: bash
-        run: |
-          set +e
-          mkdir -p test-results
-          go run ./cmd/swarm-test-postgres -- go test \
-            ./internal/runtime/pythonmodule \
-            ./internal/runtime/runforkexecution \
-            -count=1 -json 2>&1 | tee test-results/nightly-extras.json
-          status=${PIPESTATUS[0]}
-          set -e
-          go run ./cmd/swarm-test-timing \
-            -input test-results/nightly-extras.json \
-            -markdown test-results/nightly-extras-timing.md
-          cat test-results/nightly-extras-timing.md >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
-
-      - name: Upload nightly extras artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-extras-timing
-          path: |
-            test-results/nightly-extras.json
-            test-results/nightly-extras-timing.md
-          if-no-files-found: warn
+          test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
 
   timing-budget:
     name: CI timing budget
     if: always()
-    needs:
-      - ci-plan
-      - test-shard
-      - full-conformance
+    needs: [ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Download shard evidence
+      - name: Download exact proof plan
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results/plan
+      - name: Download all proof evidence
         if: always()
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          pattern: go-test-shard-*-timing
+          pattern: proof-*-timing
           path: test-results/evidence
-
-      - name: Download full-conformance evidence
-        if: always() && needs.ci-plan.outputs.run_full_conformance == 'true'
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: full-conformance-timing
-          path: test-results/evidence/full-conformance-timing
-
-      - name: Evaluate complete timing evidence
+          merge-multiple: true
+      - name: Evaluate complete plan-bound evidence
         if: always()
-        shell: bash
         run: |
-          set -uo pipefail
-          mkdir -p test-results/evidence
-          expect_full="${{ needs.ci-plan.outputs.run_full_conformance }}"
-          if [ "$expect_full" != "true" ] && [ "$expect_full" != "false" ]; then
-            expect_full=false
-          fi
-          set +e
-          go run ./cmd/swarm-test-timing \
-            -evaluate-budget \
+          go run ./cmd/swarm-test-timing -evaluate-budget \
+            -plan test-results/plan/proof-plan.json \
             -policy .github/test-timing-budgets.yaml \
-            -snapshot .github/test-shards/go-test-shards.json \
-            -full-packages .github/test-shards/full-conformance-packages.txt \
+            -weight-model .github/test-timing-weights.json \
             -evidence-root test-results/evidence \
-            -expect-full="$expect_full" \
             -result-json test-results/timing-budget-result.json \
             -markdown test-results/timing-budget-result.md
-          status=$?
-          set -e
-          if [ -s test-results/timing-budget-result.md ]; then
-            cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
-
+          cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload timing budget result
         if: always()
         uses: actions/upload-artifact@v4
@@ -681,15 +332,7 @@ jobs:
   required-tests:
     name: Required test summary
     if: always()
-    needs:
-      - ci-plan
-      - static-checks
-      - sqlite-local-dev
-      - test-shard
-      - semantic-smoke
-      - full-conformance
-      - nightly-extras
-      - timing-budget
+    needs: [ci-plan, static-checks, sqlite-local-dev, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -698,29 +341,91 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          {
-            echo "### Required test summary"
-            echo
-          } >> "$GITHUB_STEP_SUMMARY"
           for item in \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
-            "test-shard:${{ needs.test-shard.result }}" \
+            "proof-unit:${{ needs.proof-unit.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
-            "full-conformance:${{ needs.full-conformance.result }}" \
-            "nightly-extras:${{ needs.nightly-extras.result }}" \
             "timing-budget:${{ needs.timing-budget.result }}"
           do
-            name="${item%%:*}"
-            result="${item#*:}"
+            name="${item%%:*}"; result="${item#*:}"
             echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
-            case "$result" in
-              success|skipped)
-                ;;
-              *)
-                failed=1
-                ;;
-            esac
+            case "$result" in success|skipped) ;; *) failed=1 ;; esac
           done
           exit "$failed"
+
+  publish-timing-model:
+    name: Publish generated timing model
+    if: github.event_name == 'schedule' && needs.required-tests.result == 'success'
+    needs: [required-tests, ci-plan, proof-unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: timing-model-publisher
+    permissions:
+      contents: read
+    steps:
+      - name: Mint repository-restricted publisher token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.TEST_MODEL_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.TEST_MODEL_PUBLISHER_PRIVATE_KEY }}
+          owner: division-sh
+          repositories: swarm
+          permission-actions: write
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Download exact proof plan
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results/plan
+      - name: Download successful proof evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: proof-*-timing
+          path: test-results/evidence
+          merge-multiple: true
+      - name: Generate and publish model-only PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOURCE_RUN_ID: github-actions-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          result=$(go run ./cmd/swarm-test-timing -update-weight-model \
+            -plan test-results/plan/proof-plan.json \
+            -evidence-root test-results/evidence \
+            -weight-model .github/test-timing-weights.json \
+            -source-run-id "$SOURCE_RUN_ID")
+          if [ "$result" = "unchanged" ]; then
+            echo "Timing model unchanged; no generated PR." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          test "$result" = "changed"
+          git diff --name-only > test-results/generated-diff.txt
+          go run ./cmd/swarm-test-timing -validate-publish-diff \
+            -changed-files test-results/generated-diff.txt
+
+          branch=automation/test-timing-model
+          git config user.name division-sh-swarm-timing-publisher[bot]
+          git config user.email 227853450+division-sh-swarm-timing-publisher[bot]@users.noreply.github.com
+          git checkout -B "$branch"
+          git add .github/test-timing-weights.json
+          git commit -m "test: refresh generated timing weights"
+          git push --force-with-lease origin "$branch"
+
+          pr=$(gh pr list --head "division-sh:$branch" --base master --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            gh pr create --base master --head "$branch" \
+              --title "[automation][issue #1967] Refresh CI timing weights" \
+              --body $'Generated from successful fresh CI evidence.\n\nGenerated file only; human review and normal protection required.\n\nPart of #1967.'
+          else
+            gh pr edit "$pr" --title "[automation][issue #1967] Refresh CI timing weights"
+          fi
+          gh workflow run ci.yml --ref "$branch" -f profile=full

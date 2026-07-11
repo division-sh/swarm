@@ -1,7 +1,0 @@
-github.com/division-sh/swarm/cmd/swarm
-github.com/division-sh/swarm/internal/apiv1
-github.com/division-sh/swarm/internal/dashboard/server
-github.com/division-sh/swarm/internal/runtime/bus
-github.com/division-sh/swarm/internal/runtime/cataloge2e
-github.com/division-sh/swarm/internal/runtime/conformance
-github.com/division-sh/swarm/internal/runtime/pipeline
