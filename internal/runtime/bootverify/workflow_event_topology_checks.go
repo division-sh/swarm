@@ -55,7 +55,11 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if strings.TrimSpace(issue.Failure) != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
 			continue
 		}
-		evidence := []string{fmt.Sprintf("rejected typed pub/sub relation %s -> %s", issue.From, issue.To)}
+		subject := strings.TrimSpace(issue.From)
+		if subject == "" {
+			subject = strings.TrimSpace(issue.Location)
+		}
+		evidence := []string{fmt.Sprintf("rejected typed pub/sub relation %s -> %s", subject, issue.To)}
 		if detail := strings.TrimSpace(issue.Detail); detail != "" {
 			evidence = append(evidence, "authorization proofs: "+detail)
 		}
@@ -66,7 +70,9 @@ func (c *checkerContext) eventWarnings() []Finding {
 			issue.Remediation,
 			evidence...,
 		))
-		rejectedProducers[strings.TrimSpace(issue.From)] = struct{}{}
+		if producerID := strings.TrimSpace(issue.From); producerID != "" {
+			rejectedProducers[producerID] = struct{}{}
+		}
 	}
 	for _, subscription := range topology.LegacyQualifiedSubscriptions {
 		message := fmt.Sprintf("legacy qualified subscription '%s' at %s still delivers at runtime but is outside canonical same-flow pub/sub and pin/connect topology; migrate to pins/connect", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)

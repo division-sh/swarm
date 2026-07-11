@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -101,7 +102,6 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 
 func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
-		ProducerAuthored: true,
 		ObserveGrant: "      observe:\n" +
 			"        - source: producer\n" +
 			"          events: [task.done]\n" +
@@ -115,6 +115,8 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 	}
 	if issue := relations.Issues[0]; issue.Failure != semanticview.TypedPubSubFailureAuthorizationAmbiguous || len(issue.Authorizations) != 2 {
 		t.Fatalf("typed pub/sub issue = %#v, want two-proof authorization ambiguity", issue)
+	} else if issue.Producer.ID != "" || issue.Event.EventKey() != "producer/task.done" {
+		t.Fatalf("typed pub/sub issue = %#v, want producerless declared-event authority", issue)
 	}
 
 	topology := routingtopology.Build(source)
@@ -129,6 +131,13 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 	if importBoundaryWildcardReportContains(report.Findings, "event_consumer_exists", "producer/task.done") {
 		t.Fatalf("verify findings = %#v, ambiguity should replace the generic missing-consumer warning", report.Findings)
 	}
+	validationOpts := swruntime.DefaultWorkflowContractValidationOptions(nil)
+	validationOpts.CheckMCPReachable = false
+	validationOpts.FatalBootWarnings = false
+	validationOpts.FatalToolImplementationWarning = false
+	if _, err := swruntime.ValidateWorkflowContractSurface(context.Background(), source, validationOpts); err == nil || !strings.Contains(err.Error(), semanticview.TypedPubSubFailureAuthorizationAmbiguous) {
+		t.Fatalf("runtime contract validation error = %v, want event.publish runtime-context admission failure", err)
+	}
 
 	routes, err := runtimebus.DeriveRouteTable(source)
 	if routes != nil {
@@ -142,8 +151,7 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 		t.Fatalf("NewEventBusWithOptions = (%#v, %v), want fail-closed startup", eb, err)
 	}
 	validSource := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
-		ProducerAuthored: true,
-		ObserveGrant:     "      observe:\n        - source: producer\n          events: [task.done]\n",
+		ObserveGrant: "      observe:\n        - source: producer\n          events: [task.done]\n",
 	})
 	prebuiltRoutes, err := runtimebus.DeriveRouteTable(validSource)
 	if err != nil {
@@ -154,9 +162,27 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 	}
 }
 
-func TestImportBoundaryWildcardExactDuplicateAuthorizationCollapsesAcrossSurfaces(t *testing.T) {
+func TestImportBoundaryWildcardAuthorizationAmbiguityRetainsAuthoredProducerProof(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ProducerAuthored: true,
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n" +
+			"        - source: flows/producer\n" +
+			"          events: [task.done]\n",
+	})
+
+	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
+	if len(relations.Issues) != 1 || strings.TrimSpace(relations.Issues[0].Producer.ID) == "" {
+		t.Fatalf("typed pub/sub relations = %#v, want one ambiguity with authored producer provenance", relations)
+	}
+	if routes, err := runtimebus.DeriveRouteTable(source); err == nil || routes != nil {
+		t.Fatalf("DeriveRouteTable = (%#v, %v), want authored-producer ambiguity to remain fail closed", routes, err)
+	}
+}
+
+func TestImportBoundaryWildcardExactDuplicateAuthorizationCollapsesAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ObserveGrant: "      observe:\n" +
 			"        - source: producer\n" +
 			"          events: [task.done]\n" +
@@ -165,12 +191,12 @@ func TestImportBoundaryWildcardExactDuplicateAuthorizationCollapsesAcrossSurface
 	})
 
 	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
-	if len(relations.Issues) != 0 || len(relations.Matches) != 1 {
-		t.Fatalf("typed pub/sub relations = %#v, want one deduplicated match", relations)
+	if len(relations.Issues) != 0 || len(relations.Matches) != 0 {
+		t.Fatalf("typed pub/sub relations = %#v, want no conflict and no synthetic producer edge", relations)
 	}
 	topology := routingtopology.Build(source)
-	if len(topology.Issues) != 0 || len(topology.Edges) != 1 {
-		t.Fatalf("routing topology = %#v, want one deduplicated edge", topology)
+	if len(topology.Issues) != 0 || len(topology.Edges) != 0 {
+		t.Fatalf("routing topology = %#v, want no conflict and no synthetic producer edge", topology)
 	}
 	routes, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {

@@ -25,6 +25,8 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "Canonical name equality alone never authorizes a cross-flow edge")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "runtime route admission")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "including when a caller supplies a prebuilt route table")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "every declared materializable event independently of current producer-census membership")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "low-level event.publish")
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "exact authored package.yaml file:line")
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "connect_source_location_missing")
 	assertScalarContains(t, mustMappingValue(t, routing, "legacy_qualified_subscription_rule"), "any root or child flow authors stages")
