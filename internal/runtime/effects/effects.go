@@ -111,6 +111,15 @@ func WithLogicalOperationIdentity(ctx context.Context, identity string) context.
 	return context.WithValue(ctx, logicalOperationIdentityKey{}, strings.TrimSpace(identity))
 }
 
+func LogicalOperationIdentityFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	identity, ok := ctx.Value(logicalOperationIdentityKey{}).(string)
+	identity = strings.TrimSpace(identity)
+	return identity, ok && identity != ""
+}
+
 // WithLogicalOperationIdentitySegment refines the current logical work with a
 // deterministic child coordinate, such as a provider turn or tool-call ID.
 func WithLogicalOperationIdentitySegment(ctx context.Context, segment string) context.Context {
@@ -362,8 +371,7 @@ func logicalOperationIdentity(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	identity, _ := ctx.Value(logicalOperationIdentityKey{}).(string)
-	identity = strings.TrimSpace(identity)
+	identity, _ := LogicalOperationIdentityFromContext(ctx)
 	if identity == "" {
 		if evt, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 			identity = strings.TrimSpace(evt.ID())

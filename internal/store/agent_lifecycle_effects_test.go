@@ -175,6 +175,33 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		}
 	}
 
+	launchFenceCtx := runtimeeffects.WithLogicalOperationIdentity(restartedCtx, "effect-authority-launch-fence")
+	launchFence, err := runtimeeffects.Begin(launchFenceCtx, "authored_http_tool", []byte("launch-fence"), nil)
+	if err != nil {
+		t.Fatalf("authorize launch-fence effect: %v", err)
+	}
+	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: "00000000-0000-0000-0000-000000001904", OperationKind: "restart", RequestHash: "restart-launch-fence-hash",
+		AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: restarted.RuntimeEpoch,
+		ExpectedGeneration: restarted.Generation, ExpectedPhase: restarted.Phase,
+		TargetEpoch: restarted.RuntimeEpoch, TargetGeneration: restarted.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatalf("supersede authorized effect generation: %v", err)
+	}
+	primitiveCalls := 0
+	if err := launchFence.MarkLaunched(launchFenceCtx); err == nil {
+		primitiveCalls++
+		t.Fatal("superseded authorized effect was marked launched")
+	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassSupersededGeneration {
+		t.Fatalf("superseded launch failure = %v, want superseded generation", err)
+	}
+	if primitiveCalls != 0 {
+		t.Fatalf("superseded launch reached primitive %d times", primitiveCalls)
+	}
+	requireExternalOperationState(t, db, sqlite, launchFence.Attempt().OperationID, runtimeeffects.StateAuthorized)
+	requireExternalAttemptState(t, db, sqlite, launchFence.Attempt().AttemptID, runtimeeffects.StateAuthorized)
+
 	placeholder := "?"
 	if !sqlite {
 		placeholder = "$1"

@@ -265,6 +265,18 @@ func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt
 		return err
 	}
 	defer tx.Rollback()
+	var epoch int64
+	var generation int64
+	var phase string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id = $1 FOR UPDATE`, attempt.Token.AgentID).Scan(&epoch, &generation, &phase); err != nil {
+		if err == sql.ErrNoRows {
+			return supersededExternalAttempt(attempt.Token, 0, 0, "absent")
+		}
+		return fmt.Errorf("launch external attempt lifecycle read: %w", err)
+	}
+	if epoch != attempt.Token.RuntimeEpoch || generation != int64(attempt.Token.Generation) || strings.TrimSpace(phase) != "running" {
+		return supersededExternalAttempt(attempt.Token, epoch, generation, phase)
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID)
 	if err := requireExternalAttemptTransition(res, err); err == nil {
 		operationRes, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
@@ -283,6 +295,18 @@ func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
 	return s.runRuntimeMutation(ctx, "sqlite mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
+		var epoch int64
+		var generation int64
+		var phase string
+		if err := tx.QueryRowContext(txctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id = ?`, attempt.Token.AgentID).Scan(&epoch, &generation, &phase); err != nil {
+			if err == sql.ErrNoRows {
+				return supersededExternalAttempt(attempt.Token, 0, 0, "absent")
+			}
+			return fmt.Errorf("launch sqlite external attempt lifecycle read: %w", err)
+		}
+		if epoch != attempt.Token.RuntimeEpoch || generation != int64(attempt.Token.Generation) || strings.TrimSpace(phase) != "running" {
+			return supersededExternalAttempt(attempt.Token, epoch, generation, phase)
+		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND operation_id = ? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID, attempt.OperationID)
 		if err := requireExternalAttemptTransition(res, err); err == nil {
 			operationRes, err := tx.ExecContext(txctx, `UPDATE agent_external_effect_operations SET state = 'launched', updated_at = ? WHERE operation_id = ? AND state = 'authorized'`, now.UTC(), attempt.OperationID)
