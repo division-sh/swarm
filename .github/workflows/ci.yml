@@ -16,7 +16,7 @@ on:
     - cron: "17 3 * * *"
 
 concurrency:
-  group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
