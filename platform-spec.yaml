@@ -211,6 +211,7 @@ contract_formats:
     bundle_scope_exception: contracts/schema.yaml for the root flow
     owned_concepts:
     - stages
+    - loops
     - initial_state
     - terminal_states
     - states
@@ -268,6 +269,118 @@ contract_formats:
           Stage timer rows reject superseded spellings including `delay`,
           `interrupting`, `repeat`, and `recurring`. Stage timer rows are
           one-shot in this slice.
+    bounded_loops:
+      status: merge_bearing
+      implementation_tracker: '#1849'
+      purpose: >
+        `loops:` is the canonical owner for declarative, finite lifecycle
+        revision loops. It replaces counter guards, backward-edge conventions,
+        prompt instructions, and accumulator reset fields as loop authority.
+      syntax: |
+        loops:
+          revision:
+            revision_field: revision_id
+            max_attempts: "{{policy.inner_revision_max}}"
+            escape:
+              advances_to: escalated
+              emit:
+                event: review.escalated
+                fields:
+                  revision_id: {cel: loop.revision_id}
+
+        event_handlers:
+          work.started:
+            loop: {start: revision, from: queued}
+            advances_to: drafting
+          draft.ready:
+            loop: {admit: revision, from: drafting}
+            advances_to: review
+          review.revision_requested:
+            loop: {repeat: revision, from: review}
+            advances_to: drafting
+          review.approved:
+            loop: {close: revision, from: review}
+            advances_to: approved
+      declaration:
+        keyed_scope: Loop IDs and revision_field names are unique within one flow.
+        revision_field: >
+          Required text event field that carries the current durable revision
+          identity. A handler consuming that field in the declaring flow must
+          declare exactly one matching loop operation.
+        max_attempts: >
+          Required positive integer or policy scalar reference. It means total
+          attempts including the initial attempt, is evaluated exactly once at
+          start, and is persisted in the activation. Policy edits and resume do
+          not alter an active loop's cap.
+        escape: >
+          Required advances_to target outside the loop's strongly connected
+          component, with an optional typed emit. Escape is a declared lifecycle
+          outcome, not a failure.
+      operations:
+        start: Creates one durable activation at attempt 1 and enters the loop region.
+        admit: >
+          Admits work for the current revision before guards, values, state
+          mutation, actions, activities, fan-out, joins, accumulators, transition,
+          or emit. It may remain in the stage or advance only within the region.
+        repeat: >
+          If attempt is below the stamped cap, atomically increments the attempt,
+          mints a new revision, supersedes prior-attempt machinery, and returns to
+          the declared entry path. At the cap it atomically selects escape and
+          suppresses ordinary repeat transition and emit work.
+        close: Atomically closes the activation and exits the region.
+        source_fact: >
+          Every operation requires exact `from:`. Runtime admission requires the
+          persisted current stage to match it; no ambient or inferred source stage
+          is accepted.
+      topology: >
+        Verify requires one start, at least one repeat and close, disjoint flat
+        regions, and an escape outside the region. Nested, overlapping, computed,
+        unbounded, or arbitrary loops are rejected and belong to #1671.
+      identity_and_admission: >
+        Activation and revision IDs are deterministic run/entity/flow/loop facts.
+        Exact delivery identity remains idempotent. A prior or post-close revision
+        is platform.stale_arrival; a matching revision for a later stage is
+        platform.early_arrival; an unknown/future/non-active revision is
+        platform.unexpected_arrival; conflicting content at one logical coordinate
+        is platform.conflicting_duplicate. Rejections mutate no business or
+        control state and launch no effect.
+      atomicity: >
+        Start, admit, repeat, close, cap escape, stage mutation, outbox events,
+        and supersession of generation-owned machinery commit through one selected
+        SQLite/Postgres mutation owner under the workflow entity lock. An error in
+        any part rolls back the unit; no post-commit best-effort loop authority is
+        permitted.
+      generation_carriers: >
+        One-shot stage/event timers, join activations and outcomes, accumulator
+        buckets/timeouts, fan-out and child results, action and mailbox results,
+        activity requests/claims/results, runtime logs, restart, replay, and forks
+        carry either the internal immutable generation or the declared revision
+        field. Prior-generation work cannot mutate or launch work in a later
+        generation. Recurring timers connected to a loop region or operation are
+        rejected by verify, boot, and runtime construction.
+      activity_claim: >
+        A loop-owned non_idempotent_write activity checks the durable generation
+        and inserts or reads activity_attempts.started in one selected-store
+        transaction under the entity lock, before credential resolution or
+        outbound preparation. Repeat/close winning first yields stale admission
+        and no call. A committed started claim winning first owns at most one call;
+        its later result remains stamped with that generation. Commit
+        acknowledgment ambiguity reconciles by request identity before dispatch;
+        started or uncertain rows are never blindly redispatched.
+      replay_restart_fork: >
+        Restart reloads the activation and generation-owned machinery. Same-run
+        replay preserves recorded identity. Timestamp forks preserve attempt and
+        stamped cap but deterministically mint fork-local activation/revision IDs
+        and remint generation-bearing timer/join/accumulator identities.
+      expression_context: >
+        `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
+        `loop.max_attempts` are available after loop admission. The CEL
+        implementation may lower this root internally, but `loop.*` is the only
+        authored spelling.
+      projection: >
+        Reserved persisted loop buckets are not readable or writable through
+        authored accumulator/data/clear paths. Supported entity/tool readbacks
+        expose a typed loop projection and omit the mutable internal bucket.
   entity_schema:
     description: |
       `package.yaml.entity_schema` is retired. Authoritative entity
@@ -3065,8 +3178,8 @@ handler_specification:
           activity execution when the activity_attempts journal owns provider-attempt truth. The tool must be declared in
           tools.yaml or imported as a connector pack, resolve to handler_type http, and include an http block. read_only
           tools may retry under the read-only retry policy. non_idempotent_write tools must check the existing
-          activity_attempts row for the request identity before credential resolution or outbound preparation, must insert
-          activity_attempts.started before outbound dispatch, must not automatically retry or re-dispatch once an attempt
+          activity_attempts row for the request identity and, when loop-owned, atomically compare the loop generation and
+          insert/read activity_attempts.started before credential resolution or outbound preparation. It must not automatically retry or re-dispatch once an attempt
           may have reached the provider, and may consume static credentials through the existing credential-store/import-
           boundary owner or managed credentials through `tool_model.managed_credential_store` when the tool is a
           provider_connector. Missing static or managed credentials fail before provider dispatch. HTTP tools using
@@ -3096,8 +3209,8 @@ handler_specification:
         non_idempotent_write:
           stage_1_execution: Executable only for authored HTTP tools, with optional static credentials or managed
             credentials for provider_connector tools, when the activity_attempts journal is available. The runtime must
-            consume the row on duplicate/redelivered request events before credential resolution or provider preparation,
-            resolve admitted credentials before provider dispatch, insert the started attempt row before outbound dispatch,
+            consume or atomically claim the row on duplicate/redelivered request events before credential resolution or provider preparation,
+            insert the started attempt row before resolving credentials and before outbound dispatch,
             update the row with succeeded, failed, or uncertain terminal state after the outcome, and consume the row on
             duplicate/redelivered request events before deciding whether dispatch is allowed. Any existing started,
             uncertain, succeeded, or failed row blocks automatic provider re-dispatch and managed credential refresh.
@@ -3123,6 +3236,10 @@ handler_specification:
       - "`handler.branch` — retired; use `rules` for handler-phase branch selection"
       - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
       - "`fan_out.emit_mapping` — retired; no direct replacement in the current fan_out model. Use a single `fan_out.emit` and route before or after fan-out if per-item event-name branching is required."
+      - "top-level handler `completion_rule` — retired; it had no production interpreter"
+      - "top-level handler `policy_ref` — retired; use `guard.policy_ref` only"
+      - "loop counter guards `revision_count_below_limit` and `inner_revision_count_below_limit` — retired; use `loops:`"
+      - "clear targets `cycle_counters` and `cycle_index` — retired; loop activation owns attempt state"
       - "`fan_out.target` — retired; `fan_out.emit` routes through ordinary emit target semantics or, for composed pin-declared outputs, through output pin plus parent connect route authority."
     clear_gates:
       field: clear_gates
@@ -10163,7 +10280,7 @@ platform_tables:
         request events, the existing row is consumed before static or managed credential resolution, token refresh, or outbound
         preparation. response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and long_running remain
         split/fail-closed.'
-      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
+      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
@@ -12545,6 +12662,8 @@ platform_events:
         parent_event_id: string
         chain_depth: integer
         attempt: integer
+        loop_generation: object (optional; durable bounded-loop attempt identity)
+        loop_stage: string (optional; source stage claimed with the attempt)
       produced_by_type: platform
     platform.agent_failed:
       description: Agent session failed after retry.
@@ -22147,6 +22266,40 @@ api_specification:
             description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
               \ arrays depending on accumulate, data_accumulation, compute, or projection writers."
             additionalProperties: true
+          loops:
+            type: array
+            description: Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.
+            items:
+              $ref: '#/components/schemas/BoundedLoopActivation'
+      BoundedLoopActivation:
+        type: object
+        additionalProperties: false
+        required:
+        - id
+        - revision_id
+        - attempt
+        - max_attempts
+        - current_stage
+        - status
+        properties:
+          id:
+            type: string
+          revision_id:
+            type: string
+          attempt:
+            type: integer
+            minimum: 1
+          max_attempts:
+            type: integer
+            minimum: 1
+          current_stage:
+            type: string
+          status:
+            type: string
+            enum: [open, closed]
+          close_reason:
+            type: string
+            enum: [completed, escaped]
       EntityAggregateResult:
         type: object
         additionalProperties: false

@@ -176,6 +176,16 @@ func (s *WorkflowInstanceStore) createSQLite(ctx context.Context, instance Workf
 }
 
 func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+	if fn == nil {
+		return nil
+	}
+	return s.mutateSQLiteE(ctx, instanceID, func(instance *WorkflowInstance) error {
+		fn(instance)
+		return nil
+	})
+}
+
+func (s *WorkflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		instance, ok, err := s.loadSQLite(txctx, instanceID)
 		if err != nil {
@@ -184,7 +194,9 @@ func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID str
 		if !ok {
 			instance = WorkflowInstance{InstanceID: strings.TrimSpace(instanceID)}
 		}
-		fn(&instance)
+		if err := fn(&instance); err != nil {
+			return err
+		}
 		return s.Upsert(txctx, instance)
 	})
 }
@@ -638,10 +650,7 @@ func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context,
 		return err
 	}
 	for _, timer := range timers {
-		payloadJSON, err := json.Marshal(map[string]any{
-			"started_by": strings.TrimSpace(timer.StartedBy),
-			"timer_id":   strings.TrimSpace(timer.TimerID),
-		})
+		payloadJSON, err := workflowTimerStatePayload(timer)
 		if err != nil {
 			return err
 		}
@@ -657,7 +666,7 @@ func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context,
 				fire_at, recurring, owner_node, task_type, status, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, workflowInstanceTimerRowID(runID, strings.TrimSpace(timer.TimerID), entityID), runID, strings.TrimSpace(timer.TimerID), entityID, storageRef,
+		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), entityID), runID, workflowTimerStateTaskID(timer), entityID, storageRef,
 			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt.UTC(), timer.Recurring,
 			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt)); err != nil {
 			return err
@@ -668,7 +677,7 @@ func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context,
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSQLite(ctx context.Context, runID, entityID string) ([]WorkflowTimerState, error) {
 	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT timer_name, fire_event, created_at, fire_at, COALESCE(json_extract(fire_payload, '$.started_by'), ''), recurring, status
+		SELECT timer_name, fire_event, created_at, fire_at, fire_payload, recurring, status
 		FROM timers
 		WHERE run_id = ? AND entity_id = ? AND owner_node = ? AND owner_agent IS NULL
 		ORDER BY created_at ASC, timer_name ASC
@@ -681,8 +690,12 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSQLite(ctx context.Context, ru
 	for rows.Next() {
 		var timer WorkflowTimerState
 		var createdRaw, firesRaw any
+		var payloadRaw any
 		var status string
-		if err := rows.Scan(&timer.TimerID, &timer.EventType, &createdRaw, &firesRaw, &timer.StartedBy, &timer.Recurring, &status); err != nil {
+		if err := rows.Scan(&timer.TaskID, &timer.EventType, &createdRaw, &firesRaw, &payloadRaw, &timer.Recurring, &status); err != nil {
+			return nil, err
+		}
+		if err := decodeWorkflowTimerStatePayload(payloadRaw, &timer); err != nil {
 			return nil, err
 		}
 		status = strings.TrimSpace(status)

@@ -281,6 +281,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !preview {
 		logAccumulatorCompletionOutcome(ctx, pc.bus, nodeID, triggerCtx.Event, result.AccumulatorCompletionDiagnostics, err)
 		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
+		logLoopExecution(ctx, pc.bus, nodeID, triggerCtx.Event, result.LoopTrace)
 	}
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
@@ -327,6 +328,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		InitialValuesMaterialized: initialValuesMaterialized,
 		Handled:                   true,
 	}, nil
+}
+
+func logLoopExecution(ctx context.Context, bus Bus, nodeID string, evt events.Event, trace *runtimeengine.LoopExecutionTrace) {
+	if bus == nil || trace == nil {
+		return
+	}
+	_ = bus.LogRuntime(ctx, RuntimeLogEntry{
+		Level: "info", Message: "Workflow loop operation committed", Component: strings.TrimSpace(nodeID),
+		Action: "workflow_loop_" + strings.TrimSpace(trace.Operation), EventID: strings.TrimSpace(evt.ID()),
+		EventType: strings.TrimSpace(string(evt.Type())), EntityID: workflowEventEntityID(evt), Detail: trace,
+	})
 }
 
 func resolveHandlerEntityIDForFlow(

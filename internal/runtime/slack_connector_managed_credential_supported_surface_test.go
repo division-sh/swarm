@@ -517,8 +517,11 @@ func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackMan
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456791", "missing credential")
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456791")
-	if got := countSlackManagedConnectorActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
-		t.Fatalf("%s missing managed credential activity attempts = %d, want 0", backend.name, got)
+	if attempt := waitForSlackManagedConnectorTerminalActivityAttempt(t, backend, inboundEventID); attempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
+		t.Fatalf("%s missing managed credential activity status = %q, want failed", backend.name, attempt.Status)
+	}
+	if got := countSlackManagedConnectorActivityAttemptsForSource(t, backend, inboundEventID); got != 1 {
+		t.Fatalf("%s missing managed credential activity attempts = %d, want one failed claim", backend.name, got)
 	}
 	requireManagedConnectorFailureEventCountEventually(t, backend, "missing managed credential", inboundEventID, countSlackManagedConnectorFailureEventsForSource)
 }

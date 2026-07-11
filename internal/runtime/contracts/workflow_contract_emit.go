@@ -87,21 +87,34 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			ItemAlias: alias,
 		})
 	}
+	addAction := func(source, siteKey, ruleID string, ruleIndex int, action ActionSpec) {
+		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
+			return
+		}
+		add(source+".success", siteKey+".success", ruleID, ruleIndex, EmitSpec{Event: action.ArtifactRepo.SuccessEvent, Fields: action.ArtifactRepo.SuccessPayload})
+		add(source+".failure", siteKey+".failure", ruleID, ruleIndex, EmitSpec{Event: action.ArtifactRepo.FailureEvent, Fields: action.ArtifactRepo.FailurePayload})
+	}
+	addAction("handler.action", "handler.action", "", -1, handler.Action)
 	templateSites := HandlerRuleEmitTemplateSites(handler)
 	if len(templateSites) == 0 {
 		add("handler.emit", "handler.emit", "", -1, handler.Emit)
 		for idx, rule := range handler.Rules {
 			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, idx, rule.Emit)
+			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, idx, rule.Action)
 			if rule.FanOut != nil {
 				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 	} else {
 		out = append(out, templateSites...)
+		for idx, rule := range handler.Rules {
+			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, idx, rule.Action)
+		}
 	}
 	add("handler.on_success.emit", "handler.on_success.emit", "", -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
 		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
+		addAction("handler.on_complete.action", indexedHandlerEmitSiteKey("handler.on_complete", idx, "action"), rule.ID, idx, rule.Action)
 		if rule.FanOut != nil {
 			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 		}
@@ -109,12 +122,14 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 	if handler.Accumulate != nil {
 		for idx, rule := range handler.Accumulate.OnComplete {
 			add("handler.accumulate.on_complete.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
+			addAction("handler.accumulate.on_complete.action", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "action"), rule.ID, idx, rule.Action)
 			if rule.FanOut != nil {
 				add("handler.accumulate.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Emit)
+			addAction("handler.accumulate.on_timeout.action", "handler.accumulate.on_timeout.action", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Action)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit, handler.Accumulate.OnTimeout.FanOut.As)
 			}
@@ -122,7 +137,9 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 	}
 	if handler.Join != nil {
 		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Emit)
+		addAction("handler.join.on_complete.action", "handler.join.on_complete.action", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Action)
 		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Emit)
+		addAction("handler.join.timeout.action", "handler.join.timeout.action", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Action)
 	}
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit, handler.FanOut.As)

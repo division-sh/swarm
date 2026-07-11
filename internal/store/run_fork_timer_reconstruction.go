@@ -200,6 +200,11 @@ func insertRunForkSelectedContractTimerReconstructions(ctx context.Context, tx *
 		return nil
 	}
 	for _, row := range reconstruction.Rows {
+		var err error
+		row, err = forkAttemptGenerationTimer(row, forkRunID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO timers (
 				run_id, source_timer_id, forked_from_run_id, forked_from_event_id, reconstruction_owner,

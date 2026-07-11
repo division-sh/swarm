@@ -17,6 +17,7 @@ type ContextOverlay struct {
 	Accumulated map[string]any
 	FanOut      map[string]any
 	Join        map[string]any
+	Loop        map[string]any
 }
 
 type ContextBuilderInput struct {
@@ -79,6 +80,11 @@ func WithFanOutItem(base BaseContext, fanOut map[string]any) BaseContext {
 
 func WithJoin(base BaseContext, join map[string]any) BaseContext {
 	base.Join = values.Wrap(cloneStringAnyMap(join))
+	return base
+}
+
+func WithLoop(base BaseContext, loop map[string]any) BaseContext {
+	base.Loop = values.Wrap(cloneStringAnyMap(loop))
 	return base
 }
 

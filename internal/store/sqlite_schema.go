@@ -191,6 +191,8 @@ func (s *SQLiteSchemaStore) ensureSQLiteReplyContextColumns(ctx context.Context)
 	}{
 		{table: "event_deliveries", name: "delivery_context", definition: "TEXT NOT NULL DEFAULT '{}'"},
 		{table: "activity_attempts", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
+		{table: "activity_attempts", name: "loop_generation", definition: "TEXT NOT NULL DEFAULT '{}'"},
+		{table: "activity_attempts", name: "loop_stage", definition: "TEXT"},
 		{table: "timers", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
 		{table: "mailbox", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
 	}

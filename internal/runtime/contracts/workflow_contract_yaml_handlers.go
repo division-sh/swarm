@@ -803,9 +803,8 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		ClearGates           yaml.Node                `yaml:"clear_gates"`
 		DataAccumulation     WorkflowDataAccumulation `yaml:"data_accumulation"`
 		Condition            string                   `yaml:"condition"`
-		CompletionRule       string                   `yaml:"completion_rule"`
 		Logic                string                   `yaml:"logic"`
-		PolicyRef            string                   `yaml:"policy_ref"`
+		Loop                 *LoopOperationSpec       `yaml:"loop"`
 		OnComplete           yaml.Node                `yaml:"on_complete"`
 		Rules                yaml.Node                `yaml:"rules"`
 		Accumulate           *AccumulateSpec          `yaml:"accumulate"`
@@ -831,9 +830,8 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		OnSuccess:        aux.OnSuccess,
 		DataAccumulation: aux.DataAccumulation,
 		Condition:        strings.TrimSpace(aux.Condition),
-		CompletionRule:   strings.TrimSpace(aux.CompletionRule),
 		Logic:            strings.TrimSpace(aux.Logic),
-		PolicyRef:        strings.TrimSpace(aux.PolicyRef),
+		Loop:             aux.Loop,
 		Accumulate:       aux.Accumulate,
 		Join:             aux.Join,
 		Compute:          aux.Compute,
@@ -1159,9 +1157,8 @@ var handlerFieldOptions = map[string]struct{}{
 	"clear_gates":             {},
 	"data_accumulation":       {},
 	"condition":               {},
-	"completion_rule":         {},
 	"logic":                   {},
-	"policy_ref":              {},
+	"loop":                    {},
 	"on_complete":             {},
 	"rules":                   {},
 	"accumulate":              {},

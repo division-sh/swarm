@@ -31,6 +31,7 @@ type workflowExpressionContext struct {
 	Accumulated                  any
 	FanOut                       map[string]any
 	Join                         map[string]any
+	Loop                         map[string]any
 	WorkflowName                 string
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
@@ -53,6 +54,7 @@ func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 		cel.Variable("accumulated", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
 		cel.Variable("join", cel.DynType),
+		cel.Variable("_loop", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -104,6 +106,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		"accumulated": normalizedCtx.Accumulated,
 		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
 		"join":        workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Join)),
+		"_loop":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Loop)),
 	})
 	if err != nil {
 		return false, err
@@ -174,6 +177,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 			FanOut:                       cloneStringAnyMap(ctx.FanOut),
 			Join:                         cloneStringAnyMap(ctx.Join),
+			Loop:                         cloneStringAnyMap(ctx.Loop),
 			WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 			QueryEntityCount:             ctx.QueryEntityCount,
 			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
@@ -213,6 +217,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 		FanOut:                       cloneStringAnyMap(ctx.FanOut),
 		Join:                         cloneStringAnyMap(ctx.Join),
+		Loop:                         cloneStringAnyMap(ctx.Loop),
 		WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
@@ -237,7 +242,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if err != nil {
 		return "", workflowExpressionContext{}, err
 	}
-	return normalized, normalizedCtx, nil
+	return workflowexpr.RewriteLoopRoot(normalized), normalizedCtx, nil
 }
 
 func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {

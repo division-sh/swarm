@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -52,6 +53,16 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 	}
 	for _, intent := range intents {
 		intent = intent.Normalized()
+		detail := map[string]any{
+			"activity_id": intent.ActivityID, "tool": intent.Tool, "effect_class": string(intent.EffectClass),
+			"success_event": intent.SuccessEvent, "failure_event": intent.FailureEvent,
+			"retry_max_attempts": intent.RetryMaxAttempts, "retry_backoff": intent.RetryBackoff,
+			"fork_policy": string(intent.ForkPolicy),
+		}
+		if intent.Generation.Valid() {
+			detail["loop_generation"] = intent.Generation.PayloadValue()
+			detail["loop_stage"] = intent.LoopStage
+		}
 		if err := w.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "info",
 			Component: "activity",
@@ -59,16 +70,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			EventID:   activityRequestEventID(intent),
 			EventType: intent.SuccessEvent,
 			EntityID:  intent.EntityID.String(),
-			Detail: map[string]any{
-				"activity_id":        intent.ActivityID,
-				"tool":               intent.Tool,
-				"effect_class":       string(intent.EffectClass),
-				"success_event":      intent.SuccessEvent,
-				"failure_event":      intent.FailureEvent,
-				"retry_max_attempts": intent.RetryMaxAttempts,
-				"retry_backoff":      intent.RetryBackoff,
-				"fork_policy":        string(intent.ForkPolicy),
-			},
+			Detail:    detail,
 		}); err != nil {
 			return err
 		}
@@ -123,6 +125,11 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_unsupported", "activity-runtime", "execute_activity", map[string]any{
 			"tool": intent.Tool, "effect_class": string(toolEffectClass),
 		}))
+	}
+	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
+			return d.publishActivityFailure(ctx, intent, err)
+		}
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.executeNonIdempotentActivityIntent(ctx, intent, tool)
@@ -179,6 +186,37 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
 }
 
+func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.Context, intent runtimeengine.ActivityIntent) error {
+	if !intent.Generation.Valid() {
+		return nil
+	}
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_loop_store_unavailable", "activity-runtime", "admit_read_only_activity", nil)
+	}
+	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
+	defer unlock()
+	return d.coordinator.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		instance, ok, err := d.coordinator.workflowStore.Load(txctx, intent.EntityID.String())
+		if err != nil {
+			return err
+		}
+		current := false
+		if ok {
+			current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
+		}
+		if err != nil {
+			return err
+		}
+		if !current {
+			return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "admit_read_only_activity", map[string]any{
+				"activity_id": intent.ActivityID, "loop_id": intent.Generation.LoopID,
+				"revision_id": intent.Generation.RevisionID, "expected_stage": intent.LoopStage,
+			})
+		}
+		return nil
+	})
+}
+
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) error {
 	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
@@ -188,23 +226,37 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	intent.Attempt = 1
-	requestEventID := activityRequestEventID(intent)
-	if existing, ok, err := d.coordinator.workflowStore.LoadActivityAttempt(ctx, requestEventID); err != nil {
-		return d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "load_activity_attempt"))
-	} else if ok {
-		return d.publishExistingActivityAttempt(ctx, intent, existing)
-	}
-	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
+	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
+	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
+	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
+	unlock()
 	if err != nil {
-		return d.publishActivityFailure(ctx, intent, err)
-	}
-	startRecord := activityAttemptStartRecord(intent, prepared.inputHash)
-	started, inserted, err := d.coordinator.workflowStore.StartActivityAttempt(ctx, startRecord)
-	if err != nil {
+		if reconciled, ok, loadErr := d.coordinator.workflowStore.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
+			if claimErr := validateActivityAttemptClaimIdentity(reconciled, startRecord); claimErr != nil {
+				return claimErr
+			}
+			return d.publishExistingActivityAttempt(ctx, intent, reconciled)
+		}
 		return d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "start_activity_attempt"))
 	}
 	if !inserted {
 		return d.publishExistingActivityAttempt(ctx, intent, started)
+	}
+	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
+	if err != nil {
+		cause := runtimefailures.FromError(err, "activity-runtime", "prepare_non_idempotent_http")
+		terminal := started.withTerminal(
+			ActivityAttemptStatusFailed,
+			activityResultEventID(intent, intent.FailureEvent),
+			intent.FailureEvent,
+			activityFailurePayload(intent, cause),
+			&cause.Failure,
+		)
+		stored, journalErr := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		if journalErr != nil {
+			return activityDependencyFailure(journalErr, intent.Tool, "complete_activity_attempt")
+		}
+		return d.publishJournaledActivityResult(ctx, intent, stored)
 	}
 	result, err := executePreparedActivityHTTPTool(ctx, prepared)
 	var terminal ActivityAttemptRecord
@@ -309,6 +361,10 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 		detail = map[string]any{}
 	}
 	detail["request_event_id"] = activityRequestEventID(intent)
+	if intent.Generation.Valid() {
+		detail["loop_generation"] = intent.Generation.PayloadValue()
+		detail["loop_stage"] = intent.LoopStage
+	}
 	_ = d.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
 		Level:     "info",
 		Component: "activity",
@@ -336,25 +392,27 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 }
 
 type activityRequestPayload struct {
-	ActivityID       string         `json:"activity_id"`
-	Tool             string         `json:"tool"`
-	Input            map[string]any `json:"input"`
-	EffectClass      string         `json:"effect_class"`
-	SuccessEvent     string         `json:"success_event"`
-	FailureEvent     string         `json:"failure_event"`
-	RetryMaxAttempts int            `json:"retry_max_attempts"`
-	RetryBackoff     string         `json:"retry_backoff"`
-	ForkPolicy       string         `json:"fork_policy"`
-	EntityID         string         `json:"entity_id"`
-	NodeID           string         `json:"node_id"`
-	FlowID           string         `json:"flow_id"`
-	HandlerEventKey  string         `json:"handler_event_key"`
-	SourceEventID    string         `json:"source_event_id"`
-	SourceRunID      string         `json:"source_run_id"`
-	SourceTaskID     string         `json:"source_task_id"`
-	ParentEventID    string         `json:"parent_event_id"`
-	ChainDepth       int            `json:"chain_depth"`
-	Attempt          int            `json:"attempt"`
+	ActivityID       string                       `json:"activity_id"`
+	Tool             string                       `json:"tool"`
+	Input            map[string]any               `json:"input"`
+	EffectClass      string                       `json:"effect_class"`
+	SuccessEvent     string                       `json:"success_event"`
+	FailureEvent     string                       `json:"failure_event"`
+	RetryMaxAttempts int                          `json:"retry_max_attempts"`
+	RetryBackoff     string                       `json:"retry_backoff"`
+	ForkPolicy       string                       `json:"fork_policy"`
+	EntityID         string                       `json:"entity_id"`
+	NodeID           string                       `json:"node_id"`
+	FlowID           string                       `json:"flow_id"`
+	HandlerEventKey  string                       `json:"handler_event_key"`
+	SourceEventID    string                       `json:"source_event_id"`
+	SourceRunID      string                       `json:"source_run_id"`
+	SourceTaskID     string                       `json:"source_task_id"`
+	ParentEventID    string                       `json:"parent_event_id"`
+	ChainDepth       int                          `json:"chain_depth"`
+	Attempt          int                          `json:"attempt"`
+	Generation       attemptgeneration.Generation `json:"loop_generation,omitempty"`
+	LoopStage        string                       `json:"loop_stage,omitempty"`
 }
 
 func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, error) {
@@ -415,6 +473,7 @@ func activityRequestEventID(intent runtimeengine.ActivityIntent) string {
 		intent.HandlerEventKey,
 		intent.ActivityID,
 		fmt.Sprintf("%d", intent.Attempt),
+		intent.Generation.RevisionID,
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-request:"+strings.Join(parts, "\x00"))).String()
 }
@@ -432,6 +491,7 @@ func activityResultEventID(intent runtimeengine.ActivityIntent, eventType string
 		intent.ActivityID,
 		intent.Tool,
 		eventidentity.Normalize(eventType),
+		intent.Generation.RevisionID,
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-result:"+strings.Join(parts, "\x00"))).String()
 }
@@ -505,6 +565,8 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 		ParentEventID:    intent.ParentEventID,
 		ChainDepth:       intent.ChainDepth,
 		Attempt:          intent.Attempt,
+		Generation:       intent.Generation,
+		LoopStage:        intent.LoopStage,
 	}
 }
 
@@ -534,6 +596,8 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		ParentEventID:    payload.ParentEventID,
 		ChainDepth:       payload.ChainDepth,
 		Attempt:          payload.Attempt,
+		Generation:       payload.Generation,
+		LoopStage:        payload.LoopStage,
 	}.Normalized()
 	if intent.ActivityID == "" || intent.Tool == "" || intent.SuccessEvent == "" || intent.FailureEvent == "" {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s is missing required activity identity", evt.ID())
@@ -1164,13 +1228,14 @@ func (d pipelineActivityDispatcher) publishActivitySuccess(ctx context.Context, 
 }
 
 func activitySuccessPayload(intent runtimeengine.ActivityIntent, result any) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"activity_id":  intent.ActivityID,
 		"tool":         intent.Tool,
 		"effect_class": string(intent.EffectClass),
 		"attempt":      intent.Attempt,
 		"result":       result,
 	}
+	return activityPayloadWithGeneration(intent, payload)
 }
 
 func (d pipelineActivityDispatcher) publishActivityFailure(ctx context.Context, intent runtimeengine.ActivityIntent, cause error) error {
@@ -1179,13 +1244,21 @@ func (d pipelineActivityDispatcher) publishActivityFailure(ctx context.Context, 
 
 func activityFailurePayload(intent runtimeengine.ActivityIntent, cause error) map[string]any {
 	failure := runtimefailures.Normalize(cause, "activity-runtime", "activity_failure_payload")
-	return map[string]any{
+	payload := map[string]any{
 		"activity_id":  intent.ActivityID,
 		"tool":         intent.Tool,
 		"effect_class": string(intent.EffectClass),
 		"attempt":      intent.Attempt,
 		"failure":      failure,
 	}
+	return activityPayloadWithGeneration(intent, payload)
+}
+
+func activityPayloadWithGeneration(intent runtimeengine.ActivityIntent, payload map[string]any) map[string]any {
+	if generation := intent.Generation.Normalize(); generation.Valid() {
+		payload[generation.RevisionField] = generation.RevisionID
+	}
+	return payload
 }
 
 func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent, eventType string, payload map[string]any) error {
@@ -1259,6 +1332,7 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 		return fmt.Errorf("activity attempt %s has no terminal journal result", rec.RequestEventID)
 	}
 	intent.Attempt = rec.Attempt
+	intent.Generation = rec.Generation
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}
@@ -1285,6 +1359,8 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 		FailureEvent:    intent.FailureEvent,
 		InputHash:       inputHash,
 		ReplyContextID:  intent.Context.ReplyContextID(),
+		Generation:      intent.Generation,
+		LoopStage:       intent.LoopStage,
 	}
 }
 

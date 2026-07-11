@@ -23,6 +23,7 @@ type ActivitySite struct {
 	RuleID          string
 	RuleIndex       int
 	Spec            ActivitySpec
+	RevisionField   string
 }
 
 type ActivityResultEvents struct {
@@ -198,6 +199,10 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 			"failure":      {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", Description: "Canonical durable activity failure envelope."},
 		}
 	}
+	if revisionField := strings.TrimSpace(site.RevisionField); revisionField != "" {
+		properties[revisionField] = EventFieldSpec{Type: "text", Description: "Owning bounded-loop revision identity."}
+		required = append(required, revisionField)
+	}
 	return EventCatalogEntry{
 		Swarm: EventSwarmMetadata{
 			Note:     description,
@@ -256,6 +261,15 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 			},
 		},
 	}
+	if revisionField := strings.TrimSpace(site.RevisionField); revisionField != "" {
+		for eventType, schema := range out {
+			required, _ := schema.Schema["required"].([]string)
+			schema.Schema["required"] = append(required, revisionField)
+			properties, _ := schema.Schema["properties"].(map[string]any)
+			properties[revisionField] = map[string]any{"type": "string"}
+			out[eventType] = schema
+		}
+	}
 	return out
 }
 
@@ -312,7 +326,21 @@ func (b *WorkflowContractBundle) ActivitySites() []ActivitySite {
 		if source, ok := b.NodeContractSource(nodeID); ok {
 			flowID = strings.TrimSpace(source.FlowID)
 		}
-		out = append(out, ActivitySitesForNode(flowID, nodeID, b.NodeEventHandlers(nodeID))...)
+		for _, site := range ActivitySitesForNode(flowID, nodeID, b.NodeEventHandlers(nodeID)) {
+			handler := b.NodeEventHandlers(nodeID)[site.HandlerEventKey]
+			if handler.Loop != nil {
+				_, loopID, err := handler.Loop.Operation()
+				if err == nil {
+					for _, plan := range b.WorkflowLoops() {
+						if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.ID) == loopID {
+							site.RevisionField = strings.TrimSpace(plan.RevisionField)
+							break
+						}
+					}
+				}
+			}
+			out = append(out, site)
+		}
 	}
 	return out
 }

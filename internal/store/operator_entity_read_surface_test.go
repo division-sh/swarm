@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -44,7 +46,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 			t.Fatalf("seed entity %s/%s: %v", runID, entityID, err)
 		}
 	}
-	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, `{"score":3,"accumulator":{"count":2},"notes":["a",{"text":"probe"}]}`, base.Add(time.Minute))
+	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, operatorLoopAccumulatedJSON(t, runA, entityA, base), base.Add(time.Minute))
 	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
@@ -106,6 +108,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if notes, ok := full.Accumulated["notes"].([]any); !ok || len(notes) != 2 {
 		t.Fatalf("full accumulated notes = %#v, want two entries", full.Accumulated["notes"])
 	}
+	assertOperatorLoopProjection(t, full)
 	if _, err := pg.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, ErrAmbiguousEntityRunID) {
 		t.Fatalf("LoadOperatorEntity ambiguous = %v, want ErrAmbiguousEntityRunID", err)
 	}
@@ -194,7 +197,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 			t.Fatalf("seed sqlite entity %s/%s: %v", runID, entityID, err)
 		}
 	}
-	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, `{"score":3,"accumulator":{"count":2},"notes":["a",{"text":"probe"}]}`, base.Add(time.Minute))
+	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, operatorLoopAccumulatedJSON(t, runA, entityA, base), base.Add(time.Minute))
 	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
@@ -260,6 +263,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
 		t.Fatalf("full accumulated bucket = %#v, want count", full.Accumulated["accumulator"])
 	}
+	assertOperatorLoopProjection(t, full)
 	if notes, ok := full.Accumulated["notes"].([]any); !ok || len(notes) != 2 {
 		t.Fatalf("full accumulated notes = %#v, want two entries", full.Accumulated["notes"])
 	}
@@ -329,5 +333,37 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	}
 	if _, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: "not-a-uuid"}); !errors.Is(err, ErrInvalidEntityReadParam) {
 		t.Fatalf("AggregateOperatorEntities invalid run id = %v, want ErrInvalidEntityReadParam", err)
+	}
+}
+
+func operatorLoopAccumulatedJSON(t *testing.T, runID, entityID string, now time.Time) string {
+	t.Helper()
+	activation, err := loopruntime.New(runID, entityID, "review", "revision", "revision_id", uuid.NewString(), "collecting", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := loopruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	persisted := map[string]any{
+		"score": float64(3), "accumulator": map[string]any{"count": float64(2)},
+		"notes":               []any{"a", map[string]any{"text": "probe"}},
+		loopruntime.BucketKey: buckets[loopruntime.BucketKey],
+	}
+	raw, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func assertOperatorLoopProjection(t *testing.T, full OperatorEntityFull) {
+	t.Helper()
+	if _, leaked := full.Accumulated[loopruntime.BucketKey]; leaked {
+		t.Fatalf("reserved loop state leaked through accumulated readback: %#v", full.Accumulated)
+	}
+	if len(full.Loops) != 1 || full.Loops[0].ID != "revision" || full.Loops[0].Attempt != 1 || full.Loops[0].Status != loopruntime.StatusOpen {
+		t.Fatalf("typed loop projection = %#v", full.Loops)
 	}
 }

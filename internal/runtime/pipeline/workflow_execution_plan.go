@@ -25,7 +25,6 @@ type handlerExecutionPlan struct {
 	InstanceIDFrom   string
 	InstanceIDPath   paths.Path
 	ConfigFrom       *runtimecontracts.ConfigFromSpec
-	CompletionRule   string
 	Accumulate       *runtimecontracts.AccumulateSpec
 	Compute          *runtimecontracts.ComputeSpec
 	FanOut           *runtimecontracts.FanOutSpec
@@ -75,7 +74,6 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		InstanceIDFrom:   strings.TrimSpace(handler.Action.InstanceIDFrom),
 		InstanceIDPath:   handler.Action.InstanceIDPath,
 		ConfigFrom:       handler.Action.ConfigFrom,
-		CompletionRule:   strings.TrimSpace(handler.CompletionRule),
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,
 		FanOut:           handler.FanOut,

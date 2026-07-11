@@ -33,17 +33,14 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 	toSchedule := make([]Schedule, 0, 2)
 	toCancel := make([]Schedule, 0, 2)
 	now := time.Now().UTC()
-	var lifecycleErr error
-	err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
-			lifecycleErr = fmt.Errorf("decode join state: %w", err)
-			return
+			return fmt.Errorf("decode join state: %w", err)
 		}
 		activations, err := joinruntime.List(carrier.StateBuckets)
 		if err != nil {
-			lifecycleErr = fmt.Errorf("list join state: %w", err)
-			return
+			return fmt.Errorf("list join state: %w", err)
 		}
 		for _, activation := range activations {
 			if activation.Stage != currentStage || activation.Stage == nextStage || !activation.CloseForStageExit() {
@@ -55,60 +52,56 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			}
 			activation.TimerCancelled = true
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
-				lifecycleErr = fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
-				return
+				return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 			}
 			toCancel = append(toCancel, joinSchedule(entityID, *instance, activation, kind))
 		}
 
 		for _, plan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {
 			if plan.ResultType.Empty() {
-				lifecycleErr = fmt.Errorf("join %s has no resolved output type in the semantic plan", plan.Spec.EffectiveID())
-				return
+				return fmt.Errorf("join %s has no resolved output type in the semantic plan", plan.Spec.EffectiveID())
 			}
 			members, ok := joinMemberSnapshot(instance.Metadata, plan.Spec.Members.From)
 			if !ok {
-				lifecycleErr = fmt.Errorf("join %s members source %s is not a unique list of non-empty text", plan.Spec.EffectiveID(), plan.Spec.Members.From)
-				return
+				return fmt.Errorf("join %s members source %s is not a unique list of non-empty text", plan.Spec.EffectiveID(), plan.Spec.Members.From)
 			}
 			window := ""
 			if plan.Spec.Window != nil {
 				window = strings.TrimSpace(asString(instance.Metadata[joinTopLevelField(plan.Spec.Window.From, "entity")]))
 				if window == "" {
-					lifecycleErr = fmt.Errorf("join %s window source %s resolved empty", plan.Spec.EffectiveID(), plan.Spec.Window.From)
-					return
+					return fmt.Errorf("join %s window source %s resolved empty", plan.Spec.EffectiveID(), plan.Spec.Window.From)
 				}
 			}
-			key := joinruntime.ActivationKey(plan.Spec.Stage, plan.Spec.EffectiveID(), window)
+			generation, _, generationErr := workflowLoopGenerationForStage(pc.SemanticSource(), instance, nextStage)
+			if generationErr != nil {
+				return generationErr
+			}
+			key := joinruntime.ActivationKeyForGeneration(plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
 			if _, found, err := joinruntime.Load(carrier.StateBuckets, plan.NodeID, key); err != nil {
-				lifecycleErr = fmt.Errorf("load join %s: %w", key, err)
-				return
+				return fmt.Errorf("load join %s: %w", key, err)
 			} else if found {
 				continue
 			}
 			delay := workflowTimerRenderedDelay(plan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), plan.FlowID))
 			interval, ok := timeridentity.ParseDelayDuration(delay)
 			if !ok {
-				lifecycleErr = fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", plan.Spec.EffectiveID(), plan.Spec.Timeout.After)
-				return
+				return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", plan.Spec.EffectiveID(), plan.Spec.Timeout.After)
 			}
-			ref := timeridentity.NewJoinRef(plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window)
+			ref := timeridentity.NewJoinRefForGeneration(plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
 			handle := timeridentity.JoinTimeoutHandle(ref)
 			activation, err := joinruntime.NewActivation(
 				plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, window, members,
-				now, now.Add(interval), handle.TaskID(), joinTimeoutEvent,
+				now, now.Add(interval), handle.TaskID(), joinTimeoutEvent, generation,
 			)
 			if err != nil {
-				lifecycleErr = fmt.Errorf("arm join %s: %w", plan.Spec.EffectiveID(), err)
-				return
+				return fmt.Errorf("arm join %s: %w", plan.Spec.EffectiveID(), err)
 			}
 			kind := timeridentity.TimerHandleJoinTimeout
 			complete, err := joinruntime.CompletionSatisfied(activation, plan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
 				return workflowexpr.EvalJoinBool(expression, joinContext, plan.ResultType)
 			})
 			if err != nil {
-				lifecycleErr = fmt.Errorf("evaluate join %s completion at arm: %w", plan.Spec.EffectiveID(), err)
-				return
+				return fmt.Errorf("evaluate join %s completion at arm: %w", plan.Spec.EffectiveID(), err)
 			}
 			if complete {
 				activation.Close(joinruntime.CloseReasonComplete, true, false)
@@ -119,18 +112,15 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 				activation.TimerEventType = joinCompleteEvent
 			}
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
-				lifecycleErr = fmt.Errorf("persist join %s: %w", activation.Key(), err)
-				return
+				return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 			}
 			toSchedule = append(toSchedule, joinSchedule(entityID, *instance, activation, kind))
 		}
 		instance.StateBuckets = carrier.PersistedStateBuckets()
+		return nil
 	})
 	if err != nil {
 		return err
-	}
-	if lifecycleErr != nil {
-		return lifecycleErr
 	}
 	for _, schedule := range toCancel {
 		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, schedule)); err != nil {
@@ -278,12 +268,16 @@ func joinTopLevelField(path, root string) string {
 }
 
 func joinSchedule(entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) Schedule {
-	ref := timeridentity.NewJoinRef(activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window)
+	ref := timeridentity.NewJoinRefForGeneration(activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
 	handle := timeridentity.JoinTimeoutHandle(ref)
 	eventType := joinTimeoutEvent
 	if kind == timeridentity.TimerHandleJoinComplete {
 		handle = timeridentity.JoinCompleteHandle(ref)
 		eventType = joinCompleteEvent
+	}
+	payload := handle.PayloadMetadata()
+	if generation := activation.Generation.Normalize(); generation.Valid() {
+		payload[generation.RevisionField] = generation.RevisionID
 	}
 	return Schedule{
 		AgentID:      runtimeWorkflowID,
@@ -293,6 +287,6 @@ func joinSchedule(entityID string, instance WorkflowInstance, activation joinrun
 		EntityID:     strings.TrimSpace(entityID),
 		FlowInstance: strings.Trim(strings.TrimSpace(instance.StorageRef), "/"),
 		TaskID:       handle.TaskID(),
-		Payload:      mustJSON(handle.PayloadMetadata()),
+		Payload:      mustJSON(payload),
 	}
 }

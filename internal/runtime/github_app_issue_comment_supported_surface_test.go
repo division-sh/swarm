@@ -458,8 +458,11 @@ func assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t *testin
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 	publishGitHubIssueComment(t, backend, bus, gateway, webhookPath, deliveryID, installationID, label)
 	inboundEventID := loadGitHubAppIssueCommentInboundEventID(t, backend, deliveryID)
-	if got := countGitHubAppIssueCommentActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
-		t.Fatalf("%s %s activity attempts = %d, want 0", backend.name, label, got)
+	if attempt := waitForGitHubAppIssueCommentTerminalActivityAttempt(t, backend, inboundEventID); attempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
+		t.Fatalf("%s %s activity status = %q, want failed", backend.name, label, attempt.Status)
+	}
+	if got := countGitHubAppIssueCommentActivityAttemptsForSource(t, backend, inboundEventID); got != 1 {
+		t.Fatalf("%s %s activity attempts = %d, want one failed claim", backend.name, label, got)
 	}
 	requireGitHubAppIssueCommentFailureEventEventually(t, backend, label, inboundEventID)
 	if got := fake.tokenRequestCount(); got != beforeTokens {

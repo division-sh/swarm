@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,9 +22,11 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -63,6 +66,41 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	}
 	if got := payload.Input["url"]; got != "https://example.com/source" {
 		t.Fatalf("request input url = %#v", got)
+	}
+}
+
+func TestLoopActivityRequestResultAndForkCarryGeneration(t *testing.T) {
+	entityID := uuid.NewString()
+	activation, err := loopruntime.New("source-run", entityID, "validation", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	forked, err := loopruntime.Fork(activation, "fork-run", entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := testNonIdempotentActivityIntent("source-run", uuid.NewString(), entityID)
+	source.Generation, source.LoopStage = activation.Generation(), "review"
+	fork := source
+	fork.SourceRunID, fork.Generation = "fork-run", forked.Generation()
+	if activityRequestEventID(source) == activityRequestEventID(fork) || activityResultEventID(source, source.SuccessEvent) == activityResultEventID(fork, fork.SuccessEvent) {
+		t.Fatal("fork-local activity identity retained source loop generation")
+	}
+	emit, err := activityRequestEmitIntent(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := activityIntentFromRequestEvent(emit.Event)
+	if err != nil || !roundTrip.Generation.Equal(source.Generation) || roundTrip.LoopStage != "review" {
+		t.Fatalf("activity request generation round trip = %#v err=%v", roundTrip, err)
+	}
+	for name, payload := range map[string]map[string]any{
+		"success": activitySuccessPayload(source, map[string]any{"ok": true}),
+		"failure": activityFailurePayload(source, runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_failed", "test", "activity", nil)),
+	} {
+		if payload[activation.RevisionField] != activation.RevisionID {
+			t.Fatalf("%s payload revision = %#v, want %s", name, payload[activation.RevisionField], activation.RevisionID)
+		}
 	}
 }
 
@@ -880,6 +918,80 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 	}
 }
 
+func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatal(err)
+	}
+	runner := &activityCommitAckLossRunner{db: db}
+	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"provider_write": {
+			HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"}, HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL},
+		},
+	}})
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
+	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
+	runner.failNext.Store(true)
+	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
+		t.Fatalf("execute after commit acknowledgment loss: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("provider calls = %d, want no blind dispatch", calls.Load())
+	}
+	record, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil || !ok || record.Status != ActivityAttemptStatusStarted || !record.Generation.Equal(intent.Generation) {
+		t.Fatalf("reconciled claim = %#v found=%v err=%v", record, ok, err)
+	}
+	if len(bus.publishes) != 0 {
+		t.Fatalf("published results after indeterminate claim: %#v", bus.publishes)
+	}
+}
+
+type activityCommitAckLossRunner struct {
+	db       *sql.DB
+	failNext atomic.Bool
+}
+
+func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	postCommit := make([]func(), 0, 2)
+	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
+	if err := fn(txctx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	flushPipelinePostCommitActions(postCommit)
+	if r.failNext.Swap(false) {
+		return errors.New("simulated commit acknowledgment loss")
+	}
+	return nil
+}
+
 func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResult(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -969,7 +1081,7 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	}
 }
 
-func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t *testing.T) {
+func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -1016,10 +1128,10 @@ func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t
 	if calls != 0 {
 		t.Fatalf("server calls = %d, want missing credential to fail before provider dispatch", calls)
 	}
-	if _, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent)); err != nil {
+	if rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent)); err != nil {
 		t.Fatalf("LoadActivityAttempt: %v", err)
-	} else if ok {
-		t.Fatal("activity attempt journal row exists, want missing credential to fail before started journal")
+	} else if !ok || rec.Status != ActivityAttemptStatusFailed {
+		t.Fatalf("activity attempt = %#v found=%v, want journaled failed claim", rec, ok)
 	}
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
@@ -1030,7 +1142,7 @@ func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t
 	}
 }
 
-func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalAndDispatch(t *testing.T) {
+func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatch(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -1072,10 +1184,10 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalA
 	if calls != 0 {
 		t.Fatalf("Telegram calls = %d, want missing token to fail before dispatch", calls)
 	}
-	if _, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent)); err != nil {
+	if rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent)); err != nil {
 		t.Fatalf("LoadActivityAttempt: %v", err)
-	} else if ok {
-		t.Fatal("activity attempt journal row exists, want missing token to fail before started journal")
+	} else if !ok || rec.Status != ActivityAttemptStatusFailed {
+		t.Fatalf("activity attempt = %#v found=%v, want journaled failed claim", rec, ok)
 	}
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
@@ -1315,6 +1427,8 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			result_payload TEXT,
 			failure TEXT,
 			input_hash TEXT NOT NULL,
+			loop_generation TEXT NOT NULL DEFAULT '{}',
+			loop_stage TEXT,
 			reply_context_id TEXT,
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at TEXT,

@@ -23,6 +23,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		Transitions:            deriveStageTimerTransitions(bundle),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
+		Loops:                  nil,
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		Actions:                deriveWorkflowActionEntries(bundle),
 		GuardByID:              map[string]GuardActionEntry{},
@@ -149,7 +150,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Emit:                 cloneEmitSpec(handler.Emit),
 				OnSuccess:            HandlerOnSuccessSpec{Emit: cloneEmitSpec(handler.OnSuccess.Emit)},
 				Condition:            strings.TrimSpace(handler.Condition),
-				CompletionRule:       strings.TrimSpace(handler.CompletionRule),
+				Loop:                 handler.Loop,
 				OnComplete:           handler.OnComplete,
 				Rules:                handler.Rules,
 				Accumulate:           handler.Accumulate,
@@ -189,7 +190,65 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		}
 		semantics.NodeHandlers[nodeID] = handlers
 	}
+	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
 	bundle.Semantics = semantics
+}
+
+func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []HandlerTransitionSemantic) []WorkflowLoopPlan {
+	if bundle == nil {
+		return nil
+	}
+	plans := make([]WorkflowLoopPlan, 0)
+	add := func(flowID string, declarations FlowLoopDeclarations) {
+		for _, declaration := range declarations.Entries {
+			plans = append(plans, WorkflowLoopPlan{
+				FlowID:        strings.TrimSpace(flowID),
+				ID:            strings.TrimSpace(declaration.ID),
+				RevisionField: strings.TrimSpace(declaration.RevisionField),
+				MaxAttempts:   declaration.MaxAttempts,
+				Escape:        declaration.Escape,
+			})
+		}
+	}
+	if bundle.RootSchema != nil {
+		add("", bundle.RootSchema.LoopDeclarations)
+	}
+	for flowID, schema := range bundle.FlowSchemas {
+		add(flowID, schema.LoopDeclarations)
+	}
+	for _, transition := range transitions {
+		if transition.Loop == nil {
+			continue
+		}
+		kind, loopID, err := transition.Loop.Operation()
+		if err != nil {
+			continue
+		}
+		for idx := range plans {
+			if plans[idx].ID != loopID || plans[idx].FlowID != strings.TrimSpace(transition.FlowID) {
+				continue
+			}
+			operation := WorkflowLoopOperationPlan{
+				NodeID:       strings.TrimSpace(transition.NodeID),
+				HandlerEvent: strings.TrimSpace(transition.EventType),
+				Kind:         kind,
+				LoopID:       loopID,
+				From:         strings.TrimSpace(transition.Loop.From),
+				AdvancesTo:   strings.TrimSpace(transition.AdvancesTo),
+				Emit:         cloneEmitSpec(transition.Emit),
+			}
+			plans[idx].Operations = append(plans[idx].Operations, operation)
+			plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.From)
+			if operation.Kind == LoopOperationStart && plans[idx].EntryStage == "" {
+				plans[idx].EntryStage = operation.AdvancesTo
+				plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.AdvancesTo)
+			}
+			if (operation.Kind == LoopOperationAdmit || operation.Kind == LoopOperationRepeat) && operation.AdvancesTo != "" {
+				plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.AdvancesTo)
+			}
+		}
+	}
+	return plans
 }
 
 func joinOutputField(path string) string {
@@ -343,6 +402,9 @@ func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (Wor
 		Trigger:          strings.TrimSpace(transition.EventType),
 		Node:             strings.TrimSpace(transition.NodeID),
 		DataAccumulation: transition.DataAccumulation,
+	}
+	if transition.Loop != nil && strings.TrimSpace(transition.Loop.From) != "" {
+		out.From = []string{strings.TrimSpace(transition.Loop.From)}
 	}
 	if guardID := strings.TrimSpace(firstTransitionGuardID(transition.Guard)); guardID != "" {
 		out.Guards = []string{guardID}

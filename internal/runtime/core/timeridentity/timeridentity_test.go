@@ -3,7 +3,19 @@ package timeridentity
 import (
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 )
+
+func TestTimerHandleRoundTripPreservesLoopGeneration(t *testing.T) {
+	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
+	handle := WorkflowTimerHandle("review.expiry")
+	handle.Generation = generation
+	parsed, ok := ParseTimerHandle(handle.PayloadMetadata())
+	if !ok || !parsed.Generation.Equal(generation) || parsed.TaskID() != handle.TaskID() {
+		t.Fatalf("parsed handle = %#v ok=%v", parsed, ok)
+	}
+}
 
 func TestParseStartTrigger(t *testing.T) {
 	trigger, err := ParseStartTrigger("state:active")

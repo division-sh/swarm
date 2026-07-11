@@ -261,6 +261,22 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			}
 		}
 	}
+	if catalog.hasTable("activity_attempts") {
+		for _, column := range []struct {
+			name string
+			sql  string
+		}{
+			{name: "loop_generation", sql: `ALTER TABLE activity_attempts ADD COLUMN IF NOT EXISTS loop_generation JSONB NOT NULL DEFAULT '{}'::jsonb`},
+			{name: "loop_stage", sql: `ALTER TABLE activity_attempts ADD COLUMN IF NOT EXISTS loop_stage TEXT`},
+		} {
+			if catalog.hasColumns("activity_attempts", column.name) {
+				continue
+			}
+			if _, err := s.DB.ExecContext(ctx, column.sql); err != nil {
+				return fmt.Errorf("ensure activity_attempts.%s column: %w", column.name, err)
+			}
+		}
+	}
 	if catalog.hasTable("event_receipts") && catalog.hasColumns("event_receipts", "event_id", "subscriber_type", "subscriber_id") {
 		if err := s.ensureEventReceiptsTypedSubscriberIdentity(ctx); err != nil {
 			return err

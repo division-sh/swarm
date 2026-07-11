@@ -14,7 +14,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -519,6 +521,162 @@ func TestWorkflowTimerRecurringSpecNormalizesCanonicalDayDelay(t *testing.T) {
 	if want := "@every 168h0m0s"; got != want {
 		t.Fatalf("workflowTimerRecurringSpec = %q, want %q", got, want)
 	}
+}
+
+func TestLoopConnectedRecurringTimerFailsClosedAtRuntimeOnBothStores(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "validation",
+		Loops: []runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", RevisionField: "revision_id", RegionStages: []string{"review"},
+		}},
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "review.poll", Stage: "review", StageOwned: true, Event: "review.poll",
+			StartOn: "state:review", Delay: "1h", Recurring: true,
+		}},
+	}}
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+			schedules := &recordingSchedulePersistence{}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store, TimerScheduleStore: schedules,
+			})
+			if err := pc.applyWorkflowTimerIntents(ctx, entityID, "queued", "review", "work.started"); err == nil || !strings.Contains(err.Error(), "recurring timer review.poll") {
+				t.Fatalf("runtime recurring-timer admission error = %v", err)
+			}
+			if len(schedules.schedules) != 0 {
+				t.Fatalf("runtime bypass persisted schedules: %#v", schedules.schedules)
+			}
+
+			if err := store.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+				activation, ok, err := loopruntime.Load(mustWorkflowStateCarrier(t, instance).StateBuckets, "validation", "revision")
+				if err != nil || !ok {
+					return err
+				}
+				instance.TimerState = []WorkflowTimerState{{
+					TimerID: "review.poll", TaskID: "legacy-poll", EventType: "review.poll", CreatedAt: time.Now().UTC(),
+					FiresAt: time.Now().UTC().Add(time.Hour), StartedBy: "state:review", Recurring: true, Generation: activation.Generation(),
+				}}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.applyWorkflowTimerIntents(ctx, entityID, "review", "approved", "review.approved"); err == nil || !strings.Contains(err.Error(), "recurring timer review.poll") {
+				t.Fatalf("recovery recurring-timer admission error = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoopTimerCannotBypassCloseAtRuntimeOnBothStores(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "validation",
+		Loops: []runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", RevisionField: "revision_id", RegionStages: []string{"review"},
+		}},
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "review.expire", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+			StartOn: "state:review", Delay: "1h", AdvancesTo: "expired",
+		}},
+	}}
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+			schedules := &recordingSchedulePersistence{}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store, TimerScheduleStore: schedules,
+			})
+			if err := pc.applyWorkflowTimerIntents(ctx, entityID, "queued", "review", "work.started"); err == nil || !strings.Contains(err.Error(), "cannot advance directly outside") {
+				t.Fatalf("runtime timer lifecycle-bypass error = %v", err)
+			}
+			if len(schedules.schedules) != 0 {
+				t.Fatalf("runtime bypass persisted schedules: %#v", schedules.schedules)
+			}
+		})
+	}
+}
+
+func TestLoopTimerGenerationRejectsPriorAttemptAndAdvancesCurrentAttemptOnBothStores(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "validation",
+		Loops: []runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", RevisionField: "revision_id", RegionStages: []string{"review", "drafting"},
+		}},
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "review.advance", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+			StartOn: "state:review", Delay: "1h", AdvancesTo: "drafting",
+		}},
+	}}
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			prior, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+			var current loopruntime.Activation
+			now := time.Now().UTC().Round(time.Microsecond)
+			if err := store.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+				carrier := mustWorkflowStateCarrier(t, instance)
+				activation, ok, err := loopruntime.Load(carrier.StateBuckets, "validation", "revision")
+				if err != nil || !ok {
+					return err
+				}
+				if _, err := activation.Repeat("review", uuid.NewString(), now); err != nil {
+					return err
+				}
+				if err := loopruntime.Store(carrier.StateBuckets, activation); err != nil {
+					return err
+				}
+				current = activation
+				priorHandle := timeridentity.WorkflowTimerHandle("review.advance")
+				priorHandle.Generation = prior.Generation()
+				currentHandle := timeridentity.WorkflowTimerHandle("review.advance")
+				currentHandle.Generation = current.Generation()
+				instance.StateBuckets = carrier.PersistedStateBuckets()
+				instance.TimerState = []WorkflowTimerState{
+					{TimerID: "review.advance", TaskID: priorHandle.TaskID(), EventType: runtimecontracts.WorkflowStageTimerInternalEvent, CreatedAt: now, FiresAt: now.Add(time.Hour), StartedBy: "state:review", Generation: prior.Generation()},
+					{TimerID: "review.advance", TaskID: currentHandle.TaskID(), EventType: runtimecontracts.WorkflowStageTimerInternalEvent, CreatedAt: now, FiresAt: now.Add(time.Hour), StartedBy: "state:review", Generation: current.Generation()},
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store,
+			})
+			fire := func(generation loopruntime.Activation, eventID string) (bool, bool, error) {
+				handle := timeridentity.WorkflowTimerHandle("review.advance")
+				handle.Generation = generation.Generation()
+				evt := eventtest.RootIngress(eventID, events.EventType(runtimecontracts.WorkflowStageTimerInternalEvent), "runtime", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0,
+					runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
+				return pc.handleWorkflowStageTimerFire(ctx, evt)
+			}
+			if recognized, fired, err := fire(prior, uuid.NewString()); err != nil || !recognized || fired {
+				t.Fatalf("prior-generation fire = recognized %v fired %v err %v", recognized, fired, err)
+			}
+			if recognized, fired, err := fire(current, uuid.NewString()); err != nil || !recognized || !fired {
+				t.Fatalf("current-generation fire = recognized %v fired %v err %v", recognized, fired, err)
+			}
+			loaded, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok || loaded.CurrentState != "drafting" {
+				t.Fatalf("loaded instance = %#v found=%v err=%v", loaded, ok, err)
+			}
+			carrier := mustWorkflowStateCarrier(t, &loaded)
+			activation, found, err := loopruntime.Load(carrier.StateBuckets, "validation", "revision")
+			if err != nil || !found || activation.CurrentStage != "drafting" || !activation.Generation().Equal(current.Generation()) {
+				t.Fatalf("current activation = %#v found=%v err=%v", activation, found, err)
+			}
+		})
+	}
+}
+
+func mustWorkflowStateCarrier(t *testing.T, instance *WorkflowInstance) runtimeengine.StateCarrier {
+	t.Helper()
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return carrier
 }
 
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -700,6 +701,11 @@ func scanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode entity accumulator: %w", err)
 		}
+		loops, err := loopruntime.PublicActivations(accumulator)
+		if err != nil {
+			return nil, fmt.Errorf("decode entity loop state: %w", err)
+		}
+		accumulator = loopruntime.PublicStateBuckets(accumulator)
 		enteredStateAt, err := toolTimeString(enteredStateAtRaw)
 		if err != nil {
 			return nil, fmt.Errorf("decode entity entered_state_at: %w", err)
@@ -722,6 +728,7 @@ func scanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 			"gates":            gates,
 			"fields":           fields,
 			"accumulator":      accumulator,
+			"loops":            loops,
 			"revision":         revision,
 			"entered_state_at": enteredStateAt,
 			"created_at":       createdAt,

@@ -225,6 +225,15 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 					if strings.TrimSpace(edge.TimerID) != "" {
 						detail += " timer " + strings.TrimSpace(edge.TimerID)
 					}
+					if strings.TrimSpace(edge.LoopID) != "" {
+						detail += " loop " + edge.LoopID + " " + edge.LoopOperation
+						if edge.MaxAttempts != "" {
+							detail += " max_attempts=" + edge.MaxAttempts
+						}
+						if edge.LoopEscape {
+							detail += " escape"
+						}
+					}
 					fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
 				}
 			}
