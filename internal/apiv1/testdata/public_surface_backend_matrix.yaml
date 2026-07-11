@@ -9,7 +9,7 @@ source:
 policy:
   closure_level: matrix_owner_first_slice_complete
   claims_parent_closure: false
-  named_full_conformance_command: go test ./internal/runtime/cataloge2e -count=1
+  full_proof_projection: catalog-full
   required_smoke_policy: >
     Required PR smoke is row/accounting validation plus the smallest selected-backend
     proof refs needed for launch-critical SQLite-default and explicit-Postgres
@@ -995,8 +995,8 @@ rows:
     proof_refs:
       - kind: go_test
         name: TestCatalogRejectsStaticCreateEntityHandlerFixture
-      - kind: manual_command
-        command: go test ./internal/runtime/cataloge2e -count=1
+      - kind: proof_projection
+        projection: catalog-full
     notes: >
       #1554 retires authored static create_entity ownership. The old positive
       exact-once mutation-log fixture is no longer a valid public-surface proof;

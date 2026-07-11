@@ -1,247 +1,191 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
-func TestGenerateShardSnapshotUsesSourceLabel(t *testing.T) {
+func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 	dir := t.TempDir()
-	packagesPath := filepath.Join(dir, "packages.txt")
-	weightsPath := filepath.Join(dir, "weights.json")
-	snapshotPath := filepath.Join(dir, "snapshot.json")
-
-	if err := os.WriteFile(packagesPath, []byte("github.com/division-sh/swarm/a\ngithub.com/division-sh/swarm/b\n"), 0o600); err != nil {
-		t.Fatalf("write packages: %v", err)
-	}
-	weights := []byte(`{"Action":"pass","Package":"github.com/division-sh/swarm/a","Elapsed":3}` + "\n" +
-		`{"Action":"pass","Package":"github.com/division-sh/swarm/b","Elapsed":1}` + "\n")
-	if err := os.WriteFile(weightsPath, weights, 0o600); err != nil {
-		t.Fatalf("write weights: %v", err)
-	}
-
-	if err := run(runConfig{
-		packagesPath:   packagesPath,
-		weightsPath:    weightsPath,
-		snapshotPath:   snapshotPath,
-		sourceLabel:    "github-actions-run-123",
-		shardCount:     2,
-		maxImbalance:   0.25,
-		generateShards: true,
+	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	planPath := filepath.Join(dir, "plan.json")
+	matrixPath := filepath.Join(dir, "matrix.json")
+	markdownPath := filepath.Join(dir, "plan.md")
+	if err := run(config{
+		planCI:          true,
+		proofPolicyPath: policyPath,
+		weightModelPath: modelPath,
+		packagesPath:    packagesPath,
+		planPath:        planPath,
+		matrixPath:      matrixPath,
+		markdownPath:    markdownPath,
+		event:           "pull_request",
+		headSHA:         "abc",
 	}); err != nil {
-		t.Fatalf("run generate shards: %v", err)
+		t.Fatalf("run plan: %v", err)
 	}
-
-	snapshot, err := readShardSnapshot(snapshotPath)
+	plan, err := readPlan(planPath)
 	if err != nil {
-		t.Fatalf("read snapshot: %v", err)
+		t.Fatal(err)
 	}
-	if snapshot.Source != "github-actions-run-123" {
-		t.Fatalf("source = %q, want source label", snapshot.Source)
+	if plan.Profile != testplanning.ProfilePRCommon || plan.Digest == "" {
+		t.Fatalf("plan = %+v", plan)
 	}
-	if snapshot.ShardCount != 2 || len(snapshot.Shards) != 2 {
-		t.Fatalf("snapshot shards = %+v, want 2 shards", snapshot.Shards)
+	raw, err := os.ReadFile(matrixPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "packages") || !strings.Contains(string(raw), `"unit"`) {
+		t.Fatalf("matrix contains another planning authority: %s", raw)
 	}
 }
 
-func TestPrintShardPackagesUsesCanonicalLineFormat(t *testing.T) {
+func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 	dir := t.TempDir()
-	snapshotPath := filepath.Join(dir, "snapshot.json")
-	if err := writeJSONFile(snapshotPath, testtiming.ShardSnapshot{
-		Version:    testtiming.ShardSnapshotVersion,
-		ShardCount: 1,
-		Shards: []testtiming.PackageShard{{
-			ID:       1,
-			Packages: []string{"github.com/division-sh/swarm/a", "github.com/division-sh/swarm/b"},
-		}},
-	}); err != nil {
-		t.Fatalf("write snapshot: %v", err)
+	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	planPath := filepath.Join(dir, "plan.json")
+	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "abc"}); err != nil {
+		t.Fatal(err)
 	}
-	snapshot, err := readShardSnapshot(snapshotPath)
+	plan, err := readPlan(planPath)
 	if err != nil {
-		t.Fatalf("read snapshot: %v", err)
+		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	if err := writeShardPackages(&output, snapshot, 1); err != nil {
-		t.Fatalf("writeShardPackages: %v", err)
+	unit := plan.Units[0]
+	jsonPath := filepath.Join(dir, "go-test.json")
+	var lines []string
+	for _, pkg := range unit.Packages {
+		lines = append(lines, `{"Action":"pass","Package":"`+pkg+`","Elapsed":1}`)
 	}
-	parsed, err := testtiming.ReadPackageList(strings.NewReader(output.String()))
+	if err := os.WriteFile(jsonPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evidencePath := filepath.Join(dir, "unit-primary-evidence.json")
+	if err := run(config{recordEvidence: true, planPath: planPath, unitID: unit.ID, evidencePath: evidencePath, inputPath: jsonPath, attempt: testtiming.AttemptPrimary, elapsedSeconds: 1, exitCode: 0}); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := readEvidence(evidencePath)
 	if err != nil {
-		t.Fatalf("ReadPackageList: %v", err)
+		t.Fatal(err)
 	}
-	want := []string{"github.com/division-sh/swarm/a", "github.com/division-sh/swarm/b"}
-	if strings.Join(parsed, " ") != strings.Join(want, " ") {
-		t.Fatalf("parsed packages = %v, want %v", parsed, want)
+	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) > 0 {
+		t.Fatalf("evidence problems: %v", problems)
 	}
 }
 
-func TestRecordCommandEvidenceWritesCompleteTypedReport(t *testing.T) {
+func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 	dir := t.TempDir()
-	packagesPath := filepath.Join(dir, "packages.txt")
-	inputPath := filepath.Join(dir, "go-test.json")
-	evidencePath := filepath.Join(dir, "shard-1-primary-evidence.json")
-	writeTestFile(t, packagesPath, "github.com/division-sh/swarm/a\n")
-	writeTestFile(t, inputPath, `{"Action":"pass","Package":"github.com/division-sh/swarm/a","Elapsed":12.5}`+"\n")
-
-	err := run(runConfig{
-		inputPath:      inputPath,
-		packagesPath:   packagesPath,
-		evidencePath:   evidencePath,
-		surface:        testtiming.ShardSurface(1),
-		attempt:        testtiming.AttemptPrimary,
-		elapsedSeconds: 15,
-		exitCode:       0,
-		environmentID:  "ci-postgres-v1",
-		countMode:      testtiming.CountModeCacheDefault,
-		recordEvidence: true,
-	})
+	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	planPath := filepath.Join(dir, "plan.json")
+	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := readPlan(planPath)
 	if err != nil {
-		t.Fatalf("run record evidence: %v", err)
+		t.Fatal(err)
 	}
-	evidence, err := readCommandEvidence(evidencePath)
-	if err != nil {
-		t.Fatalf("read evidence: %v", err)
-	}
-	if problems := testtiming.ValidateCommandEvidence(evidence); len(problems) > 0 {
-		t.Fatalf("evidence problems = %v", problems)
-	}
-	if len(evidence.Report.Packages) != 1 || evidence.Report.Packages[0].Elapsed != 12.5 {
-		t.Fatalf("complete report = %+v", evidence.Report)
-	}
-}
-
-func TestEvaluateTimingBudgetWritesSharedPassResult(t *testing.T) {
-	dir := t.TempDir()
-	policyPath := filepath.Join(dir, "policy.yaml")
-	snapshotPath := filepath.Join(dir, "snapshot.json")
-	fullPackagesPath := filepath.Join(dir, "full-packages.txt")
 	evidenceRoot := filepath.Join(dir, "evidence")
-	resultPath := filepath.Join(dir, "result.json")
-	markdownPath := filepath.Join(dir, "result.md")
 	if err := os.MkdirAll(evidenceRoot, 0o755); err != nil {
-		t.Fatalf("mkdir evidence: %v", err)
+		t.Fatal(err)
 	}
-	writeTestFile(t, policyPath, testPolicyYAML())
-	writeTestFile(t, fullPackagesPath, "catalog\n")
-	if err := writeJSONFile(snapshotPath, testtiming.ShardSnapshot{
-		Version:    testtiming.ShardSnapshotVersion,
-		ShardCount: 1,
-		Shards:     []testtiming.PackageShard{{ID: 1, Packages: []string{"a"}}},
-	}); err != nil {
-		t.Fatalf("write snapshot: %v", err)
+	for _, unit := range plan.Units {
+		report := testtiming.Report{}
+		for _, pkg := range unit.Packages {
+			report.Packages = append(report.Packages, testtiming.PackageTiming{Package: pkg, Result: "pass", Elapsed: 1})
+			report.Summary.Events++
+			report.Summary.Packages++
+			report.Summary.PackageElapsedSec++
+		}
+		evidence := testtiming.CommandEvidence{Version: 2, PlanDigest: plan.Digest, Profile: plan.Profile, HeadSHA: plan.HeadSHA, UnitID: unit.ID, Surface: unit.ID, Attempt: testtiming.AttemptPrimary, Packages: unit.Packages, EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Report: report}
+		if err := writeJSON(filepath.Join(evidenceRoot, unit.ID+"-primary-evidence.json"), evidence); err != nil {
+			t.Fatal(err)
+		}
 	}
-	evidence := commandEvidenceFixture(testtiming.ShardSurface(1), 10)
-	if err := writeJSONFile(filepath.Join(evidenceRoot, "shard-1-primary-evidence.json"), evidence); err != nil {
-		t.Fatalf("write evidence: %v", err)
+	if err := run(config{updateWeights: true, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "new-run"}); err != nil {
+		t.Fatal(err)
 	}
-
-	err := run(runConfig{
-		policyPath:       policyPath,
-		snapshotPath:     snapshotPath,
-		fullPackagesPath: fullPackagesPath,
-		evidenceRoot:     evidenceRoot,
-		resultJSONPath:   resultPath,
-		markdownPath:     markdownPath,
-		evaluateBudget:   true,
-	})
+	model, err := readWeightModel(modelPath)
 	if err != nil {
-		t.Fatalf("run evaluate budget: %v", err)
+		t.Fatal(err)
 	}
-	var result testtiming.BudgetResult
-	data, err := os.ReadFile(resultPath)
+	if model.SourceRunID != "new-run" || len(model.Packages) != 2 {
+		t.Fatalf("updated model = %+v", model)
+	}
+	before, err := os.ReadFile(modelPath)
 	if err != nil {
-		t.Fatalf("read result: %v", err)
+		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("decode result: %v", err)
+	if err := run(config{updateWeights: true, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "another-run"}); err != nil {
+		t.Fatal(err)
 	}
-	markdown, err := os.ReadFile(markdownPath)
+	after, err := os.ReadFile(modelPath)
 	if err != nil {
-		t.Fatalf("read markdown: %v", err)
+		t.Fatal(err)
 	}
-	if result.Status != testtiming.BudgetPass || !strings.Contains(string(markdown), "**Status: PASS**") {
-		t.Fatalf("result=%+v markdown=%s", result, markdown)
-	}
-}
-
-func TestEvaluateTimingBudgetWritesIncompleteResultWhenArtifactMissing(t *testing.T) {
-	dir := t.TempDir()
-	policyPath := filepath.Join(dir, "policy.yaml")
-	snapshotPath := filepath.Join(dir, "snapshot.json")
-	fullPackagesPath := filepath.Join(dir, "full-packages.txt")
-	resultPath := filepath.Join(dir, "result.json")
-	markdownPath := filepath.Join(dir, "result.md")
-	writeTestFile(t, policyPath, testPolicyYAML())
-	writeTestFile(t, fullPackagesPath, "catalog\n")
-	if err := writeJSONFile(snapshotPath, testtiming.ShardSnapshot{
-		Version:    testtiming.ShardSnapshotVersion,
-		ShardCount: 1,
-		Shards:     []testtiming.PackageShard{{ID: 1, Packages: []string{"a"}}},
-	}); err != nil {
-		t.Fatalf("write snapshot: %v", err)
-	}
-
-	err := run(runConfig{
-		policyPath:       policyPath,
-		snapshotPath:     snapshotPath,
-		fullPackagesPath: fullPackagesPath,
-		evidenceRoot:     filepath.Join(dir, "missing"),
-		resultJSONPath:   resultPath,
-		markdownPath:     markdownPath,
-		evaluateBudget:   true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "INCOMPLETE") {
-		t.Fatalf("run error = %v, want INCOMPLETE", err)
-	}
-	data, readErr := os.ReadFile(resultPath)
-	if readErr != nil {
-		t.Fatalf("read result: %v", readErr)
-	}
-	if !strings.Contains(string(data), `"status": "INCOMPLETE"`) {
-		t.Fatalf("result = %s", data)
+	if string(before) != string(after) {
+		t.Fatal("idempotent refresh rewrote an unchanged model")
 	}
 }
 
-func commandEvidenceFixture(surface string, elapsed float64) testtiming.CommandEvidence {
-	return testtiming.CommandEvidence{
-		Version:        testtiming.CommandEvidenceVersion,
-		Surface:        surface,
-		Attempt:        testtiming.AttemptPrimary,
-		ElapsedSeconds: elapsed,
-		Packages:       []string{"a"},
-		EnvironmentID:  "ci-postgres-v1",
-		CountMode:      testtiming.CountModeCacheDefault,
-		Report: testtiming.Report{
-			Summary:  testtiming.Summary{Events: 1, Packages: 1, PackageElapsedSec: 1},
-			Packages: []testtiming.PackageTiming{{Package: "a", Result: "pass", Elapsed: 1}},
-		},
-	}
-}
-
-func testPolicyYAML() string {
-	return `version: 1
-hard:
-  max_shard_command_seconds:
-    limit_seconds: 270
-    justification: Test broad ceiling.
-  full_conformance_command_seconds:
-    limit_seconds: 330
-    justification: Test full ceiling.
-package_reference_seconds:
-  a: 1
-  catalog: 1
-`
-}
-
-func writeTestFile(t *testing.T, path, content string) {
+func writePlannerFixtures(t *testing.T, dir string) (string, string, string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write %s: %v", path, err)
+	policy := `
+version: 1
+module: module
+planning: {target_seconds: 100, max_shards: 2, unknown_package_seconds: 10, max_imbalance: 0.25}
+escalation_paths: ['^internal/runtime/conformance/']
+special_packages: [module/catalog]
+profiles:
+  pr-common: {count_mode: cache-default, environment_id: env, units: [catalog-smoke]}
+  pr-escalated: {count_mode: count-1, environment_id: env, units: [catalog-full]}
+  full: {count_mode: count-1, environment_id: env, units: [catalog-full]}
+  nightly: {count_mode: count-1, environment_id: env, units: [catalog-full]}
+units:
+  catalog-smoke: {packages: [module/catalog], run: '^TestSmoke$', count_mode: count-1, environment_id: env, budget_class: full}
+  catalog-full: {packages: [module/catalog], count_mode: count-1, environment_id: env, budget_class: full}
+projections: {required-full: {profile: full}}
+`
+	policyPath := filepath.Join(dir, "policy.yaml")
+	if err := os.WriteFile(policyPath, []byte(policy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelPath := filepath.Join(dir, "weights.json")
+	model := testplanning.WeightModel{Version: 1, SourceRunID: "old-run", Packages: map[string]float64{"module/a": 20, "module/catalog": 20}}
+	file, err := os.Create(modelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testplanning.WriteWeightModel(file, model); err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	packagesPath := filepath.Join(dir, "packages.txt")
+	if err := os.WriteFile(packagesPath, []byte("module/a\nmodule/catalog\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return policyPath, modelPath, packagesPath
+}
+
+func TestReadJSONRejectsUnknownPlanFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"unknown":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := readJSON(path, &value); err != nil {
+		t.Fatalf("maps intentionally accept arbitrary keys: %v", err)
+	}
+	var plan testplanning.RunPlan
+	file, _ := os.Open(path)
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&plan); err == nil {
+		t.Fatal("typed plan accepted unknown field")
 	}
 }

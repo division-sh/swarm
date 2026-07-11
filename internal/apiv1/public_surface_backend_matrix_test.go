@@ -39,7 +39,7 @@ type publicSurfaceMatrixSource struct {
 type publicSurfaceMatrixPolicy struct {
 	ClosureLevel                              string `yaml:"closure_level"`
 	ClaimsParentClosure                       bool   `yaml:"claims_parent_closure"`
-	NamedFullConformanceCommand               string `yaml:"named_full_conformance_command"`
+	FullProofProjection                       string `yaml:"full_proof_projection"`
 	RequiredSmokePolicy                       string `yaml:"required_smoke_policy"`
 	MutatingAPIParityClassificationPolicy     string `yaml:"mutating_api_parity_classification_policy"`
 	OperatorReadAPIParityClassificationPolicy string `yaml:"operator_read_api_parity_classification_policy"`
@@ -62,13 +62,14 @@ type publicSurfaceMatrixRow struct {
 }
 
 type publicSurfaceProofRef struct {
-	Kind      string   `yaml:"kind"`
-	Name      string   `yaml:"name,omitempty"`
-	Path      string   `yaml:"path,omitempty"`
-	Issue     int      `yaml:"issue,omitempty"`
-	Watchlist string   `yaml:"watchlist,omitempty"`
-	Command   string   `yaml:"command,omitempty"`
-	Backends  []string `yaml:"backends,omitempty"`
+	Kind       string   `yaml:"kind"`
+	Name       string   `yaml:"name,omitempty"`
+	Path       string   `yaml:"path,omitempty"`
+	Issue      int      `yaml:"issue,omitempty"`
+	Watchlist  string   `yaml:"watchlist,omitempty"`
+	Command    string   `yaml:"command,omitempty"`
+	Projection string   `yaml:"projection,omitempty"`
+	Backends   []string `yaml:"backends,omitempty"`
 }
 
 type publicSurfaceMutatingAPIParityEntry struct {
@@ -1257,9 +1258,9 @@ func validatePublicSurfaceMutatingLedgerProofRefs(root, label string, refs []pub
 			if _, ok := activeTrackers[trackerKey(ref.Issue, ref.Watchlist)]; !ok {
 				problems = append(problems, fmt.Sprintf("%s tracker proof_ref issue #%d watchlist %q is not in active_trackers", label, ref.Issue, ref.Watchlist))
 			}
-		case "manual_command":
-			if !strings.HasPrefix(strings.TrimSpace(ref.Command), "go test ") {
-				problems = append(problems, fmt.Sprintf("%s manual_command proof_ref command = %q, want go test command", label, ref.Command))
+		case "proof_projection":
+			if ref.Projection != "catalog-full" && ref.Projection != "required-full" {
+				problems = append(problems, fmt.Sprintf("%s proof_projection %q is not canonical", label, ref.Projection))
 			}
 		}
 	}
@@ -1625,8 +1626,8 @@ func validatePublicSurfacePolicy(policy publicSurfaceMatrixPolicy) []string {
 	if policy.ClaimsParentClosure {
 		problems = append(problems, "policy claims_parent_closure = true, want false")
 	}
-	if !strings.HasPrefix(strings.TrimSpace(policy.NamedFullConformanceCommand), "go test ./internal/runtime/cataloge2e") {
-		problems = append(problems, fmt.Sprintf("policy named_full_conformance_command = %q, want cataloge2e go test command", policy.NamedFullConformanceCommand))
+	if strings.TrimSpace(policy.FullProofProjection) != "catalog-full" {
+		problems = append(problems, fmt.Sprintf("policy full_proof_projection = %q, want catalog-full", policy.FullProofProjection))
 	}
 	if strings.TrimSpace(policy.RequiredSmokePolicy) == "" {
 		problems = append(problems, "policy required_smoke_policy missing")
@@ -1772,9 +1773,9 @@ func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixR
 			if ref.Issue == row.SplitIssue {
 				seenSplitTracker = true
 			}
-		case "manual_command":
-			if !strings.HasPrefix(strings.TrimSpace(ref.Command), "go test ") {
-				problems = append(problems, fmt.Sprintf("%s manual_command proof_ref command = %q, want go test command", rowID, ref.Command))
+		case "proof_projection":
+			if ref.Projection != "catalog-full" && ref.Projection != "required-full" {
+				problems = append(problems, fmt.Sprintf("%s proof_projection %q is not canonical", rowID, ref.Projection))
 			}
 		}
 	}
@@ -2201,7 +2202,7 @@ func allowedPublicSurfaceProofKinds() map[string]struct{} {
 	return complianceStringSet([]string{
 		"artifact",
 		"go_test",
-		"manual_command",
+		"proof_projection",
 		"tracker",
 	})
 }

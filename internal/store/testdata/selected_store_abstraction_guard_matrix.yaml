@@ -10,10 +10,8 @@ policy:
     proof refs listed here. The matrix composes selected-store guard owners and
     public-surface accounting; it must not expand into a SQLite/Postgres
     Cartesian suite.
-  named_fast_command: >
-    go test ./internal/store ./cmd/swarm ./internal/apiv1 -run
-    'TestSelectedStoreAbstractionGuardMatrix|TestSelectedStoreFacadeOwnsProducerBackendBranching|TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences' -count=1
-  named_full_conformance_command: go test ./internal/runtime/cataloge2e -count=1
+  fast_proof_projection: selected-store-fast
+  full_proof_projection: catalog-full
 rows:
   - id: public_surface_backend_matrix_accounting
     classification: matrix_owner

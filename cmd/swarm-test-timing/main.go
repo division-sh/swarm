@@ -1,175 +1,171 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
+type config struct {
+	inputPath       string
+	markdownPath    string
+	packagesPath    string
+	changedPath     string
+	proofPolicyPath string
+	weightModelPath string
+	planPath        string
+	matrixPath      string
+	evidencePath    string
+	evidenceRoot    string
+	budgetPath      string
+	resultJSONPath  string
+	event           string
+	profile         string
+	headSHA         string
+	unitID          string
+	attempt         string
+	sourceRunID     string
+	topN            int
+	exitCode        int
+	elapsedSeconds  float64
+	planCI          bool
+	recordEvidence  bool
+	checkConfirm    bool
+	evaluateBudget  bool
+	updateWeights   bool
+	validatePublish bool
+}
+
 func main() {
-	var inputPath string
-	var markdownPath string
-	var packagesPath string
-	var weightsPath string
-	var snapshotPath string
-	var sourceLabel string
-	var shardMatrixPath string
-	var evidencePath string
-	var evidenceRoot string
-	var policyPath string
-	var surface string
-	var attempt string
-	var environmentID string
-	var countMode string
-	var resultJSONPath string
-	var fullPackagesPath string
-	var topN int
-	var shardCount int
-	var shardPackages int
-	var exitCode int
-	var maxImbalance float64
-	var elapsedSeconds float64
-	var generateShards bool
-	var checkShards bool
-	var recordEvidence bool
-	var checkConfirmation bool
-	var evaluateBudget bool
-	var expectFull bool
-	flag.StringVar(&inputPath, "input", "-", "path to go test -json output, or - for stdin")
-	flag.StringVar(&markdownPath, "markdown", "-", "path to write Markdown report, or - for stdout")
-	flag.StringVar(&packagesPath, "packages", "", "path to newline-delimited Go package list for shard snapshot operations")
-	flag.StringVar(&weightsPath, "weights", "", "optional go test -json timing input for shard generation")
-	flag.StringVar(&snapshotPath, "snapshot", "", "path to shard snapshot for shard operations")
-	flag.StringVar(&sourceLabel, "source-label", "", "optional source label recorded in generated shard snapshots")
-	flag.StringVar(&shardMatrixPath, "shard-matrix", "", "path to write GitHub Actions shard matrix JSON, or - for stdout")
-	flag.StringVar(&evidencePath, "evidence", "", "path to read or write typed command evidence")
-	flag.StringVar(&evidenceRoot, "evidence-root", "", "directory containing *-evidence.json files for budget evaluation")
-	flag.StringVar(&policyPath, "policy", "", "path to the committed timing budget policy")
-	flag.StringVar(&surface, "surface", "", "command surface identity (shard-N or full-conformance)")
-	flag.StringVar(&attempt, "attempt", "", "command attempt (primary or confirmation)")
-	flag.StringVar(&environmentID, "environment-id", "", "declared command environment identity")
-	flag.StringVar(&countMode, "count-mode", "", "test count mode (cache-default or count-1)")
-	flag.StringVar(&resultJSONPath, "result-json", "", "path to write machine-readable budget result")
-	flag.StringVar(&fullPackagesPath, "full-packages", "", "path to the canonical full-conformance package list")
-	flag.IntVar(&topN, "top", 20, "number of slow packages and tests to include")
-	flag.IntVar(&shardCount, "shards", 4, "number of shards to generate")
-	flag.IntVar(&shardPackages, "shard-packages", 0, "print packages assigned to the given shard ID")
-	flag.IntVar(&exitCode, "exit-code", -1, "recorded go test command exit code")
-	flag.Float64Var(&maxImbalance, "max-imbalance", 0.25, "warning threshold for shard weight imbalance")
-	flag.Float64Var(&elapsedSeconds, "elapsed-seconds", -1, "recorded go test command elapsed seconds")
-	flag.BoolVar(&generateShards, "generate-shards", false, "generate a shard snapshot from package list and optional timing weights")
-	flag.BoolVar(&checkShards, "check-shards", false, "validate a shard snapshot against a package list")
-	flag.BoolVar(&recordEvidence, "record-evidence", false, "record typed command evidence from go test JSON")
-	flag.BoolVar(&checkConfirmation, "check-confirmation", false, "print whether a primary evidence file requires confirmation")
-	flag.BoolVar(&evaluateBudget, "evaluate-budget", false, "evaluate complete shard/full command evidence")
-	flag.BoolVar(&expectFull, "expect-full", false, "require full-conformance evidence during budget evaluation")
+	var cfg config
+	flag.StringVar(&cfg.inputPath, "input", "-", "path to go test -json output, or - for stdin")
+	flag.StringVar(&cfg.markdownPath, "markdown", "-", "path to write Markdown output, or - for stdout")
+	flag.StringVar(&cfg.packagesPath, "packages", "", "newline-delimited discovered Go package inventory")
+	flag.StringVar(&cfg.changedPath, "changed-files", "", "newline-delimited changed paths")
+	flag.StringVar(&cfg.proofPolicyPath, "proof-policy", ".github/test-proof-plan.yaml", "canonical proof policy")
+	flag.StringVar(&cfg.weightModelPath, "weight-model", ".github/test-timing-weights.json", "generated historical weight model")
+	flag.StringVar(&cfg.planPath, "plan", "", "run plan path")
+	flag.StringVar(&cfg.matrixPath, "matrix", "", "GitHub Actions matrix output path")
+	flag.StringVar(&cfg.evidencePath, "evidence", "", "typed command evidence path")
+	flag.StringVar(&cfg.evidenceRoot, "evidence-root", "", "directory containing evidence JSON")
+	flag.StringVar(&cfg.budgetPath, "policy", ".github/test-timing-budgets.yaml", "timing budget policy")
+	flag.StringVar(&cfg.resultJSONPath, "result-json", "", "machine-readable budget result path")
+	flag.StringVar(&cfg.event, "event", "", "GitHub event name")
+	flag.StringVar(&cfg.profile, "profile", "", "explicit proof profile")
+	flag.StringVar(&cfg.headSHA, "head-sha", "", "exact tested commit SHA")
+	flag.StringVar(&cfg.unitID, "unit", "", "proof unit ID")
+	flag.StringVar(&cfg.attempt, "attempt", "", "primary or confirmation")
+	flag.StringVar(&cfg.sourceRunID, "source-run-id", "", "successful source run for generated weights")
+	flag.IntVar(&cfg.topN, "top", 20, "number of slow packages/tests in Markdown")
+	flag.IntVar(&cfg.exitCode, "exit-code", -1, "recorded go test exit code")
+	flag.Float64Var(&cfg.elapsedSeconds, "elapsed-seconds", -1, "recorded command elapsed seconds")
+	flag.BoolVar(&cfg.planCI, "plan-ci", false, "emit a digest-bound CI run plan and matrix")
+	flag.BoolVar(&cfg.recordEvidence, "record-evidence", false, "record evidence bound to a plan unit")
+	flag.BoolVar(&cfg.checkConfirm, "check-confirmation", false, "print whether this exact unit needs confirmation")
+	flag.BoolVar(&cfg.evaluateBudget, "evaluate-budget", false, "evaluate complete evidence against the emitted plan")
+	flag.BoolVar(&cfg.updateWeights, "update-weight-model", false, "update generated weights from successful plan evidence")
+	flag.BoolVar(&cfg.validatePublish, "validate-publish-diff", false, "fail unless changed-files contains only the generated model")
 	flag.Parse()
 
-	if err := run(runConfig{
-		inputPath:         inputPath,
-		markdownPath:      markdownPath,
-		packagesPath:      packagesPath,
-		weightsPath:       weightsPath,
-		snapshotPath:      snapshotPath,
-		sourceLabel:       sourceLabel,
-		shardMatrixPath:   shardMatrixPath,
-		evidencePath:      evidencePath,
-		evidenceRoot:      evidenceRoot,
-		policyPath:        policyPath,
-		surface:           surface,
-		attempt:           attempt,
-		environmentID:     environmentID,
-		countMode:         countMode,
-		resultJSONPath:    resultJSONPath,
-		fullPackagesPath:  fullPackagesPath,
-		topN:              topN,
-		shardCount:        shardCount,
-		shardPackages:     shardPackages,
-		exitCode:          exitCode,
-		maxImbalance:      maxImbalance,
-		elapsedSeconds:    elapsedSeconds,
-		generateShards:    generateShards,
-		checkShards:       checkShards,
-		recordEvidence:    recordEvidence,
-		checkConfirmation: checkConfirmation,
-		evaluateBudget:    evaluateBudget,
-		expectFull:        expectFull,
-	}); err != nil {
+	if err := run(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-type runConfig struct {
-	inputPath         string
-	markdownPath      string
-	packagesPath      string
-	weightsPath       string
-	snapshotPath      string
-	sourceLabel       string
-	shardMatrixPath   string
-	evidencePath      string
-	evidenceRoot      string
-	policyPath        string
-	surface           string
-	attempt           string
-	environmentID     string
-	countMode         string
-	resultJSONPath    string
-	fullPackagesPath  string
-	topN              int
-	shardCount        int
-	shardPackages     int
-	exitCode          int
-	maxImbalance      float64
-	elapsedSeconds    float64
-	generateShards    bool
-	checkShards       bool
-	recordEvidence    bool
-	checkConfirmation bool
-	evaluateBudget    bool
-	expectFull        bool
-}
-
-func run(cfg runConfig) error {
+func run(cfg config) error {
+	modes := 0
+	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.checkConfirm, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish} {
+		if enabled {
+			modes++
+		}
+	}
+	if modes > 1 {
+		return fmt.Errorf("exactly one command mode may be selected")
+	}
 	switch {
+	case cfg.planCI:
+		return planCI(cfg)
 	case cfg.recordEvidence:
-		return recordCommandEvidence(cfg)
-	case cfg.checkConfirmation:
-		return checkCommandConfirmation(cfg)
+		return recordEvidence(cfg)
+	case cfg.checkConfirm:
+		return checkConfirmation(cfg)
 	case cfg.evaluateBudget:
-		return evaluateTimingBudget(cfg)
-	case cfg.generateShards:
-		return generateShardSnapshot(cfg)
-	case cfg.checkShards:
-		return checkShardSnapshot(cfg)
-	case cfg.shardPackages > 0:
-		return printShardPackages(cfg)
-	case cfg.shardMatrixPath != "":
-		return writeShardMatrix(cfg)
+		return evaluateBudget(cfg)
+	case cfg.updateWeights:
+		return updateWeightModel(cfg)
+	case cfg.validatePublish:
+		paths, err := readLines(cfg.changedPath)
+		if err != nil {
+			return err
+		}
+		return testplanning.ValidatePublicationDiff(paths)
 	default:
 		return writeTimingReport(cfg)
 	}
 }
 
-func recordCommandEvidence(cfg runConfig) error {
-	if strings.TrimSpace(cfg.evidencePath) == "" {
-		return fmt.Errorf("-evidence is required with -record-evidence")
+func planCI(cfg config) error {
+	if cfg.planPath == "" || cfg.matrixPath == "" || cfg.packagesPath == "" || cfg.event == "" || cfg.headSHA == "" {
+		return fmt.Errorf("-plan, -matrix, -packages, -event, and -head-sha are required with -plan-ci")
 	}
-	if cfg.elapsedSeconds < 0 {
-		return fmt.Errorf("-elapsed-seconds must be non-negative with -record-evidence")
+	policy, err := readProofPolicy(cfg.proofPolicyPath)
+	if err != nil {
+		return err
 	}
-	if cfg.exitCode < 0 {
-		return fmt.Errorf("-exit-code must be non-negative with -record-evidence")
+	model, err := readWeightModel(cfg.weightModelPath)
+	if err != nil {
+		return err
 	}
-	packages, err := readPackagesFile(cfg.packagesPath)
+	packages, err := readLines(cfg.packagesPath)
+	if err != nil {
+		return err
+	}
+	changed, err := readOptionalLines(cfg.changedPath)
+	if err != nil {
+		return err
+	}
+	profile, reason, err := policy.ResolveProfile(cfg.event, changed, cfg.profile)
+	if err != nil {
+		return err
+	}
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(cfg.planPath, plan); err != nil {
+		return err
+	}
+	matrix, err := testplanning.MatrixJSON(plan)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(cfg.matrixPath, append(matrix, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write matrix: %w", err)
+	}
+	return writePlanMarkdown(cfg.markdownPath, plan)
+}
+
+func recordEvidence(cfg config) error {
+	if cfg.planPath == "" || cfg.unitID == "" || cfg.evidencePath == "" || cfg.elapsedSeconds < 0 || cfg.exitCode < 0 {
+		return fmt.Errorf("-plan, -unit, -evidence, non-negative -elapsed-seconds, and non-negative -exit-code are required with -record-evidence")
+	}
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		return err
+	}
+	unit, err := plan.Unit(cfg.unitID)
 	if err != nil {
 		return err
 	}
@@ -182,30 +178,42 @@ func recordCommandEvidence(cfg runConfig) error {
 	if err != nil {
 		return err
 	}
+	countMode := unit.CountMode
+	if cfg.attempt == testtiming.AttemptConfirmation {
+		countMode = testtiming.CountModeOne
+	}
 	evidence := testtiming.CommandEvidence{
 		Version:        testtiming.CommandEvidenceVersion,
-		Surface:        strings.TrimSpace(cfg.surface),
-		Attempt:        strings.TrimSpace(cfg.attempt),
+		PlanDigest:     plan.Digest,
+		Profile:        plan.Profile,
+		HeadSHA:        plan.HeadSHA,
+		UnitID:         unit.ID,
+		Surface:        unit.ID,
+		Attempt:        cfg.attempt,
 		ElapsedSeconds: cfg.elapsedSeconds,
 		ExitCode:       cfg.exitCode,
-		Packages:       packages,
-		EnvironmentID:  strings.TrimSpace(cfg.environmentID),
-		CountMode:      strings.TrimSpace(cfg.countMode),
+		Packages:       append([]string(nil), unit.Packages...),
+		EnvironmentID:  unit.EnvironmentID,
+		CountMode:      countMode,
 		Report:         report,
 	}
-	return writeJSONFile(cfg.evidencePath, evidence)
+	return writeJSON(cfg.evidencePath, evidence)
 }
 
-func checkCommandConfirmation(cfg runConfig) error {
-	policy, err := readBudgetPolicy(cfg.policyPath)
+func checkConfirmation(cfg config) error {
+	plan, err := readPlan(cfg.planPath)
 	if err != nil {
 		return err
 	}
-	evidence, err := readCommandEvidence(cfg.evidencePath)
+	policy, err := readBudgetPolicy(cfg.budgetPath)
 	if err != nil {
 		return err
 	}
-	required, err := testtiming.ConfirmationRequired(policy, evidence)
+	evidence, err := readEvidence(cfg.evidencePath)
+	if err != nil {
+		return err
+	}
+	required, err := testtiming.ConfirmationRequired(policy, plan, evidence)
 	if err != nil {
 		return err
 	}
@@ -213,251 +221,203 @@ func checkCommandConfirmation(cfg runConfig) error {
 	return err
 }
 
-func evaluateTimingBudget(cfg runConfig) error {
-	if strings.TrimSpace(cfg.resultJSONPath) == "" {
-		return fmt.Errorf("-result-json is required with -evaluate-budget")
+func evaluateBudget(cfg config) error {
+	if cfg.resultJSONPath == "" || cfg.markdownPath == "" || cfg.evidenceRoot == "" {
+		return fmt.Errorf("-result-json, -markdown, and -evidence-root are required with -evaluate-budget")
 	}
-	policy, err := readBudgetPolicy(cfg.policyPath)
+	plan, err := readPlan(cfg.planPath)
 	if err != nil {
 		return err
 	}
-	snapshot, err := readShardSnapshot(cfg.snapshotPath)
+	policy, err := readBudgetPolicy(cfg.budgetPath)
 	if err != nil {
 		return err
 	}
-	fullPackages, err := readPackagesFile(cfg.fullPackagesPath)
+	model, err := readWeightModel(cfg.weightModelPath)
 	if err != nil {
-		return fmt.Errorf("read full-conformance packages: %w", err)
+		return err
 	}
-	evidence, loadProblems := readEvidenceTree(cfg.evidenceRoot)
+	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
 	result := testtiming.EvaluateBudget(policy, testtiming.EvaluationOptions{
-		Snapshot:     snapshot,
-		FullPackages: fullPackages,
-		ExpectFull:   cfg.expectFull,
-		LoadProblems: loadProblems,
+		Plan:              plan,
+		HistoricalWeights: model.Packages,
+		LoadProblems:      problems,
 	}, evidence)
-	jsonOutput, closeJSON, err := openOutput(cfg.resultJSONPath)
+	if err := writeJSON(cfg.resultJSONPath, result); err != nil {
+		return err
+	}
+	out, closeOutput, err := openOutput(cfg.markdownPath)
 	if err != nil {
 		return err
 	}
-	if err := testtiming.WriteBudgetJSON(jsonOutput, result); err != nil {
-		closeJSON()
+	defer closeOutput()
+	if err := testtiming.WriteBudgetMarkdown(out, result); err != nil {
 		return err
 	}
-	closeJSON()
-	markdownOutput, closeMarkdown, err := openOutput(cfg.markdownPath)
-	if err != nil {
-		return err
-	}
-	if err := testtiming.WriteBudgetMarkdown(markdownOutput, result); err != nil {
-		closeMarkdown()
-		return err
-	}
-	closeMarkdown()
 	if result.ExitCode() != 0 {
-		return fmt.Errorf("timing budget status: %s", result.Status)
+		return fmt.Errorf("timing budget status is %s", result.Status)
 	}
 	return nil
 }
 
-func writeTimingReport(cfg runConfig) error {
+func updateWeightModel(cfg config) error {
+	if cfg.planPath == "" || cfg.evidenceRoot == "" || cfg.sourceRunID == "" {
+		return fmt.Errorf("-plan, -evidence-root, and -source-run-id are required with -update-weight-model")
+	}
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		return err
+	}
+	current, err := readWeightModel(cfg.weightModelPath)
+	if err != nil {
+		return err
+	}
+	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
+	if len(problems) > 0 {
+		return fmt.Errorf("cannot update weights from incomplete evidence: %s", strings.Join(problems, "; "))
+	}
+	observed := map[string]float64{}
+	seenUnits := map[string]bool{}
+	for _, item := range evidence {
+		if item.Attempt != testtiming.AttemptPrimary {
+			continue
+		}
+		if problems := testtiming.ValidateCommandEvidence(item, plan); len(problems) > 0 {
+			return fmt.Errorf("invalid evidence for %s: %s", item.UnitID, strings.Join(problems, "; "))
+		}
+		if item.ExitCode != 0 {
+			return fmt.Errorf("unit %s failed; refusing weight update", item.UnitID)
+		}
+		seenUnits[item.UnitID] = true
+		for _, timing := range item.Report.Packages {
+			observed[timing.Package] = timing.Elapsed
+		}
+	}
+	for _, unit := range plan.Units {
+		if !seenUnits[unit.ID] {
+			return fmt.Errorf("unit %s has no primary evidence", unit.ID)
+		}
+	}
+	next := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: current.SourceRunID, Packages: map[string]float64{}}
+	changed := false
+	for pkg, value := range observed {
+		old, ok := current.Packages[pkg]
+		if ok && math.Abs(value-old) <= math.Max(1, old*0.10) {
+			next.Packages[pkg] = old
+			continue
+		}
+		next.Packages[pkg] = value
+		changed = true
+	}
+	if len(current.Packages) != len(next.Packages) {
+		changed = true
+	}
+	if !changed {
+		_, err := fmt.Fprintln(os.Stdout, "unchanged")
+		return err
+	}
+	next.SourceRunID = cfg.sourceRunID
+	file, err := os.Create(cfg.weightModelPath)
+	if err != nil {
+		return fmt.Errorf("create weight model: %w", err)
+	}
+	defer file.Close()
+	if err := testplanning.WriteWeightModel(file, next); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, "changed")
+	return err
+}
+
+func writeTimingReport(cfg config) error {
 	input, closeInput, err := openInput(cfg.inputPath)
 	if err != nil {
 		return err
 	}
 	defer closeInput()
-
 	report, err := testtiming.ParseReport(input)
 	if err != nil {
 		return err
 	}
-
-	output, closeOutput, err := openOutput(cfg.markdownPath)
+	out, closeOutput, err := openOutput(cfg.markdownPath)
 	if err != nil {
 		return err
 	}
 	defer closeOutput()
-	return testtiming.WriteMarkdown(output, report, testtiming.MarkdownOptions{TopN: cfg.topN})
+	return testtiming.WriteMarkdown(out, report, testtiming.MarkdownOptions{TopN: cfg.topN})
 }
 
-func generateShardSnapshot(cfg runConfig) error {
-	if strings.TrimSpace(cfg.snapshotPath) == "" {
-		return fmt.Errorf("-snapshot is required with -generate-shards")
-	}
-	packages, err := readPackagesFile(cfg.packagesPath)
+func writePlanMarkdown(path string, plan testplanning.RunPlan) error {
+	out, closeOutput, err := openOutput(path)
 	if err != nil {
 		return err
 	}
-	weights := map[string]float64{}
-	source := "package-list"
-	if strings.TrimSpace(cfg.weightsPath) != "" {
-		input, closeInput, err := openInput(cfg.weightsPath)
-		if err != nil {
+	defer closeOutput()
+	if _, err := fmt.Fprintf(out, "### CI proof plan\n\n- profile: `%s`\n- reason: %s\n- head: `%s`\n- digest: `%s`\n- units: `%d`\n- package granularity ceiling: `%.3fs`\n\n", plan.Profile, plan.Reason, plan.HeadSHA, plan.Digest, len(plan.Units), plan.GranularityMax); err != nil {
+		return err
+	}
+	for _, unit := range plan.Units {
+		if _, err := fmt.Fprintf(out, "- `%s`: %.3fs, %d packages, %s/%s\n", unit.ID, unit.WeightSeconds, len(unit.Packages), unit.CountMode, unit.EnvironmentID); err != nil {
 			return err
 		}
-		defer closeInput()
-		weights, err = testtiming.ParsePackageWeights(input)
-		if err != nil {
-			return err
-		}
-		source = cfg.weightsPath
-	}
-	if strings.TrimSpace(cfg.sourceLabel) != "" {
-		source = strings.TrimSpace(cfg.sourceLabel)
-	}
-	snapshot, err := testtiming.BuildShardSnapshot(packages, weights, cfg.shardCount, source, cfg.maxImbalance)
-	if err != nil {
-		return err
-	}
-	return writeJSONFile(cfg.snapshotPath, snapshot)
-}
-
-func checkShardSnapshot(cfg runConfig) error {
-	snapshot, err := readShardSnapshot(cfg.snapshotPath)
-	if err != nil {
-		return err
-	}
-	packages, err := readPackagesFile(cfg.packagesPath)
-	if err != nil {
-		return err
-	}
-	validation, err := testtiming.ValidateShardSnapshot(snapshot, packages)
-	if err != nil {
-		return formatShardValidationError(validation, err)
-	}
-	if snapshot.MaxImbalance > 0 && validation.ImbalanceRatio > snapshot.MaxImbalance {
-		fmt.Fprintf(os.Stderr, "warning: shard imbalance %.1f%% exceeds configured %.1f%% (min %.3fs, max %.3fs)\n",
-			validation.ImbalanceRatio*100, snapshot.MaxImbalance*100, validation.MinWeight, validation.MaxWeight)
-	}
-	if cfg.shardMatrixPath != "" {
-		return writeShardMatrixFromSnapshot(cfg.shardMatrixPath, snapshot)
 	}
 	return nil
 }
 
-func printShardPackages(cfg runConfig) error {
-	snapshot, err := readShardSnapshot(cfg.snapshotPath)
+func readProofPolicy(path string) (testplanning.Policy, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return err
+		return testplanning.Policy{}, fmt.Errorf("open proof policy: %w", err)
 	}
-	return writeShardPackages(os.Stdout, snapshot, cfg.shardPackages)
+	defer file.Close()
+	return testplanning.LoadPolicy(file)
 }
 
-func writeShardPackages(w io.Writer, snapshot testtiming.ShardSnapshot, shardID int) error {
-	packages, err := testtiming.PackagesForShard(snapshot, shardID)
+func readWeightModel(path string) (testplanning.WeightModel, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return err
+		return testplanning.WeightModel{}, fmt.Errorf("open weight model: %w", err)
 	}
-	_, err = fmt.Fprintln(w, strings.Join(packages, "\n"))
-	return err
+	defer file.Close()
+	return testplanning.LoadWeightModel(file)
 }
 
-func writeShardMatrix(cfg runConfig) error {
-	snapshot, err := readShardSnapshot(cfg.snapshotPath)
-	if err != nil {
-		return err
+func readPlan(path string) (testplanning.RunPlan, error) {
+	var plan testplanning.RunPlan
+	if err := readJSON(path, &plan); err != nil {
+		return plan, err
 	}
-	return writeShardMatrixFromSnapshot(cfg.shardMatrixPath, snapshot)
-}
-
-func writeShardMatrixFromSnapshot(path string, snapshot testtiming.ShardSnapshot) error {
-	raw, err := testtiming.ShardMatrixJSON(snapshot)
-	if err != nil {
-		return err
+	if err := plan.Validate(); err != nil {
+		return plan, err
 	}
-	output, closeOutput, err := openOutput(path)
-	if err != nil {
-		return err
-	}
-	defer closeOutput()
-	_, err = output.Write(raw)
-	return err
-}
-
-func readPackagesFile(path string) ([]string, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("-packages is required for shard snapshot operations")
-	}
-	input, closeInput, err := openInput(path)
-	if err != nil {
-		return nil, err
-	}
-	defer closeInput()
-	return testtiming.ReadPackageList(input)
-}
-
-func readShardSnapshot(path string) (testtiming.ShardSnapshot, error) {
-	if strings.TrimSpace(path) == "" {
-		return testtiming.ShardSnapshot{}, fmt.Errorf("-snapshot is required for shard operations")
-	}
-	input, closeInput, err := openInput(path)
-	if err != nil {
-		return testtiming.ShardSnapshot{}, err
-	}
-	defer closeInput()
-	var snapshot testtiming.ShardSnapshot
-	if err := json.NewDecoder(input).Decode(&snapshot); err != nil {
-		return testtiming.ShardSnapshot{}, fmt.Errorf("decode shard snapshot %s: %w", path, err)
-	}
-	return snapshot, nil
+	return plan, nil
 }
 
 func readBudgetPolicy(path string) (testtiming.BudgetPolicy, error) {
-	if strings.TrimSpace(path) == "" {
-		return testtiming.BudgetPolicy{}, fmt.Errorf("-policy is required")
-	}
-	input, closeInput, err := openInput(path)
+	file, err := os.Open(path)
 	if err != nil {
-		return testtiming.BudgetPolicy{}, err
+		return testtiming.BudgetPolicy{}, fmt.Errorf("open budget policy: %w", err)
 	}
-	defer closeInput()
-	policy, err := testtiming.LoadBudgetPolicy(input)
-	if err != nil {
-		return testtiming.BudgetPolicy{}, fmt.Errorf("load budget policy %s: %w", path, err)
-	}
-	return policy, nil
+	defer file.Close()
+	return testtiming.LoadBudgetPolicy(file)
 }
 
-func readCommandEvidence(path string) (testtiming.CommandEvidence, error) {
-	if strings.TrimSpace(path) == "" {
-		return testtiming.CommandEvidence{}, fmt.Errorf("-evidence is required")
-	}
-	input, closeInput, err := openInput(path)
-	if err != nil {
-		return testtiming.CommandEvidence{}, err
-	}
-	defer closeInput()
+func readEvidence(path string) (testtiming.CommandEvidence, error) {
 	var evidence testtiming.CommandEvidence
-	decoder := json.NewDecoder(input)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&evidence); err != nil {
-		return testtiming.CommandEvidence{}, fmt.Errorf("decode command evidence %s: %w", path, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return testtiming.CommandEvidence{}, fmt.Errorf("decode command evidence %s: multiple JSON values", path)
-		}
-		return testtiming.CommandEvidence{}, fmt.Errorf("decode command evidence %s trailing data: %w", path, err)
-	}
-	return evidence, nil
+	return evidence, readJSON(path, &evidence)
 }
 
 func readEvidenceTree(root string) ([]testtiming.CommandEvidence, []string) {
-	if strings.TrimSpace(root) == "" {
-		return nil, []string{"-evidence-root is required"}
-	}
 	var evidence []testtiming.CommandEvidence
 	var problems []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			problems = append(problems, fmt.Sprintf("read evidence path %s: %v", path, walkErr))
-			return nil
+			return walkErr
 		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "-evidence.json") {
 			return nil
 		}
-		item, err := readCommandEvidence(path)
+		item, err := readEvidence(path)
 		if err != nil {
 			problems = append(problems, err.Error())
 			return nil
@@ -466,37 +426,68 @@ func readEvidenceTree(root string) ([]testtiming.CommandEvidence, []string) {
 		return nil
 	})
 	if err != nil {
-		problems = append(problems, fmt.Sprintf("walk evidence root %s: %v", root, err))
+		problems = append(problems, fmt.Sprintf("walk evidence root: %v", err))
 	}
+	sort.Strings(problems)
 	return evidence, problems
 }
 
-func writeJSONFile(path string, value any) error {
-	output, closeOutput, err := openOutput(path)
+func readLines(path string) ([]string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer closeOutput()
-	encoder := json.NewEncoder(output)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(value)
+	defer file.Close()
+	var values []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if value := strings.TrimSpace(scanner.Text()); value != "" {
+			values = append(values, value)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return values, nil
 }
 
-func formatShardValidationError(validation testtiming.ShardValidation, err error) error {
-	var parts []string
-	if len(validation.Missing) > 0 {
-		parts = append(parts, "missing packages: "+strings.Join(validation.Missing, ", "))
+func readOptionalLines(path string) ([]string, error) {
+	if path == "" {
+		return nil, nil
 	}
-	if len(validation.Extra) > 0 {
-		parts = append(parts, "extra packages: "+strings.Join(validation.Extra, ", "))
+	return readLines(path)
+}
+
+func readJSON(path string, value any) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
 	}
-	if len(validation.Duplicates) > 0 {
-		parts = append(parts, "duplicate packages: "+strings.Join(validation.Duplicates, ", "))
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
 	}
-	if len(parts) == 0 {
-		return err
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("decode %s: trailing JSON", path)
+		}
+		return fmt.Errorf("decode %s trailing data: %w", path, err)
 	}
-	return fmt.Errorf("%w: %s", err, strings.Join(parts, "; "))
+	return nil
+}
+
+func writeJSON(path string, value any) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	defer file.Close()
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
 
 func openInput(path string) (io.Reader, func(), error) {
@@ -505,7 +496,7 @@ func openInput(path string) (io.Reader, func(), error) {
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("open input %s: %w", path, err)
+		return nil, nil, fmt.Errorf("open input: %w", err)
 	}
 	return file, func() { _ = file.Close() }, nil
 }
@@ -516,7 +507,7 @@ func openOutput(path string) (io.Writer, func(), error) {
 	}
 	file, err := os.Create(path)
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("create output %s: %w", path, err)
+		return nil, nil, fmt.Errorf("create output: %w", err)
 	}
 	return file, func() { _ = file.Close() }, nil
 }
