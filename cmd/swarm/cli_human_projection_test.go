@@ -515,8 +515,8 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Reason: "conversation status is a separate conversation-detail taxonomy owned by #1820",
 	},
 	"conversations.go\x00writeConversationTurnDetailResult": {
-		Names:  []string{"outcome", "status"},
-		Reason: "conversation session status and turn outcome are separate detail taxonomies owned by #1820",
+		Names:  []string{"action", "outcome", "status"},
+		Reason: "runtime-log action is exact LogEntry evidence; conversation session status and turn outcome are separate detail taxonomies owned by #1820",
 	},
 	"forkchat.go\x00writeForkChatSessionHeader": {
 		Names:  []string{"state"},
@@ -534,13 +534,9 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"mode"},
 		Reason: "preflight mode is a typed diagnostic rendering input, not a registered conversation mode",
 	},
-	"logs.go\x00writeRuntimeLogListResult": {
-		Names:  []string{"action"},
-		Reason: "runtime-log action is exact log evidence owned by #1819, not a registered watchdog action",
-	},
 	"logs.go\x00writeRuntimeLogFollowEntry": {
 		Names:  []string{"action"},
-		Reason: "runtime-log action is exact log evidence owned by #1819, not a registered watchdog action",
+		Reason: "runtime-log action is exact LogEntry evidence, not a registered watchdog action",
 	},
 	"main.go\x00emit": {
 		Names:  []string{"status"},

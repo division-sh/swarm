@@ -161,6 +161,7 @@ var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeForkChatSessionHeader":             {"writeCLIFieldLine"},
 	"writeMailboxDetailResult":               {"writeCLIFieldLine"},
 	"writeMailboxListResult":                 {"writeCLITable"},
+	"writeRuntimeLogListResult":              {"writeCLITable"},
 	"writeRuntimeIncidentListResult":         {"writeCLITable"},
 	"writeSecretsTable":                      {"writeCLITable"},
 }
@@ -538,9 +539,6 @@ func TestCLIOutputConformanceNoStaleActiveSplitOwners(t *testing.T) {
 func TestCLIOutputConformanceNoUnclassifiedLiteralTabTables(t *testing.T) {
 	root := driftTestRepoRoot(t)
 	dir := filepath.Join(root, "cmd", "swarm")
-	allowedFiles := map[string]string{
-		"logs.go": "split to #1819 logs formatting",
-	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)
@@ -556,7 +554,7 @@ func TestCLIOutputConformanceNoUnclassifiedLiteralTabTables(t *testing.T) {
 			t.Fatalf("parse %s: %v", path, err)
 		}
 		for _, imp := range file.Imports {
-			if imp.Path != nil && imp.Path.Value == strconv.Quote("text/tabwriter") && allowedFiles[name] == "" {
+			if imp.Path != nil && imp.Path.Value == strconv.Quote("text/tabwriter") {
 				t.Errorf("%s imports text/tabwriter; table/list display must consume writeCLITable", name)
 			}
 		}
@@ -572,9 +570,6 @@ func TestCLIOutputConformanceNoUnclassifiedLiteralTabTables(t *testing.T) {
 				}
 				value, err := strconv.Unquote(lit.Value)
 				if err != nil || !strings.Contains(value, "\t") {
-					continue
-				}
-				if allowedFiles[name] != "" {
 					continue
 				}
 				t.Errorf("%s contains fmt print literal tab %q; table/list display must consume writeCLITable", name, value)

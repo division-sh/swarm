@@ -142,6 +142,39 @@ func TestCLIOutputConformanceRegistryPromotedAsCurrentStateOwner(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, color, "consumer_registry"), "output_conformance_registry")
 }
 
+func TestCLIRuntimeLogSemanticProjectionOwnsAllPublicCLIConsumers(t *testing.T) {
+	catalog := mustMappingValue(t, cliSpecification(t), "command_catalog")
+	logs := mustMappingValue(t, catalog, "logs")
+	projection := mustMappingValue(t, mustMappingValue(t, logs, "output"), "semantic_projection")
+
+	assertScalarValue(t, mustMappingValue(t, projection, "canonical_owner"), "cmd/swarm/runtime_log_projection.go projectRuntimeLogEntry")
+	consumers := mustMappingValue(t, projection, "consumers")
+	for _, want := range []string{"swarm logs snapshot", "swarm logs --follow", "swarm conversation turn embedded runtime_log_entries"} {
+		assertSequenceContainsSubstring(t, consumers, want)
+	}
+
+	tuples := mustMappingValue(t, projection, "exact_redundant_message_tuples")
+	if tuples.Kind != yaml.SequenceNode || len(tuples.Content) != 1 {
+		t.Fatalf("runtime-log redundant tuple count = %d, want 1", len(tuples.Content))
+	}
+	tuple := tuples.Content[0]
+	assertScalarValue(t, mustMappingValue(t, tuple, "component"), "eventbus")
+	assertScalarValue(t, mustMappingValue(t, tuple, "action"), "published")
+	assertScalarValue(t, mustMappingValue(t, tuple, "message"), "Event was published to the event bus")
+	assertScalarContains(t, mustMappingValue(t, projection, "follow_residual_details_rule"), "run_id")
+	assertScalarContains(t, mustMappingValue(t, projection, "follow_residual_details_rule"), "type/value mismatches")
+
+	conversation := mustMappingValue(t, catalog, "conversation_turn")
+	conversationOutput := mustMappingValue(t, conversation, "output")
+	assertScalarContains(t, mustMappingValue(t, conversationOutput, "runtime_log_projection"), "same raw-retaining semantic projection owner")
+	assertScalarContains(t, mustMappingValue(t, conversationOutput, "runtime_log_projection"), "component= and action= remain visible")
+
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	rows := mustMappingValue(t, mustMappingValue(t, mustMappingValue(t, outputContract, "command_support"), "output_conformance_registry"), "rows")
+	logsRegistry := mustMappingValue(t, rows, "logs")
+	assertScalarValue(t, mustMappingValue(t, logsRegistry, "owner_issue"), "#1712")
+}
+
 func TestCLIHumanCodeProjectionOwnsCurrentProducerTuples(t *testing.T) {
 	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
 	sharedRenderer := mustMappingValue(t, outputContract, "shared_renderer_contract")

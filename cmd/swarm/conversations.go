@@ -306,8 +306,12 @@ func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err := validateConversationTurnDetailResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
 	}
+	runtimeLogProjections, err := projectRuntimeLogEntries("conversation.get_turn result.turn.runtime_log_entries", result.Turn.RuntimeLogEntries)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
+	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeConversationTurnDetailResult(w, result)
+		writeConversationTurnDetailResult(w, result, runtimeLogProjections)
 	}, func() ([]string, error) {
 		return []string{fmt.Sprintf("%s %d %s", result.Session.SessionID, result.Turn.TurnIndex, firstNonEmpty(result.Turn.Outcome, result.Session.Status))}, nil
 	})
@@ -683,7 +687,7 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 	})
 }
 
-func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDetail) {
+func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDetail, runtimeLogProjections []runtimeLogSemanticProjection) {
 	if out == nil {
 		return
 	}
@@ -720,15 +724,25 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 	}
 	if len(turn.RuntimeLogEntries) > 0 {
 		fmt.Fprintln(out, "Runtime logs:")
-		for _, log := range turn.RuntimeLogEntries {
-			fmt.Fprintf(out, "log_id=%s ts=%s level=%s component=%s source=%s message=%s\n",
-				log.LogID,
-				log.TS,
-				log.Level,
-				log.Component,
-				log.Source,
-				runtimeLogMessage(log),
-			)
+		for i, log := range turn.RuntimeLogEntries {
+			projection := runtimeLogProjections[i]
+			fields := []string{
+				"log_id=" + log.LogID,
+				"ts=" + log.TS,
+				"level=" + log.Level,
+				"component=" + log.Component,
+			}
+			if projection.Action != "" {
+				fields = append(fields, "action="+projection.Action)
+			}
+			fields = append(fields, "source="+log.Source)
+			if projection.Failure != "" {
+				fields = append(fields, "failure="+projection.Failure)
+			}
+			if projection.MessageVisible {
+				fields = append(fields, "message="+projection.Message)
+			}
+			fmt.Fprintln(out, strings.Join(fields, " "))
 		}
 	}
 }

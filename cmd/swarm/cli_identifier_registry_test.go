@@ -334,6 +334,9 @@ func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 		"forkchat.go\x00FORK_ID":             cliIdentifierFamilyFork,
 		"forkchat.go\x00SOURCE_SESSION":      cliIdentifierFamilySession,
 		"forkchat.go\x00SOURCE_AGENT":        cliIdentifierFamilyAgent,
+		"logs.go\x00RUN":                     cliIdentifierFamilyRun,
+		"logs.go\x00ENTITY":                  cliIdentifierFamilyEntity,
+		"logs.go\x00SESSION":                 cliIdentifierFamilySession,
 	}
 	seen := map[string]int{}
 	keyColumnExceptions := map[string]bool{
