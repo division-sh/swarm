@@ -7247,7 +7247,7 @@ tool_model:
           enforced_by: internal/providertriggers.Manifest.Accept
           execution_proof: internal/runtime TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPublish
         touch_unbound_resources:
-          enforced_by: internal/runtime.InboundGateway.handleWebhook
+          enforced_by: internal/runtime.InboundGateway.HandleResolvedWebhook
           execution_proof: internal/runtime TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission
         bypass_activity_attempts:
           enforced_by: internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent

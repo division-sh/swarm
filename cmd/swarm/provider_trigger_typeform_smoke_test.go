@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
@@ -53,7 +54,10 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 	defer bus.Unsubscribe(agentID)
 
 	responseCapture := newProviderTriggerSmokeResponseCapture()
-	baseURL := startProviderTriggerSmokeServer(t, ctx, listenAddr, bus, sqliteStore, responseCapture)
+	baseURL := startProviderTriggerSmokeServer(t, ctx, listenAddr, bus, sqliteStore, responseCapture, runtimepkg.InboundTarget{
+		RunID: runID, FlowInstance: flowInstance, EntityID: entityID, EntitySlug: entitySlug,
+		Alias: entitySlug, Provider: provider, SigningSecret: "bounded_smoke.typeform",
+	}, webhookSecret)
 	localAddress := baseURL + webhookPath
 	t.Logf("waiting up to %s for Typeform to POST to %s through a tunnel that forwards to %s", timeout, publicWebhookURL, localAddress)
 	t.Log("trigger a Typeform UI Send test request or submit the configured form; this smoke does not call the Typeform API")

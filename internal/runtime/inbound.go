@@ -28,10 +28,6 @@ type InboundPersistence interface {
 	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
-type InboundTargetResolver interface {
-	ResolveInboundTarget(ctx context.Context, alias, provider string) (InboundTarget, error)
-}
-
 type InboundFailureRollback interface {
 	DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error
 }
@@ -67,7 +63,6 @@ func (t *InboundTarget) NormalizeEntity() {
 }
 
 type InboundGateway struct {
-	mux                     *http.ServeMux
 	bus                     *runtimebus.EventBus
 	store                   InboundPersistence
 	logger                  *RuntimeLogger
@@ -75,7 +70,6 @@ type InboundGateway struct {
 	runtimeIngress          *runtimeingress.Controller
 	providers               *providertriggers.Registry
 	credentials             runtimecredentials.Store
-	targetResolver          InboundTargetResolver
 }
 
 func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
@@ -87,17 +81,12 @@ func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *Run
 		panic("provider trigger registry is required")
 	}
 	g := &InboundGateway{
-		mux:                     http.NewServeMux(),
 		bus:                     bus,
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
 		providers:               providers,
 	}
-	if resolver, ok := any(store).(InboundTargetResolver); ok {
-		g.targetResolver = resolver
-	}
-	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
 }
 
@@ -107,33 +96,11 @@ func (g *InboundGateway) SetCredentialStore(store runtimecredentials.Store) {
 	}
 }
 
-func (g *InboundGateway) Handler() http.Handler {
-	return g.mux
-}
-
 func (g *InboundGateway) SetRuntimeIngress(controller *runtimeingress.Controller) {
 	if g == nil {
 		return
 	}
 	g.runtimeIngress = controller
-}
-
-func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	alias, provider, ok := parseWebhookPath(r.URL.Path)
-	if !ok {
-		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
-		return
-	}
-	if g.targetResolver == nil {
-		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
-		return
-	}
-	target, err := g.targetResolver.ResolveInboundTarget(r.Context(), alias, provider)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
-		return
-	}
-	g.handleResolvedWebhook(w, r, target, nil)
 }
 
 func (g *InboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
