@@ -188,18 +188,12 @@ jobs:
       - ci-plan
     runs-on: ubuntu-latest
     timeout-minutes: 18
-    env:
-      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-      SWARM_TEST_POSTGRES_ROLE_PROOF: "1"
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.ci-plan.outputs.shard_matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Start and verify disposable Postgres
-        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -263,10 +257,10 @@ jobs:
           start_epoch=$(date +%s)
           set +e
           if [ -n "$count_flag" ]; then
-            go test $test_packages "$count_flag" -json \
+            go run ./cmd/swarm-test-postgres -- go test $test_packages "$count_flag" -json \
               2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           else
-            go test $test_packages -json \
+            go run ./cmd/swarm-test-postgres -- go test $test_packages -json \
               2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           fi
           status=${PIPESTATUS[0]}
@@ -296,7 +290,7 @@ jobs:
               confirmation_evidence="test-results/shard-${{ matrix.shard }}-confirmation-evidence.json"
               confirmation_start_epoch=$(date +%s)
               set +e
-              go test $test_packages -count=1 -json \
+              go run ./cmd/swarm-test-postgres -- go test $test_packages -count=1 -json \
                 2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
               confirmation_status=${PIPESTATUS[0]}
               set -e
@@ -361,14 +355,9 @@ jobs:
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    env:
-      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Start and verify disposable Postgres
-        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -381,26 +370,64 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          go test ./cmd/swarm \
+          go run ./cmd/swarm-test-postgres -- go test ./cmd/swarm \
             -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction \
             -count=1 -json 2>&1 | tee test-results/semantic-smoke.json
 
-      - name: Prove owned Docker fallback
+      - name: Prove runner-owned Docker service
         shell: bash
         run: |
           set -euo pipefail
-          env -u SWARM_TEST_POSTGRES_DSN \
-            SWARM_TEST_POSTGRES_ASSERT_OWNED_SETTINGS=1 \
-            go test ./internal/testutil \
-              -run '^TestOwnedPostgresSettings$' \
-              -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
+          go run ./cmd/swarm-test-postgres -- go test ./internal/testutil \
+            -run '^TestStartPostgres_Smoke$' \
+            -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
+
+      - name: Prove runner failure, interrupt, and hard-death reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner="$RUNNER_TEMP/swarm-test-postgres"
+          go build -o "$runner" ./cmd/swarm-test-postgres
+
+          set +e
+          "$runner" -- sh -c 'exit 17'
+          child_status=$?
+          set -e
+          test "$child_status" -eq 17
+
+          interrupt_child_pid_file="$RUNNER_TEMP/swarm-test-postgres-interrupt-child.pid"
+          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$interrupt_child_pid_file" &
+          interrupt_runner=$!
+          for _ in $(seq 1 120); do
+            test -s "$interrupt_child_pid_file" && break
+            sleep 0.25
+          done
+          test -s "$interrupt_child_pid_file"
+          kill -TERM "$interrupt_runner"
+          wait "$interrupt_runner" || true
+          test -z "$(docker ps --all --filter label=com.division.swarm.test-postgres.managed=1 --format '{{.ID}}')"
+
+          child_pid_file="$RUNNER_TEMP/swarm-test-postgres-child.pid"
+          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$child_pid_file" &
+          hard_death_runner=$!
+          for _ in $(seq 1 120); do
+            test -s "$child_pid_file" && break
+            sleep 0.25
+          done
+          test -s "$child_pid_file"
+          kill -KILL "$hard_death_runner"
+          wait "$hard_death_runner" || true
+          kill -TERM "$(cat "$child_pid_file")" 2>/dev/null || true
+
+          "$runner" -- true
+          test -z "$(docker ps --all --filter label=com.division.swarm.test-postgres.managed=1 --format '{{.ID}}')"
 
       - name: Prove catalog required smoke
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p test-results
-          go test ./internal/runtime/cataloge2e \
+          go run ./cmd/swarm-test-postgres -- go test ./internal/runtime/cataloge2e \
             -run '^TestCatalogRequiredSmoke$' \
             -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
 
@@ -435,14 +462,9 @@ jobs:
       - ci-plan
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Start and verify disposable Postgres
-        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -465,7 +487,7 @@ jobs:
           SWARM_TOOL_GATEWAY_URL= \
           SWARM_TOOL_GATEWAY_CONTAINER_URL= \
           SWARM_TOOL_GATEWAY_TOKEN= \
-          go test $full_packages -count=1 -json \
+          go run ./cmd/swarm-test-postgres -- go test $full_packages -count=1 -json \
             2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
@@ -497,7 +519,7 @@ jobs:
               SWARM_TOOL_GATEWAY_URL= \
               SWARM_TOOL_GATEWAY_CONTAINER_URL= \
               SWARM_TOOL_GATEWAY_TOKEN= \
-              go test $full_packages -count=1 -json \
+              go run ./cmd/swarm-test-postgres -- go test $full_packages -count=1 -json \
                 2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
               confirmation_status=${PIPESTATUS[0]}
               set -e
@@ -547,14 +569,9 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Start and verify disposable Postgres
-        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -567,7 +584,7 @@ jobs:
         run: |
           set +e
           mkdir -p test-results
-          go test \
+          go run ./cmd/swarm-test-postgres -- go test \
             ./internal/runtime/pythonmodule \
             ./internal/runtime/runforkexecution \
             -count=1 -json 2>&1 | tee test-results/nightly-extras.json

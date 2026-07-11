@@ -10,6 +10,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -74,17 +75,18 @@ func TestDSNFromConfigPinsDefaultNonSecretKeywordsAgainstPGEnv(t *testing.T) {
 func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	parsed, err := pq.NewConfig(dsn)
+	connection, err := testpostgres.ParseConnection(dsn)
 	if err != nil {
 		t.Fatalf("parse canonical test Postgres DSN: %v", err)
 	}
+	parsed := connection.Parameters()
 
 	cfg := config.DatabaseConfig{
 		Host:     parsed.Host,
 		Port:     int(parsed.Port),
 		Name:     parsed.Database,
 		User:     parsed.User,
-		SSLMode:  string(parsed.SSLMode),
+		SSLMode:  parsed.SSLMode,
 		PoolSize: 5,
 	}
 	gotDSN := DSNFromConfig(cfg, parsed.Password)

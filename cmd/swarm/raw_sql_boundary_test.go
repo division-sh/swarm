@@ -282,13 +282,23 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		},
 		"internal/testutil/postgres.go": {
 			Classification: rawSQLTestSupportBoundary,
-			Issue:          1783,
-			Reason:         "testutil owns local Postgres setup/teardown and is excluded from production selected-store authority",
+			Issue:          1943,
+			Reason:         "testutil is the thin testing adapter over the canonical testpostgres lifecycle owner",
 		},
-		"internal/testutil/postgres_dsn.go": {
+		"internal/testpostgres/connection.go": {
 			Classification: rawSQLTestSupportBoundary,
-			Issue:          1901,
-			Reason:         "testutil owns the typed Postgres DSN and connector boundary used by local test setup/teardown",
+			Issue:          1943,
+			Reason:         "testpostgres owns the typed Postgres DSN and connector boundary used by test lifecycle consumers",
+		},
+		"internal/testpostgres/manager.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          1943,
+			Reason:         "testpostgres owns server-scoped template, sandbox, lease, reconciliation, and cleanup SQL",
+		},
+		"internal/testpostgres/service_registry.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          1943,
+			Reason:         "runner-owned service verification reads canonical Postgres settings through the typed test connection",
 		},
 	}
 }
