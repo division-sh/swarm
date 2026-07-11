@@ -104,6 +104,7 @@ type executionFrame struct {
 	ruleDataWritesApplied     bool
 	projectionApplied         bool
 	transitionApplied         bool
+	joinResultType            runtimecontracts.CatalogTypeReference
 }
 
 type handlerRuleSource string
@@ -757,6 +758,11 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	if spec == nil {
 		return false, nil
 	}
+	resultType, found := e.joinResultType(frame.req)
+	if !found || resultType.Empty() {
+		return false, fmt.Errorf("join %s has no resolved output type in the semantic plan", spec.EffectiveID())
+	}
+	frame.joinResultType = resultType
 	payload := frame.payload
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
 	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.Stage != strings.TrimSpace(spec.Stage) || ref.JoinID != spec.EffectiveID()) {
@@ -851,7 +857,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	frame.state.Join = activation.Context()
 	complete, err := joinruntime.CompletionSatisfied(activation, spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
 		frame.state.Join = joinContext
-		return e.evaluator.EvalBool(expression, e.currentContext(frame))
+		return workflowexpr.EvalJoinBool(expression, joinContext, frame.joinResultType)
 	})
 	if err != nil {
 		return false, fmt.Errorf("join complete_when: %w", err)
@@ -1995,7 +2001,30 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 }
 
 func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
-	return workflowexpr.ValueExpressionOptions{AllowJoin: frame != nil && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout)}
+	allowJoin := frame != nil && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout)
+	if !allowJoin {
+		return workflowexpr.ValueExpressionOptions{}
+	}
+	return workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
+}
+
+func (e *Executor) joinResultType(req ExecutionRequest) (runtimecontracts.CatalogTypeReference, bool) {
+	if e == nil || e.deps.Source == nil {
+		return runtimecontracts.CatalogTypeReference{}, false
+	}
+	for _, plan := range e.deps.Source.WorkflowJoins() {
+		planFlowID := strings.TrimSpace(plan.FlowID)
+		requestFlowID := strings.TrimSpace(req.FlowID.String())
+		flowMatches := planFlowID == requestFlowID
+		if planFlowID == "" {
+			flowMatches = requestFlowID == "" || requestFlowID == strings.TrimSpace(e.deps.Source.WorkflowName())
+		}
+		if flowMatches && strings.TrimSpace(plan.NodeID) == strings.TrimSpace(req.NodeID.String()) &&
+			strings.TrimSpace(plan.HandlerEvent) == strings.TrimSpace(req.HandlerEventKey) {
+			return plan.ResultType, true
+		}
+	}
+	return runtimecontracts.CatalogTypeReference{}, false
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {

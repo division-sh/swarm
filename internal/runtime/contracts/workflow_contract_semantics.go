@@ -165,11 +165,13 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
 			if handler.Join != nil {
+				resultType, _ := ResolveEventFieldType(bundle, strings.TrimSpace(source.FlowID), rawEventType, joinOutputField(handler.Join.Output))
 				semantics.Joins = append(semantics.Joins, WorkflowJoinPlan{
 					FlowID:       strings.TrimSpace(source.FlowID),
 					NodeID:       nodeID,
 					HandlerEvent: rawEventType,
 					Spec:         *handler.Join,
+					ResultType:   resultType,
 				})
 			}
 			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
@@ -188,6 +190,18 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.NodeHandlers[nodeID] = handlers
 	}
 	bundle.Semantics = semantics
+}
+
+func joinOutputField(path string) string {
+	path = strings.TrimSpace(path)
+	if !strings.HasPrefix(path, "payload.") {
+		return ""
+	}
+	field := strings.TrimPrefix(path, "payload.")
+	if field == "" || strings.Contains(field, ".") {
+		return ""
+	}
+	return field
 }
 
 func semanticInputEventPins(pins FlowInputPins) []FlowInputEventPin {

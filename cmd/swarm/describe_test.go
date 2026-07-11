@@ -351,6 +351,53 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 	}
 }
 
+func TestVerifyCommandRejectsTypeInvalidNamedJoinResult(t *testing.T) {
+	contractsRoot := writeDescribeStageGraphContracts(t)
+	flowRoot := filepath.Join(contractsRoot, "flows", "support")
+	writeDescribeTestFile(t, filepath.Join(flowRoot, "types.yaml"), `
+types:
+  JoinResult:
+    value: text
+`)
+	eventsPath := filepath.Join(flowRoot, "events.yaml")
+	events, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDescribeTestFile(t, eventsPath, strings.Replace(string(events), "  result: string", "  result: JoinResult", 1))
+	nodesPath := filepath.Join(flowRoot, "nodes.yaml")
+	nodes, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(nodes), "      join:\n        stage: active", "      join:\n        complete_when: join.results[0] > 1\n        remaining: ignore\n        stage: active", 1)
+	if updated == string(nodes) {
+		t.Fatal("join fixture mutation did not match")
+	}
+	writeDescribeTestFile(t, nodesPath, updated)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"verify", "--contracts", contractsRoot, "--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code == 0 {
+		t.Fatalf("verify --json code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	output := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if !reportContainsVerifyError(output.Errors, "join_validation", "no matching overload") {
+		t.Fatalf("verify --json errors = %#v, want named JoinResult typed rejection", output.Errors)
+	}
+}
+
+func reportContainsVerifyError(findings []verifyFindingOutput, checkID, message string) bool {
+	for _, finding := range findings {
+		if finding.CheckID == checkID && strings.Contains(finding.Message, message) {
+			return true
+		}
+	}
+	return false
+}
+
 func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()

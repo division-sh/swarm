@@ -64,6 +64,42 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.CompleteWhen = "join.results[0] > 1"
 			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
 		}, wantError: "no matching overload"},
+		{name: "custom completion preserves named result fields", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+				"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "text"}}},
+			}}
+			event := bundle.Events["item.completed"]
+			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
+			bundle.Events["item.completed"] = event
+			h.Join.CompleteWhen = `join.results[0].value == "ok"`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}},
+		{name: "custom completion rejects named result as scalar", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+				"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "text"}}},
+			}}
+			event := bundle.Events["item.completed"]
+			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
+			bundle.Events["item.completed"] = event
+			h.Join.CompleteWhen = `join.results[0] > 1`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "no matching overload"},
+		{name: "custom completion preserves enum result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}}}
+			event := bundle.Events["item.completed"]
+			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Decision"}
+			bundle.Events["item.completed"] = event
+			h.Join.CompleteWhen = `join.results[0] > 1`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "no matching overload"},
+		{name: "custom completion preserves scalar alias result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}}}
+			event := bundle.Events["item.completed"]
+			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Score"}
+			bundle.Events["item.completed"] = event
+			h.Join.CompleteWhen = `join.results[0].startsWith("1")`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "no matching overload"},
 		{name: "outcome payload forbidden", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("payload.result")
 		}, wantError: "may not reference payload.*"},

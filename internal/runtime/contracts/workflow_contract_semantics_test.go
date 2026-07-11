@@ -57,6 +57,36 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 	}
 }
 
+func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) {
+	spec := JoinSpec{Output: "payload.result"}
+	bundle := &WorkflowContractBundle{
+		RootTypes: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"JoinResult": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+		}},
+		Events: map[string]EventCatalogEntry{
+			"item.completed": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"result": {Type: "JoinResult"}}}},
+		},
+		Nodes: map[string]SystemNodeContract{
+			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+
+	joins := bundle.WorkflowJoins()
+	if len(joins) != 1 || joins[0].ResultType.Type != "JoinResult" {
+		t.Fatalf("join result type = %#v", joins)
+	}
+	resolved, err := joins[0].ResultType.Resolve()
+	if err != nil || resolved.Kind != CatalogTypeObject || resolved.Name != "JoinResult" {
+		t.Fatalf("resolved join result = %#v, %v", resolved, err)
+	}
+	delete(bundle.RootTypes.Types, "JoinResult")
+	if _, ok := joins[0].ResultType.NamedFields("JoinResult"); !ok {
+		t.Fatal("join plan did not retain the declaring type catalog")
+	}
+}
+
 func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{

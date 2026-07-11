@@ -9,9 +9,11 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
+	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
 
@@ -53,7 +55,7 @@ type ValueExpressionOptions struct {
 	ItemAlias      string
 	AllowJoin      bool
 	RequireBool    bool
-	JoinResultType string
+	JoinResultType runtimecontracts.CatalogTypeReference
 }
 
 func ValidateValueExpression(expression string) error {
@@ -176,12 +178,18 @@ func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *ce
 	return ctx.NewAST(expression.Expr())
 }
 
-func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, resultType string) (*cel.Ast, error) {
+func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, resultType runtimecontracts.CatalogTypeReference) (*cel.Ast, error) {
+	provider := newJoinCatalogTypeProvider(env.CELTypeProvider(), resultType)
+	resultCELType, err := provider.resolve(resultType.Type)
+	if err != nil {
+		return nil, err
+	}
 	typedEnv, err := env.Extend(
+		cel.CustomTypeProvider(provider),
 		cel.Variable(joinTypedVariable("expected"), cel.IntType),
 		cel.Variable(joinTypedVariable("completed"), cel.IntType),
 		cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
-		cel.Variable(joinTypedVariable("results"), cel.ListType(joinResultCELType(resultType))),
+		cel.Variable(joinTypedVariable("results"), cel.ListType(resultCELType)),
 		cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
 	)
 	if err != nil {
@@ -202,37 +210,136 @@ func joinTypedVariable(field string) string {
 	return "__swarm_join_" + strings.TrimSpace(field)
 }
 
-func joinResultCELType(typeRef string) *cel.Type {
-	typeRef = strings.TrimSpace(typeRef)
-	if strings.HasSuffix(typeRef, "[]") {
-		return cel.ListType(joinResultCELType(strings.TrimSpace(strings.TrimSuffix(typeRef, "[]"))))
+const joinCatalogTypePrefix = "swarm.workflow.join."
+
+type joinCatalogTypeProvider struct {
+	celtypes.Provider
+	result runtimecontracts.CatalogTypeReference
+}
+
+func newJoinCatalogTypeProvider(base celtypes.Provider, result runtimecontracts.CatalogTypeReference) *joinCatalogTypeProvider {
+	return &joinCatalogTypeProvider{Provider: base, result: result}
+}
+
+func (p *joinCatalogTypeProvider) resolve(typeRef string) (*cel.Type, error) {
+	resolved, err := p.result.ResolveReference(typeRef)
+	if err != nil {
+		return nil, err
 	}
-	if strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") {
-		return cel.ListType(joinResultCELType(strings.TrimSpace(typeRef[1 : len(typeRef)-1])))
-	}
-	lower := strings.ToLower(typeRef)
-	if strings.HasPrefix(lower, "list<") && strings.HasSuffix(typeRef, ">") {
-		return cel.ListType(joinResultCELType(strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])))
-	}
-	if strings.HasPrefix(lower, "numeric(") {
-		return cel.DoubleType
-	}
-	switch lower {
-	case "text", "string", "uuid", "timestamp", "timestamptz":
-		return cel.StringType
-	case "integer", "int", "bigint":
-		return cel.IntType
-	case "number", "numeric", "float", "double", "real":
-		return cel.DoubleType
-	case "boolean", "bool":
-		return cel.BoolType
+	return p.resolveResolved(resolved)
+}
+
+func (p *joinCatalogTypeProvider) resolveResolved(resolved runtimecontracts.ResolvedCatalogType) (*cel.Type, error) {
+	switch resolved.Kind {
+	case runtimecontracts.CatalogTypeDynamic:
+		return cel.DynType, nil
+	case runtimecontracts.CatalogTypeText:
+		return cel.StringType, nil
+	case runtimecontracts.CatalogTypeInteger:
+		return cel.IntType, nil
+	case runtimecontracts.CatalogTypeNumber:
+		return cel.DoubleType, nil
+	case runtimecontracts.CatalogTypeBoolean:
+		return cel.BoolType, nil
+	case runtimecontracts.CatalogTypeObject:
+		return cel.ObjectType(joinCatalogTypePrefix + resolved.Name), nil
+	case runtimecontracts.CatalogTypeList:
+		if resolved.Element == nil {
+			return nil, fmt.Errorf("catalog list type has no element type")
+		}
+		element, err := p.resolveResolved(*resolved.Element)
+		if err != nil {
+			return nil, err
+		}
+		return cel.ListType(element), nil
+	case runtimecontracts.CatalogTypeMap:
+		if resolved.Key == nil || resolved.Value == nil {
+			return nil, fmt.Errorf("catalog map type is incomplete")
+		}
+		key, err := p.resolveResolved(*resolved.Key)
+		if err != nil {
+			return nil, err
+		}
+		value, err := p.resolveResolved(*resolved.Value)
+		if err != nil {
+			return nil, err
+		}
+		return cel.MapType(key, value), nil
 	default:
-		return cel.DynType
+		return nil, fmt.Errorf("unsupported catalog type kind %q", resolved.Kind)
 	}
+}
+
+func (p *joinCatalogTypeProvider) FindStructType(typeName string) (*celtypes.Type, bool) {
+	if name, ok := joinCatalogTypeName(typeName); ok {
+		if _, found := p.result.NamedFields(name); found {
+			return celtypes.NewTypeTypeWithParam(celtypes.NewObjectType(typeName)), true
+		}
+	}
+	return p.Provider.FindStructType(typeName)
+}
+
+func (p *joinCatalogTypeProvider) FindStructFieldNames(typeName string) ([]string, bool) {
+	if name, ok := joinCatalogTypeName(typeName); ok {
+		fields, found := p.result.NamedFields(name)
+		if !found {
+			return nil, false
+		}
+		names := make([]string, 0, len(fields))
+		for field := range fields {
+			names = append(names, field)
+		}
+		sort.Strings(names)
+		return names, true
+	}
+	return p.Provider.FindStructFieldNames(typeName)
+}
+
+func (p *joinCatalogTypeProvider) FindStructFieldType(typeName, fieldName string) (*celtypes.FieldType, bool) {
+	if name, ok := joinCatalogTypeName(typeName); ok {
+		fields, found := p.result.NamedFields(name)
+		if !found {
+			return nil, false
+		}
+		field, found := fields[strings.TrimSpace(fieldName)]
+		if !found {
+			return nil, false
+		}
+		fieldType, err := p.resolve(field.Type)
+		if err != nil {
+			return nil, false
+		}
+		return &celtypes.FieldType{Type: fieldType}, true
+	}
+	return p.Provider.FindStructFieldType(typeName, fieldName)
+}
+
+func joinCatalogTypeName(typeName string) (string, bool) {
+	if !strings.HasPrefix(typeName, joinCatalogTypePrefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(typeName, joinCatalogTypePrefix)
+	return name, name != ""
 }
 
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	return EvalValueExpressionWithOptions(expression, ctx, ValueExpressionOptions{})
+}
+
+func EvalJoinBool(expression string, join map[string]any, resultType runtimecontracts.CatalogTypeReference) (bool, error) {
+	value, err := EvalValueExpressionWithOptions(expression, ValueContext{Join: join}, ValueExpressionOptions{
+		AllowJoin:      true,
+		RequireBool:    true,
+		JoinResultType: resultType,
+	})
+	if err != nil {
+		return false, err
+	}
+	result, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("workflow join expression returned non-bool %T", value)
+	}
+	return result, nil
 }
 
 func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (any, error) {

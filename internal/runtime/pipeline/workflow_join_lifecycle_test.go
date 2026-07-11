@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -187,6 +188,44 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 	}
 }
 
+func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	bundle := workflowJoinLifecycleBundle()
+	node := bundle.Nodes["join-node"]
+	handler := node.EventHandlers["item.completed"]
+	spec := *handler.Join
+	spec.CompleteWhen = "join.results[0] > 1"
+	spec.Remaining = runtimecontracts.JoinRemainingIgnore
+	handler.Join = &spec
+	node.EventHandlers["item.completed"] = handler
+	bundle.Nodes["join-node"] = node
+	bundle.Semantics.Joins[0].Spec = spec
+	bundle.Semantics.Joins[0].ResultType = runtimecontracts.CatalogTypeReference{
+		Type: "JoinResult",
+		Catalog: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "text"}}},
+		}},
+	}
+
+	pc := &PipelineCoordinator{
+		module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+		workflowStore: store,
+	}
+	entityID := FlowInstanceEntityID("orders/order-typed")
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := pc.armWorkflowCurrentStageLifecycle(ctx, entityID, "state:awaiting")
+	if err == nil || !strings.Contains(err.Error(), "no matching overload") {
+		t.Fatalf("arm join error = %v, want catalog-backed typed rejection", err)
+	}
+}
+
 func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -204,9 +243,10 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Events["approval.completed"] = bundle.Events["item.completed"]
 			bundle.RootSchema.StageDeclarations.Entries = append(bundle.RootSchema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{ID: "reviewing"})
 			bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "reviewing"})
+			resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 			bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{
-				{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: first},
-				{FlowID: "", NodeID: "join-node", HandlerEvent: "approval.completed", Spec: second},
+				{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: first, ResultType: resultType},
+				{FlowID: "", NodeID: "join-node", HandlerEvent: "approval.completed", Spec: second, ResultType: resultType},
 			}
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
@@ -773,6 +813,7 @@ func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) 
 }
 
 func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
+	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 	spec := runtimecontracts.JoinSpec{
 		ID: "awaiting", Stage: "awaiting",
 		Members: runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
@@ -802,7 +843,7 @@ func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "orders", Version: "1.0.0", InitialStage: "dispatching", Stages: []runtimecontracts.WorkflowStageContract{{ID: "dispatching"}, {ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"ready", "attention"},
-			Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec}},
+			Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
 				"join-node":  {ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(joinNode)},
 				"dispatcher": {ID: "dispatcher", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(dispatcher)},

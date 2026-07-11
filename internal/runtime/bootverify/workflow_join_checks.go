@@ -36,7 +36,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
 			}
 			spec := *handler.Join
-			resultType := c.joinOutputType(flowID, eventType, spec)
+			resultType := c.joinOutputType(flowID, nodeID, eventType, spec)
 			prefix := fmt.Sprintf("join %s", spec.EffectiveID())
 			if !flowUsesAuthoredStages(c.source, flowID) {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
@@ -78,16 +78,23 @@ func checkJoinValidation(c *checkerContext) []Finding {
 	return findings
 }
 
-func (c *checkerContext) joinOutputType(flowID, eventType string, spec runtimecontracts.JoinSpec) string {
+func (c *checkerContext) joinOutputType(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) runtimecontracts.CatalogTypeReference {
 	if c == nil || c.source == nil {
-		return ""
+		return runtimecontracts.CatalogTypeReference{}
 	}
-	field := joinPathField(spec.Output, "payload")
-	if field == "" {
-		return ""
+	for _, plan := range c.source.WorkflowJoins() {
+		if strings.TrimSpace(plan.FlowID) == strings.TrimSpace(flowID) &&
+			strings.TrimSpace(plan.NodeID) == strings.TrimSpace(nodeID) &&
+			strings.TrimSpace(plan.HandlerEvent) == strings.TrimSpace(eventType) {
+			return plan.ResultType
+		}
 	}
-	proof := semanticview.ResolveFlowEventProof(c.source, flowID, eventType)
-	return proof.Entry.Payload.Properties[field].Type
+	if bundle, ok := semanticview.Bundle(c.source); ok {
+		if resultType, found := runtimecontracts.ResolveEventFieldType(bundle, flowID, eventType, joinPathField(spec.Output, "payload")); found {
+			return resultType
+		}
+	}
+	return runtimecontracts.CatalogTypeReference{}
 }
 
 func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) []Finding {
@@ -127,7 +134,7 @@ func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spe
 	return out
 }
 
-func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType string) []Finding {
+func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType runtimecontracts.CatalogTypeReference) []Finding {
 	out := make([]Finding, 0)
 	if target := strings.TrimSpace(rule.AdvancesTo); target != "" && !containsString(states, target) {
 		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s advances_to references unknown stage %s", label, target)))
@@ -145,7 +152,7 @@ func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimeco
 	return out
 }
 
-func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType string) []Finding {
+func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType runtimecontracts.CatalogTypeReference) []Finding {
 	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}); err != nil {
 		return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
 	}
