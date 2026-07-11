@@ -45,16 +45,19 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			return
 		}
 		for _, activation := range activations {
-			if activation.Status != joinruntime.StatusOpen || activation.Stage != currentStage || activation.Stage == nextStage {
+			if activation.Stage != currentStage || activation.Stage == nextStage || !activation.CloseForStageExit() {
 				continue
 			}
-			activation.Close(joinruntime.CloseReasonStageExit, false, false)
+			kind := timeridentity.TimerHandleJoinTimeout
+			if activation.TimerEventType == joinCompleteEvent {
+				kind = timeridentity.TimerHandleJoinComplete
+			}
 			activation.TimerCancelled = true
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 				lifecycleErr = fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 				return
 			}
-			toCancel = append(toCancel, joinSchedule(entityID, *instance, activation, timeridentity.TimerHandleJoinTimeout))
+			toCancel = append(toCancel, joinSchedule(entityID, *instance, activation, kind))
 		}
 
 		for _, plan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {

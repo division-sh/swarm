@@ -215,6 +215,27 @@ func (a *Activation) Close(reason CloseReason, outcomePending, outcomeFired bool
 	return true
 }
 
+func (a *Activation) CloseForStageExit() bool {
+	if a == nil {
+		return false
+	}
+	if a.Status == StatusOpen {
+		a.Status = StatusClosed
+		a.CloseReason = CloseReasonStageExit
+		a.OutcomePending = false
+		a.OutcomeFired = false
+		return true
+	}
+	if a.Status != StatusClosed || a.CloseReason != CloseReasonComplete || !a.OutcomePending || a.OutcomeFired {
+		return false
+	}
+	// A zero-member completion is closed before its internal event fires. Stage
+	// exit supersedes that pending outcome so a delayed event cannot apply it.
+	a.CloseReason = CloseReasonStageExit
+	a.OutcomePending = false
+	return true
+}
+
 func Load(stateBuckets map[string]map[string]any, nodeID, key string) (Activation, bool, error) {
 	node := stateBuckets[strings.TrimSpace(nodeID)]
 	joins, _ := node[bucketKey].(map[string]any)

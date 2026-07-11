@@ -492,6 +492,86 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 	}
 }
 
+func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t *testing.T) {
+	tests := []struct {
+		name  string
+		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+	}{
+		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+		}},
+		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			runID := uuid.NewString()
+			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+				t.Fatal(err)
+			}
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(context.Background(), runID)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.store(t)
+			bundle := workflowJoinLifecycleBundle()
+			schedules := &recordingSchedulePersistence{}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+				WorkflowStore:      store,
+				TimerScheduleStore: schedules,
+			})
+			path := "orders/" + uuid.NewString()
+			entityID := FlowInstanceEntityID(path)
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.armWorkflowCurrentStageLifecycle(ctx, entityID, "state:awaiting"); err != nil {
+				t.Fatalf("arm zero join: %v", err)
+			}
+			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != joinCompleteEvent {
+				t.Fatalf("completion schedules = %#v", schedules.schedules)
+			}
+			completion := schedules.schedules[0]
+			if err := pc.updateEntityState(ctx, entityID, "dispatching", "manual.abort"); err != nil {
+				t.Fatalf("exit join stage: %v", err)
+			}
+			if schedules.cancelOwned != 1 || len(schedules.cancels) != 1 || schedules.cancels[0].EventType != joinCompleteEvent || len(schedules.cancelTx) != 1 || !schedules.cancelTx[0] {
+				t.Fatalf("completion cancellation = count:%d cancels:%#v tx:%#v", schedules.cancelOwned, schedules.cancels, schedules.cancelTx)
+			}
+
+			instance, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok {
+				t.Fatalf("load exited instance = %v, %v", ok, err)
+			}
+			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			if err != nil || !ok || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonStageExit || activation.OutcomePending || activation.OutcomeFired || !activation.TimerCancelled {
+				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
+			}
+
+			fire := eventtest.RootIngress("join-zero-after-exit", events.EventType(completion.EventType), "", completion.TaskID, completion.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: pc.currentWorkflowState(ctx, entityID)})
+			if err != nil || !result.Handled {
+				t.Fatalf("late completion fire = handled:%v err:%v", result.Handled, err)
+			}
+			instance, ok, err = store.Load(ctx, entityID)
+			if err != nil || !ok || instance.CurrentState != "dispatching" || len(instance.TransitionHistory) != 1 {
+				t.Fatalf("lifecycle after late completion = instance:%#v found:%v err:%v", instance, ok, err)
+			}
+			if schedules.cancelOwned != 1 {
+				t.Fatalf("late completion repeated cancellation: %d", schedules.cancelOwned)
+			}
+		})
+	}
+}
+
 func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
