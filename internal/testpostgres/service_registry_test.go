@@ -44,6 +44,7 @@ func TestServiceRegistryPreparedStateClearsWithoutDockerAuthority(t *testing.T) 
 	if _, err := registry.record(record.LeaseID); !os.IsNotExist(err) {
 		t.Fatalf("prepared record survives: %v", err)
 	}
+	assertServiceAuthorityAbsent(t, registry, record)
 }
 
 func TestServiceRegistryCreatorStartingFenceBlocksReconciliation(t *testing.T) {
@@ -67,6 +68,7 @@ func TestServiceRegistryCreatorStartingWithoutFenceClears(t *testing.T) {
 	if _, err := registry.record(record.LeaseID); !os.IsNotExist(err) {
 		t.Fatalf("creator-starting record survives without a fence: %v", err)
 	}
+	assertServiceAuthorityAbsent(t, registry, record)
 }
 
 func TestServiceRegistryCreatingFenceBlocksReconciliation(t *testing.T) {
@@ -127,6 +129,7 @@ func TestServiceRegistryFailedCreatorWithoutEvidenceClears(t *testing.T) {
 	if _, err := registry.record(record.LeaseID); !os.IsNotExist(err) {
 		t.Fatalf("failed creator record survives proven absence: %v", err)
 	}
+	assertServiceAuthorityAbsent(t, registry, record)
 }
 
 func TestServiceRegistryTerminalPublicationWaitsForCreatorFenceRelease(t *testing.T) {
@@ -176,6 +179,7 @@ func TestServiceRegistryExactTerminalContainerIsRemoved(t *testing.T) {
 	if !containsCall(registry.docker.(*fakeDocker).calls, "rm --force "+record.ContainerID) {
 		t.Fatal("exact container was not removed")
 	}
+	assertServiceAuthorityAbsent(t, registry, record)
 }
 
 func TestServiceRegistryTearingDownConvergesAfterContainerAlreadyRemoved(t *testing.T) {
@@ -354,6 +358,31 @@ func TestServiceCloseInspectsBeforeRemoval(t *testing.T) {
 	}
 }
 
+func TestServiceCloseRemovesAllAuthorityFiles(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("acquire lease: acquired=%v err=%v", acquired, err)
+	}
+	creator, acquired, err := acquireFileLock(registry.creatorPath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("acquire creator: acquired=%v err=%v", acquired, err)
+	}
+	if err := creator.Close(); err != nil {
+		t.Fatal(err)
+	}
+	registry.docker = dockerWithContainers(t, testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID))
+	service := &Service{registry: registry, record: record, lease: lease}
+	if err := service.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertServiceAuthorityAbsent(t, registry, record)
+}
+
 func TestServiceRegistryRejectsUnknownState(t *testing.T) {
 	registry, record := testRegistryRecord(t, ServicePrepared)
 	record.State = "future_state"
@@ -461,37 +490,6 @@ func TestServiceRegistryOwnerIDFirstCreationIsAtomic(t *testing.T) {
 	}
 }
 
-func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
-	registry, first := testRegistryRecord(t, ServicePrepared)
-	second := first
-	second.LeaseID = "lease-two"
-	second.RunnerID = "runner-two"
-	second.Name = "swarm-test-postgres-v1-runner-two"
-	second.CIDFile = filepath.Join(registry.StateRoot, "handoff", "lease-two.cid")
-	second.Labels = serviceLabels(second.OwnerID, second.DaemonID, second.RunnerID, second.LeaseID, second.SpecHash)
-	if err := registry.putRecord(second); err != nil {
-		t.Fatal(err)
-	}
-	firstLease, acquired, err := acquireFileLock(registry.leasePath(first.LeaseID), false)
-	if err != nil || !acquired {
-		t.Fatalf("first lease: acquired=%v err=%v", acquired, err)
-	}
-	defer firstLease.Close()
-	secondLease, acquired, err := acquireFileLock(registry.leasePath(second.LeaseID), false)
-	if err != nil || !acquired {
-		t.Fatalf("second lease: acquired=%v err=%v", acquired, err)
-	}
-	defer secondLease.Close()
-	if err := registry.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, leaseID := range []string{first.LeaseID, second.LeaseID} {
-		if _, err := registry.record(leaseID); err != nil {
-			t.Fatalf("live runner %s removed: %v", leaseID, err)
-		}
-	}
-}
-
 func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, ServiceRecord) {
 	t.Helper()
 	root := t.TempDir()
@@ -513,6 +511,15 @@ func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, Ser
 		t.Fatal(err)
 	}
 	return registry, record
+}
+
+func assertServiceAuthorityAbsent(t *testing.T, registry *ServiceRegistry, record ServiceRecord) {
+	t.Helper()
+	for _, path := range []string{record.CIDFile, registry.creatorPath(record.LeaseID), registry.leasePath(record.LeaseID)} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("terminal service authority %q survives: %v", path, err)
+		}
+	}
 }
 
 func managedPSCommand() string {

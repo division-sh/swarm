@@ -12,8 +12,57 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
+
+func TestTemplateDigestUsesCanonicalGeneratedSchema(t *testing.T) {
+	spec, err := loadPlatformSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := templateDigest(plans, spec.Platform.Version, "role", "server", "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := yaml.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n# unrelated non-schema spec comment\n")...)
+	var reparsed runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &reparsed); err != nil {
+		t.Fatal(err)
+	}
+	reparsedPlans, err := platformschema.GeneratePlatformTableDDLs(reparsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := templateDigest(reparsedPlans, reparsed.Platform.Version, "role", "server", "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("non-schema spec bytes changed template digest: %q != %q", first, second)
+	}
+	changed := append([]platformschema.TableDDL(nil), plans...)
+	changed[0] = plans[0]
+	changed[0].Statements = append([]string(nil), plans[0].Statements...)
+	changed[0].Statements[0] += "\nALTER TABLE schema_version ADD COLUMN digest_probe text"
+	third, err := templateDigest(changed, spec.Platform.Version, "role", "server", "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == third {
+		t.Fatal("real generated schema change reused template digest")
+	}
+}
 
 func TestManagerLifecycleSupportedRepresentations(t *testing.T) {
 	raw := strings.TrimSpace(os.Getenv(SourceEnv))
@@ -92,6 +141,25 @@ func TestManagerReconcilesSandboxAfterLeaseOwnerDies(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertDatabaseAbsent(t, manager.admin, name)
+}
+
+func TestManagerReconcileLeavesActiveManagerSandboxUntouched(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sandbox.Release(context.Background())
+	peer, err := NewManager(ctx, manager.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertDatabaseExists(t, manager.admin, sandbox.Name)
 }
 
 func TestManagerLeavesUnprovableSandboxUntouched(t *testing.T) {
@@ -351,6 +419,144 @@ func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 		t.Fatalf("stale CREATE-window snapshot produced a false blocker: %v", err)
 	}
 	assertDatabaseAbsent(t, manager.admin, name)
+}
+
+func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
+	manager := integrationManager(t)
+	for _, kind := range []string{"sandbox", "template"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			adminDB, err := manager.admin.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer adminDB.Close()
+			identity := kind + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+			prefix := sandboxNamePrefix
+			leaseKey := advisoryKey("sandbox:" + identity)
+			if kind == "template" {
+				prefix = templateNamePrefix
+				leaseKey = 0
+			}
+			name := manager.signedResourceName(prefix, kind, identity)
+			intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
+			if err := manager.putIntent(ctx, intent); err != nil {
+				t.Fatal(err)
+			}
+			defer manager.deleteIntent(context.Background(), name)
+			defer dropDatabase(context.Background(), adminDB, name)
+
+			controlDB, err := manager.control.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer controlDB.Close()
+			blocker, err := controlDB.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Rollback()
+			if _, err := blocker.ExecContext(ctx, `LOCK TABLE `+quoteIdent(intentTableName)+` IN ACCESS EXCLUSIVE MODE`); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- manager.Reconcile(ctx) }()
+			waitForBlockedIntentRead(t, ctx, adminDB, manager.controlName)
+
+			lockKey := leaseKey
+			if kind == "template" {
+				lockKey = advisoryKey("template:" + name)
+			}
+			creator, err := adminDB.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := acquireAdvisoryLock(ctx, creator, lockKey, "snapshot-race "+name); err != nil {
+				t.Fatal(err)
+			}
+			if err := createDatabase(ctx, adminDB, name); err != nil {
+				t.Fatal(err)
+			}
+			releaseAdvisoryLock(creator, lockKey)
+			if err := blocker.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			assertDatabaseAbsent(t, manager.admin, name)
+			if _, found, err := manager.intent(ctx, name); err != nil || found {
+				t.Fatalf("intent found=%v err=%v, want retired after exact reconciliation", found, err)
+			}
+		})
+	}
+}
+
+func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
+	manager := integrationManager(t)
+	for _, kind := range []string{"sandbox", "template"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			db, err := manager.admin.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			identity := kind + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+			prefix := sandboxNamePrefix
+			leaseKey := advisoryKey("sandbox:" + identity)
+			if kind == "template" {
+				prefix = templateNamePrefix
+				leaseKey = 0
+			}
+			name := manager.signedResourceName(prefix, kind, identity)
+			if err := manager.putIntent(ctx, resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}); err != nil {
+				t.Fatal(err)
+			}
+			defer manager.deleteIntent(context.Background(), name)
+			defer dropDatabase(context.Background(), db, name)
+			if err := createDatabase(ctx, db, name); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.retireIntentIfDatabaseAbsent(ctx, db, name); err == nil || !strings.Contains(err.Error(), "retained") {
+				t.Fatalf("retire existing database intent error = %v, want retained blocker", err)
+			}
+			if _, found, err := manager.intent(ctx, name); err != nil || !found {
+				t.Fatalf("existing database intent found=%v err=%v, want retained", found, err)
+			}
+			if err := dropDatabase(ctx, db, name); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.retireIntentIfDatabaseAbsent(ctx, db, name); err != nil {
+				t.Fatal(err)
+			}
+			if _, found, err := manager.intent(ctx, name); err != nil || found {
+				t.Fatalf("absent database intent found=%v err=%v, want retired", found, err)
+			}
+		})
+	}
+}
+
+func waitForBlockedIntentRead(t *testing.T, ctx context.Context, db *sql.DB, controlName string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		err := db.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM pg_stat_activity
+			WHERE datname=$1 AND query LIKE $2 AND wait_event_type='Lock'
+		)`, controlName, "%"+intentTableName+"%").Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("reconciliation did not block on the intent snapshot")
 }
 
 func integrationManager(t *testing.T) *Manager {
