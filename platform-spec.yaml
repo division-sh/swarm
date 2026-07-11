@@ -8636,22 +8636,27 @@ flow_model:
             Fields may be added within routing-topology/v1. Removing, renaming, retyping, or changing the meaning of
             a field requires a new artifact schema identity. Runtime recipients, persisted deliveries, replay facts,
             conformance status, and historical route-decision provenance are forbidden inputs and fields.
+          delivery_scope_rule: >
+            Delivery between authored producers and consumers has exactly two canonical scopes. Standing ingress is
+            admission into a declared event boundary, not a third authored producer-to-consumer delivery scope.
           delivery_scopes:
-          - typed_pubsub between authored endpoints, with match exact|pattern and boundary same_flow|import_boundary proof
-          - inter_flow_connect lowered from declared output pin through parent connect to declared input pin
+          - typed_pubsub delivery between authored producers and consumers, with match exact|pattern and boundary same_flow|import_boundary proof
+          - inter_flow_connect delivery between authored producers and consumers, lowered from declared output pin through parent connect to declared input pin
           typed_pubsub_rule: >
             One semanticview relation resolver evaluates each producer-or-input/consumer pair exactly once. Same canonical
             flow identity may return exact or pattern with boundary same_flow. Different canonical flow identity may return
             only pattern with boundary import_boundary and a stable normalized authorization proof naming the authorizing
-            parent package, child package, import label/source, event pattern, and route source. Exact duplicate proofs
-            collapse deterministically; distinct proofs for one relation are a typed ambiguity and produce an issue, not an
-            edge. Authorization-conflict enumeration also evaluates every declared materializable event independently of
-            current producer-census membership, because low-level event.publish can publish a declared event without an
-            authored static producer endpoint. The complete ordered relation result is consumed by static topology projection,
-            boot verification, and runtime route admission. Typed authorization ambiguity is a hard invalidity: runtime
-            contract validation, route-table construction, and EventBus construction fail closed without runtime delivery
-            authority, including when a caller supplies a prebuilt route table. Canonical name equality alone never authorizes
-            a cross-flow edge.
+            parent package, child package, import label/source, event pattern, and route source. Bounded observe-grant patterns
+            intersect imported wildcard subscriptions over the declared typed event catalog: a grant is retained exactly when
+            at least one declared event identity matches both normalized patterns. That declared-event witness drives semantic
+            relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
+            distinct proofs for one relation are a typed ambiguity and produce an issue, not an edge. Authorization-conflict
+            enumeration also evaluates every declared materializable event independently of current producer-census membership,
+            because low-level event.publish can publish a declared event without an authored static producer endpoint. The
+            complete ordered relation result is consumed by static topology projection, boot verification, and runtime route
+            admission. Typed authorization ambiguity is a hard invalidity: runtime contract validation, route-table construction,
+            and EventBus construction fail closed without runtime delivery authority, including when a caller supplies a prebuilt
+            route table. Canonical name equality alone never authorizes a cross-flow edge.
           connect_source_rule: >
             Every inter_flow_connect edge and connect-lowering issue carries the exact authored package.yaml file:line
             captured by contract loading and propagated through normalization and lowering. Missing source file or positive

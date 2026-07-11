@@ -100,6 +100,72 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 
 }
 
+func TestImportBoundaryWildcardBoundedGrantDeliversAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerAuthored:   true,
+		ObserveGrant:       "      observe:\n        - source: producer\n          events: [task.*]\n",
+		ProducerExtraEvent: "task.failed",
+	})
+
+	if issues := semanticview.ImportBoundaryWildcardGrantIssues(source); len(issues) != 0 {
+		t.Fatalf("observe grant issues = %#v, want bounded grant accepted", issues)
+	}
+	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
+	if len(relations.Issues) != 0 || len(relations.Matches) != 1 {
+		t.Fatalf("typed pub/sub relations = %#v, want one bounded-grant relation", relations)
+	}
+	match := relations.Matches[0]
+	if match.Authorization == nil || match.Authorization.EventPattern != "producer/task.*" || match.Authorization.MatchPattern != "**/task.done" {
+		t.Fatalf("typed pub/sub authorization = %#v, want declared-event intersection of producer/task.* and **/task.done", match.Authorization)
+	}
+
+	topology := routingtopology.Build(source)
+	if len(topology.Issues) != 0 || !importBoundaryWildcardTopologyContainsAuthorization(topology, "producer/task.*") {
+		t.Fatalf("routing topology = %#v, want bounded-grant typed pub/sub edge", topology)
+	}
+	report := bootverify.Run(context.Background(), source, bootverify.Options{})
+	if importBoundaryWildcardReportContains(report.Errors(), "flow_package_wildcard_observe_grant", "") || importBoundaryWildcardReportContains(report.Errors(), semanticview.TypedPubSubFailureAuthorizationAmbiguous, "") {
+		t.Fatalf("verify errors = %#v, want bounded grant admitted", report.Errors())
+	}
+
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].ID != "worker-listener" || got[0].RouteSource != "import_boundary_wildcard_grant" {
+		t.Fatalf("Resolve(producer/task.done) = %#v, want one bounded-grant worker route", got)
+	}
+	if got := routes.Resolve("producer/task.failed"); len(got) != 0 {
+		t.Fatalf("Resolve(producer/task.failed) = %#v, want no route outside the consumer wildcard intersection", got)
+	}
+	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 1 || owners[0] != "worker-listener" {
+		t.Fatalf("RuntimeEventOwners(producer/task.done) = %#v, want bounded-grant worker owner", owners)
+	}
+	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); !ok {
+		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) did not resolve through bounded grant")
+	}
+
+	store := &routePersistenceTestStore{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := eventtest.RootIngress("evt-bounded-grant", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish bounded grant: %v", err)
+	}
+	if got := store.deliveries["evt-bounded-grant"]; len(got) != 1 || got[0] != "worker-listener" {
+		t.Fatalf("bounded-grant persisted deliveries = %#v, want worker-listener", got)
+	}
+	nonIntersecting := eventtest.RootIngress("evt-bounded-grant-non-intersection", "producer/task.failed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.Publish(context.Background(), nonIntersecting); err != nil {
+		t.Fatalf("Publish non-intersecting bounded grant event: %v", err)
+	}
+	if got := store.deliveries["evt-bounded-grant-non-intersection"]; len(got) != 0 {
+		t.Fatalf("non-intersecting persisted deliveries = %#v, want none", got)
+	}
+}
+
 func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ObserveGrant: "      observe:\n" +
@@ -108,7 +174,29 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 			"        - source: flows/producer\n" +
 			"          events: [task.done]\n",
 	})
+	assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t, source)
+}
 
+func TestImportBoundaryWildcardBoundedAndExactAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.*]\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n",
+	})
+	issue := assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t, source)
+	patterns := map[string]bool{}
+	for _, authorization := range issue.Authorizations {
+		patterns[authorization.EventPattern] = true
+	}
+	if !patterns["producer/task.*"] || !patterns["producer/task.done"] || len(patterns) != 2 {
+		t.Fatalf("authorization patterns = %#v, want distinct bounded and exact proofs", patterns)
+	}
+}
+
+func assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T, source semanticview.Source) semanticview.TypedPubSubConsumerIssue {
+	t.Helper()
 	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
 	if len(relations.Matches) != 0 || len(relations.Issues) != 1 {
 		t.Fatalf("typed pub/sub relations = %#v, want one ambiguity and no edge authority", relations)
@@ -160,6 +248,7 @@ func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t
 	if eb, err := runtimebus.NewEventBusWithOptions(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuiltRoutes}); err == nil || eb != nil {
 		t.Fatalf("NewEventBusWithOptions with prebuilt routes = (%#v, %v), want contract ambiguity to remain authoritative", eb, err)
 	}
+	return relations.Issues[0]
 }
 
 func TestImportBoundaryWildcardAuthorizationAmbiguityRetainsAuthoredProducerProof(t *testing.T) {
@@ -295,6 +384,7 @@ type importBoundaryWildcardFixtureOptions struct {
 	WorkerSubscription string
 	RootWildcard       bool
 	ProducerAuthored   bool
+	ProducerExtraEvent string
 }
 
 func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildcardFixtureOptions) semanticview.Source {
@@ -392,6 +482,9 @@ pins:
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
 	producerEvents := "task.done: {}\n"
+	if extra := strings.TrimSpace(opts.ProducerExtraEvent); extra != "" {
+		producerEvents += extra + ": {}\n"
+	}
 	producerNodes := "{}\n"
 	if opts.ProducerAuthored {
 		producerEvents += "task.start: {}\n"
@@ -429,6 +522,15 @@ func importBoundaryWildcardReportContains(findings []bootverify.Finding, checkID
 			continue
 		}
 		if substr == "" || strings.Contains(finding.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func importBoundaryWildcardTopologyContainsAuthorization(topology routingtopology.Topology, eventPattern string) bool {
+	for _, edge := range topology.Edges {
+		if edge.TypedPubSub != nil && edge.TypedPubSub.Authorization != nil && edge.TypedPubSub.Authorization.EventPattern == eventPattern {
 			return true
 		}
 	}

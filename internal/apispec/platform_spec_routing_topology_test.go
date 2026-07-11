@@ -21,7 +21,11 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "endpoint_rule"), "interface exposures")
 	assertScalarContains(t, mustMappingValue(t, routing, "resolution_rule"), "select-or-create")
 	assertScalarContains(t, mustMappingValue(t, routing, "identity_rule"), "fail closed")
+	assertScalarContains(t, mustMappingValue(t, routing, "delivery_scope_rule"), "Delivery between authored producers and consumers has exactly two canonical scopes")
+	assertScalarContains(t, mustMappingValue(t, routing, "delivery_scope_rule"), "Standing ingress is admission")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "evaluates each producer-or-input/consumer pair exactly once")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "Bounded observe-grant patterns")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "declared event identity matches both normalized patterns")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "Canonical name equality alone never authorizes a cross-flow edge")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "runtime route admission")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "including when a caller supplies a prebuilt route table")
@@ -32,10 +36,10 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "legacy_qualified_subscription_rule"), "any root or child flow authors stages")
 	deliveryScopes := mustMappingValue(t, routing, "delivery_scopes")
 	if deliveryScopes.Kind != yaml.SequenceNode || len(deliveryScopes.Content) != 2 {
-		t.Fatalf("delivery_scopes = %#v, want exactly two canonical scopes", deliveryScopes)
+		t.Fatalf("delivery_scopes = %#v, want exactly two scopes for delivery between authored producers and consumers", deliveryScopes)
 	}
-	assertScalarContains(t, deliveryScopes.Content[0], "typed_pubsub")
-	assertScalarContains(t, deliveryScopes.Content[1], "inter_flow_connect")
+	assertScalarContains(t, deliveryScopes.Content[0], "typed_pubsub delivery between authored producers and consumers")
+	assertScalarContains(t, deliveryScopes.Content[1], "inter_flow_connect delivery between authored producers and consumers")
 	rejectedScope := "intra" + "_" + "flow"
 	if strings.Contains(deliveryScopes.Content[0].Value+deliveryScopes.Content[1].Value, rejectedScope) {
 		t.Fatalf("delivery_scopes retained rejected scope %q", rejectedScope)
