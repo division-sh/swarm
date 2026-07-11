@@ -179,6 +179,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			ref := timeridentity.NewJoinRef("join-node", "item.completed", "awaiting", "")
 			handle := timeridentity.JoinTimeoutHandle(ref)
 			timeout := eventtest.RootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
+			triggerState := pc.currentWorkflowState(ctx, entityID)
 			type raceResult struct {
 				result contractHandlerExecutionResult
 				err    error
@@ -192,7 +193,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 				go func() {
 					defer wg.Done()
 					<-start
-					result, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: evt, State: pc.currentWorkflowState(ctx, entityID), HandlerEventKey: "item.completed"}, false)
+					result, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: evt, State: triggerState, HandlerEventKey: "item.completed"}, false)
 					results <- raceResult{result: result, err: err}
 				}()
 			}
