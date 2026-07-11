@@ -122,9 +122,9 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 	go func() { stdoutCh <- readStreamLines(stdout, monitor, false) }()
 	go func() { stderrCh <- readStreamLines(stderr, monitor, true) }()
 
-	waitErr := cmd.Wait()
 	stdoutLines := <-stdoutCh
 	stderrLines := <-stderrCh
+	waitErr := cmd.Wait()
 	if waitErr != nil {
 		stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
 		stdoutText := strings.TrimSpace(string(joinRawLines(stdoutLines)))
