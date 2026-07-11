@@ -552,7 +552,24 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 				}
 			}
 			for _, carrier := range runtimecontracts.HandlerAdvanceCarriers(handler) {
-				edges = appendStageGraphEdge(edges, from, carrier.AdvancesTo, stateSet, carrier.Source(), nodeID, eventType)
+				carrierFrom := from
+				carrierEvent := eventType
+				joinTimed := false
+				if handler.Join != nil && (carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinOnComplete || carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinTimeout) {
+					carrierFrom = []string{strings.TrimSpace(handler.Join.Stage)}
+				}
+				if handler.Join != nil && carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinTimeout {
+					carrierEvent = "platform.join_timeout"
+					joinTimed = true
+				}
+				before := len(edges)
+				edges = appendStageGraphEdge(edges, carrierFrom, carrier.AdvancesTo, stateSet, carrier.Source(), nodeID, carrierEvent)
+				if joinTimed && len(edges) > before {
+					edge := &edges[len(edges)-1]
+					edge.After = strings.TrimSpace(handler.Join.Timeout.After)
+					edge.TimerID = strings.TrimSpace(handler.Join.EffectiveID())
+					edge.Timed = true
+				}
 			}
 		}
 	}

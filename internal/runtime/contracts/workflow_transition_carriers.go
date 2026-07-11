@@ -10,6 +10,8 @@ const (
 	HandlerAdvanceCarrierRules                HandlerAdvanceCarrierKind = "handler.rules"
 	HandlerAdvanceCarrierAccumulateOnComplete HandlerAdvanceCarrierKind = "handler.accumulate.on_complete"
 	HandlerAdvanceCarrierAccumulateOnTimeout  HandlerAdvanceCarrierKind = "handler.accumulate.on_timeout"
+	HandlerAdvanceCarrierJoinOnComplete       HandlerAdvanceCarrierKind = "handler.join.on_complete"
+	HandlerAdvanceCarrierJoinTimeout          HandlerAdvanceCarrierKind = "handler.join.timeout"
 )
 
 // HandlerAdvanceCarrier describes one authored handler site that can carry an advances_to target.
@@ -28,12 +30,12 @@ func (c HandlerAdvanceCarrier) Source() string {
 
 // HandlerAdvanceCarriers returns the complete authored advances_to carrier set for a handler.
 func HandlerAdvanceCarriers(handler SystemNodeEventHandler) []HandlerAdvanceCarrier {
-	return handlerAdvanceCarriers(handler.AdvancesTo, handler.OnComplete, handler.Rules, handler.Accumulate)
+	return handlerAdvanceCarriers(handler.AdvancesTo, handler.OnComplete, handler.Rules, handler.Accumulate, handler.Join)
 }
 
 // HandlerTransitionAdvanceCarriers returns the complete authored advances_to carrier set for a semantic transition.
 func HandlerTransitionAdvanceCarriers(transition HandlerTransitionSemantic) []HandlerAdvanceCarrier {
-	return handlerAdvanceCarriers(transition.AdvancesTo, transition.OnComplete, transition.Rules, transition.Accumulate)
+	return handlerAdvanceCarriers(transition.AdvancesTo, transition.OnComplete, transition.Rules, transition.Accumulate, transition.Join)
 }
 
 // HandlerAdvanceTargets returns the carrier targets without source metadata.
@@ -53,6 +55,7 @@ func handlerAdvanceCarriers(
 	onComplete []HandlerRuleEntry,
 	rules []HandlerRuleEntry,
 	accumulate *AccumulateSpec,
+	join *JoinSpec,
 ) []HandlerAdvanceCarrier {
 	out := make([]HandlerAdvanceCarrier, 0, 1+len(onComplete)+len(rules))
 	if target := strings.TrimSpace(advancesTo); target != "" {
@@ -93,6 +96,10 @@ func handlerAdvanceCarriers(
 				})
 			}
 		}
+	}
+	if join != nil {
+		appendRuleCarriers(HandlerAdvanceCarrierJoinOnComplete, []HandlerRuleEntry{join.OnComplete})
+		appendRuleCarriers(HandlerAdvanceCarrierJoinTimeout, []HandlerRuleEntry{join.Timeout.Outcome})
 	}
 	return out
 }

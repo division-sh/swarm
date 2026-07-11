@@ -247,6 +247,7 @@ type ExecutionState struct {
 	Computed    map[string]any
 	Accumulated map[string]any
 	FanOut      map[string]any
+	Join        map[string]any
 	Transformed map[string]any
 }
 
@@ -260,6 +261,10 @@ func (s ExecutionState) AccumulatedBucket() values.Bucket {
 
 func (s ExecutionState) FanOutBucket() values.Bucket {
 	return values.Wrap(s.FanOut)
+}
+
+func (s ExecutionState) JoinBucket() values.Bucket {
+	return values.Wrap(s.Join)
 }
 
 func (s *ExecutionState) SetComputed(key string, value any) {
@@ -281,6 +286,13 @@ func (s *ExecutionState) SetFanOut(key string, value any) {
 		s.FanOut = map[string]any{}
 	}
 	values.Wrap(s.FanOut).Set(key, value)
+}
+
+func (s *ExecutionState) SetJoin(key string, value any) {
+	if s.Join == nil {
+		s.Join = map[string]any{}
+	}
+	values.Wrap(s.Join).Set(key, value)
 }
 
 type EmitIntent struct {

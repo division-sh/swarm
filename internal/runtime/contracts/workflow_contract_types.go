@@ -79,6 +79,7 @@ type WorkflowSemanticView struct {
 	TerminalStages         []string
 	Transitions            []WorkflowTransitionContract
 	Timers                 []WorkflowTimerContract
+	Joins                  []WorkflowJoinPlan
 	Guards                 []GuardActionEntry
 	Actions                []GuardActionEntry
 	GuardByID              map[string]GuardActionEntry
@@ -293,6 +294,7 @@ type HandlerTransitionSemantic struct {
 	OnComplete           []HandlerRuleEntry
 	Rules                []HandlerRuleEntry
 	Accumulate           *AccumulateSpec
+	Join                 *JoinSpec
 	Compute              *ComputeSpec
 	Query                *QuerySpec
 	FanOut               *FanOutSpec
@@ -314,6 +316,13 @@ type HandlerRuleEntry struct {
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
+}
+
+type WorkflowJoinPlan struct {
+	FlowID       string
+	NodeID       string
+	HandlerEvent string
+	Spec         JoinSpec
 }
 
 type PolicySheetRowKind string
@@ -1697,6 +1706,7 @@ type SystemNodeEventHandler struct {
 	OnComplete           []HandlerRuleEntry        `yaml:"on_complete"`
 	Rules                []HandlerRuleEntry        `yaml:"rules"`
 	Accumulate           *AccumulateSpec           `yaml:"accumulate"`
+	Join                 *JoinSpec                 `yaml:"join"`
 	Compute              *ComputeSpec              `yaml:"compute"`
 	Query                *QuerySpec                `yaml:"query"`
 	FanOut               *FanOutSpec               `yaml:"fan_out"`

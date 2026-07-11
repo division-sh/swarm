@@ -809,6 +809,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		OnComplete           yaml.Node                `yaml:"on_complete"`
 		Rules                yaml.Node                `yaml:"rules"`
 		Accumulate           *AccumulateSpec          `yaml:"accumulate"`
+		Join                 *JoinSpec                `yaml:"join"`
 		Compute              *ComputeSpec             `yaml:"compute"`
 		Query                yaml.Node                `yaml:"query"`
 		FanOut               *FanOutSpec              `yaml:"fan_out"`
@@ -834,6 +835,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Logic:            strings.TrimSpace(aux.Logic),
 		PolicyRef:        strings.TrimSpace(aux.PolicyRef),
 		Accumulate:       aux.Accumulate,
+		Join:             aux.Join,
 		Compute:          aux.Compute,
 		FanOut:           aux.FanOut,
 		GroupBy:          aux.GroupBy,
@@ -1163,6 +1165,7 @@ var handlerFieldOptions = map[string]struct{}{
 	"on_complete":             {},
 	"rules":                   {},
 	"accumulate":              {},
+	"join":                    {},
 	"compute":                 {},
 	"query":                   {},
 	"fan_out":                 {},
@@ -1260,6 +1263,8 @@ const (
 	handlerRuleDecodeContextOnComplete           handlerRuleDecodeContext = "on_complete"
 	handlerRuleDecodeContextAccumulateOnComplete handlerRuleDecodeContext = "accumulate.on_complete"
 	handlerRuleDecodeContextAccumulateOnTimeout  handlerRuleDecodeContext = "accumulate.on_timeout"
+	handlerRuleDecodeContextJoinOnComplete       handlerRuleDecodeContext = "join.on_complete"
+	handlerRuleDecodeContextJoinTimeout          handlerRuleDecodeContext = "join.timeout"
 )
 
 func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContext) (*HandlerRuleEntry, error) {

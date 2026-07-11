@@ -242,6 +242,7 @@ func evalWorkflowValueExpression(base BaseContext, state ExecutionState, express
 		Policy:         base.Policy.Raw(),
 		Computed:       base.Computed.Raw(),
 		FanOut:         state.FanOut,
+		Join:           state.Join,
 	}, opts)
 }
 

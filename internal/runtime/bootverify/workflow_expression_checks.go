@@ -80,7 +80,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias}); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias, AllowJoin: expr.AllowJoin}); err != nil {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
 						Severity: "error",
@@ -109,7 +109,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias}); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias, AllowJoin: expr.AllowJoin}); err != nil {
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
@@ -289,6 +289,7 @@ type expressionReference struct {
 	SelfTargetField string
 	AllowBareItem   bool
 	ItemAlias       string
+	AllowJoin       bool
 }
 
 type handlerCondition struct {
@@ -432,6 +433,22 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			appendRuleExpressions("accumulate.on_timeout", *handler.Accumulate.OnTimeout)
 		}
 	}
+	if handler.Join != nil {
+		if from := strings.TrimSpace(handler.Join.Members.From); from != "" {
+			out = append(out, expressionReference{Kind: "join.members.from", Expression: from, Phase: runtimepipeline.WorkflowEntityFieldLifecycleRule})
+		}
+		if handler.Join.Window != nil {
+			if from := strings.TrimSpace(handler.Join.Window.From); from != "" {
+				out = append(out, expressionReference{Kind: "join.window.from", Expression: from, Phase: runtimepipeline.WorkflowEntityFieldLifecycleRule})
+			}
+		}
+		before := len(out)
+		appendRuleExpressions("join.on_complete", handler.Join.OnComplete)
+		appendRuleExpressions("join.timeout", handler.Join.Timeout.Outcome)
+		for i := before; i < len(out); i++ {
+			out[i].AllowJoin = true
+		}
+	}
 	if handler.Filter != nil {
 		if predicate := strings.TrimSpace(handler.Filter.Predicate); predicate != "" {
 			out = append(out, expressionReference{Kind: "filter predicate", Expression: predicate, Phase: runtimepipeline.WorkflowEntityFieldLifecycleFilter})
@@ -495,6 +512,7 @@ func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID,
 				Expression: expr,
 				Phase:      phase,
 				ItemAlias:  strings.TrimSpace(itemAlias),
+				AllowJoin:  strings.HasPrefix(strings.TrimSpace(kindPrefix), "handler.join."),
 			})
 		}
 	}

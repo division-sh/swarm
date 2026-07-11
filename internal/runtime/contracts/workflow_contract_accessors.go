@@ -55,6 +55,12 @@ func (b *WorkflowContractBundle) WorkflowTimers() []WorkflowTimerContract {
 	}
 	return b.Semantics.Timers
 }
+func (b *WorkflowContractBundle) WorkflowJoins() []WorkflowJoinPlan {
+	if b == nil {
+		return nil
+	}
+	return append([]WorkflowJoinPlan(nil), b.Semantics.Joins...)
+}
 func (b *WorkflowContractBundle) WorkflowTimerByID(id string) (WorkflowTimerContract, bool) {
 	id = strings.TrimSpace(id)
 	if b == nil || id == "" {

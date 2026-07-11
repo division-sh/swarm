@@ -197,37 +197,37 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	if graph.FlowID != "support" || graph.FlowPath != "support" {
 		t.Fatalf("graph identity = %#v, want support namespace", graph)
 	}
-	if len(graph.Nodes) != 5 {
-		t.Fatalf("graph nodes = %#v, want waiting/active/review/timed_out/done", graph.Nodes)
+	if len(graph.Nodes) != 4 {
+		t.Fatalf("graph nodes = %#v, want waiting/active/review/timed_out", graph.Nodes)
 	}
 	if !graph.Nodes[0].Initial || graph.Nodes[0].ID != "waiting" {
 		t.Fatalf("first graph node = %#v, want waiting initial", graph.Nodes[0])
 	}
-	var terminalDone bool
+	var terminalReview bool
 	for _, node := range graph.Nodes {
-		if node.ID == "done" && node.Terminal {
-			terminalDone = true
+		if node.ID == "review" && node.Terminal {
+			terminalReview = true
 		}
 	}
-	if !terminalDone {
-		t.Fatalf("graph nodes = %#v, want terminal done", graph.Nodes)
+	if !terminalReview {
+		t.Fatalf("graph nodes = %#v, want terminal review", graph.Nodes)
 	}
 	if len(graph.Edges) == 0 {
 		t.Fatalf("graph edges missing: %#v", graph)
 	}
 	var foundOpenedAdvance bool
-	var foundAccumulateComplete bool
-	var foundAccumulateTimeout bool
+	var foundJoinComplete bool
+	var foundJoinTimeout bool
 	var foundTimedAdvance bool
 	for _, edge := range graph.Edges {
 		if edge.Source == "handler.advances_to" && edge.NodeID == "support-node" && edge.EventType == "ticket.opened" && edge.To == "active" {
 			foundOpenedAdvance = true
 		}
-		if edge.Source == "handler.accumulate.on_complete" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "review" {
-			foundAccumulateComplete = true
+		if edge.Source == "handler.join.on_complete" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "review" {
+			foundJoinComplete = true
 		}
-		if edge.Source == "handler.accumulate.on_timeout" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "timed_out" {
-			foundAccumulateTimeout = true
+		if edge.Source == "handler.join.timeout" && edge.NodeID == "support-node" && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
+			foundJoinTimeout = true
 		}
 		if edge.Source == "timer" && edge.TimerID == "support.active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
 			foundTimedAdvance = true
@@ -236,11 +236,11 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	if !foundOpenedAdvance {
 		t.Fatalf("graph edges = %#v, want ticket.opened handler.advances_to edge to active", graph.Edges)
 	}
-	if !foundAccumulateComplete {
-		t.Fatalf("graph edges = %#v, want ticket.closed handler.accumulate.on_complete edge to review", graph.Edges)
+	if !foundJoinComplete {
+		t.Fatalf("graph edges = %#v, want ticket.closed handler.join.on_complete edge to review", graph.Edges)
 	}
-	if !foundAccumulateTimeout {
-		t.Fatalf("graph edges = %#v, want ticket.closed handler.accumulate.on_timeout edge to timed_out", graph.Edges)
+	if !foundJoinTimeout {
+		t.Fatalf("graph edges = %#v, want timed platform.join_timeout edge to timed_out", graph.Edges)
 	}
 	if !foundTimedAdvance {
 		t.Fatalf("graph edges = %#v, want stage timer edge to timed_out with delay", graph.Edges)
@@ -271,10 +271,10 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"stage graph:",
 		"flow support (support):",
 		"waiting [initial]",
-		"done [terminal]",
+		"review [terminal]",
 		"handler.advances_to support-node on ticket.opened",
-		"handler.accumulate.on_complete support-node on ticket.closed",
-		"handler.accumulate.on_timeout support-node on ticket.closed",
+		"handler.join.on_complete support-node on ticket.closed",
+		"handler.join.timeout support-node on platform.join_timeout after 1h timer active",
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
@@ -286,7 +286,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	}
 }
 
-func TestVerifyCommandAcceptsAccumulatorTransitionCarrierFixture(t *testing.T) {
+func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 	contractsRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
@@ -380,9 +380,9 @@ stages:
         emit: ticket.sla_escalated
       - after: 72h
         advances_to: timed_out
-  review: {}
-  timed_out: {}
-  done:
+  review:
+    terminal: true
+  timed_out:
     terminal: true
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
@@ -398,6 +398,8 @@ ticket.closed:
   swarm:
     source: external
   entity_id: string
+  line_item_id: string
+  result: string
 ticket.sla_escalated:
   swarm:
     consumer: [operator]
@@ -412,7 +414,10 @@ accumulate.timeout:
     source: platform
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
-ticket: {}
+ticket:
+  expected_line_item_ids:
+    type: "[text]"
+    initial: []
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
 support-node:
@@ -435,14 +440,16 @@ support-node:
             line_item_index: fan_out.index
       advances_to: active
     ticket.closed:
-      advances_to: done
-      accumulate:
-        completion: timeout
-        timeout_ms: 1000
+      join:
+        stage: active
+        members:
+          from: entity.expected_line_item_ids
+          by: payload.line_item_id
+        output: payload.result
         on_complete:
-          - condition: "true"
-            advances_to: review
-        on_timeout:
+          advances_to: review
+        timeout:
+          after: 1h
           advances_to: timed_out
 `)
 	return root

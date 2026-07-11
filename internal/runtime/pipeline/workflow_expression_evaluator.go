@@ -30,6 +30,7 @@ type workflowExpressionContext struct {
 	Computed                     map[string]any
 	Accumulated                  any
 	FanOut                       map[string]any
+	Join                         map[string]any
 	WorkflowName                 string
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
@@ -51,6 +52,7 @@ func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("accumulated", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
+		cel.Variable("join", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -96,6 +98,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		"computed":    workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Computed)),
 		"accumulated": normalizedCtx.Accumulated,
 		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
+		"join":        workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Join)),
 	})
 	if err != nil {
 		return false, err
@@ -165,6 +168,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			Computed:                     cloneStringAnyMap(ctx.Computed),
 			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 			FanOut:                       cloneStringAnyMap(ctx.FanOut),
+			Join:                         cloneStringAnyMap(ctx.Join),
 			WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 			QueryEntityCount:             ctx.QueryEntityCount,
 			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
@@ -203,6 +207,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		Computed:                     cloneStringAnyMap(ctx.Computed),
 		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 		FanOut:                       cloneStringAnyMap(ctx.FanOut),
+		Join:                         cloneStringAnyMap(ctx.Join),
 		WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,

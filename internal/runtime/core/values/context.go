@@ -13,6 +13,7 @@ type Context struct {
 	Payload        Bucket
 	Accumulated    Bucket
 	FanOut         Bucket
+	Join           Bucket
 	Computed       Bucket
 }
 
@@ -28,6 +29,7 @@ func NewContext() Context {
 		Payload:        Wrap(map[string]any{}),
 		Accumulated:    Wrap(map[string]any{}),
 		FanOut:         Wrap(map[string]any{}),
+		Join:           Wrap(map[string]any{}),
 		Computed:       Wrap(map[string]any{}),
 	}
 }
@@ -44,6 +46,7 @@ func (c Context) Clone() Context {
 		Payload:        c.Payload.Clone(),
 		Accumulated:    c.Accumulated.Clone(),
 		FanOut:         c.FanOut.Clone(),
+		Join:           c.Join.Clone(),
 		Computed:       c.Computed.Clone(),
 	}
 }
@@ -88,6 +91,8 @@ func (c Context) Bucket(root paths.PathRoot) Bucket {
 		return c.Accumulated
 	case paths.RootFanOut:
 		return c.FanOut
+	case paths.RootJoin:
+		return c.Join
 	case paths.RootComputed:
 		return c.Computed
 	default:

@@ -15,6 +15,7 @@ type Source interface {
 	WorkflowTransitions() []runtimecontracts.WorkflowTransitionContract
 	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
+	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan
 	WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool)
 	GuardInstructions() []runtimeregistry.GuardInstruction
 	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)

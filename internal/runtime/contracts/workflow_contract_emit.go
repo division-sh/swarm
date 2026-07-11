@@ -56,6 +56,10 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 			out = append(out, ruleEmitEvents(*handler.Accumulate.OnTimeout)...)
 		}
 	}
+	if handler.Join != nil {
+		out = append(out, ruleEmitEvents(handler.Join.OnComplete)...)
+		out = append(out, ruleEmitEvents(handler.Join.Timeout.Outcome)...)
+	}
 	if handler.FanOut != nil {
 		if eventType := handler.FanOut.Emit.EventType(); eventType != "" {
 			out = append(out, eventType)
@@ -115,6 +119,10 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit, handler.Accumulate.OnTimeout.FanOut.As)
 			}
 		}
+	}
+	if handler.Join != nil {
+		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Emit)
+		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Emit)
 	}
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit, handler.FanOut.As)
@@ -222,6 +230,9 @@ func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
 		if len(handler.Accumulate.OnComplete) > 0 || handler.Accumulate.OnTimeout != nil {
 			return true
 		}
+	}
+	if handler.Join != nil {
+		return true
 	}
 	return false
 }
@@ -409,6 +420,14 @@ func rejectEventlessEmitSpecs(handler SystemNodeEventHandler) error {
 			if err := requireRuleEmitEvents("accumulate.on_timeout", 0, *handler.Accumulate.OnTimeout); err != nil {
 				return err
 			}
+		}
+	}
+	if handler.Join != nil {
+		if err := requireRuleEmitEvents("join.on_complete", 0, handler.Join.OnComplete); err != nil {
+			return err
+		}
+		if err := requireRuleEmitEvents("join.timeout", 0, handler.Join.Timeout.Outcome); err != nil {
+			return err
 		}
 	}
 	return nil

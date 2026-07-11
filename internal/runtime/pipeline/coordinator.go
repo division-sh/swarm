@@ -316,6 +316,12 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			handlerEventKey = bucket.EventType
 		}
 	}
+	if !ok && isJoinLifecycleEvent(events.EventType(trigger)) {
+		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == nodeID {
+			handler, ok = findJoinHandlerForRef(source, ref)
+			handlerEventKey = ref.HandlerEvent
+		}
+	}
 	if !ok {
 		return false, nil
 	}

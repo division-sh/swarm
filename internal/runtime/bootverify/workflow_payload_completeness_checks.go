@@ -295,6 +295,10 @@ func payloadCompletenessDeclarativeSiteLabel(site runtimecontracts.HandlerDeclar
 		return payloadCompletenessRuleLabel("accumulate.on_timeout", site.RuleIndex, site.RuleID, "emit")
 	case "handler.accumulate.on_timeout.fan_out.emit":
 		return payloadCompletenessRuleLabel("accumulate.on_timeout", site.RuleIndex, site.RuleID, "fan_out.emit")
+	case "handler.join.on_complete.emit":
+		return payloadCompletenessRuleLabel("join.on_complete", site.RuleIndex, site.RuleID, "emit")
+	case "handler.join.timeout.emit":
+		return payloadCompletenessRuleLabel("join.timeout", site.RuleIndex, site.RuleID, "emit")
 	default:
 		if label := strings.TrimSpace(site.SiteKey); label != "" {
 			return label

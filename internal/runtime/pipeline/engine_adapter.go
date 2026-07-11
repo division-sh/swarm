@@ -43,6 +43,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Computed:       cloneStringAnyMap(ctx.Computed.Raw()),
 		Accumulated:    accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
+		Join:           cloneStringAnyMap(ctx.Join.Raw()),
 		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
@@ -205,6 +206,11 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		if !hadState {
 			materializedState = true
 		}
+		if mutation.StateCarrier.StateBuckets != nil {
+			if err := r.coordinator.reconcileClosedJoinSchedules(ctx, entityID.String(), mutation.StateCarrier); err != nil {
+				return err
+			}
+		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
 		if err := r.coordinator.updateEntityState(ctx, entityID.String(), next, ""); err != nil {
@@ -215,7 +221,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}
 	}
 	if materializedState {
-		if err := r.coordinator.armWorkflowCurrentStageTimers(ctx, entityID.String(), ""); err != nil {
+		if err := r.coordinator.armWorkflowCurrentStageLifecycle(ctx, entityID.String(), ""); err != nil {
 			return err
 		}
 	}

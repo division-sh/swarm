@@ -59,6 +59,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"expression_field_reference_validation":   "Fix the expression field reference so it uses the supported namespace and declared field path.",
 	"event_metadata_authority":                "Move platform-owned event metadata out of authored business payload declarations.",
 	"fan_out_validation":                      "Fix fan_out so items_from names a declared collection, as names the item binding, identity uses that binding, and the emitted payload carries the identity.",
+	"join_validation":                         "Use the canonical staged handler.join contract with typed membership, mandatory timeout, and supported entity/join outcomes.",
 	"flow_boundary_create_entity_validation":  "Fix the cross-flow create_entity declaration so it preserves the receiving flow boundary.",
 	"flow_data_access_validation":             "Use the supported flow data access form for the referenced field or remove the unsupported access.",
 	"flow_package_dependency_binding":         "Declare the required imported package binding or remove the unresolved dependency reference.",
