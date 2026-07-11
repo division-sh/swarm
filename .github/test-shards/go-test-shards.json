@@ -72,6 +72,7 @@
         "github.com/division-sh/swarm/internal/runtime/authority",
         "github.com/division-sh/swarm/internal/runtime/bootverify",
         "github.com/division-sh/swarm/internal/runtime/containeridentity",
+		"github.com/division-sh/swarm/internal/runtime/core/activityidentity",
         "github.com/division-sh/swarm/internal/runtime/core/attemptgeneration",
         "github.com/division-sh/swarm/internal/runtime/core/identity",
         "github.com/division-sh/swarm/internal/runtime/core/sharding",

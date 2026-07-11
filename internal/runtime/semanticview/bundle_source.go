@@ -67,6 +67,9 @@ func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 func (s bundleSource) WorkflowLoops() []runtimecontracts.WorkflowLoopPlan {
 	return s.bundle.WorkflowLoops()
 }
+func (s bundleSource) WorkflowStageTopology(flowID string) (runtimecontracts.WorkflowStageTopology, bool) {
+	return s.bundle.WorkflowStageTopology(flowID)
+}
 
 func WorkflowLoops(source Source) []runtimecontracts.WorkflowLoopPlan {
 	if source == nil {
@@ -82,6 +85,22 @@ func WorkflowLoops(source Source) []runtimecontracts.WorkflowLoopPlan {
 		return bundle.WorkflowLoops()
 	}
 	return nil
+}
+
+func WorkflowStageTopology(source Source, flowID string) (runtimecontracts.WorkflowStageTopology, bool) {
+	if source == nil {
+		return runtimecontracts.WorkflowStageTopology{}, false
+	}
+	type provider interface {
+		WorkflowStageTopology(string) (runtimecontracts.WorkflowStageTopology, bool)
+	}
+	if topology, ok := source.(provider); ok {
+		return topology.WorkflowStageTopology(flowID)
+	}
+	if bundle, ok := Bundle(source); ok {
+		return bundle.WorkflowStageTopology(flowID)
+	}
+	return runtimecontracts.WorkflowStageTopology{}, false
 }
 func (s bundleSource) WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool) {
 	return s.bundle.WorkflowTimerByID(id)

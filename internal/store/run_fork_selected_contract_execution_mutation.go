@@ -78,6 +78,7 @@ func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabil
 	}{
 		{runForkSelectedContractExecutionLineageTable, []string{"fork_run_id", "source_run_id", "source_event_id", "fork_event_id", "event_name", "created_at"}},
 		{runForkSelectedContractBranchDivergenceTable, []string{"fork_run_id", "source_run_id", "fork_event_id", "owner", "policy", "source_run_status_at_activation", "source_run_status_after_activation", "source_frozen", "source_advanced_facts", "created_at"}},
+		{"activity_attempts", []string{"request_event_id", "run_id", "source_event_id", "parent_event_id", "entity_id", "node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status", "success_event", "failure_event", "result_event_id", "result_event_type", "result_payload", "failure", "input_hash", "loop_generation", "loop_stage", "started_at", "completed_at", "updated_at"}},
 	}
 	for _, requirement := range required {
 		if catalog.hasColumns(requirement.table, requirement.columns...) {
@@ -557,6 +558,11 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			return fmt.Errorf("delete selected-contract fork timers: %w", err)
 		}
 	}
+	if catalog.hasColumns("activity_attempts", "run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM activity_attempts WHERE run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork activity evidence: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork mutations: %w", err)
 	}
@@ -579,7 +585,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	return nil
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]RunForkSelectedContractSourceEvent, error) {
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string) ([]RunForkSelectedContractSourceEvent, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -587,11 +593,25 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if sourceRunID == "" {
 		return nil, fmt.Errorf("source run_id is required")
 	}
+	forkRunID = strings.TrimSpace(forkRunID)
+	if forkRunID == "" {
+		return nil, fmt.Errorf("fork run_id is required")
+	}
 	ids := uniqueNonEmptyStrings(sourceEventIDs)
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, fmt.Errorf("begin selected-contract source event preparation: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
 			event_id::text,
 			event_name,
@@ -607,7 +627,6 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract source events: %w", err)
 	}
-	defer rows.Close()
 	out := make([]RunForkSelectedContractSourceEvent, 0, len(ids))
 	for rows.Next() {
 		var event RunForkSelectedContractSourceEvent
@@ -620,11 +639,26 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		out = append(out, event)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("read selected-contract source events: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close selected-contract source events: %w", err)
 	}
 	if len(out) != len(ids) {
 		return nil, fmt.Errorf("selected-contract source event lookup returned %d rows for %d requested events", len(out), len(ids))
 	}
+	for idx := range out {
+		prepared, err := prepareRunForkSelectedContractSourceEvent(ctx, tx, forkRunID, out[idx])
+		if err != nil {
+			return nil, err
+		}
+		out[idx] = prepared
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit selected-contract source event preparation: %w", err)
+	}
+	committed = true
 	return out, nil
 }
 

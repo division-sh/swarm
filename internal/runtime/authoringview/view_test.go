@@ -191,7 +191,6 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 			},
 		},
 	}
-
 	view := mustBuild(t, semanticview.Wrap(bundle), nil)
 
 	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
@@ -244,6 +243,9 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 			},
 		},
 	}
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
+		"", "awaiting_review", []string{"awaiting_review", "expired"}, []string{"expired"}, nil, bundle.Semantics.Timers, nil,
+	)}
 
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
@@ -339,6 +341,10 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 			Timeout:    runtimecontracts.JoinTimeoutSpec{After: "24h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}},
 		}}}}},
 	}
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
+		"", "awaiting", []string{"awaiting", "ready", "attention"}, []string{"attention"},
+		[]runtimecontracts.HandlerTransitionSemantic{{ID: "join-node:item.completed", NodeID: "join-node", EventType: "item.completed", Join: bundle.Nodes["join-node"].EventHandlers["item.completed"].Join}}, nil, nil,
+	)}
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)
@@ -368,13 +374,21 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 		}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued", Loops: []runtimecontracts.WorkflowLoopPlan{{
 			ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
-			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, RegionStages: []string{"drafting", "review"},
+			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"},
 			Operations: []runtimecontracts.WorkflowLoopOperationPlan{
 				{NodeID: "loop-node", HandlerEvent: "work.started", Kind: runtimecontracts.LoopOperationStart, From: "queued", AdvancesTo: "drafting"},
 				{NodeID: "loop-node", HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review", AdvancesTo: "drafting"},
 			},
 		}}},
 	}
+	loopTransitions := []runtimecontracts.HandlerTransitionSemantic{
+		{ID: "loop-node:work.started", NodeID: "loop-node", EventType: "work.started", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"}},
+		{ID: "loop-node:review.revision_requested", NodeID: "loop-node", EventType: "review.revision_requested", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}},
+		{ID: "loop-node:draft.ready", NodeID: "loop-node", EventType: "draft.ready", AdvancesTo: "review", Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}},
+	}
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
+		"", "queued", []string{"queued", "drafting", "review", "escalated"}, []string{"escalated"}, loopTransitions, nil, bundle.Semantics.Loops,
+	)}
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)

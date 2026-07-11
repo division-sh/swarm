@@ -10,6 +10,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -135,7 +136,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID, req.ForkTime); err != nil {
 		return nil, err
 	}
-	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.SourceEvents)
+	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +169,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
-		forkEventID := uuid.NewString()
+		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
 		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
 		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)

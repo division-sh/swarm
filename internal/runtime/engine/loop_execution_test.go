@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -161,4 +163,97 @@ func TestPositiveLoopMaxAttemptsRejectsRuntimeBypassValues(t *testing.T) {
 			t.Fatalf("positiveLoopMaxAttempts(%#v) = (%d, %v), want (%d, %v)", tc.value, got, ok, tc.want, tc.ok)
 		}
 	}
+}
+
+func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t *testing.T) {
+	plan := runtimecontracts.WorkflowLoopPlan{
+		FlowID: "validation", ID: "revision", RevisionField: "revision_id",
+		MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "drafting",
+		RegionStages: []string{"drafting", "review"}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"},
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Loops: []runtimecontracts.WorkflowLoopPlan{plan}}})
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := loopruntime.New("run", "00000000-0000-0000-0000-000000000001", "validation", "revision", "revision_id", "start", "drafting", 3, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorRevision := activation.RevisionID
+	if err := activation.AdvanceWithin("review", "advance", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if escaped, err := activation.Repeat("drafting", "repeat", time.Now().UTC()); err != nil || escaped {
+		t.Fatalf("repeat = escaped:%v err:%v", escaped, err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := loopruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	baseState := testStateSnapshot("drafting", map[string]any{}, nil, buckets)
+
+	for _, tc := range []struct {
+		name      string
+		eventType string
+		handler   runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "fan_out_result", eventType: "line_item.completed",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"},
+				FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", As: "line_item", Identity: "line_item.id", Emit: runtimecontracts.EmitSpec{
+					Event: "line_item.follow_up", Fields: map[string]runtimecontracts.ExpressionValue{"revision_id": runtimecontracts.RefExpression("loop.revision_id")},
+				}},
+			},
+		},
+		{
+			name: "child_result", eventType: "child_flow.completed",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"},
+				Emit: runtimecontracts.EmitSpec{Event: "child_flow.accepted", Fields: map[string]runtimecontracts.ExpressionValue{"revision_id": runtimecontracts.RefExpression("loop.revision_id")}},
+			},
+		},
+		{
+			name: "agent_result", eventType: "agent.review_completed",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"},
+				Emit: runtimecontracts.EmitSpec{Event: "agent.review_accepted", Fields: map[string]runtimecontracts.ExpressionValue{"revision_id": runtimecontracts.RefExpression("loop.revision_id")}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stalePayload := map[string]any{"revision_id": priorRevision, "items": []any{map[string]any{"id": "one"}}}
+			_, err := exec.Execute(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 1), stalePayload))
+			if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassStaleArrival {
+				t.Fatalf("prior generation error = %v, want stale_arrival", err)
+			}
+			currentPayload := map[string]any{"revision_id": activation.RevisionID, "items": []any{map[string]any{"id": "one"}}}
+			result, err := exec.Execute(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 2), currentPayload))
+			if err != nil {
+				t.Fatalf("current generation: %v", err)
+			}
+			if len(result.EmitIntents) != 1 {
+				t.Fatalf("current generation emit intents = %d, want 1", len(result.EmitIntents))
+			}
+			if got := eventPayloadMap(t, result.EmitIntents[0].Event)["revision_id"]; got != activation.RevisionID {
+				t.Fatalf("current generation emitted revision = %#v, want %s", got, activation.RevisionID)
+			}
+		})
+	}
+}
+
+func loopCarrierTestRequest(state StateSnapshot, handler runtimecontracts.SystemNodeEventHandler, eventType, eventID string, payload map[string]any) ExecutionRequest {
+	req := loopTestRequest(state, handler, eventID, payload)
+	raw, _ := json.Marshal(payload)
+	req.Event = eventtest.RootIngress(eventID, events.EventType(eventType), "", "", raw, 0,
+		"00000000-0000-0000-0000-000000000010", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-0000-0000-000000000001"),
+		time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC))
+	return req
+}
+
+func uuidForLoopCarrier(name string, ordinal int) string {
+	return activityidentity.ForkLineageEventID("00000000-0000-0000-0000-000000000010", fmt.Sprintf("%s:%d", name, ordinal))
 }

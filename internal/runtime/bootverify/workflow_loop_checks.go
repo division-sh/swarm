@@ -30,6 +30,11 @@ func checkLoopValidation(c *checkerContext) []Finding {
 	fieldOwners := map[string]string{}
 	for _, plan := range plans {
 		location := loopLocation(plan)
+		topology, topologyOK := semanticview.WorkflowStageTopology(c.source, plan.FlowID)
+		if !topologyOK {
+			findings = append(findings, loopFinding(location, "canonical lifecycle topology is unavailable"))
+			continue
+		}
 		if key := strings.TrimSpace(plan.MaxAttempts.PolicyRef); key != "" {
 			value, ok := semanticview.PolicyValueForFlow(c.source, plan.FlowID, key)
 			if !ok {
@@ -51,7 +56,11 @@ func checkLoopValidation(c *checkerContext) []Finding {
 		}
 
 		counts := map[runtimecontracts.LoopOperationKind]int{}
-		region := stringSet(plan.RegionStages)
+		regionStages := topology.StronglyConnectedComponent(plan.EntryStage)
+		region := stringSet(regionStages)
+		if strings.Join(sortedLoopStages(stringSet(plan.RegionStages)), "\x00") != strings.Join(regionStages, "\x00") {
+			findings = append(findings, loopFinding(location, "lowered runtime loop region does not match the canonical transition SCC"))
+		}
 		for _, operation := range plan.Operations {
 			counts[operation.Kind]++
 			if _, ok := states[operation.From]; !ok {
@@ -81,6 +90,33 @@ func checkLoopValidation(c *checkerContext) []Finding {
 					}
 				}
 			}
+			switch operation.Kind {
+			case runtimecontracts.LoopOperationStart:
+				if _, inside := region[operation.From]; inside {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("start source %s is inside the loop SCC", operation.From)))
+				}
+				if operation.AdvancesTo != plan.EntryStage {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("start handler %s:%s must enter loop entry stage %s", operation.NodeID, operation.HandlerEvent, plan.EntryStage)))
+				}
+			case runtimecontracts.LoopOperationAdmit:
+				if _, inside := region[operation.From]; !inside {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("admit source %s is outside the loop SCC", operation.From)))
+				}
+			case runtimecontracts.LoopOperationRepeat:
+				if _, inside := region[operation.From]; !inside {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("repeat source %s is outside the loop SCC", operation.From)))
+				}
+				if operation.AdvancesTo != plan.EntryStage {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("repeat handler %s:%s must return to entry stage %s", operation.NodeID, operation.HandlerEvent, plan.EntryStage)))
+				}
+			case runtimecontracts.LoopOperationClose:
+				if _, inside := region[operation.From]; !inside {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("close source %s is outside the loop SCC", operation.From)))
+				}
+				if _, inside := region[operation.AdvancesTo]; inside {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("close target %s does not leave the loop SCC", operation.AdvancesTo)))
+				}
+			}
 		}
 		if counts[runtimecontracts.LoopOperationStart] != 1 {
 			findings = append(findings, loopFinding(location, fmt.Sprintf("requires exactly one start operation, found %d", counts[runtimecontracts.LoopOperationStart])))
@@ -98,8 +134,9 @@ func checkLoopValidation(c *checkerContext) []Finding {
 		if _, ok := states[escape]; !ok {
 			findings = append(findings, loopFinding(location, fmt.Sprintf("escape.advances_to references unknown stage %s", escape)))
 		} else if _, inside := region[escape]; inside {
-			findings = append(findings, loopFinding(location, fmt.Sprintf("escape target %s does not leave the loop region", escape)))
+			findings = append(findings, loopFinding(location, fmt.Sprintf("escape target %s does not leave the loop SCC", escape)))
 		}
+		findings = append(findings, validateLoopEscapeEmit(c.source, plan)...)
 		for stage := range region {
 			key := strings.TrimSpace(plan.FlowID) + "|" + stage
 			if prior, exists := stageOwners[key]; exists && prior != location {
@@ -108,7 +145,7 @@ func checkLoopValidation(c *checkerContext) []Finding {
 				stageOwners[key] = location
 			}
 		}
-		findings = append(findings, validateLoopCorrelatedHandlers(c.source, plan)...)
+		findings = append(findings, validateLoopRegionHandlers(c.source, plan, topology, region)...)
 		findings = append(findings, validateLoopRecurringTimers(c.source, plan, region)...)
 	}
 	return findings
@@ -192,19 +229,25 @@ func loopHandlerActions(handler runtimecontracts.SystemNodeEventHandler) []runti
 	return out
 }
 
-func validateLoopCorrelatedHandlers(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan) []Finding {
+func validateLoopRegionHandlers(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, topology runtimecontracts.WorkflowStageTopology, region map[string]struct{}) []Finding {
 	findings := make([]Finding, 0)
 	for nodeID, node := range source.NodeEntries() {
 		if strings.TrimSpace(nodeFlowID(source, nodeID)) != strings.TrimSpace(plan.FlowID) {
 			continue
 		}
 		for eventType, handler := range node.EventHandlers {
-			proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
-			if _, carries := proof.Entry.Payload.Properties[plan.RevisionField]; !proof.HasSchema || !carries {
+			if !loopStagesIntersect(topology.HandlerStages(nodeID, eventType), region) {
 				continue
 			}
+			proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
 			if handler.Loop == nil {
-				findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s consumes loop revision field %s but omits loop operation", nodeID, eventType, plan.RevisionField)))
+				field, carries := proof.Entry.Payload.Properties[plan.RevisionField]
+				typed := proof.HasSchema && carries && joinTextType(field.Type) && containsString(proof.Entry.Payload.Required, plan.RevisionField)
+				if typed {
+					findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s may execute in the loop region but omits loop operation", nodeID, eventType)))
+				} else {
+					findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s may execute in the loop region but omits both loop operation and required text revision field %s", nodeID, eventType, plan.RevisionField)))
+				}
 				continue
 			}
 			_, loopID, err := handler.Loop.Operation()
@@ -212,6 +255,52 @@ func validateLoopCorrelatedHandlers(source semanticview.Source, plan runtimecont
 				findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s revision field %s is bound to the wrong loop", nodeID, eventType, plan.RevisionField)))
 			}
 		}
+	}
+	return findings
+}
+
+func loopStagesIntersect(stages []string, region map[string]struct{}) bool {
+	for _, stage := range stages {
+		if _, ok := region[strings.TrimSpace(stage)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan) []Finding {
+	spec := plan.Escape.Emit
+	if spec.Empty() {
+		return nil
+	}
+	location := loopLocation(plan)
+	eventType := strings.TrimSpace(spec.EventType())
+	proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
+	if eventType == "" || !proof.HasSchema {
+		return []Finding{loopFinding(location, fmt.Sprintf("escape.emit event %s has no typed event schema", eventType))}
+	}
+	findings := make([]Finding, 0)
+	declared := payloadCompletenessDeclaredFields(proof.Entry)
+	fields := map[string]struct{}{}
+	for field := range spec.Fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			fields[field] = struct{}{}
+		}
+	}
+	for _, field := range payloadCompletenessUndeclaredFields(fields, declared) {
+		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s authors undeclared payload field %s", eventType, field)))
+	}
+	for _, field := range payloadCompletenessRequiredFields(proof.Entry) {
+		if _, ok := spec.Fields[field]; !ok {
+			findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s omits required payload field %s", eventType, field)))
+		}
+	}
+	revision, declaredRevision := proof.Entry.Payload.Properties[plan.RevisionField]
+	if !declaredRevision || !joinTextType(revision.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must require text field %s", eventType, plan.RevisionField)))
+	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !loopRevisionExpression(value) {
+		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must carry %s from loop.revision_id", eventType, plan.RevisionField)))
 	}
 	return findings
 }

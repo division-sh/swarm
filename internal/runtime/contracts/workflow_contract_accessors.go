@@ -67,6 +67,13 @@ func (b *WorkflowContractBundle) WorkflowLoops() []WorkflowLoopPlan {
 	}
 	return append([]WorkflowLoopPlan(nil), b.Semantics.Loops...)
 }
+func (b *WorkflowContractBundle) WorkflowStageTopology(flowID string) (WorkflowStageTopology, bool) {
+	if b == nil {
+		return WorkflowStageTopology{}, false
+	}
+	topology, ok := b.Semantics.StageTopologies[strings.TrimSpace(flowID)]
+	return topology, ok
+}
 func (b *WorkflowContractBundle) WorkflowTimerByID(id string) (WorkflowTimerContract, bool) {
 	id = strings.TrimSpace(id)
 	if b == nil || id == "" {
