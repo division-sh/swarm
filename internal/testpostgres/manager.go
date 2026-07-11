@@ -826,15 +826,26 @@ func (m *Manager) withDDLAdmissionMode(ctx context.Context, db *sql.DB, resource
 		return fmt.Errorf("open DDL admission connection for %s: %w", resource, err)
 	}
 	defer conn.Close()
+	gateKey := advisoryKey("global-ddl-admission-gate")
+	if err := acquireDDLAdmission(ctx, conn, gateKey, resource+" admission gate", shared); err != nil {
+		return err
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			releaseDDLAdmission(conn, gateKey, shared)
+		}
+	}()
 	key := advisoryKey("global-ddl-admission")
 	if err := acquireDDLAdmission(ctx, conn, key, resource, shared); err != nil {
 		return err
 	}
-	unlockQuery := `SELECT pg_advisory_unlock($1)`
-	if shared {
-		unlockQuery = `SELECT pg_advisory_unlock_shared($1)`
-	}
-	defer func() { _, _ = conn.ExecContext(context.Background(), unlockQuery, key) }()
+	defer releaseDDLAdmission(conn, key, shared)
+	// Once the operation owns the main lock, the gate can admit the next waiter.
+	// An exclusive waiter holds the gate while draining existing shared work, so
+	// a stream of new sandbox DDL cannot starve template/control mutation.
+	releaseDDLAdmission(conn, gateKey, shared)
+	gateHeld = false
 	if _, err := conn.ExecContext(ctx, `SET lock_timeout='15s'`); err != nil {
 		return fmt.Errorf("set postgres DDL lock timeout for %s: %w", resource, err)
 	}
@@ -842,6 +853,14 @@ func (m *Manager) withDDLAdmissionMode(ctx context.Context, db *sql.DB, resource
 		return fmt.Errorf("set postgres DDL statement timeout for %s: %w", resource, err)
 	}
 	return fn(conn)
+}
+
+func releaseDDLAdmission(conn *sql.Conn, key int64, shared bool) {
+	query := `SELECT pg_advisory_unlock($1)`
+	if shared {
+		query = `SELECT pg_advisory_unlock_shared($1)`
+	}
+	_, _ = conn.ExecContext(context.Background(), query, key)
 }
 
 func (m *Manager) dropSandbox(ctx context.Context, db *sql.DB, name string) error {

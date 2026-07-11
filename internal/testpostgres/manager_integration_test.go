@@ -388,6 +388,83 @@ func TestManagerDDLAdmissionSharesSandboxWorkAndFencesTemplateMutation(t *testin
 	}
 }
 
+func TestManagerDDLAdmissionGivesQueuedExclusiveWriterPriority(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	holder, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	mainKey := advisoryKey("global-ddl-admission")
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_lock_shared($1)`, mainKey); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.ExecContext(context.Background(), `SELECT pg_advisory_unlock_shared($1)`, mainKey)
+
+	order := make(chan string, 2)
+	exclusiveDone := make(chan error, 1)
+	go func() {
+		exclusiveDone <- manager.withExclusiveDDLAdmission(ctx, db, "queued template mutation", func(*sql.Conn) error {
+			order <- "exclusive"
+			return nil
+		})
+	}()
+	waitForExclusiveAdmissionGate(t, ctx, db)
+	sharedDone := make(chan error, 1)
+	go func() {
+		sharedDone <- manager.withDDLAdmission(ctx, db, "late sandbox mutation", func(*sql.Conn) error {
+			order <- "shared"
+			return nil
+		})
+	}()
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_unlock_shared($1)`, mainKey); err != nil {
+		t.Fatal(err)
+	}
+	if first := <-order; first != "exclusive" {
+		t.Fatalf("first admitted operation = %q, want queued exclusive writer", first)
+	}
+	if err := <-exclusiveDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-sharedDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForExclusiveAdmissionGate(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	key := advisoryKey("global-ddl-admission-gate")
+	for {
+		var acquired bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock_shared($1)`, key).Scan(&acquired); err != nil {
+			t.Fatal(err)
+		}
+		if !acquired {
+			return
+		}
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock_shared($1)`, key); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 	manager := integrationManager(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
