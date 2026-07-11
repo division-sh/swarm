@@ -38,6 +38,7 @@
         "github.com/division-sh/swarm/internal/runtime/credentials",
         "github.com/division-sh/swarm/internal/runtime/diaglog",
         "github.com/division-sh/swarm/internal/runtime/effects",
+        "github.com/division-sh/swarm/internal/runtime/effects/effecttest",
         "github.com/division-sh/swarm/internal/runtime/flowdata",
         "github.com/division-sh/swarm/internal/runtime/joinruntime",
         "github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest",

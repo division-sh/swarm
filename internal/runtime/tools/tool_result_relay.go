@@ -101,15 +101,15 @@ func (e *Executor) writeToolResultRelayFile(ctx context.Context, target *workspa
 		if err != nil {
 			return toolResultRelayFailure(err, "tool_result_relay_path_unavailable", "resolve_path", map[string]any{"relay_path": relayPath})
 		}
-		if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
-			return toolResultRelayFailure(err, "tool_result_relay_write_failed", "create_parent", map[string]any{"relay_path": resolved.LogicalPath})
-		}
 		attempt, err := runtimeeffects.Begin(ctx, "tool_result_relay", append([]byte(resolved.LogicalPath+"\x00"), payload...), map[string]string{"logical_path": resolved.LogicalPath})
 		if err != nil {
 			return err
 		}
 		if err := attempt.MarkLaunched(ctx); err != nil {
 			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "create_parent", map[string]any{"relay_path": resolved.LogicalPath}, err)
 		}
 		tmp, err := os.CreateTemp(filepath.Dir(resolved.HostPath), ".swarm-relay-*")
 		if err != nil {

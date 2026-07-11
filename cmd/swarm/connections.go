@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -130,7 +131,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure managed credential store: %w", err))
 			}
-			source := runtimemanagedcredentials.TokenSource{Store: store}
+			source := runtimemanagedcredentials.TokenSource{Store: store, DifferentOwner: runtimeeffects.OwnerCredentialLifecycle}
 			key := strings.TrimSpace(args[0])
 			switch strings.TrimSpace(opts.grant) {
 			case runtimemanagedcredentials.GrantAuthorizationCode:
@@ -279,7 +280,7 @@ func newConnectionsCallbackCommand(ctx context.Context, repo string) *cobra.Comm
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure managed credential store: %w", err))
 			}
-			source := runtimemanagedcredentials.TokenSource{Store: store}
+			source := runtimemanagedcredentials.TokenSource{Store: store, DifferentOwner: runtimeeffects.OwnerCredentialLifecycle}
 			record, err := source.CompleteAuthCode(ctx, runtimemanagedcredentials.CompleteAuthCodeRequest{
 				Key:   strings.TrimSpace(args[0]),
 				State: state,

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
@@ -252,6 +253,13 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
+		requestID, err := json.Marshal(req.ID)
+		if err != nil {
+			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.identity", err, map[string]any{"field": "id"})
+			g.writeToolCallErrorResult(w, req.ID, err)
+			return
+		}
+		ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "mcp_tool_call:"+string(requestID))
 		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
 			err := g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", nil, map[string]any{"tool": toolName})
@@ -744,6 +752,14 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 }
 
 func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	if turn.HasLifecycleToken {
+		ctx = runtimeeffects.WithLifecycleToken(ctx, turn.LifecycleToken)
+		if turn.EffectController != nil {
+			ctx = runtimeeffects.WithController(ctx, turn.EffectController)
+		}
+	} else if turn.DifferentOwner != "" {
+		ctx = runtimeeffects.WithDifferentOwner(ctx, turn.DifferentOwner)
+	}
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, turn.Actor)
 	}

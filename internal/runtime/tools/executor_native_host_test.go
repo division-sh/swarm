@@ -22,7 +22,7 @@ func TestNativeWorkspaceCommandRunsInExplicitHostBackendWorkdir(t *testing.T) {
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	exec := &Executor{}
-	stdout, stderr, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
+	stdout, stderr, exitCode, err := exec.runWorkspaceCommand(unmanagedToolTestContext(), &workspace.Target{
 		Workdir: workspaceDir,
 		Backend: workspace.BackendHost,
 		Mounts: []workspace.ExecutionMount{
@@ -54,7 +54,7 @@ func TestNativeWorkspaceCommandRunsInExplicitHostBackendWorkdir(t *testing.T) {
 
 func TestNativeWorkspaceCommandFailsClosedForHostTargetWithoutBackingPath(t *testing.T) {
 	exec := &Executor{}
-	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
+	_, _, exitCode, err := exec.runWorkspaceCommand(unmanagedToolTestContext(), &workspace.Target{
 		Workdir: t.TempDir(),
 		Backend: workspace.BackendHost,
 	}, "native_bash", time.Second, "", "sh", "-lc", "true")
@@ -70,7 +70,7 @@ func TestNativeWorkspaceCommandDoesNotFallbackFromDockerToHost(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fallback-marker")
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 	exec := &Executor{cfg: &config.Config{Workspace: config.WorkspaceConfig{DockerBin: missingDocker}}}
-	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
+	_, _, exitCode, err := exec.runWorkspaceCommand(unmanagedToolTestContext(), &workspace.Target{
 		Backend:   workspace.BackendDocker,
 		Container: "swarm-agent",
 		Workdir:   workspace.LogicalWorkspaceMount,
@@ -116,7 +116,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 			return nil, nil, 0, nil
 		},
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "writer",
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
@@ -174,7 +174,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 }
 
 func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
@@ -284,7 +284,7 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 }
 
 func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
@@ -384,7 +384,7 @@ func TestNativeFileToolsKeepDockerWorkspaceCommandExecution(t *testing.T) {
 			return nil, nil, 1, nil
 		}
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "docker-file-agent",
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
@@ -423,14 +423,14 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 		},
 	}
 
-	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
+	defs := exec.ToolDefinitionsForActorInContext(unmanagedToolTestContext(), actor)
 	for _, allowed := range []string{"bash", "read_file", "write_file"} {
 		if !containsToolDefinition(defs, allowed) {
 			t.Fatalf("context definitions missing %q: %#v", allowed, defs)
 		}
 	}
 
-	caps := exec.ToolCapabilitiesForActorInContext(context.Background(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
+	caps := exec.ToolCapabilitiesForActorInContext(unmanagedToolTestContext(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
 	for _, allowed := range []string{"bash", "read_file", "write_file"} {
 		cap := caps.ByName[allowed]
 		if !cap.Visible || !cap.Callable || cap.DenialReason != "" {
@@ -467,7 +467,7 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 		},
 	}
 
-	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
+	defs := exec.ToolDefinitionsForActorInContext(unmanagedToolTestContext(), actor)
 	for _, denied := range []string{"bash", "read_file", "write_file", "web_search"} {
 		if containsToolDefinition(defs, denied) {
 			t.Fatalf("strict provider-native runtime exposed platform fallback definition %q: %#v", denied, defs)
@@ -477,7 +477,7 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 		}
 	}
 
-	caps := exec.ToolCapabilitiesForActorInContext(context.Background(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
+	caps := exec.ToolCapabilitiesForActorInContext(unmanagedToolTestContext(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
 	for _, denied := range []string{"bash", "read_file", "write_file", "web_search"} {
 		cap := caps.ByName[denied]
 		if cap.Visible || cap.Callable {
@@ -492,7 +492,7 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 		t.Fatal("strict provider-native runtime must not execute platform fallback workspace tools")
 		return nil, nil, 0, nil
 	}
-	_, err := exec.Execute(models.WithActor(context.Background(), actor), "read_file", map[string]any{"path": "/workspace/missing.txt"})
+	_, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_file", map[string]any{"path": "/workspace/missing.txt"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported runtime tool") {
 		t.Fatalf("Execute(read_file) error = %v, want fallback execution denial", err)
 	}
@@ -511,7 +511,7 @@ func TestNativeWorkspaceCommandRequiresActorBashAuthorization(t *testing.T) {
 			},
 		},
 	})
-	actorCtx := models.WithActor(context.Background(), models.AgentConfig{
+	actorCtx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "host-no-bash",
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	})

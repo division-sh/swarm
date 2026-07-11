@@ -40,7 +40,9 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:2":                                            ownerCredentialLifecycle,
 	"internal/runtime/engine/helpers.go:executionConditionEnv:http_do:1":                                                  ownerPipelineActivity,
 	"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1":                                                           ownerManagedAgent,
-	"internal/runtime/llm/cli_runtime_process.go:buildCommand:process_launch:1":                                           ownerManagedAgent,
+	"internal/runtime/llm/cli_runtime_process.go:runStreaming:process_launch:1":                                           ownerManagedAgent,
+	"internal/runtime/llm/cli_runtime_process.go:runWithInput:process_launch:1":                                           ownerManagedAgent,
+	"internal/runtime/llm/cli_runtime_startup_probe.go:runUntilCLIStartupInit:process_launch:1":                           ownerRuntimeDependency,
 	"internal/runtime/llm/cli_tool_result_relay.go:runWorkspaceCommand:process_launch:1":                                  ownerManagedAgent,
 	"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1":                                             ownerManagedAgent,
 	"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1":                                              ownerManagedAgent,
@@ -75,12 +77,68 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:1":                                ownerManagedAgent,
 	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:2":                                ownerManagedAgent,
 	"internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1":                                      ownerManagedAgent,
-	"internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:2":                                      ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:1":                             ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:2":                             ownerManagedAgent,
 	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:1":                              ownerPipelineActivity,
 	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:2":                              ownerPipelineActivity,
 	"internal/runtime/workspace/manager.go:RunDocker:process_launch:1":                                                    ownerRuntimeDependency,
+	"internal/runtime/contracts/bundle_build.go:BuildBundleMaterialization:filesystem_write:2":                            ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_build.go:BuildBundleMaterialization:filesystem_write:3":                            ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_build.go:BuildBundleMaterialization:filesystem_write:4":                            ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_build.go:materializeBundleInputs:filesystem_write:2":                               ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_build.go:materializeBundleSourceInputs:filesystem_write:2":                         ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_build.go:writeDeterministicJSONFile:filesystem_write:2":                            ownerOperatorInfra,
+	"internal/runtime/contracts/bundle_catalog_runtime_loader.go:Cleanup:filesystem_write:1":                              ownerRuntimeDependency,
+	"internal/runtime/contracts/bundle_catalog_runtime_loader.go:LoadBundleCatalogRuntimeSource:filesystem_write:1":       ownerRuntimeDependency,
+	"internal/runtime/contracts/bundle_catalog_runtime_loader.go:LoadBundleCatalogRuntimeSource:filesystem_write:2":       ownerRuntimeDependency,
+	"internal/runtime/contracts/bundle_catalog_runtime_loader.go:LoadBundleCatalogRuntimeSource:filesystem_write:3":       ownerRuntimeDependency,
+	"internal/runtime/contracts/bundle_catalog_runtime_loader.go:materializeBundleCatalogRuntimeFiles:filesystem_write:2": ownerRuntimeDependency,
+	"internal/runtime/credentials/file_lock_unix.go:lockCredentialFile:filesystem_write:1":                                ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_lock_windows.go:lockCredentialFile:filesystem_write:1":                             ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:3":                                            ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:4":                                            ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:5":                                            ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:6":                                            ownerCredentialLifecycle,
+	"internal/runtime/credentials/file_store.go:withWriteLockLocked:filesystem_write:1":                                   ownerCredentialLifecycle,
+	"internal/runtime/llm/monitor_sink.go:OpenTurn:filesystem_write:1":                                                    ownerDiagnostic,
+	"internal/runtime/llm/monitor_sink.go:OpenTurn:filesystem_write:2":                                                    ownerDiagnostic,
+	"internal/runtime/managedcredentials/file_lock_unix.go:lockManagedCredentialFile:filesystem_write:1":                  ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/file_lock_windows.go:lockManagedCredentialFile:filesystem_write:1":               ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/store.go:withWriteLockLocked:filesystem_write:1":                                 ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:3":                                         ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:4":                                         ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:5":                                         ownerCredentialLifecycle,
+	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:6":                                         ownerCredentialLifecycle,
+	"internal/runtime/pipeline/artifact_repo.go:ensureArtifactRepoInitialized:filesystem_write:1":                         ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:1":                      ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:2":                      ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:2":                 ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:3":                 ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:2":                                ownerPipelineActivity,
+	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:1":                                         ownerComputeSandbox,
+	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:2":                                         ownerComputeSandbox,
+	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:3":                                         ownerComputeSandbox,
+	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:4":                                         ownerComputeSandbox,
+	"internal/runtime/pythonmodule/runtime.go:runHarness:filesystem_write:2":                                              ownerComputeSandbox,
+	"internal/runtime/testfixtures/fanoutpinroute/fixture.go:writeFile:filesystem_write:2":                                ownerBuildTest,
+	"internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go:writeFile:filesystem_write:2":                    ownerBuildTest,
+	"internal/runtime/testfixtures/sealedpackage/fixture.go:writeFile:filesystem_write:2":                                 ownerBuildTest,
+	"internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go:writeFile:filesystem_write:2":                     ownerBuildTest,
+	"internal/runtime/testfixtures/templatefanin/fixture.go:writeFile:filesystem_write:2":                                 ownerBuildTest,
+	"internal/runtime/testfixtures/templateflowpilot/fixture.go:writeFile:filesystem_write:2":                             ownerBuildTest,
+	"internal/runtime/testfixtures/templatereply/fixture.go:writeFile:filesystem_write:2":                                 ownerBuildTest,
+	"internal/runtime/testfixtures/templateselectexisting/fixture.go:writeFile:filesystem_write:2":                        ownerBuildTest,
+	"internal/runtime/testfixtures/templateselectorcreate/fixture.go:writeFile:filesystem_write:2":                        ownerBuildTest,
+	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:3":                                ownerManagedAgent,
+	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:4":                                ownerManagedAgent,
+	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:5":                                ownerManagedAgent,
+	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:6":                                ownerManagedAgent,
+	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:3":                             ownerManagedAgent,
+	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:4":                             ownerManagedAgent,
+	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:5":                             ownerManagedAgent,
+	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:6":                             ownerManagedAgent,
+	"internal/runtime/workspace/host_manager.go:EnsurePrereqs:filesystem_write:1":                                         ownerRuntimeDependency,
+	"internal/runtime/workspace/host_manager.go:ensureHostWorkspaceDir:filesystem_write:1":                                ownerRuntimeDependency,
 }
 
 func TestDirectPrimitiveOwnershipManifestIsTotal(t *testing.T) {
@@ -111,12 +169,14 @@ func TestDirectPrimitiveOwnershipManifestIsTotal(t *testing.T) {
 func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	seen := map[string]struct{}{}
+	primitiveAdapters := map[string][]string{}
 	for _, registration := range Registrations() {
 		if registration.Kind == "" || registration.Class == "" || strings.TrimSpace(registration.Adapter) == "" ||
 			strings.TrimSpace(registration.Transport) == "" || strings.TrimSpace(registration.LaunchSite) == "" ||
 			strings.TrimSpace(registration.LaunchObserved) == "" || strings.TrimSpace(registration.OutcomeMapping) == "" ||
 			strings.TrimSpace(registration.CanonicalEvidence) == "" || strings.TrimSpace(registration.SettlementRecovery) == "" ||
-			strings.TrimSpace(registration.Proof) == "" {
+			strings.TrimSpace(registration.Proof) == "" || len(registration.PrimitiveKeys) == 0 ||
+			registration.PrelaunchFailure == "" || registration.PostlaunchFailure == "" {
 			t.Fatalf("incomplete effect registration: %#v", registration)
 		}
 		if _, ok := seen[registration.Adapter]; ok {
@@ -130,7 +190,98 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 		if !strings.Contains(string(raw), fmt.Sprintf("\"%s\"", registration.Adapter)) {
 			t.Fatalf("launch site %s does not consume adapter %s", registration.LaunchSite, registration.Adapter)
 		}
+		for _, primitiveKey := range registration.PrimitiveKeys {
+			primitiveAdapters[primitiveKey] = append(primitiveAdapters[primitiveKey], registration.Adapter)
+		}
 	}
+	for primitiveKey, owner := range sourcePrimitiveOwners {
+		if owner != ownerManagedAgent {
+			continue
+		}
+		if len(primitiveAdapters[primitiveKey]) == 0 {
+			t.Errorf("managed primitive %s has no adapter contract", primitiveKey)
+		}
+	}
+	for primitiveKey, adapters := range primitiveAdapters {
+		if sourcePrimitiveOwners[primitiveKey] != ownerManagedAgent {
+			t.Errorf("adapter contract %s -> %v does not name a live managed primitive", primitiveKey, adapters)
+			continue
+		}
+		if err := verifyManagedPrimitiveOrdering(root, primitiveKey); err != nil {
+			t.Errorf("managed primitive contract %s -> %v: %v", primitiveKey, adapters, err)
+		}
+	}
+}
+
+func verifyManagedPrimitiveOrdering(root, primitiveKey string) error {
+	parts := strings.Split(primitiveKey, ":")
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid primitive key")
+	}
+	ordinal := 0
+	if _, err := fmt.Sscanf(parts[3], "%d", &ordinal); err != nil || ordinal <= 0 {
+		return fmt.Errorf("invalid primitive ordinal %q", parts[3])
+	}
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, filepath.Join(root, filepath.FromSlash(parts[0])), nil, 0)
+	if err != nil {
+		return err
+	}
+	matchedFunction := false
+	var lastErr error
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != parts[1] || fn.Body == nil {
+			continue
+		}
+		matchedFunction = true
+		commandVars := commandVariables(fn.Body)
+		fileVars := fileVariables(fn.Body)
+		var beginPos, launchPos, primitivePos token.Pos
+		primitiveCount := 0
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if isEffectsCall(call, "Begin") && beginPos == token.NoPos {
+				beginPos = call.Pos()
+			}
+			if isMethodCall(call, "MarkLaunched") && launchPos == token.NoPos {
+				launchPos = call.Pos()
+			}
+			if directPrimitive(call, commandVars, fileVars) == parts[2] {
+				primitiveCount++
+				if primitiveCount == ordinal {
+					primitivePos = call.Pos()
+				}
+			}
+			return true
+		})
+		if beginPos == token.NoPos || launchPos == token.NoPos || primitivePos == token.NoPos {
+			lastErr = fmt.Errorf("missing Begin/MarkLaunched/primitive binding")
+			continue
+		}
+		if !(beginPos < launchPos && launchPos < primitivePos) {
+			lastErr = fmt.Errorf("required order Begin < MarkLaunched < primitive is not satisfied")
+			continue
+		}
+		return nil
+	}
+	if matchedFunction {
+		return lastErr
+	}
+	return fmt.Errorf("function %s not found", parts[1])
+}
+
+func isEffectsCall(call *ast.CallExpr, name string) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selectorRoot(selector.X) == "runtimeeffects" && selector.Sel.Name == name
+}
+
+func isMethodCall(call *ast.CallExpr, name string) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == name
 }
 
 func collectDirectPrimitives(root string) (map[string]struct{}, error) {
@@ -157,12 +308,14 @@ func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 				continue
 			}
 			counts := map[string]int{}
+			commandVars := commandVariables(fn.Body)
+			fileVars := fileVariables(fn.Body)
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
-				primitive := directPrimitive(call)
+				primitive := directPrimitive(call, commandVars, fileVars)
 				if primitive == "" {
 					return true
 				}
@@ -177,7 +330,69 @@ func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 	return out, err
 }
 
-func directPrimitive(call *ast.CallExpr) string {
+func commandVariables(body *ast.BlockStmt) map[string]struct{} {
+	variables := map[string]struct{}{}
+	ast.Inspect(body, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for idx, rhs := range assign.Rhs {
+			call, ok := rhs.(*ast.CallExpr)
+			if !ok || !isExecCommandCall(call) || idx >= len(assign.Lhs) {
+				continue
+			}
+			if ident, ok := assign.Lhs[idx].(*ast.Ident); ok {
+				variables[ident.Name] = struct{}{}
+			}
+		}
+		return true
+	})
+	return variables
+}
+
+func isExecCommandCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selectorRoot(selector.X) == "exec" && (selector.Sel.Name == "Command" || selector.Sel.Name == "CommandContext")
+}
+
+func fileVariables(body *ast.BlockStmt) map[string]struct{} {
+	variables := map[string]struct{}{}
+	ast.Inspect(body, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, rhs := range assign.Rhs {
+			call, ok := rhs.(*ast.CallExpr)
+			if !ok || !isOSFileCreationCall(call) {
+				continue
+			}
+			if len(assign.Lhs) > 0 {
+				if ident, ok := assign.Lhs[0].(*ast.Ident); ok {
+					variables[ident.Name] = struct{}{}
+				}
+			}
+		}
+		return true
+	})
+	return variables
+}
+
+func isOSFileCreationCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || selectorRoot(selector.X) != "os" {
+		return false
+	}
+	switch selector.Sel.Name {
+	case "Create", "CreateTemp", "OpenFile":
+		return true
+	default:
+		return false
+	}
+}
+
+func directPrimitive(call *ast.CallExpr, commandVars, fileVars map[string]struct{}) string {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return ""
@@ -186,15 +401,54 @@ func directPrimitive(call *ast.CallExpr) string {
 	switch {
 	case selector.Sel.Name == "Do":
 		return "http_do"
-	case root == "exec" && (selector.Sel.Name == "Command" || selector.Sel.Name == "CommandContext"):
+	case commandExecutionCall(selector, commandVars):
 		return "process_launch"
-	case root == "os" && (selector.Sel.Name == "WriteFile" || selector.Sel.Name == "Create" || selector.Sel.Name == "CreateTemp" || selector.Sel.Name == "Rename"):
+	case root == "os" && osMutation(selector.Sel.Name):
+		return "filesystem_write"
+	case fileMutationCall(selector, fileVars):
 		return "filesystem_write"
 	case selector.Sel.Name == "Write" && strings.Contains(strings.ToLower(selectorPath(selector.X)), "stdin"):
 		return "stdio_write"
 	default:
 		return ""
 	}
+}
+
+func osMutation(name string) bool {
+	switch name {
+	case "WriteFile", "Create", "CreateTemp", "OpenFile", "Rename", "Mkdir", "MkdirAll", "Remove", "RemoveAll", "Chmod", "Chtimes", "Symlink", "Link", "Truncate":
+		return true
+	default:
+		return false
+	}
+}
+
+func fileMutationCall(selector *ast.SelectorExpr, fileVars map[string]struct{}) bool {
+	switch selector.Sel.Name {
+	case "Write", "WriteAt", "Sync", "Chmod", "Truncate":
+	default:
+		return false
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, ok = fileVars[ident.Name]
+	return ok
+}
+
+func commandExecutionCall(selector *ast.SelectorExpr, commandVars map[string]struct{}) bool {
+	switch selector.Sel.Name {
+	case "Start", "Run", "Output", "CombinedOutput":
+	default:
+		return false
+	}
+	if ident, ok := selector.X.(*ast.Ident); ok {
+		_, tracked := commandVars[ident.Name]
+		return tracked || ident.Name == "cmd"
+	}
+	call, ok := selector.X.(*ast.CallExpr)
+	return ok && isExecCommandCall(call)
 }
 
 func selectorPath(expr ast.Expr) string {

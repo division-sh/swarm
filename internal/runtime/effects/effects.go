@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -46,6 +47,19 @@ func (t LifecycleToken) Valid() bool {
 
 type lifecycleTokenKey struct{}
 
+type DifferentOwner string
+
+const (
+	OwnerRuntimeDependency       DifferentOwner = "runtime_dependency"
+	OwnerCredentialLifecycle     DifferentOwner = "credential_lifecycle"
+	OwnerOperatorInfrastructure  DifferentOwner = "operator_infrastructure"
+	OwnerPipelineActivity        DifferentOwner = "pipeline_activity"
+	OwnerBuildTestInfrastructure DifferentOwner = "build_test_infrastructure"
+)
+
+type differentOwnerKey struct{}
+type logicalOperationIdentityKey struct{}
+
 func WithLifecycleToken(ctx context.Context, token LifecycleToken) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -59,6 +73,56 @@ func LifecycleTokenFromContext(ctx context.Context) (LifecycleToken, bool) {
 	}
 	token, ok := ctx.Value(lifecycleTokenKey{}).(LifecycleToken)
 	return token, ok && token.Valid()
+}
+
+// WithDifferentOwner explicitly classifies a context whose external effects
+// are not managed agent attempts. Absence of lifecycle context is never enough
+// to infer this distinction.
+func WithDifferentOwner(ctx context.Context, owner DifferentOwner) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, differentOwnerKey{}, DifferentOwner(strings.TrimSpace(string(owner))))
+}
+
+func DifferentOwnerFromContext(ctx context.Context) (DifferentOwner, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	owner, ok := ctx.Value(differentOwnerKey{}).(DifferentOwner)
+	return owner, ok && owner.valid()
+}
+
+func (o DifferentOwner) valid() bool {
+	switch o {
+	case OwnerRuntimeDependency, OwnerCredentialLifecycle, OwnerOperatorInfrastructure, OwnerPipelineActivity, OwnerBuildTestInfrastructure:
+		return true
+	default:
+		return false
+	}
+}
+
+// WithLogicalOperationIdentity supplies canonical identity when an effect is
+// not rooted in an inbound event (for example, an explicit directive step).
+func WithLogicalOperationIdentity(ctx context.Context, identity string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, logicalOperationIdentityKey{}, strings.TrimSpace(identity))
+}
+
+// WithLogicalOperationIdentitySegment refines the current logical work with a
+// deterministic child coordinate, such as a provider turn or tool-call ID.
+func WithLogicalOperationIdentitySegment(ctx context.Context, segment string) context.Context {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return ctx
+	}
+	identity := logicalOperationIdentity(ctx)
+	if identity == "" {
+		return WithLogicalOperationIdentity(ctx, segment)
+	}
+	return WithLogicalOperationIdentity(ctx, identity+"\x00"+segment)
 }
 
 type State string
@@ -84,33 +148,43 @@ type Registration struct {
 	CanonicalEvidence  string
 	SettlementRecovery string
 	Proof              string
+	PrimitiveKeys      []string
+	PrelaunchFailure   State
+	PostlaunchFailure  State
 }
 
 var registrations = []Registration{
-	registration(KindProviderTurn, EffectWriteOrUnknown, "anthropic_api", "http", "internal/runtime/llm/api_runtime.go"),
-	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go"),
-	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go"),
-	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go"),
-	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go"),
-	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go"),
-	registration(KindNativeWebSearchHTTP, EffectReadOnly, "native_web_search", "http", "internal/runtime/tools/executor_native.go"),
-	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go"),
-	registration(KindMCPStdioRequest, EffectWriteOrUnknown, "mcp_tools_call_stdio", "stdio", "internal/runtime/mcp/client.go"),
-	registration(KindNativeCommand, EffectWriteOrUnknown, "native_bash", "process", "internal/runtime/tools/executor_native.go"),
-	registration(KindNativeCommand, EffectReadOnly, "native_read_file", "process", "internal/runtime/tools/executor_native.go"),
-	registration(KindNativeFileWrite, EffectWriteOrUnknown, "native_write_file", "filesystem", "internal/runtime/tools/executor_native.go"),
-	registration(KindToolResultRelay, EffectWriteOrUnknown, "tool_result_relay", "filesystem", "internal/runtime/tools/tool_result_relay.go"),
-	registration(KindClaudeToolResultRelay, EffectWriteOrUnknown, "claude_tool_result_relay", "process", "internal/runtime/llm/cli_tool_result_relay.go"),
+	registration(KindProviderTurn, EffectWriteOrUnknown, "anthropic_api", "http", "internal/runtime/llm/api_runtime.go", []string{"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/anthropic_api"),
+	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go", []string{"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_compatible"),
+	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go", []string{"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_responses"),
+	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreaming:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
+	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes/authored_http_tool"),
+	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
+	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes/native_web_search"),
+	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes/http"),
+	registration(KindMCPStdioRequest, EffectWriteOrUnknown, "mcp_tools_call_stdio", "stdio", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:Call:stdio_write:1"}, "TestManagedMCPEffectOutcomes/stdio"),
+	registration(KindNativeCommand, EffectWriteOrUnknown, "native_bash", "process", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1"}, "TestManagedNativeEffectOutcomes/bash"),
+	registration(KindNativeCommand, EffectReadOnly, "native_read_file", "process", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1"}, "TestManagedNativeEffectOutcomes/read_file"),
+	registration(KindNativeFileWrite, EffectWriteOrUnknown, "native_write_file", "filesystem", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:1", "internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:2", "internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:3", "internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:4", "internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:5", "internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:6", "internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1"}, "TestManagedNativeEffectOutcomes/write_file"),
+	registration(KindToolResultRelay, EffectWriteOrUnknown, "tool_result_relay", "filesystem", "internal/runtime/tools/tool_result_relay.go", []string{"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:1", "internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:2", "internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:3", "internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:4", "internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:5", "internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:6", "internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1"}, "TestManagedRelayEffectOutcomes/tool_result_relay"),
+	registration(KindClaudeToolResultRelay, EffectWriteOrUnknown, "claude_tool_result_relay", "process", "internal/runtime/llm/cli_tool_result_relay.go", []string{"internal/runtime/llm/cli_tool_result_relay.go:runWorkspaceCommand:process_launch:1"}, "TestManagedRelayEffectOutcomes/claude_tool_result_relay"),
 }
 
-func registration(kind Kind, class EffectClass, adapter, transport, launchSite string) Registration {
+func registration(kind Kind, class EffectClass, adapter, transport, launchSite string, primitiveKeys []string, proof string) Registration {
+	postlaunch := StateOutcomeUncertain
+	if class == EffectReadOnly {
+		postlaunch = StateTerminalFailure
+	}
 	return Registration{
 		Kind: kind, Class: class, Adapter: adapter, Transport: transport, LaunchSite: launchSite,
-		LaunchObserved:     "adapter marks the durable attempt immediately before the primitive launch",
-		OutcomeMapping:     "adapter maps every post-launch result through its effect-aware outcome table",
-		CanonicalEvidence:  "durable operation/attempt evidence keyed by lifecycle generation",
-		SettlementRecovery: "same attempt settles once; recovery never redispatches",
-		Proof:              "adapter-specific stale-before-launch and post-launch outcome tests",
+		LaunchObserved:     "state=launched must commit before: " + strings.Join(primitiveKeys, ","),
+		OutcomeMapping:     fmt.Sprintf("success=%s; proven_launch_rejection=%s; postlaunch_failure=%s", StateSettled, StateTerminalFailure, postlaunch),
+		CanonicalEvidence:  "operation_id, attempt_id, lifecycle token, request fingerprint, launch timestamp, settlement evidence",
+		SettlementRecovery: fmt.Sprintf("authorized=%s; launched/response_observed=%s; replay=no_redispatch", StateTerminalFailure, StateOutcomeUncertain),
+		Proof:              proof,
+		PrimitiveKeys:      append([]string(nil), primitiveKeys...),
+		PrelaunchFailure:   StateTerminalFailure,
+		PostlaunchFailure:  postlaunch,
 	}
 }
 
@@ -216,7 +290,10 @@ func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool,
 func ProjectionCurrent(ctx context.Context) (bool, error) {
 	token, hasToken := LifecycleTokenFromContext(ctx)
 	if !hasToken {
-		return true, nil
+		if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
+			return true, nil
+		}
+		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_token_missing", "external-effects", "check_generation", nil)
 	}
 	controller, ok := ControllerFromContext(ctx)
 	if !ok {
@@ -231,26 +308,73 @@ func Fingerprint(raw []byte) string {
 }
 
 type Handle struct {
-	controller *Controller
-	attempt    Attempt
+	controller     *Controller
+	attempt        Attempt
+	differentOwner DifferentOwner
 }
 
 func Begin(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
 	controller, hasController := ControllerFromContext(ctx)
-	_, hasToken := LifecycleTokenFromContext(ctx)
+	token, hasToken := LifecycleTokenFromContext(ctx)
+	differentOwner, hasDifferentOwner := DifferentOwnerFromContext(ctx)
 	if !hasToken {
-		return nil, nil
+		if hasDifferentOwner {
+			return &Handle{differentOwner: differentOwner}, nil
+		}
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_token_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	if hasDifferentOwner {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "different_owner": differentOwner})
 	}
 	if !hasController {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
+	fingerprint := Fingerprint(request)
+	operationID, err := canonicalOperationID(ctx, token, strings.TrimSpace(adapter), lineage)
+	if err != nil {
+		return nil, err
+	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
-		Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+func canonicalOperationID(ctx context.Context, token LifecycleToken, adapter string, lineage map[string]string) (string, error) {
+	identity := logicalOperationIdentity(ctx)
+	if identity == "" {
+		return "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_logical_identity_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter, "agent_id": token.AgentID})
+	}
+	lineageJSON, err := json.Marshal(lineage)
+	if err != nil {
+		return "", fmt.Errorf("marshal external effect lineage identity: %w", err)
+	}
+	seed := strings.Join([]string{
+		"managed-agent-effect-v1", token.AgentID, identity, adapter, string(lineageJSON),
+	}, "\x00")
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String(), nil
+}
+
+func logicalOperationIdentity(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	identity, _ := ctx.Value(logicalOperationIdentityKey{}).(string)
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		if evt, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			identity = strings.TrimSpace(evt.ID())
+		}
+	}
+	if identity == "" {
+		if runtimeLineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
+			identity = strings.TrimSpace(runtimeLineage.SubjectEventID)
+		}
+	}
+	return identity
 }
 
 func (h *Handle) Attempt() Attempt {
@@ -262,6 +386,9 @@ func (h *Handle) Attempt() Attempt {
 
 func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if h == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "launch_attempt", nil)
+	}
+	if h.differentOwner != "" {
 		return nil
 	}
 	return h.controller.MarkLaunched(ctx, h.attempt)
@@ -269,6 +396,9 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 
 func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailures.Envelope, evidence map[string]any) error {
 	if h == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_attempt", nil)
+	}
+	if h.differentOwner != "" {
 		return nil
 	}
 	return h.controller.Settle(ctx, Settlement{
@@ -283,6 +413,9 @@ func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {
 	if h == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_attempt", nil)
+	}
+	if h.differentOwner != "" {
 		return cause
 	}
 	var failureErr error
@@ -304,7 +437,7 @@ func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Cl
 
 func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attempt, error) {
 	if c == nil || c.store == nil {
-		return Attempt{}, nil
+		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", nil)
 	}
 	registration, ok := RegistrationFor(req.Adapter)
 	if !ok {
@@ -330,10 +463,14 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_token_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 	}
 	if req.OperationID == "" {
-		req.OperationID = uuid.NewString()
+		return Attempt{}, fmt.Errorf("external effect logical operation id is required")
 	}
 	if req.AttemptID == "" {
-		req.AttemptID = uuid.NewString()
+		operationUUID, err := uuid.Parse(req.OperationID)
+		if err != nil {
+			return Attempt{}, fmt.Errorf("parse external effect logical operation id: %w", err)
+		}
+		req.AttemptID = uuid.NewSHA1(operationUUID, []byte("attempt:1")).String()
 	}
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
@@ -343,14 +480,14 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 
 func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) error {
 	if c == nil || c.store == nil || attempt.AttemptID == "" {
-		return nil
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
 	}
 	return c.store.MarkExternalAttemptLaunched(context.WithoutCancel(ctx), attempt, time.Now().UTC())
 }
 
 func (c *Controller) Settle(ctx context.Context, settlement Settlement) error {
 	if c == nil || c.store == nil || settlement.AttemptID == "" {
-		return nil
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "settle_attempt", nil)
 	}
 	if settlement.Now.IsZero() {
 		settlement.Now = time.Now().UTC()

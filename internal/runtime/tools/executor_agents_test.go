@@ -160,7 +160,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		},
 	}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
-	ctx := WithActor(context.Background(), models.AgentConfig{
+	ctx := WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "control",
 		Role:        "control",
 		Permissions: []string{"message_flow"},

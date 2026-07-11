@@ -16,6 +16,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -113,7 +114,7 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/40ms", "500ms"),
 	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
 	for i := 0; i < 2; i++ {
 		if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
 			t.Fatalf("Execute #%d: %v", i+1, err)
@@ -155,10 +156,10 @@ func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
 			MaxWait: 500 * time.Millisecond,
 		},
 	}
-	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
+	if _, err := exec.execHTTPRequestOnce(unmanagedToolTestContext(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
 		t.Fatalf("initial execHTTPRequestOnce: %v", err)
 	}
-	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
+	if _, err := exec.execHTTPRequestOnce(unmanagedToolTestContext(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
 		t.Fatalf("second execHTTPRequestOnce after admission wait: %v", err)
 	}
 	recorder.requireGapAtLeast(t, 45*time.Millisecond)
@@ -176,7 +177,7 @@ func TestExecutor_HTTPRateLimitTimeoutDoesNotRetry(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
 		t.Fatalf("initial Execute: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestExecutor_MCPServerRateLimitIsSharedAcrossTools(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedMCPSource(server.URL, "1/40ms", "500ms"),
 	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping", "infra.pong"}})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping", "infra.pong"}})
 	if _, err := exec.Execute(ctx, "infra.ping", map[string]any{}); err != nil {
 		t.Fatalf("Execute(infra.ping): %v", err)
 	}
@@ -226,7 +227,7 @@ func TestExecutor_MCPStdioRuntimeCallUsesRateLimit(t *testing.T) {
 	})
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping"}})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping"}})
 	if _, err := exec.Execute(ctx, "infra.ping", map[string]any{}); err != nil {
 		t.Fatalf("initial Execute(infra.ping): %v", err)
 	}
@@ -306,7 +307,7 @@ func TestGatewayToolPathProjectsHTTPRateLimitTimeout(t *testing.T) {
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
 	actor := models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}}
-	ctx := models.WithActor(context.Background(), actor)
+	ctx := models.WithActor(unmanagedToolTestContext(), actor)
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
 		t.Fatalf("initial Execute: %v", err)
 	}
@@ -341,7 +342,7 @@ func TestGatewayMCPToolsCallProjectsRateLimitedRuntimeError(t *testing.T) {
 		WorkflowSource: rateLimitedMCPSource(server.URL, "1/s", "0s"),
 	})
 	actor := models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping"}}
-	ctx := models.WithActor(context.Background(), actor)
+	ctx := models.WithActor(unmanagedToolTestContext(), actor)
 	if _, err := exec.Execute(ctx, "infra.ping", map[string]any{}); err != nil {
 		t.Fatalf("initial Execute: %v", err)
 	}
@@ -403,7 +404,7 @@ func TestExecutor_NativeWebSearchHardcodedProviderUsesRateLimit(t *testing.T) {
 		}
 		return jsonHTTPResponse(http.StatusOK, `{"web":{"results":[{"title":"T","url":"https://example.test","description":"S"}]}}`), nil
 	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "agent-1",
 		NativeTools: models.NativeToolConfig{WebSearch: true},
 	})
@@ -434,7 +435,7 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 		WorkflowSource: rateLimitedNativeWebSearchSource("custom", "1/40ms", "500ms", customHTTP),
 		ModelRuntime:   nativeCapabilityRuntimeStub{},
 	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "agent-1",
 		NativeTools: models.NativeToolConfig{WebSearch: true},
 	})
@@ -461,7 +462,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 		WorkflowSource: rateLimitedNativeWebSearchSiblingFlowSource(server.URL),
 		ModelRuntime:   nativeCapabilityRuntimeStub{},
 	})
-	first := models.WithActor(context.Background(), models.AgentConfig{
+	first := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "alpha-agent",
 		FlowPath:    "alpha/instance-1",
 		NativeTools: models.NativeToolConfig{WebSearch: true},
@@ -469,7 +470,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 	if _, err := exec.Execute(first, "web_search", map[string]any{"query": "alpha"}); err != nil {
 		t.Fatalf("first sibling Execute(web_search): %v", err)
 	}
-	second := models.WithActor(context.Background(), models.AgentConfig{
+	second := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ID:          "beta-agent",
 		FlowPath:    "beta/instance-1",
 		NativeTools: models.NativeToolConfig{WebSearch: true},
@@ -683,9 +684,10 @@ func fixedTurnContextResolver(actor models.AgentConfig) func(string) (runtimemcp
 			return runtimemcp.TurnContext{}, false
 		}
 		return runtimemcp.TurnContext{
-			Actor:     actor,
-			CreatedAt: time.Now().UTC(),
-			ExpiresAt: time.Now().UTC().Add(time.Hour),
+			Actor:          actor,
+			DifferentOwner: runtimeeffects.OwnerBuildTestInfrastructure,
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
 		}, true
 	}
 }

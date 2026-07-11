@@ -55,7 +55,7 @@ func (b *entityToolRuntimeLogBus) LogRuntime(ctx context.Context, entry runtimep
 
 func selectedForkEntityToolRuntimeContext(actor models.AgentConfig) context.Context {
 	const eventID = "f6d20e7c-123d-4a37-9f9b-137421a24bdb"
-	ctx := runtimetools.WithActor(context.Background(), actor)
+	ctx := runtimetools.WithActor(unmanagedToolTestContext(), actor)
 	ctx = runtimecorrelation.WithRunID(ctx, entityToolTestRunID)
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
@@ -1298,7 +1298,7 @@ accounts:
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
 		VALUES ($1::uuid, 'running', $2)
@@ -1346,7 +1346,7 @@ accounts:
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
-	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), result.ForkRunID), actor)
+	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), result.ForkRunID), actor)
 	out, err := exec.Execute(forkCtx, "get_entity", map[string]any{"entity_id": entityID})
 	if err != nil {
 		t.Fatalf("get_entity fork entity: %v", err)
@@ -1395,7 +1395,7 @@ accounts:
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
 		VALUES ($1::uuid, 'running', $2)
@@ -1451,7 +1451,7 @@ accounts:
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
-	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), materialized.ForkRunID), actor)
+	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), materialized.ForkRunID), actor)
 	if _, err := exec.Execute(forkCtx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "status",
@@ -2747,7 +2747,7 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
-	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
+	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
@@ -2760,7 +2760,7 @@ const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 
 func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(unmanagedToolTestContext(), `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
 		ON CONFLICT (run_id) DO NOTHING

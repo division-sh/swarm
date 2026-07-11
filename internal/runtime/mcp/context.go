@@ -11,6 +11,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +23,10 @@ type TurnContext struct {
 	HasInbound        bool
 	RuntimeLineage    runtimecorrelation.RuntimeLineage
 	HasRuntimeLineage bool
+	LifecycleToken    runtimeeffects.LifecycleToken
+	HasLifecycleToken bool
+	EffectController  *runtimeeffects.Controller
+	DifferentOwner    runtimeeffects.DifferentOwner
 	Allowed           map[string]struct{}
 	Recorder          *runtimebus.EmittedEventsRecorder
 	Emitted           map[string]struct{}
@@ -72,12 +77,19 @@ func (r *TurnContextRegistry) RegisterTurnContextWithAllowedTools(ctx context.Co
 	recorder, _ := runtimebus.EmittedEventsRecorderFromContext(ctx)
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
 	lineage, hasLineage := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	lifecycleToken, hasLifecycleToken := runtimeeffects.LifecycleTokenFromContext(ctx)
+	effectController, _ := runtimeeffects.ControllerFromContext(ctx)
+	differentOwner, _ := runtimeeffects.DifferentOwnerFromContext(ctx)
 	r.put(token, TurnContext{
 		Actor:             actor,
 		Inbound:           inbound,
 		HasInbound:        hasInbound,
 		RuntimeLineage:    lineage,
 		HasRuntimeLineage: hasLineage,
+		LifecycleToken:    lifecycleToken,
+		HasLifecycleToken: hasLifecycleToken,
+		EffectController:  effectController,
+		DifferentOwner:    differentOwner,
 		Allowed:           normalizeAllowedTools(allowedTools),
 		Recorder:          recorder,
 		CreatedAt:         now,

@@ -274,7 +274,24 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 	if err := e.admitExternalDispatch(ctx, policy); err != nil {
 		return nil, err
 	}
-	attempt, err := runtimeeffects.Begin(ctx, "native_web_search", []byte(req.Method+"\x00"+req.URL.String()), nil)
+	headerEvidence, err := json.Marshal(req.Header)
+	if err != nil {
+		return nil, err
+	}
+	requestEvidence := append([]byte(req.Method+"\x00"+req.URL.String()+"\x00"), headerEvidence...)
+	if req.GetBody != nil {
+		body, bodyErr := req.GetBody()
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		rawBody, bodyErr := io.ReadAll(body)
+		_ = body.Close()
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		requestEvidence = append(requestEvidence, rawBody...)
+	}
+	attempt, err := runtimeeffects.Begin(ctx, "native_web_search", requestEvidence, map[string]string{"method": req.Method})
 	if err != nil {
 		return nil, err
 	}
@@ -283,26 +300,26 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 	}
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_transport_failed", "tool-executor", "web_search", map[string]any{"stage": "transport"}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"stage": "transport"}, err)
 	}
 	defer resp.Body.Close()
 	raw, err := ioReadAll(resp)
 	if err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_read_failed", "tool-executor", "web_search", map[string]any{"stage": "read"}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"stage": "read"}, err)
 	}
 	parsed := parseHTTPResponseBody(resp, raw)
 	if resp.StatusCode >= 400 {
 		err := fmt.Errorf("web_search returned status %d: %s", resp.StatusCode, strings.TrimSpace(asString(parsed)))
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_status_failed", "tool-executor", "web_search", map[string]any{"status": resp.StatusCode}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"status": resp.StatusCode}, err)
 	}
 	arrayValue, err := nestedValue(parsed, responsePath)
 	if err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_mapping_failed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
 	}
 	items, ok := arrayValue.([]any)
 	if !ok {
 		err := fmt.Errorf("web_search response path %q did not resolve to an array", responsePath)
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_mapping_failed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
 	}
 	results := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -381,12 +398,11 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 	if err != nil {
 		return nil, nil, -1, err
 	}
-	if err := cmd.Start(); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "native_command_start_failed", "tool-executor", adapter, map[string]any{"execution_mode": string(execTarget.Mode)}, err)
-	}
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		_ = cmd.Process.Kill()
 		return stdout.Bytes(), stderr.Bytes(), -1, err
+	}
+	if err := cmd.Start(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "native_command_start_failed", "tool-executor", adapter, map[string]any{"execution_mode": string(execTarget.Mode), "launch_rejected": true}, err)
 	}
 	err = cmd.Wait()
 	exitCode := 0
@@ -447,24 +463,23 @@ func execNativeHostWriteFile(ctx context.Context, target workspace.ExecutionTarg
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
-		return nil, fmt.Errorf("write_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
-	}
 	data := []byte(content)
 	attempt, err := runtimeeffects.Begin(ctx, "native_write_file", append([]byte(resolved.LogicalPath+"\x00"), data...), map[string]string{"logical_path": resolved.LogicalPath, "execution_mode": string(workspace.ExecutionModeHostLocal)})
 	if err != nil {
 		return nil, err
 	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "create_parent"}, err)
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(resolved.HostPath), ".swarm-write-*")
 	if err != nil {
-		return nil, err
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "create_temp"}, err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
-	if err := attempt.MarkLaunched(ctx); err != nil {
-		_ = tmp.Close()
-		return nil, err
-	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "write_temp"}, err)

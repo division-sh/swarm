@@ -27432,13 +27432,22 @@ agent_lifecycle_authority:
 managed_external_effect_authority:
   owner: agent_external_effect_operations and agent_external_effect_attempts in the selected store
   registration:
-    required_fields: [effect_kind, effect_class, adapter, transport, launch_site, launch_observed, outcome_mapping, canonical_evidence, settlement_recovery, proof]
-    rule: Registration is incomplete unless every field is present and the source-derived primitive manifest maps the actual launch/write boundary to exactly one owner.
+    required_fields: [effect_kind, effect_class, adapter, transport, launch_site, primitive_keys, launch_observed, prelaunch_failure, postlaunch_failure, outcome_mapping, canonical_evidence, settlement_recovery, proof]
+    rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof.
+  context_authority:
+    managed_agent: Every adapter invocation requires the lifecycle token, selected-store controller, and typed logical-operation identity. Missing context fails closed before authorization.
+    gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, inbound identity, and lineage; reconstruction cannot degrade a managed call into an unowned call.
+    different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
+  logical_operation:
+    identity: A deterministic operation_id is derived from agent, typed inbound/explicit logical identity, deterministic provider-turn or tool-call child coordinate, adapter, and declared lineage. Sibling turns/calls under one inbound event are distinct while replay of the same child is stable. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
+    replay: Authorization loads the existing operation and ordinal-one attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, or uncertain replay returns platform.outcome_uncertain; changed request or registration fields return a fingerprint conflict.
+    attempts: One actual attempt is authorized for each logical operation. No adapter creates a second attempt or operation during replay.
   effect_classes:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
   launch:
-    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt immediately before HTTP dispatch, process start, MCP stdio write, or filesystem mutation.
+    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
+    rejection: If the primitive subsequently rejects launch with exact zero-effect proof, the already-marked attempt settles terminal_failure with launch_rejected evidence. Marker failure performs zero launch or mutation.
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
     success: Correlated known success settles the same attempt exactly once with immutable evidence.
@@ -27447,7 +27456,7 @@ managed_external_effect_authority:
     postlaunch_write_or_unknown_failure: platform.outcome_uncertain with an adapter-specific detail; automatic redispatch is forbidden.
     mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
   recovery:
-    authorized: An authorized attempt has proven no primitive launch because durable launched state is committed before dispatch; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
+    authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
     launched_or_response_observed: Startup settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   automatic_redispatch_allowlist: []
@@ -27463,3 +27472,5 @@ managed_external_effect_authority:
     - effect classification derived from HTTP status, JSON-RPC correlation, exit code, or provider self-description
     - post-mutation native file failure reported as a proven terminal no-effect outcome
     - recovery redispatch of an authorized, launched, response-observed, or uncertain attempt
+    - nil-handle or missing-token no-op admission
+    - random logical operation or attempt identity on retry

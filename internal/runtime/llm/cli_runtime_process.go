@@ -75,12 +75,11 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 		return nil, err
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", nil, err)
-	}
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		_ = cmd.Process.Kill()
 		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
 	}
 	if err := cmd.Wait(); err != nil {
 		stderrText := strings.TrimSpace(stderr.String())
@@ -126,12 +125,11 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 		defer func() { _ = monitor.Close() }()
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", nil, err)
-	}
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		_ = cmd.Process.Kill()
 		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
 	}
 
 	stdoutCh := make(chan [][]byte, 1)

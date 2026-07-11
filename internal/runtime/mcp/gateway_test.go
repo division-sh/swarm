@@ -57,7 +57,7 @@ func mustMCPToolsForRequest(t *testing.T, g *Gateway, req *http.Request) []ToolD
 }
 
 func roleScopedTypedReadContext(name string) context.Context {
-	return toolcapabilities.WithContext(context.Background(), toolcapabilities.NewSet([]toolcapabilities.Capability{{
+	return toolcapabilities.WithContext(unmanagedMCPTestContext(), toolcapabilities.NewSet([]toolcapabilities.Capability{{
 		Name:               name,
 		Visible:            true,
 		Callable:           true,
@@ -1666,7 +1666,7 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadFailsClosedWhenTooLarge(t
 func TestProjectToolCallSuccessText_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
 	payload := map[string]any{"blob": strings.Repeat("x", maxToolResultBytes+1024)}
 
-	text, err := projectToolCallSuccessText(context.Background(), testToolExecutor(func(context.Context, string, any) (any, error) {
+	text, err := projectToolCallSuccessText(unmanagedMCPTestContext(), testToolExecutor(func(context.Context, string, any) (any, error) {
 		return payload, nil
 	}), "read_custom_report", map[string]any{}, payload)
 	if err != nil {
@@ -2455,7 +2455,7 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 }
 
 func TestGatewayTransports_PreserveRequestContextValueAfterResolvedTurn(t *testing.T) {
-	base := context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "value-from-request")
+	base := context.WithValue(unmanagedMCPTestContext(), gatewayCtxProbeKey("probe"), "value-from-request")
 	mcpObs, toolObs := runGatewayTransportPair(t, base)
 
 	if mcpObs.value != "value-from-request" {
@@ -2471,7 +2471,7 @@ func TestGatewayTransports_PreserveRequestContextValueAfterResolvedTurn(t *testi
 
 func TestGatewayTransports_PreserveRequestDeadlineAfterResolvedTurn(t *testing.T) {
 	wantDeadline := time.Now().UTC().Add(5 * time.Minute).Round(0)
-	base, cancel := context.WithDeadline(context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "deadline"), wantDeadline)
+	base, cancel := context.WithDeadline(context.WithValue(unmanagedMCPTestContext(), gatewayCtxProbeKey("probe"), "deadline"), wantDeadline)
 	defer cancel()
 
 	mcpObs, toolObs := runGatewayTransportPair(t, base)
@@ -2491,7 +2491,7 @@ func TestGatewayTransports_PreserveRequestDeadlineAfterResolvedTurn(t *testing.T
 }
 
 func TestGatewayTransports_PreserveRequestCancellationAfterResolvedTurn(t *testing.T) {
-	base, cancel := context.WithCancel(context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "cancel"))
+	base, cancel := context.WithCancel(context.WithValue(unmanagedMCPTestContext(), gatewayCtxProbeKey("probe"), "cancel"))
 	cancel()
 
 	mcpObs, toolObs := runGatewayTransportPair(t, base)

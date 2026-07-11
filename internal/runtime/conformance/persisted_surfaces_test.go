@@ -26,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -284,7 +285,8 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	runtime := runtimellm.NewAnthropicAPIRuntimeWithProviderCredentials(&config.Config{}, registry, "worker-1", nil, pg, nil, bus, conformanceProviderCredentialResolver(t, "ANTHROPIC_API_KEY", "test-key"))
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
+		base := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
+		base = runtimesessions.WithScope(base, runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
@@ -453,7 +455,8 @@ printf '{"result":"ok"}'
 	})
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
+		base := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
+		base = runtimesessions.WithScope(base, runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{

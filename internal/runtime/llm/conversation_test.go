@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -89,6 +92,61 @@ func (s *scriptedRuntime) ContinueSession(_ context.Context, _ *Session, message
 
 type fakeToolExec struct {
 	calls int
+}
+
+type managedRoundRuntime struct {
+	harness *effecttest.Harness
+	calls   int
+}
+
+func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
+	return &Session{ID: "managed-session", AgentID: agentID, RuntimeMode: "api"}, nil
+}
+
+func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _ Message) (*Response, error) {
+	handle, err := runtimeeffects.Begin(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := handle.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	if err := handle.Succeed(ctx, map[string]any{"turn": r.calls + 1}); err != nil {
+		return nil, err
+	}
+	r.calls++
+	if r.calls == 1 {
+		return &Response{Message: Message{Role: "assistant"}, ToolCalls: []ToolCall{{ID: "call-1", Name: "echo", Arguments: map[string]any{"text": "hello"}}}}, nil
+	}
+	return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+}
+
+type managedEffectToolExecutor struct {
+	harness *effecttest.Harness
+	calls   int
+}
+
+func (e *managedEffectToolExecutor) Execute(ctx context.Context, _ string, _ any) (any, error) {
+	handle, err := runtimeeffects.Begin(ctx, "authored_http_tool", []byte("tool-request"), map[string]string{"tool": "echo"})
+	if err != nil {
+		return nil, err
+	}
+	if err := handle.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	if err := handle.Succeed(ctx, map[string]any{"status": 200}); err != nil {
+		return nil, err
+	}
+	e.calls++
+	return map[string]any{"ok": true}, nil
+}
+
+func (e *managedEffectToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
 }
 
 func (f *fakeToolExec) Execute(_ context.Context, name string, input any) (any, error) {
@@ -335,6 +393,26 @@ func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	}
 	if len(payload) != 1 {
 		t.Fatalf("expected one tool payload entry, got %d", len(payload))
+	}
+}
+
+func TestConversationStep_SeparatesManagedProviderRoundsAndToolCalls(t *testing.T) {
+	harness := effecttest.New()
+	runtime := &managedRoundRuntime{harness: harness}
+	tools := &managedEffectToolExecutor{harness: harness}
+	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, SessionScoped, 10, runtime)
+	conversation.SetToolExecutor(tools)
+
+	ctx := models.WithActor(harness.Context("inbound-event-1"), models.AgentConfig{ID: "effect-test-agent", Role: "analysis"})
+	response, err := conversation.Step(ctx, "start")
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if response.Message.Content != "done" || runtime.calls != 2 || tools.calls != 1 {
+		t.Fatalf("composed execution = response %#v provider_calls=%d tool_calls=%d", response, runtime.calls, tools.calls)
+	}
+	if len(harness.Attempts) != 3 {
+		t.Fatalf("managed attempts = %d, want one per provider turn and tool call", len(harness.Attempts))
 	}
 }
 

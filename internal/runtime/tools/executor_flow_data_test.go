@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +32,7 @@ func TestExecutorReadFlowDataReadsDeclaredFlowFile(t *testing.T) {
 		t.Fatalf("read_flow_data capability = %#v, want visible/callable flow_data_access", cap)
 	}
 
-	out, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
+	out, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
 	if err != nil {
 		t.Fatalf("Execute(read_flow_data): %v", err)
 	}
@@ -57,10 +56,10 @@ func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing
 	actor := flowDataActor()
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "missing.yaml"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "missing.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data missing.yaml) succeeded, want undeclared failure")
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "../other/secret.yaml"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "../other/secret.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data traversal) succeeded, want traversal failure")
 	}
 
@@ -74,7 +73,7 @@ func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing
 	if err := os.Symlink(filepath.Join(root, "flows", "other", "data", "secret.md"), linkPath); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil {
 		t.Fatal("Execute(read_flow_data symlink escape) succeeded, want failure")
 	}
 }
@@ -93,7 +92,7 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
 		t.Fatal("read_flow_data visible without flow_data_access declaration")
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data) succeeded without declaration")
 	}
 }
@@ -116,7 +115,7 @@ func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
 	if !ok || cap.Visible || cap.Callable || cap.AuthorizationClass != "flow_data_access" {
 		t.Fatalf("capability = %#v, want denied flow_data_access for role/mode impersonation", cap)
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data) succeeded through role/mode fallback impersonation")
 	}
 }
@@ -130,7 +129,7 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
 		t.Fatalf("write escape.md: %v", err)
 	}
-	_, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"})
+	_, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "escape.md"})
 	requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
 }
 
@@ -147,7 +146,7 @@ func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
 	actor.FlowPath = "other"
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
-	out, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
+	out, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
 	if err != nil {
 		t.Fatalf("Execute(read_flow_data): %v", err)
 	}
@@ -166,7 +165,7 @@ func TestExecutorReadFlowDataDiagnosticsUseFlowDataAuthorization(t *testing.T) {
 	bus := &telemetryBusStub{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err != nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err != nil {
 		t.Fatalf("Execute(read_flow_data): %v", err)
 	}
 	if len(bus.logs) != 1 {
@@ -193,7 +192,7 @@ func TestExecutorReadFlowDataRequiresWorkflowSource(t *testing.T) {
 	if !ok || cap.Visible || cap.Callable || cap.AuthorizationClass != "flow_data_access" {
 		t.Fatalf("capability = %#v, want denied flow_data_access without source", cap)
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data) succeeded without workflow source")
 	}
 }

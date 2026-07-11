@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +40,7 @@ func TestValidateNativeToolBootConfig_FailsClosedWhenRuntimeLacksNativeCapabilit
 		},
 	})
 
-	_, err := ValidateNativeToolBootConfig(context.Background(), source, nil, nativeCapabilityRuntimeStub{strict: true}, nil)
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeStub{strict: true}, nil)
 	if err == nil || !strings.Contains(err.Error(), "selected runtime is strict provider-native and does not support provider-native capability") {
 		t.Fatalf("expected unsupported native capability error, got %v", err)
 	}
@@ -59,7 +58,7 @@ func TestValidateNativeToolBootConfig_CLINativeWebSearchDoesNotRequireFallbackPr
 		},
 	})
 
-	warnings, err := ValidateNativeToolBootConfig(context.Background(), source, nil, nativeCapabilityRuntimeStub{
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeStub{
 		caps:   llm.NativeToolCapabilities{WebSearch: true},
 		strict: true,
 	}, nil)
@@ -97,7 +96,7 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	if err != nil {
 		t.Fatalf("NewFileStore empty: %v", err)
 	}
-	_, err = ValidateNativeToolBootConfig(context.Background(), source, emptyStore, nativeCapabilityRuntimeStub{}, nil)
+	_, err = ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, emptyStore, nativeCapabilityRuntimeStub{}, nil)
 	if err == nil || !strings.Contains(err.Error(), `missing credential "brave_search_api_key"`) {
 		t.Fatalf("ValidateNativeToolBootConfig error = %v, want missing web_search credential", err)
 	}
@@ -106,10 +105,10 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := store.Set(context.Background(), "brave_search_api_key", "secret"); err != nil {
+	if err := store.Set(unmanagedToolTestContext(), "brave_search_api_key", "secret"); err != nil {
 		t.Fatalf("Set credential: %v", err)
 	}
-	warnings, err := ValidateNativeToolBootConfig(context.Background(), source, store, nativeCapabilityRuntimeStub{}, nil)
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, store, nativeCapabilityRuntimeStub{}, nil)
 	if err != nil {
 		t.Fatalf("ValidateNativeToolBootConfig with credential: %v", err)
 	}
@@ -130,12 +129,12 @@ func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTa
 		},
 	})
 
-	_, err := ValidateNativeToolBootConfig(context.Background(), source, nil, nativeCapabilityRuntimeStub{}, nil)
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeStub{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "workspace resolver is not configured") {
 		t.Fatalf("ValidateNativeToolBootConfig error = %v, want missing workspace resolver", err)
 	}
 
-	warnings, err := ValidateNativeToolBootConfig(context.Background(), source, nil, nativeCapabilityRuntimeStub{}, relayWorkspaceResolverStub{
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeStub{}, relayWorkspaceResolverStub{
 		target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 	})
 	if err != nil {

@@ -84,7 +84,7 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "cheap",
 		EntityID: "entity-1",
@@ -145,7 +145,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	turns := &turnCapture{}
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -220,7 +220,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	defer server.Close()
 
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

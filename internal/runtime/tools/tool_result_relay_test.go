@@ -50,7 +50,7 @@ func TestExecutorPersistOversizedToolResultRelay_DockerChunksLargeReadFileResult
 			return nil, nil, 0, nil
 		},
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "market-research-agent"})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "market-research-agent"})
 	raw, err := json.Marshal(map[string]any{
 		"content":    strings.Repeat("x", toolResultRelayChunkBytes+512),
 		"size_bytes": toolResultRelayChunkBytes + 512,
@@ -96,7 +96,7 @@ func TestExecutorPersistOversizedToolResultRelay_HostUsesExecutionTargetFileIO(t
 		t.Fatalf("host relay must use direct platform file I/O, not workspace command execution")
 		return nil, nil, 0, nil
 	}
-	ctx := models.WithActor(context.Background(), actor)
+	ctx := models.WithActor(unmanagedToolTestContext(), actor)
 
 	relay, err := exec.PersistOversizedToolResultRelay(ctx, "sql_execute", []byte(`{"blob":"hello"}`))
 	if err != nil {
@@ -133,7 +133,7 @@ func TestExecutorPersistOversizedToolResultRelay_HostChunksLargeReadFileResults(
 		t.Fatalf("host chunk relay must use direct platform file I/O, not workspace command execution")
 		return nil, nil, 0, nil
 	}
-	ctx := models.WithActor(context.Background(), actor)
+	ctx := models.WithActor(unmanagedToolTestContext(), actor)
 	raw, err := json.Marshal(map[string]any{
 		"content":    strings.Repeat("x", toolResultRelayChunkBytes+512),
 		"size_bytes": toolResultRelayChunkBytes + 512,
@@ -187,7 +187,7 @@ func TestExecutorPersistOversizedToolResultRelay_HostWithoutBackingMountFailsClo
 			return nil, nil, 0, nil
 		},
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "market-research-agent"})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "market-research-agent"})
 
 	_, err := exec.PersistOversizedToolResultRelay(ctx, "sql_execute", []byte(`{"blob":"hello"}`))
 	failure, ok := runtimefailures.As(err)
@@ -198,7 +198,7 @@ func TestExecutorPersistOversizedToolResultRelay_HostWithoutBackingMountFailsClo
 
 func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspace.Target) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()

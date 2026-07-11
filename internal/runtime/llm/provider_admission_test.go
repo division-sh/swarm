@@ -26,7 +26,7 @@ func TestProviderAdmissionDefaultsToNoLimitWhenUnconfigured(t *testing.T) {
 	registry := NewProviderAdmissionRegistry(&config.Config{})
 
 	for i := 0; i < 5; i++ {
-		release, err := registry.Admit(context.Background(), profile, model)
+		release, err := registry.Admit(unmanagedLLMTestContext(), profile, model)
 		if err != nil {
 			t.Fatalf("Admit attempt %d: %v", i+1, err)
 		}
@@ -45,10 +45,10 @@ func TestProviderAdmissionEmptyProfilePolicyDoesNotRequireModel(t *testing.T) {
 	}
 	registry := NewProviderAdmissionRegistry(cfg)
 
-	if _, err := resolveProviderAdmissionModel(context.Background(), cfg, registry, profile); err != nil {
+	if _, err := resolveProviderAdmissionModel(unmanagedLLMTestContext(), cfg, registry, profile); err != nil {
 		t.Fatalf("resolveProviderAdmissionModel: %v", err)
 	}
-	release, err := registry.Admit(context.Background(), profile, llmselection.ResolvedModel{})
+	release, err := registry.Admit(unmanagedLLMTestContext(), profile, llmselection.ResolvedModel{})
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
@@ -69,13 +69,13 @@ func TestProviderAdmissionRateLimitFailsClosedAtMaxWait(t *testing.T) {
 		},
 	})
 
-	release, err := registry.Admit(context.Background(), profile, model)
+	release, err := registry.Admit(unmanagedLLMTestContext(), profile, model)
 	if err != nil {
 		t.Fatalf("first Admit: %v", err)
 	}
 	release()
 
-	_, err = registry.Admit(context.Background(), profile, model)
+	_, err = registry.Admit(unmanagedLLMTestContext(), profile, model)
 	requireProviderAdmissionRateLimited(t, err)
 }
 
@@ -93,16 +93,16 @@ func TestProviderAdmissionConcurrencyLimitFailsClosedAtMaxWait(t *testing.T) {
 		},
 	})
 
-	release, err := registry.Admit(context.Background(), profile, model)
+	release, err := registry.Admit(unmanagedLLMTestContext(), profile, model)
 	if err != nil {
 		t.Fatalf("first Admit: %v", err)
 	}
 
-	_, err = registry.Admit(context.Background(), profile, model)
+	_, err = registry.Admit(unmanagedLLMTestContext(), profile, model)
 	requireProviderAdmissionRateLimited(t, err)
 
 	release()
-	release, err = registry.Admit(context.Background(), profile, model)
+	release, err = registry.Admit(unmanagedLLMTestContext(), profile, model)
 	if err != nil {
 		t.Fatalf("third Admit after release: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestProviderAdmissionDoesNotHoldConcurrencyWhileWaitingForRate(t *testing.T
 		},
 	}
 	controller.rateBucket(policy.RateBucketKey).scheduled = []time.Time{time.Now()}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(unmanagedLLMTestContext())
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -173,15 +173,15 @@ func TestProviderAdmissionRollsBackRateReservationWhenConcurrencyRejects(t *test
 		},
 	}
 
-	release, err := controller.Admit(context.Background(), policy)
+	release, err := controller.Admit(unmanagedLLMTestContext(), policy)
 	if err != nil {
 		t.Fatalf("first Admit: %v", err)
 	}
-	_, err = controller.Admit(context.Background(), policy)
+	_, err = controller.Admit(unmanagedLLMTestContext(), policy)
 	requireProviderAdmissionRateLimited(t, err)
 
 	release()
-	release, err = controller.Admit(context.Background(), policy)
+	release, err = controller.Admit(unmanagedLLMTestContext(), policy)
 	if err != nil {
 		t.Fatalf("third Admit after concurrency rejection: %v", err)
 	}
@@ -210,21 +210,21 @@ func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
 	})
 
 	for i := 0; i < 2; i++ {
-		release, err := registry.Admit(context.Background(), profile, regular)
+		release, err := registry.Admit(unmanagedLLMTestContext(), profile, regular)
 		if err != nil {
 			t.Fatalf("regular Admit %d: %v", i+1, err)
 		}
 		release()
 	}
-	_, err := registry.Admit(context.Background(), profile, regular)
+	_, err := registry.Admit(unmanagedLLMTestContext(), profile, regular)
 	requireProviderAdmissionRateLimited(t, err)
 
-	release, err := registry.Admit(context.Background(), profile, cheap)
+	release, err := registry.Admit(unmanagedLLMTestContext(), profile, cheap)
 	if err != nil {
 		t.Fatalf("cheap first Admit: %v", err)
 	}
 	release()
-	_, err = registry.Admit(context.Background(), profile, cheap)
+	_, err = registry.Admit(unmanagedLLMTestContext(), profile, cheap)
 	requireProviderAdmissionRateLimited(t, err)
 }
 
@@ -262,7 +262,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -305,12 +305,12 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
+		_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
+	_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -351,12 +351,12 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
+		_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
+	_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -386,7 +386,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 printf '%s\n' '{"result":"done"}'
 `)
@@ -426,7 +426,7 @@ func TestClaudeCLIUnstructuredPromptTransportFailureDoesNotRetry(t *testing.T) {
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 if [ "$count" = "1" ]; then
   printf '%s\n' 'input must be provided either through stdin or as a prompt argument when using --print' >&2

@@ -71,7 +71,7 @@ accounts:
 `)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID), actor)
+	ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    sqliteStore,
 		WorkflowSource:                 semanticview.Wrap(bundle),
@@ -142,7 +142,7 @@ accounts:
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
+	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
 	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 		RunID:        entityToolTestRunID,
@@ -184,7 +184,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
+	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
 	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 		RunID:        entityToolTestRunID,
@@ -283,7 +283,7 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 				t.Fatalf("reply-scoped human_task_request: %v", err)
 			}
 			replyTaskID := strings.TrimSpace(asString(replyTaskOut.(map[string]any)["task_id"]))
-			replyTask, err := tc.store.GetMailboxItem(context.Background(), replyTaskID)
+			replyTask, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), replyTaskID)
 			if err != nil || replyTask.ReplyContextID != replyContextID || replyTask.FlowInstance != "provider" {
 				t.Fatalf("reply-scoped human task = %#v err=%v", replyTask, err)
 			}
@@ -298,20 +298,20 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 				t.Fatalf("reply-scoped mailbox_send: %v", err)
 			}
 			mailboxID := strings.TrimSpace(asString(mailboxOut.(map[string]any)["mailbox_id"]))
-			mailboxItem, err := tc.store.GetMailboxItem(context.Background(), mailboxID)
+			mailboxItem, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), mailboxID)
 			if err != nil || mailboxItem.ReplyContextID != replyContextID {
 				t.Fatalf("reply-scoped mailbox item = %#v err=%v", mailboxItem, err)
 			}
 
 			firstID := createHumanTaskWithExecutor(t, exec, requester)
-			firstItem, err := tc.store.GetMailboxItem(context.Background(), firstID)
+			firstItem, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), firstID)
 			if err != nil {
 				t.Fatalf("get first human task: %v", err)
 			}
 			if firstItem.Type != "human_task" || firstItem.EntityID != requester.EntityID {
 				t.Fatalf("first human task item = %#v", firstItem)
 			}
-			if _, err := exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+			if _, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
 				"task_id":  firstID,
 				"decision": "approve",
 				"reason":   "ok",
@@ -320,7 +320,7 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			}
 
 			secondID := createHumanTaskWithExecutor(t, exec, requester)
-			out, err := exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+			out, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
 				"task_id":  secondID,
 				"decision": "approve",
 			})
@@ -331,7 +331,7 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 				t.Fatalf("second human task status = %q, want deferred", got)
 			}
 			assertHumanTaskDeferredProjection(t, tc.store, secondID)
-			requeueCount, err := tc.store.HumanTaskRequeueCount(context.Background(), secondID)
+			requeueCount, err := tc.store.HumanTaskRequeueCount(unmanagedToolTestContext(), secondID)
 			if err != nil {
 				t.Fatalf("load second human task requeue count: %v", err)
 			}
@@ -340,7 +340,7 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			}
 			explicitID := createHumanTaskWithExecutor(t, exec, requester)
 			explicitUntil := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
-			out, err = exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+			out, err = exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
 				"task_id":      explicitID,
 				"decision":     "defer",
 				"reason":       "wait for operator context",
@@ -354,13 +354,13 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			}
 			assertHumanTaskDeferredProjection(t, tc.store, explicitID)
 			missingDateID := createHumanTaskWithExecutor(t, exec, requester)
-			if _, err := exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+			if _, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
 				"task_id":  missingDateID,
 				"decision": "defer",
 			}); err == nil {
 				t.Fatal("defer human task without requeue_date error = nil")
 			}
-			out, err = exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+			out, err = exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
 				"task_id":  secondID,
 				"decision": "approve",
 			})
@@ -381,20 +381,20 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC()
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
 			t.Fatalf("seed postgres reply tool run: %v", err)
 		}
-		if _, err := typed.DB.ExecContext(context.Background(), `
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
 			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 			VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'requester', 'node', $3)
 		`, runID, requestEventID, now); err != nil {
 			t.Fatalf("seed postgres reply tool event: %v", err)
 		}
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
 			t.Fatalf("seed sqlite reply tool run: %v", err)
 		}
-		if _, err := typed.DB.ExecContext(context.Background(), `
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
 			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 			VALUES (?, ?, 'provider.requested', 'global', '{}', 'requester', 'node', ?)
 		`, runID, requestEventID, now); err != nil {
@@ -419,7 +419,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		UpdatedAt:            now,
 	}
 	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
-	if err := persistence.CreateReplyContext(context.Background(), record); err != nil {
+	if err := persistence.CreateReplyContext(unmanagedToolTestContext(), record); err != nil {
 		t.Fatalf("seed reply tool context: %v", err)
 	}
 	inbound := eventtest.RootIngress(
@@ -434,14 +434,14 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}),
 		now,
 	)
-	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(context.Background(), runID), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
 	return ctx, record.ID, requestEventID
 }
 
 func assertHumanTaskDeferredProjection(t *testing.T, store humanTaskToolStore, taskID string) {
 	t.Helper()
-	detail, err := store.GetV1MailboxItem(context.Background(), taskID)
+	detail, err := store.GetV1MailboxItem(unmanagedToolTestContext(), taskID)
 	if err != nil {
 		t.Fatalf("get v1 deferred human task: %v", err)
 	}
@@ -458,7 +458,7 @@ func assertHumanTaskDeferredProjection(t *testing.T, store humanTaskToolStore, t
 
 func createHumanTaskWithExecutor(t *testing.T, exec *runtimetools.Executor, actor models.AgentConfig) string {
 	t.Helper()
-	out, err := exec.ExecHumanTaskRequestDirect(context.Background(), actor, map[string]any{
+	out, err := exec.ExecHumanTaskRequestDirect(unmanagedToolTestContext(), actor, map[string]any{
 		"category":       "review",
 		"description":    "Needs human review",
 		"expected_value": "approval",
@@ -509,7 +509,7 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 			t.Fatalf("close sqlite runtime store: %v", err)
 		}
 	})
-	if err := sqliteStore.EnsureSchemaTables(context.Background(), plans); err != nil {
+	if err := sqliteStore.EnsureSchemaTables(unmanagedToolTestContext(), plans); err != nil {
 		t.Fatalf("EnsureSchemaTables: %v", err)
 	}
 	return sqliteStore
@@ -517,7 +517,7 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
-	if _, err := sqliteStore.DB.ExecContext(context.Background(), `
+	if _, err := sqliteStore.DB.ExecContext(unmanagedToolTestContext(), `
 		INSERT INTO runs (run_id, status, bundle_source, started_at)
 		VALUES (?, 'running', 'legacy', ?)
 		ON CONFLICT(run_id) DO NOTHING
