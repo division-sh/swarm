@@ -44,6 +44,7 @@ type TimerHandle struct {
 type JoinRef struct {
 	NodeID       string
 	HandlerEvent string
+	Stage        string
 	JoinID       string
 	Window       string
 }
@@ -255,22 +256,23 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 	}
 }
 
-func NewJoinRef(nodeID, handlerEvent, joinID, window string) JoinRef {
+func NewJoinRef(nodeID, handlerEvent, stage, joinID, window string) JoinRef {
 	return JoinRef{
 		NodeID:       strings.TrimSpace(nodeID),
 		HandlerEvent: strings.TrimSpace(handlerEvent),
+		Stage:        strings.TrimSpace(stage),
 		JoinID:       strings.TrimSpace(joinID),
 		Window:       strings.TrimSpace(window),
 	}
 }
 
 func (r JoinRef) Normalize() JoinRef {
-	return NewJoinRef(r.NodeID, r.HandlerEvent, r.JoinID, r.Window)
+	return NewJoinRef(r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window)
 }
 
 func (r JoinRef) Valid() bool {
 	r = r.Normalize()
-	return r.NodeID != "" && r.HandlerEvent != "" && r.JoinID != ""
+	return r.NodeID != "" && r.HandlerEvent != "" && r.Stage != "" && r.JoinID != ""
 }
 
 func (r JoinRef) Key() string {
@@ -278,7 +280,7 @@ func (r JoinRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{r.NodeID, r.HandlerEvent, r.JoinID, r.Window}
+	parts := []string{r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window}
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
@@ -293,6 +295,7 @@ func (r JoinRef) PayloadValue() map[string]any {
 	return map[string]any{
 		"node_id":       r.NodeID,
 		"handler_event": r.HandlerEvent,
+		"stage":         r.Stage,
 		"join_id":       r.JoinID,
 		"window":        r.Window,
 	}
@@ -311,7 +314,7 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	if !ok {
 		return JoinRef{}, false
 	}
-	ref := NewJoinRef(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["join_id"]), asString(raw["window"]))
+	ref := NewJoinRef(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]))
 	return ref, ref.Valid()
 }
 

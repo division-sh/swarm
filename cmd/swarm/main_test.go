@@ -31,9 +31,12 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -3777,6 +3780,137 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	}
 }
 
+func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
+	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name":      "order.started",
+		"bundle_hash":     bundleHash,
+		"payload":         map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"},
+		"idempotency_key": "join-failure-run-" + uuid.NewString(),
+	})
+	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
+		t.Fatalf("join failure initial run = %#v", initial)
+	}
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
+	entityID := servedJoinEntityID(t, db, initial.RunID)
+
+	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": initial.EventID,
+		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
+		"idempotency_key": "join-failure-arrival-" + uuid.NewString(),
+	})
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "dead_letter", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "node", "join-node", "dead_letter", 1)
+
+	type failureReadback struct {
+		EntityID   string `json:"entity_id"`
+		Deliveries []struct {
+			SubscriberType string                    `json:"subscriber_type"`
+			SubscriberID   string                    `json:"subscriber_id"`
+			Status         string                    `json:"status"`
+			Failure        *runtimefailures.Envelope `json:"failure"`
+		} `json:"deliveries"`
+		DeadLetters []struct {
+			Failure runtimefailures.Envelope `json:"failure"`
+		} `json:"dead_letters"`
+	}
+	var event failureReadback
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": arrival.EventID}, &event)
+	if event.EntityID != entityID || len(event.Deliveries) == 0 || len(event.DeadLetters) == 0 {
+		t.Fatalf("join event.get evidence = %#v", event)
+	}
+	found := false
+	for _, delivery := range event.Deliveries {
+		if delivery.SubscriberType == "node" && delivery.SubscriberID == "join-node" && delivery.Status == "dead_letter" &&
+			delivery.Failure != nil && delivery.Failure.Class == runtimefailures.ClassEarlyArrival && delivery.Failure.Detail.Code == "join_not_armed" {
+			found = true
+		}
+	}
+	if !found || event.DeadLetters[0].Failure.Class != runtimefailures.ClassEarlyArrival || event.DeadLetters[0].Failure.Detail.Code != "join_not_armed" {
+		t.Fatalf("join event.get typed failure = %#v", event)
+	}
+	stdout, stderr, code := runServedCLICommand(t, endpoint, []string{"event", "view", arrival.EventID})
+	if code != 0 || strings.TrimSpace(stderr) != "" {
+		t.Fatalf("join event view code=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"subscriber=node/join-node", "status=dead letter", "failure=platform.early_arrival/join_not_armed", "dead_letters:"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("join event view missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
+	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "order.started", "bundle_hash": bundleHash,
+		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
+		"idempotency_key": "join-fork-run-" + uuid.NewString(),
+	})
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
+	entityID := servedJoinEntityID(t, db, initial.RunID)
+	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID,
+		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
+	})
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", "dispatcher", "delivered", 1)
+	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID,
+		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
+		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
+	})
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "delivered", 1)
+	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
+
+	var fork apiv1.RunForkExecutionResult
+	requireServedJSONRPCResult(t, endpoint, "run.fork", map[string]any{
+		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "idempotency_key": "join-fork-" + uuid.NewString(),
+	}, &fork)
+	if fork.ForkRunID == "" || fork.SourceRunID != initial.RunID || fork.ExecutedEventCount != 1 {
+		t.Fatalf("join run.fork result = %#v", fork)
+	}
+	forkCtx := runtimecorrelation.WithRunID(context.Background(), fork.ForkRunID)
+	instance, ok, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(forkCtx, entityID)
+	if err != nil || !ok {
+		t.Fatalf("load fork join instance = %#v, %v, %v", instance, ok, err)
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("awaiting", "awaiting", "dispatch-1"))
+	if err != nil || !ok || activation.Status != joinruntime.StatusOpen || activation.Completed() != 1 || activation.Expected() != 2 {
+		t.Fatalf("fork join activation = %#v, %v, %v", activation, ok, err)
+	}
+	if output, ok := activation.Outputs["a"]; !ok || output.Hash == "" {
+		t.Fatalf("fork join output = %#v", activation.Outputs)
+	}
+	var fireEvent string
+	var firePayload []byte
+	var reconstructed int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT fire_event, fire_payload, COUNT(*) OVER ()
+		FROM timers
+		WHERE run_id = $1::uuid
+		  AND source_timer_id IS NOT NULL
+		  AND forked_from_run_id = $2::uuid
+		  AND forked_from_event_id = $3::uuid
+		  AND reconstruction_owner = $4
+		  AND status = 'active'
+	`, fork.ForkRunID, initial.RunID, forkEventID, store.RunForkHistoricalReplayTimerReconstructionOwner).Scan(&fireEvent, &firePayload, &reconstructed); err != nil {
+		t.Fatalf("load reconstructed join timer: %v", err)
+	}
+	var timerPayload map[string]any
+	if err := json.Unmarshal(firePayload, &timerPayload); err != nil {
+		t.Fatalf("decode reconstructed join timer payload: %v", err)
+	}
+	handle, ok := timeridentity.ParseTimerHandle(timerPayload)
+	if reconstructed != 1 || fireEvent != "platform.join_timeout" || !ok || handle.Kind != timeridentity.TimerHandleJoinTimeout ||
+		handle.Join.Stage != "awaiting" || handle.Join.JoinID != "awaiting" {
+		t.Fatalf("fork join timer = event:%q count:%d handle:%#v parsed:%v", fireEvent, reconstructed, handle, ok)
+	}
+}
+
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -6838,6 +6972,218 @@ scorer:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	return root
+}
+
+func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
+	t.Helper()
+	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	root := writeServedJoinProofFixture(t)
+	bundleHash := seedServeRuntimeBundleCatalogRoot(t, context.Background(), pg, root)
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		BundleHash:              bundleHash,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      true,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	return endpoint, db, bundleHash
+}
+
+func writeServedJoinProofFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: served-join-proof
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: served-join-proof
+stages:
+  new:
+    initial: true
+  dispatching:
+    {}
+  awaiting: {}
+  ready:
+    terminal: true
+  attention:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - name: order_started
+        event: order.started
+        source: external
+      - name: order_dispatched
+        event: order.dispatched
+        source: external
+      - name: item_completed
+        event: item.completed
+        source: external
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+order:
+  expected:
+    type: "[text]"
+    initial: []
+  dispatch_id: text
+  probe: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), `
+types:
+  JoinResult:
+    ok: boolean
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+order.started:
+  swarm:
+    source: external
+  expected: "[text]"
+  dispatch_id: text
+order.dispatched:
+  swarm:
+    source: external
+item.completed:
+  swarm:
+    source: external
+  dispatch_id: text
+  member_id: text
+  result: JoinResult
+fork.probe:
+  swarm:
+    source: external
+  marker: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+starter:
+  id: starter
+  execution_type: system_node
+  subscribes_to: [order.started]
+  event_handlers:
+    order.started:
+      create_entity: true
+      data_accumulation:
+        source_event: order.started
+        writes:
+          - source_field: expected
+            target_field: expected
+          - source_field: dispatch_id
+            target_field: dispatch_id
+      advances_to: dispatching
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  subscribes_to: [order.dispatched]
+  event_handlers:
+    order.dispatched:
+      advances_to: awaiting
+join-node:
+  id: join-node
+  execution_type: system_node
+  subscribes_to: [item.completed]
+  event_handlers:
+    item.completed:
+      join:
+        stage: awaiting
+        members:
+          from: entity.expected
+          by: payload.member_id
+        window:
+          from: entity.dispatch_id
+          by: payload.dispatch_id
+        output: payload.result
+        on_complete:
+          advances_to: ready
+        timeout:
+          after: 1h
+          advances_to: attention
+fork-probe:
+  id: fork-probe
+  execution_type: system_node
+  subscribes_to: [fork.probe]
+  event_handlers:
+    fork.probe:
+      data_accumulation:
+        source_event: fork.probe
+        writes:
+          - source_field: marker
+            target_field: probe
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	return root
+}
+
+func servedJoinEntityID(t *testing.T, db *sql.DB, runID string) string {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for time.Now().Before(deadline) {
+		var entityID string
+		err := db.QueryRowContext(context.Background(), `
+			SELECT entity_id::text
+			FROM entity_state
+			WHERE run_id = $1::uuid
+			  AND entity_type = 'order'
+			ORDER BY created_at, entity_id
+			LIMIT 1
+		`, runID).Scan(&entityID)
+		if err == nil && strings.TrimSpace(entityID) != "" {
+			return entityID
+		}
+		if err != nil && err != sql.ErrNoRows {
+			t.Fatalf("load served join entity: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("served join entity was not created for run %s\n%s", runID, servedEventPublishDebugSummary(t, db, "postgres", runID))
+	return ""
+}
+
+func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourceEventID string) string {
+	t.Helper()
+	var flowInstance string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(flow_instance, '')
+		FROM entity_state
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, runID, entityID).Scan(&flowInstance); err != nil {
+		t.Fatalf("load served join flow instance: %v", err)
+	}
+	eventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	createdAt := time.Now().UTC()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope, source_event_id,
+			payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'fork.probe', $3::uuid, $4, 'entity', $5::uuid,
+			'{"marker":"replayed"}'::jsonb, 'join-proof', 'platform', $6
+		)
+	`, eventID, runID, entityID, flowInstance, sourceEventID, createdAt); err != nil {
+		t.Fatalf("seed served join fork event: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'fork-probe', 'pending', 'join_fork_replay_proof', $4)
+	`, deliveryID, runID, eventID, createdAt); err != nil {
+		t.Fatalf("seed served join fork delivery: %v", err)
+	}
+	return eventID
 }
 
 func writeServedEventPublishTargetRouteFixture(t *testing.T) string {

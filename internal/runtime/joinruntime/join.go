@@ -121,19 +121,41 @@ func (a Activation) Validate() error {
 }
 
 func (a Activation) Key() string {
-	return ActivationKey(a.JoinID, a.Window)
+	return ActivationKey(a.Stage, a.JoinID, a.Window)
 }
 
-func ActivationKey(joinID, window string) string {
+func ActivationKey(stage, joinID, window string) string {
+	stage = strings.TrimSpace(stage)
 	joinID = strings.TrimSpace(joinID)
 	window = strings.TrimSpace(window)
-	if joinID == "" {
+	if stage == "" || joinID == "" {
 		return ""
 	}
-	if window == "" {
-		return joinID
+	parts := []string{stage, joinID}
+	if window != "" {
+		parts = append(parts, window)
 	}
-	return joinID + "@window=" + base64.RawURLEncoding.EncodeToString([]byte(window))
+	for i := range parts {
+		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
+	}
+	return strings.Join(parts, ".")
+}
+
+type CompletionEvaluator func(expression string, joinContext map[string]any) (bool, error)
+
+func CompletionSatisfied(activation Activation, completeWhen string, evaluate CompletionEvaluator) (bool, error) {
+	completeWhen = strings.TrimSpace(completeWhen)
+	if completeWhen == "" {
+		return activation.Completed() == activation.Expected(), nil
+	}
+	if evaluate == nil {
+		return false, fmt.Errorf("join completion evaluator is required")
+	}
+	return evaluate(completeWhen, activation.Context())
+}
+
+func SupportedContextFields() []string {
+	return []string{"expected", "completed", "missing", "results", "timed_out"}
 }
 
 func (a *Activation) Add(member string, value any) (AddDisposition, error) {

@@ -9,7 +9,9 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/types/ref"
 )
 
@@ -50,6 +52,7 @@ type ValueExpressionOptions struct {
 	AllowBareItem bool
 	ItemAlias     string
 	AllowJoin     bool
+	RequireBool   bool
 }
 
 func ValidateValueExpression(expression string) error {
@@ -83,11 +86,66 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
 	}
-	_, issues := env.Compile(expression)
+	compiled, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return issues.Err()
 	}
+	if opts.AllowJoin {
+		if err := validateJoinAccesses(compiled); err != nil {
+			return err
+		}
+	}
+	if opts.RequireBool && compiled.OutputType() != cel.BoolType {
+		return fmt.Errorf("workflow expression must return bool, got %s", compiled.OutputType())
+	}
 	return nil
+}
+
+func validateJoinAccesses(compiled *cel.Ast) error {
+	if compiled == nil || compiled.NativeRep() == nil {
+		return fmt.Errorf("workflow expression AST is unavailable")
+	}
+	allowed := make(map[string]struct{}, len(joinruntime.SupportedContextFields()))
+	for _, field := range joinruntime.SupportedContextFields() {
+		allowed[field] = struct{}{}
+	}
+	root := celast.NavigateAST(compiled.NativeRep())
+	var visit func(celast.NavigableExpr) error
+	visit = func(expr celast.NavigableExpr) error {
+		if expr.Kind() == celast.IdentKind && expr.AsIdent() == "join" {
+			parent, ok := expr.Parent()
+			if !ok {
+				return fmt.Errorf("join must be accessed as join.<field>")
+			}
+			switch parent.Kind() {
+			case celast.SelectKind:
+				selection := parent.AsSelect()
+				if selection.Operand().ID() != expr.ID() {
+					return fmt.Errorf("join must be accessed as join.<field>")
+				}
+				field := strings.TrimSpace(selection.FieldName())
+				if _, ok := allowed[field]; !ok {
+					return fmt.Errorf("unsupported join.%s", field)
+				}
+			case celast.CallKind:
+				call := parent.AsCall()
+				args := call.Args()
+				if call.FunctionName() == "_[_]" && len(args) > 0 && args[0].ID() == expr.ID() {
+					return fmt.Errorf("bracket access on join is unsupported; use join.<field>")
+				}
+				return fmt.Errorf("join must be accessed as join.<field>")
+			default:
+				return fmt.Errorf("join must be accessed as join.<field>")
+			}
+		}
+		for _, child := range expr.Children() {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return visit(root)
 }
 
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
