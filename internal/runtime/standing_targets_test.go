@@ -44,6 +44,16 @@ func TestResolveStandingTargetDeclarationsRejectsImplicitActivation(t *testing.T
 	}
 }
 
+func TestResolveStandingTargetDeclarationsRejectsUnreachableIngressAlias(t *testing.T) {
+	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.PackageTree[0].Manifest.Flows[0].Ingress.Alias = "chat/support"
+	_, err := ResolveStandingTargetDeclarations(source, registry)
+	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
+		t.Fatalf("multi-segment alias error = %v", err)
+	}
+}
+
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
 	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bus, err := runtimebus.NewEventBus(nil)

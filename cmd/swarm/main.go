@@ -1377,6 +1377,9 @@ func logWorkspaceBackendDecision(out io.Writer, decision workspaceBackendSelecti
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+	if err := validateServePersistedStandingOwnership(ctx, contexts); err != nil {
+		return err
+	}
 	started := make([]*runtime.Runtime, 0, len(contexts))
 	registered := make([]string, 0, len(contexts))
 	rollback := func() {
@@ -1438,6 +1441,27 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 	return nil
 }
 
+func validateServePersistedStandingOwnership(ctx context.Context, contexts []serveRuntimeBundleContext) error {
+	facts := make([]runtimecorrelation.BundleSourceFact, 0, len(contexts))
+	var owner *runtimepipeline.WorkflowInstanceStore
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		facts = append(facts, contextDef.bundleSourceFact.Normalized())
+		if owner == nil {
+			owner = contextDef.runtime.Stores.PipelineStore
+		}
+	}
+	if len(facts) == 0 {
+		return nil
+	}
+	if owner == nil {
+		return fmt.Errorf("persisted standing ownership admission requires pipeline store")
+	}
+	return owner.ValidatePersistedStandingOwnership(ctx, facts)
+}
+
 func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts serveOptions) error {
 	var shutdownErr error
 	for _, contextDef := range contexts {
@@ -1445,7 +1469,7 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 			continue
 		}
 		if manager != nil {
-			result := manager.DeactivateBundleHash(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded)
+			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: opts.ShutdownGrace})
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 			continue
 		}

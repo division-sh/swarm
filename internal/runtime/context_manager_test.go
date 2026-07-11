@@ -213,6 +213,64 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibility(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	release, admitted := contextDef.Runtime.shutdownGate.Begin()
+	if !admitted {
+		t.Fatal("runtime admission unexpectedly closed")
+	}
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	done := make(chan RuntimeContextDeactivationResult, 1)
+	go func() {
+		done <- manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	}()
+	select {
+	case <-done:
+		t.Fatal("deactivation withdrew visibility before active admission completed")
+	default:
+	}
+	release()
+	result := <-done
+	if !result.Changed || !contextDef.Runtime.shutdownAdmissionClosed() {
+		t.Fatalf("deactivation result/gate = %#v/%v", result, contextDef.Runtime.shutdownAdmissionClosed())
+	}
+}
+
+func TestRuntimeContextManagerResolvedRequestCannotAdmitAfterDeactivation(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	resolved := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	if !resolved.Loaded() || resolved.Context == nil || resolved.Context.Runtime == nil {
+		t.Fatalf("pre-deactivation lookup = %#v, want loaded runtime", resolved)
+	}
+	result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	if !result.Changed {
+		t.Fatalf("DeactivateBundleHash = %#v, want changed", result)
+	}
+	if release, admitted := resolved.Context.Runtime.shutdownGate.Begin(); admitted {
+		release()
+		t.Fatal("request resolved before deactivation admitted after visibility withdrawal")
+	}
+}
+
+func TestRuntimeContextManagerDeactivationPropagatesShutdownOptions(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	result := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+	if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "shutdown grace") {
+		t.Fatalf("configured shutdown option error = %v", result.ShutdownErr)
+	}
+}
+
 func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
 	t.Helper()
 	return testBundleContextWithAgents(t, bundleHash, eventName)

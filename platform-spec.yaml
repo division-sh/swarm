@@ -8555,6 +8555,7 @@ flow_model:
         - 'activation: standing is valid only for mode: singleton'
         - standing activation without ingress is valid for timer-driven or connect-fed services
         - ingress requires activation: standing and defaults alias to the package flow id
+        - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
         - signing_secret is an explicit deployment credential reference; package data never carries the value
         - every provider binding requires an exact compatible external input pin under the provider manifest event-name policy
@@ -8564,11 +8565,16 @@ flow_model:
         ActivateFlowInstance path, including routes, agents, initial timers, schedules, and creation effects. Same-source
         restart rehydrates the persisted instance and runtime side effects without replaying creation effects. The canonical
         bundle_hash, package flow identity, run_id, flow_instance, and entity_id form the standing semantic authority.
+        Admission discovers every active persisted standing owner independently of candidate declarations, then requires each
+        predecessor bundle hash/source pair to be in the complete candidate bundle set. Removing or renaming the declaration,
+        renaming package or flow identity, or changing standing to non-standing MUST NOT hide persisted predecessor authority.
       process_routing: >
         One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, replacement, and
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, provider registry, credential store, ingress controller, store,
-        EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden.
+        EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden. Replacement and
+        deactivation close predecessor admission while manager visibility is serialized: admitted requests drain before
+        withdrawal, and requests that resolved the predecessor but have not entered its gateway fail closed afterward.
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
         canonical event name MUST match an exact external input pin on the selected flow before marker persistence, dedupe,
@@ -8577,11 +8583,16 @@ flow_model:
         per webhook.
       replacement_policy: >
         Same-bundle-hash restart resumes the standing identity. Same-hash live replacement may publish new runtime objects
-        only after they are ready and then atomically replaces process visibility. If any active standing target exists, a
-        changed-hash live reload MUST fail before readiness changes, detach, shutdown, activation, registry mutation, or new
-        run/instance/entity/target creation. Cold changed-hash startup against persisted standing authority also fails closed.
-        The predecessor remains running and authoritative until a future explicit reset/migration operation defines quiesce,
-        terminal/preservation, side-effect transition, rollback, and restart behavior.
+        only after they are ready and then atomically replaces process visibility. The candidate starts through an explicit
+        startup-ownership handoff under the predecessor's one exclusive store lease; it MUST NOT reacquire, release, or bypass
+        that lease. Failed candidate start or pre-commit validation rolls back to predecessor ownership and admission. Commit
+        transfers lease authority exactly once before predecessor shutdown. A predecessor shutdown failure after commit is a
+        post-commit diagnostic and MUST NOT report replacement failure or roll visibility back. If any active standing target
+        exists, a changed-hash live reload MUST fail before readiness changes, detach, shutdown, activation, registry mutation,
+        or new run/instance/entity/target creation. Cold changed-hash startup against persisted standing authority also fails
+        closed. The predecessor remains running and authoritative until a future explicit reset/migration operation defines
+        quiesce, terminal/preservation, side-effect transition, rollback, and restart behavior. Manager-backed deactivation
+        propagates the caller's configured shutdown grace rather than silently substituting runtime defaults.
       fail_closed:
       - duplicate aliases within a bundle or across loaded runtime contexts
       - duplicate providers within one alias

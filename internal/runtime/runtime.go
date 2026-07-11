@@ -137,12 +137,15 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
-	lifecycleMu    sync.Mutex
-	startCtx       context.Context
-	cancelStart    context.CancelFunc
-	ownershipLease runtimestartupownership.Lease
-	ownerID        string
-	shutdownGate   shutdownAdmission
+	lifecycleMu             sync.Mutex
+	startCtx                context.Context
+	cancelStart             context.CancelFunc
+	ownershipLease          runtimestartupownership.Lease
+	ownershipLeaseBorrowed  bool
+	pendingOwnershipLease   runtimestartupownership.Lease
+	ownershipHandoffPending bool
+	ownerID                 string
+	shutdownGate            shutdownAdmission
 
 	Config             *config.Config
 	Stores             Stores
@@ -188,6 +191,111 @@ func (rt *Runtime) shutdownAdmissionClosed() bool {
 		return false
 	}
 	return rt.shutdownGate.Closed()
+}
+
+func (rt *Runtime) CloseAdmission() {
+	if rt != nil {
+		rt.shutdownGate.Close()
+	}
+}
+
+type StartupOwnershipHandoff struct {
+	predecessor *Runtime
+	candidate   *Runtime
+	lease       runtimestartupownership.Lease
+	active      bool
+	committed   bool
+}
+
+// PrepareStartupOwnershipHandoff authorizes a replacement runtime to start
+// under the predecessor's exclusive process lease. Durable ownership remains
+// with the predecessor until Commit, so candidate failure is rollback-safe.
+func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*StartupOwnershipHandoff, error) {
+	if rt == nil || predecessor == nil || rt == predecessor {
+		return nil, nil
+	}
+	predecessor.lifecycleMu.Lock()
+	defer predecessor.lifecycleMu.Unlock()
+	rt.lifecycleMu.Lock()
+	defer rt.lifecycleMu.Unlock()
+	if predecessor.ownershipHandoffPending {
+		return nil, fmt.Errorf("runtime startup ownership handoff is already pending")
+	}
+	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
+		return nil, fmt.Errorf("replacement runtime already started or has pending ownership")
+	}
+	lease := predecessor.ownershipLease
+	if lease == nil {
+		if rt.Stores.StartupOwnership != nil {
+			return nil, fmt.Errorf("replacement runtime requires predecessor startup ownership lease")
+		}
+		return nil, nil
+	}
+	if rt.Stores.StartupOwnership == nil {
+		return nil, fmt.Errorf("replacement runtime cannot consume predecessor startup ownership lease")
+	}
+	predecessor.ownershipHandoffPending = true
+	rt.pendingOwnershipLease = lease
+	return &StartupOwnershipHandoff{predecessor: predecessor, candidate: rt, lease: lease, active: true}, nil
+}
+
+func (h *StartupOwnershipHandoff) Commit() error {
+	if h == nil || !h.active {
+		return nil
+	}
+	h.predecessor.lifecycleMu.Lock()
+	defer h.predecessor.lifecycleMu.Unlock()
+	h.candidate.lifecycleMu.Lock()
+	defer h.candidate.lifecycleMu.Unlock()
+	if h.predecessor.ownershipLease != h.lease || h.candidate.ownershipLease != h.lease || !h.candidate.ownershipLeaseBorrowed {
+		return fmt.Errorf("runtime startup ownership handoff state changed before commit")
+	}
+	h.predecessor.ownershipLease = nil
+	h.candidate.ownershipLeaseBorrowed = false
+	h.candidate.pendingOwnershipLease = nil
+	h.committed = true
+	return nil
+}
+
+func (h *StartupOwnershipHandoff) Finalize() {
+	if h == nil || !h.active || !h.committed {
+		return
+	}
+	h.predecessor.lifecycleMu.Lock()
+	h.predecessor.ownershipHandoffPending = false
+	h.predecessor.lifecycleMu.Unlock()
+	h.active = false
+}
+
+func (h *StartupOwnershipHandoff) Rollback() {
+	if h == nil || !h.active {
+		return
+	}
+	h.predecessor.lifecycleMu.Lock()
+	defer h.predecessor.lifecycleMu.Unlock()
+	h.candidate.lifecycleMu.Lock()
+	defer h.candidate.lifecycleMu.Unlock()
+	if h.committed {
+		if h.candidate.ownershipLease == h.lease {
+			h.candidate.ownershipLease = nil
+			h.candidate.ownershipLeaseBorrowed = false
+		}
+		h.predecessor.ownershipLease = h.lease
+		h.predecessor.ownershipHandoffPending = false
+		h.candidate.pendingOwnershipLease = nil
+		h.committed = false
+		h.active = false
+		return
+	}
+	if h.candidate.cancelStart == nil && h.candidate.ownershipLeaseBorrowed && h.candidate.ownershipLease == h.lease {
+		h.candidate.ownershipLease = nil
+		h.candidate.ownershipLeaseBorrowed = false
+	}
+	if h.candidate.pendingOwnershipLease == h.lease {
+		h.candidate.pendingOwnershipLease = nil
+	}
+	h.predecessor.ownershipHandoffPending = false
+	h.active = false
 }
 
 const runtimeQuiescenceStableChecks = 3
@@ -704,6 +812,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGatewayWithProviderRegistry(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, opts.ProviderTriggerRegistry, stores.InboundStore)
+		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.Begin)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
 	}
@@ -806,8 +915,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("runtime already started")
 	}
 	startCtx, cancelStart := context.WithCancel(ctx)
-	var lease runtimestartupownership.Lease
-	if rt.Stores.StartupOwnership != nil {
+	lease := rt.pendingOwnershipLease
+	borrowedLease := lease != nil
+	if rt.Stores.StartupOwnership != nil && lease == nil {
 		var err error
 		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
 		if err != nil {
@@ -817,12 +927,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return err
 		}
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "owner="+rt.ownerID)
+	} else if borrowedLease {
+		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "handoff_owner="+rt.ownerID)
 	} else {
 		rt.emitBootProgress(5, "startup_ownership_lease", "skipped", "startup ownership store unavailable")
 	}
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart
 	rt.ownershipLease = lease
+	rt.ownershipLeaseBorrowed = borrowedLease
 	rt.lifecycleMu.Unlock()
 
 	started := false
@@ -1166,6 +1279,12 @@ func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
+	rt.lifecycleMu.Lock()
+	if rt.ownershipHandoffPending {
+		rt.lifecycleMu.Unlock()
+		return fmt.Errorf("runtime startup ownership handoff is pending")
+	}
+	rt.lifecycleMu.Unlock()
 	rt.shutdownGate.Close()
 	var shutdownErr error
 	if rt.Manager != nil {
@@ -1187,14 +1306,16 @@ func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
 	lease := rt.ownershipLease
+	borrowedLease := rt.ownershipLeaseBorrowed
 	rt.cancelStart = nil
 	rt.startCtx = nil
 	rt.ownershipLease = nil
+	rt.ownershipLeaseBorrowed = false
 	rt.lifecycleMu.Unlock()
 	if cancelStart != nil {
 		cancelStart()
 	}
-	if lease != nil {
+	if lease != nil && !borrowedLease {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := lease.Release(releaseCtx); err != nil && shutdownErr == nil {
 			shutdownErr = err
@@ -1222,14 +1343,16 @@ func (rt *Runtime) cleanupStartFailure() {
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
 	lease := rt.ownershipLease
+	borrowedLease := rt.ownershipLeaseBorrowed
 	rt.cancelStart = nil
 	rt.startCtx = nil
 	rt.ownershipLease = nil
+	rt.ownershipLeaseBorrowed = false
 	rt.lifecycleMu.Unlock()
 	if cancelStart != nil {
 		cancelStart()
 	}
-	if lease != nil {
+	if lease != nil && !borrowedLease {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = lease.Release(releaseCtx)
 		cancel()

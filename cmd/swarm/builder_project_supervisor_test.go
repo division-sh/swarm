@@ -22,11 +22,15 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShutdown(t *testing.T) {
@@ -185,6 +189,26 @@ func TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias(t *testing.T) {
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(`{"ok":true}`)))
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `no ingress target "chat" is declared`) {
 		t.Fatalf("unknown alias status/body = %d %q, want teaching 404", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
+	for _, alias := range []string{"chat", "chat.v2", "chat_v2", "chat-v2", "9chat"} {
+		if _, err := runtimepkg.NormalizeStandingIngressAlias(alias); err != nil {
+			t.Fatalf("NormalizeStandingIngressAlias(%q): %v", alias, err)
+		}
+		gotAlias, provider, ok := parseProcessWebhookPath("/webhooks/" + alias + "/telegram")
+		if !ok || gotAlias != alias || provider != "telegram" {
+			t.Fatalf("parseProcessWebhookPath(%q) = %q/%q/%v", alias, gotAlias, provider, ok)
+		}
+	}
+	for _, alias := range []string{"chat/support", "chat support", "chat%2Fsupport", "-chat", ".chat", "chat?x"} {
+		if _, err := runtimepkg.NormalizeStandingIngressAlias(alias); err == nil {
+			t.Fatalf("NormalizeStandingIngressAlias(%q) error = nil", alias)
+		}
+	}
+	if _, _, ok := parseProcessWebhookPath("/webhooks/chat/support/telegram"); ok {
+		t.Fatal("parseProcessWebhookPath accepted a multi-segment alias")
 	}
 }
 
@@ -410,7 +434,7 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	}
 	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime, _ runtimepkg.ShutdownOptions) error {
 		stopped = append(stopped, rt)
-		return nil
+		return errors.New("predecessor drain timed out")
 	}
 	status, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/tmp/candidate", newSource, newBundle, newFact, newIdentity, newRT)
 	if err != nil {
@@ -428,6 +452,153 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	lookup := manager.LookupBundleHashStatus(newHash)
 	if !lookup.Loaded() || lookup.Context.Runtime != newRT || lookup.Context.BundleIdentity.BundleHash != newHash {
 		t.Fatalf("new bundle context = %#v", lookup)
+	}
+}
+
+func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *testing.T) {
+	type backend struct {
+		name string
+		open func(*testing.T) runtimestartupownership.Store
+	}
+	backends := []backend{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) runtimestartupownership.Store {
+				store, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.sqlite"))
+				if err != nil {
+					t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+				}
+				t.Cleanup(func() { _ = store.DB.Close() })
+				return store
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) runtimestartupownership.Store {
+				dsn, _, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store, err := store.NewPostgresStore(dsn)
+				if err != nil {
+					t.Fatalf("NewPostgresStore: %v", err)
+				}
+				t.Cleanup(func() { _ = store.DB.Close() })
+				return store
+			},
+		},
+	}
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			for _, changedHash := range []bool{false, true} {
+				changedHash := changedHash
+				name := "same_hash"
+				if changedHash {
+					name = "changed_nonstanding_hash"
+				}
+				t.Run(name, func(t *testing.T) {
+					ownership := backend.open(t)
+					bundle := testWorkflowValidationBundle()
+					source := semanticview.Wrap(bundle)
+					module := stubWorkflowModule{source: source}
+					oldHash := runtimeContextTestHash("a")
+					newHash := oldHash
+					if changedHash {
+						newHash = runtimeContextTestHash("b")
+					}
+					newRuntime := func(hash string) *runtimepkg.Runtime {
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
+							Config: &config.Config{},
+							Stores: runtimepkg.Stores{StartupOwnership: ownership},
+							Options: runtimepkg.RuntimeOptions{
+								SelfCheck:                        false,
+								WorkflowModule:                   module,
+								LLMRuntime:                       runtimellm.NoopRuntime{},
+								DisablePersistentStartupRecovery: true,
+								BundleSourceFact: runtimecorrelation.BundleSourceFact{
+									BundleHash:   hash,
+									BundleSource: storerunlifecycle.BundleSourcePersisted,
+								},
+							},
+						})
+						if err != nil {
+							t.Fatalf("NewRuntime(%s): %v", hash, err)
+						}
+						return rt
+					}
+					predecessor := newRuntime(oldHash)
+					if err := predecessor.Start(context.Background()); err != nil {
+						t.Fatalf("start predecessor: %v", err)
+					}
+					probe := newRuntime(newHash)
+					if err := probe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already owned") {
+						t.Fatalf("ordinary competing start error = %v, want exclusive ownership denial", err)
+					}
+
+					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+					manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+						BundleHash: oldHash, BundleSourceFact: oldFact, Source: source, Runtime: predecessor,
+					})
+					if err != nil {
+						t.Fatalf("NewRuntimeContextManager: %v", err)
+					}
+					candidate := newRuntime(newHash)
+					supervisor := &runtimeProjectSupervisor{
+						ready:                   new(atomic.Bool),
+						currentRoot:             "/old",
+						currentSource:           source,
+						currentBundle:           bundle,
+						currentRT:               predecessor,
+						currentBundleSourceFact: oldFact,
+						runtimeContexts:         manager,
+					}
+					supervisor.ready.Store(true)
+					status, err := supervisor.replaceCurrentRuntimeWithSource(
+						context.Background(), "/new", source, bundle, newFact,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate,
+					)
+					if err != nil {
+						t.Fatalf("replaceCurrentRuntimeWithSource: %v", err)
+					}
+					if !status.Loaded || supervisor.CurrentRuntime() != candidate {
+						t.Fatalf("replacement status/runtime = %#v/%p, want loaded candidate %p", status, supervisor.CurrentRuntime(), candidate)
+					}
+					if _, ok := manager.LookupBundleHash(newHash); !ok {
+						t.Fatalf("manager does not expose replacement hash %s", newHash)
+					}
+					if err := candidate.Shutdown(); err != nil {
+						t.Fatalf("shutdown replacement: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func runtimeContextTestHash(fill string) string {
+	return "bundle-v1:sha256:" + strings.Repeat(fill, 64)
+}
+
+func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	hash := "bundle-v1:sha256:" + strings.Repeat("9", 64)
+	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	supervisor := &runtimeProjectSupervisor{
+		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt,
+		currentBundleSourceFact: fact, runtimeContexts: manager,
+	}
+	_, err = supervisor.CloseProjectWithShutdownOptions(context.Background(), runtimepkg.ShutdownOptions{Grace: -1})
+	if err == nil || !strings.Contains(err.Error(), "shutdown grace") {
+		t.Fatalf("manager-backed configured shutdown error = %v", err)
 	}
 }
 

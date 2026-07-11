@@ -76,6 +76,22 @@ func (t StandingTarget) normalized() StandingTarget {
 	return t
 }
 
+func NormalizeStandingIngressAlias(alias string) (string, error) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return "", fmt.Errorf("ingress alias is required")
+	}
+	for i := 0; i < len(alias); i++ {
+		c := alias[i]
+		alphaNumeric := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if alphaNumeric || i > 0 && (c == '.' || c == '_' || c == '-') {
+			continue
+		}
+		return "", fmt.Errorf("ingress alias %q must be one URL-safe path segment matching [A-Za-z0-9][A-Za-z0-9._-]*; remove slashes, whitespace, escapes, or reserved characters", alias)
+	}
+	return alias, nil
+}
+
 func ResolveStandingTargetDeclarations(source semanticview.Source, providers *providertriggers.Registry) ([]StandingTargetDeclaration, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -117,9 +133,15 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, providers *pr
 				decl.FlowPath = flowID
 			}
 			if ref.Ingress != nil {
-				if alias := strings.Trim(strings.TrimSpace(ref.Ingress.Alias), "/"); alias != "" {
-					decl.Alias = alias
+				alias := strings.TrimSpace(ref.Ingress.Alias)
+				if alias == "" {
+					alias = flowID
 				}
+				alias, err := NormalizeStandingIngressAlias(alias)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", location, err)
+				}
+				decl.Alias = alias
 				if len(ref.Ingress.Providers) == 0 {
 					return nil, fmt.Errorf("%s ingress.providers must contain at least one provider binding", location)
 				}

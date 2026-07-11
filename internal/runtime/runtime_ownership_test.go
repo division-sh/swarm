@@ -158,6 +158,145 @@ func TestRuntimeCleanupStartFailure_ReleasesSharedStoreOwnership(t *testing.T) {
 	}
 }
 
+func TestRuntimeReplacementBorrowsAndCommitsStartupOwnershipWithoutReacquire(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	var acquires atomic.Int32
+	ownership := fakeRuntimeStartupOwnershipStore{acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+		acquires.Add(1)
+		return lease, nil
+	}}
+	newRuntime := func() *Runtime {
+		rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
+		}})
+		if err != nil {
+			t.Fatalf("NewRuntime: %v", err)
+		}
+		return rt
+	}
+	predecessor := newRuntime()
+	if err := predecessor.Start(context.Background()); err != nil {
+		t.Fatalf("start predecessor: %v", err)
+	}
+	candidate := newRuntime()
+	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
+	if err != nil {
+		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
+	}
+	if err := candidate.Start(context.Background()); err != nil {
+		t.Fatalf("start candidate under handoff: %v", err)
+	}
+	if got := acquires.Load(); got != 1 {
+		t.Fatalf("startup ownership acquires = %d, want one predecessor acquire", got)
+	}
+	if err := handoff.Commit(); err != nil {
+		t.Fatalf("commit handoff: %v", err)
+	}
+	if err := predecessor.Shutdown(); err == nil || !strings.Contains(err.Error(), "handoff is pending") {
+		t.Fatalf("predecessor shutdown during visibility commit error = %v", err)
+	}
+	handoff.Finalize()
+	if err := predecessor.Shutdown(); err != nil {
+		t.Fatalf("shutdown predecessor: %v", err)
+	}
+	if got := lease.released.Load(); got != 0 {
+		t.Fatalf("predecessor released transferred lease %d time(s)", got)
+	}
+	if err := candidate.Shutdown(); err != nil {
+		t.Fatalf("shutdown candidate: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("candidate lease releases = %d, want one", got)
+	}
+}
+
+func TestRuntimeReplacementStartupRollbackPreservesPredecessorOwnership(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	ownership := fakeRuntimeStartupOwnershipStore{acquire: func(context.Context, string) (runtimestartupownership.Lease, error) { return lease, nil }}
+	newRuntime := func() *Runtime {
+		rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
+		}})
+		if err != nil {
+			t.Fatalf("NewRuntime: %v", err)
+		}
+		return rt
+	}
+	predecessor := newRuntime()
+	if err := predecessor.Start(context.Background()); err != nil {
+		t.Fatalf("start predecessor: %v", err)
+	}
+	candidate := newRuntime()
+	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
+	if err != nil {
+		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
+	}
+	if err := candidate.Start(context.Background()); err != nil {
+		t.Fatalf("start candidate: %v", err)
+	}
+	if err := candidate.Shutdown(); err != nil {
+		t.Fatalf("shutdown rejected candidate: %v", err)
+	}
+	handoff.Rollback()
+	if got := lease.released.Load(); got != 0 {
+		t.Fatalf("rejected candidate released predecessor lease %d time(s)", got)
+	}
+	if predecessor.shutdownAdmissionClosed() {
+		t.Fatal("rollback closed predecessor admission")
+	}
+	if err := predecessor.Shutdown(); err != nil {
+		t.Fatalf("shutdown predecessor: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("predecessor lease releases = %d, want one", got)
+	}
+}
+
+func TestRuntimeReplacementPostCommitRollbackRestoresPredecessorOwnership(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	ownership := fakeRuntimeStartupOwnershipStore{acquire: func(context.Context, string) (runtimestartupownership.Lease, error) { return lease, nil }}
+	newRuntime := func() *Runtime {
+		rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
+		}})
+		if err != nil {
+			t.Fatalf("NewRuntime: %v", err)
+		}
+		return rt
+	}
+	predecessor := newRuntime()
+	if err := predecessor.Start(context.Background()); err != nil {
+		t.Fatalf("start predecessor: %v", err)
+	}
+	candidate := newRuntime()
+	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
+	if err != nil {
+		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
+	}
+	if err := candidate.Start(context.Background()); err != nil {
+		t.Fatalf("start candidate: %v", err)
+	}
+	if err := handoff.Commit(); err != nil {
+		t.Fatalf("commit handoff: %v", err)
+	}
+	handoff.Rollback()
+	if err := candidate.Shutdown(); err != nil {
+		t.Fatalf("shutdown rolled-back candidate: %v", err)
+	}
+	if got := lease.released.Load(); got != 0 {
+		t.Fatalf("rolled-back candidate released predecessor lease %d time(s)", got)
+	}
+	if err := predecessor.Shutdown(); err != nil {
+		t.Fatalf("shutdown predecessor: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("restored predecessor lease releases = %d, want one", got)
+	}
+}
+
 func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntime {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))

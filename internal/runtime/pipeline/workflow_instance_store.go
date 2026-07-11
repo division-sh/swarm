@@ -530,6 +530,87 @@ func (s *WorkflowInstanceStore) EnsureStandingRun(ctx context.Context, runID, pa
 	})
 }
 
+// ValidatePersistedStandingOwnership rejects a candidate set that omits or
+// changes any active durable standing owner. The persisted predecessor is the
+// authority, so this check is intentionally independent of candidate flow and
+// package declarations.
+func (s *WorkflowInstanceStore) ValidatePersistedStandingOwnership(ctx context.Context, admitted []runtimecorrelation.BundleSourceFact) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
+	allowed := make(map[string]string, len(admitted))
+	labels := make([]string, 0, len(admitted))
+	seenLabels := make(map[string]struct{}, len(admitted))
+	for _, fact := range admitted {
+		fact = fact.Normalized()
+		if fact.BundleHash == "" || fact.BundleSource == "" {
+			return fmt.Errorf("persisted standing ownership admission requires bundle_hash and bundle_source")
+		}
+		if previous, exists := allowed[fact.BundleHash]; exists && previous != fact.BundleSource {
+			return fmt.Errorf("bundle_hash %s has conflicting admitted bundle sources %s and %s", fact.BundleHash, previous, fact.BundleSource)
+		}
+		allowed[fact.BundleHash] = fact.BundleSource
+		label := fact.BundleHash + "/" + fact.BundleSource
+		if _, exists := seenLabels[label]; !exists {
+			seenLabels[label] = struct{}{}
+			labels = append(labels, label)
+		}
+	}
+	sort.Strings(labels)
+
+	query := `
+		SELECT es.run_id::text,
+		       COALESCE(r.bundle_hash, ''),
+		       COALESCE(r.bundle_source, ''),
+		       COALESCE(es.fields->>'package_key', ''),
+		       fi.flow_template
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN runs r ON r.run_id = es.run_id
+		WHERE es.fields->>'activation' = 'standing'
+		  AND r.status = 'running'
+		ORDER BY es.run_id
+	`
+	if s.isSQLite() {
+		query = `
+			SELECT es.run_id,
+			       COALESCE(r.bundle_hash, ''),
+			       COALESCE(r.bundle_source, ''),
+			       COALESCE(json_extract(es.fields, '$.package_key'), ''),
+			       fi.flow_template
+			FROM entity_state es
+			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			JOIN runs r ON r.run_id = es.run_id
+			WHERE json_extract(es.fields, '$.activation') = 'standing'
+			  AND r.status = 'running'
+			ORDER BY es.run_id
+		`
+	}
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("inspect persisted standing ownership: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var runID, bundleHash, bundleSource, packageKey, flowID string
+		if err := rows.Scan(&runID, &bundleHash, &bundleSource, &packageKey, &flowID); err != nil {
+			return fmt.Errorf("read persisted standing ownership: %w", err)
+		}
+		runID = strings.TrimSpace(runID)
+		bundleHash = strings.TrimSpace(bundleHash)
+		bundleSource = strings.TrimSpace(bundleSource)
+		if allowed[bundleHash] == bundleSource && bundleHash != "" {
+			continue
+		}
+		return fmt.Errorf("standing service %s/%s is already admitted as run_id=%s bundle_hash=%s bundle_source=%s, outside candidate bundle set [%s]; serve the admitted bundle or perform an explicit reset/migration",
+			strings.TrimSpace(packageKey), strings.TrimSpace(flowID), runID, bundleHash, bundleSource, strings.Join(labels, ", "))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect persisted standing ownership: %w", err)
+	}
+	return nil
+}
+
 func (s *WorkflowInstanceStore) rejectChangedStandingSource(ctx context.Context, tx *sql.Tx, runID, packageKey, flowID string, source runtimecorrelation.BundleSourceFact) error {
 	query := `
 		SELECT es.run_id, COALESCE(r.bundle_hash, ''), COALESCE(r.bundle_source, '')
