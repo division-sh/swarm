@@ -43,6 +43,7 @@ type runtimeLogCommandOptions struct {
 	orderSet  bool
 	sinceSet  bool
 	untilSet  bool
+	reference time.Time
 }
 
 type runtimeLogListResult struct {
@@ -95,6 +96,7 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 			logOpts.orderSet = cmd.Flags().Changed("order")
 			logOpts.sinceSet = cmd.Flags().Changed("since")
 			logOpts.untilSet = cmd.Flags().Changed("until")
+			logOpts.reference = captureCLIReadWindowReference(logOpts.apiOptions)
 			return runLogsCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), logOpts)
 		},
 	}
@@ -107,8 +109,8 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&logOpts.source, "source", "", "Filter by log source")
 	cmd.Flags().BoolVar(&logOpts.follow, "follow", false, "Follow matching runtime logs as they stream")
 	cmd.Flags().StringVar(&logOpts.replaySince, "replay-since", "", "With --follow, optional RFC3339 catch-up window start")
-	cmd.Flags().StringVar(&logOpts.since, "since", "", "Snapshot-only RFC3339 lower timestamp bound")
-	cmd.Flags().StringVar(&logOpts.until, "until", "", "Snapshot-only RFC3339 upper timestamp bound")
+	cmd.Flags().StringVar(&logOpts.since, "since", "", "Snapshot-only RFC3339 or relative lower timestamp bound")
+	cmd.Flags().StringVar(&logOpts.until, "until", "", "Snapshot-only RFC3339 or relative upper timestamp bound")
 	cmd.Flags().IntVar(&logOpts.limit, "limit", 0, "Snapshot-only page size, 1-1000")
 	cmd.Flags().StringVar(&logOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	cmd.Flags().StringVar(&logOpts.order, "order", "", "Snapshot-only sort order: asc or desc")
@@ -216,27 +218,15 @@ func (opts runtimeLogCommandOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["order"] = order
 	}
-	since := strings.TrimSpace(opts.since)
-	until := strings.TrimSpace(opts.until)
-	if since != "" {
-		if err := validateRFC3339Flag("--since", since); err != nil {
-			return nil, err
-		}
-		params["since"] = since
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: opts.since, Set: opts.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: opts.until, Set: opts.untilSet},
+		ReferenceUTC: opts.reference,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if until != "" {
-		if err := validateRFC3339Flag("--until", until); err != nil {
-			return nil, err
-		}
-		params["until"] = until
-	}
-	if since != "" && until != "" {
-		sinceTime, _ := time.Parse(time.RFC3339Nano, since)
-		untilTime, _ := time.Parse(time.RFC3339Nano, until)
-		if untilTime.Before(sinceTime) {
-			return nil, fmt.Errorf("--until must be greater than or equal to --since")
-		}
-	}
+	window.addParams(params)
 	return params, nil
 }
 

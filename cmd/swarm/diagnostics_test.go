@@ -679,6 +679,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 
 func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
+	wantReference := time.Date(2026, 5, 13, 10, 30, 0, 123456789, time.UTC)
 	var capturedUntil string
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 		switch callIndex {
@@ -732,13 +733,25 @@ func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 	})
 	defer server.Close()
 
+	nowCalls := 0
+	opts := testRootCommandOptions(server)
+	opts.now = func() time.Time {
+		nowCalls++
+		return wantReference
+	}
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--delivery-summary"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--delivery-summary"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if len(*requests) != 3 {
 		t.Fatalf("requests = %d, want run.list then two run.trace pages", len(*requests))
+	}
+	if nowCalls != 1 {
+		t.Fatalf("invocation clock calls = %d, want 1", nowCalls)
+	}
+	if capturedUntil != wantReference.Format(time.RFC3339Nano) {
+		t.Fatalf("captured until = %q, want %q", capturedUntil, wantReference.Format(time.RFC3339Nano))
 	}
 	if !strings.Contains(stdout.String(), "run trace delivery summary: run_id=active-run snapshot=point-in-time") {
 		t.Fatalf("stdout = %q, want resolved active-run summary", stdout.String())
@@ -1316,13 +1329,13 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "runs invalid limit", args: []string{"run", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
-		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
 		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most one argument"},
 		{name: "trace invalid limit low", args: []string{"run", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid limit high", args: []string{"run", "trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
-		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "trace invalid until", args: []string{"run", "trace", "run-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp"},
-		{name: "trace since after until", args: []string{"run", "trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be at or after --since"},
+		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
+		{name: "trace invalid until", args: []string{"run", "trace", "run-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp or a positive relative duration"},
+		{name: "trace since after until", args: []string{"run", "trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be greater than or equal to --since"},
 		{name: "trace blank cursor", args: []string{"run", "trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
 		{name: "trace no retry requires follow", args: []string{"run", "trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
 		{name: "trace delivery detail and summary are mutually exclusive", args: []string{"run", "trace", "run-1", "--delivery-detail", "--delivery-summary"}, wantStderr: "--delivery-detail and --delivery-summary are mutually exclusive"},
