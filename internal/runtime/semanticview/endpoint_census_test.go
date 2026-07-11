@@ -218,7 +218,7 @@ func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T)
 	}
 }
 
-func TestAuthoredEventEndpointCensusMatchesImportedWildcardConsumersAcrossFlowScopes(t *testing.T) {
+func TestAuthoredEventEndpointCensusResolvesImportedWildcardAsTypedRelation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -229,9 +229,129 @@ func TestAuthoredEventEndpointCensusMatchesImportedWildcardConsumersAcrossFlowSc
 		t.Fatalf("load wildcard fixture: %v", err)
 	}
 
-	matched := BuildAuthoredEventEndpointCensus(Wrap(bundle)).MatchingWildcardConsumersAcrossFlows("grandchild", "task.done")
-	if len(matched) != 1 || matched[0].NodeID != "collector" || matched[0].Event.Authored != "**/task.done" {
-		t.Fatalf("cross-flow wildcard consumers = %#v, want root collector", matched)
+	source := Wrap(bundle)
+	census := BuildAuthoredEventEndpointCensus(source)
+	for _, producer := range census.Producers() {
+		if producer.Event.Canonical != "child/grandchild/task.done" {
+			continue
+		}
+		matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+		for _, match := range matches {
+			if match.Consumer.NodeID == "collector" {
+				if match.Kind != TypedPubSubMatchPattern || match.Boundary != TypedPubSubBoundaryImportBoundary || match.Authorization == nil {
+					t.Fatalf("typed match = %#v, want authorized import-boundary pattern", match)
+				}
+				return
+			}
+		}
+		var collector AuthoredEventEndpoint
+		for _, consumer := range census.Consumers() {
+			if consumer.NodeID == "collector" {
+				collector = consumer
+				break
+			}
+		}
+		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(source, collector.PackageKey, collector.FlowID, "", nil, collector.Event.Authored)
+		t.Fatalf("typed matches = %#v issues = %#v collector = %#v resolution = %#v", matches, issues, collector, resolution)
+	}
+	t.Fatal("task.done producer not found")
+}
+
+func TestAuthoredEventEndpointCensusTypedRelationClassifiesSameFlowExactlyOnce(t *testing.T) {
+	source := endpointCensusFixture(nil)
+	producer := AuthoredEventEndpoint{
+		ID:        "producer",
+		Direction: EventEndpointProducer,
+		FlowID:    "worker",
+		Event:     ResolveFlowEventProof(source, "worker", "work.completed"),
+	}
+	consumer := AuthoredEventEndpoint{ID: "exact", Direction: EventEndpointConsumer, FlowID: "worker", Event: ResolveFlowEventProof(source, "worker", "work.completed")}
+	census := AuthoredEventEndpointCensus{source: source, consumers: []AuthoredEventEndpoint{consumer}}
+	matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+	if len(issues) != 0 || len(matches) != 1 {
+		t.Fatalf("matches = %#v issues = %#v, want one match", matches, issues)
+	}
+	if matches[0].Kind != TypedPubSubMatchExact || matches[0].Boundary != TypedPubSubBoundarySameFlow || matches[0].Authorization != nil {
+		t.Fatalf("match = %#v, want exact/same_flow without import proof", matches[0])
+	}
+}
+
+func TestAuthoredEventEndpointCensusClassifiesImportedPackageOwnPatternAsSameFlow(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load wildcard fixture: %v", err)
+	}
+	worker := bundle.FlowTree.ByID["grandchild"]
+	if worker == nil {
+		t.Fatal("grandchild flow missing")
+	}
+	node := worker.Nodes["worker"]
+	node.SubscribesTo = append(node.SubscribesTo, "task.*")
+	node.EventHandlers["task.*"] = runtimecontracts.SystemNodeEventHandler{}
+	worker.Nodes["worker"] = node
+	bundle.Nodes["worker"] = node
+	bundle.Semantics.NodeHandlers["worker"] = node.EventHandlers
+	effective := bundle.Semantics.EffectiveNodes["worker"]
+	effective.RuntimeSubscriptions = append(effective.RuntimeSubscriptions, "task.*")
+	bundle.Semantics.EffectiveNodes["worker"] = effective
+
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	for _, producer := range census.Producers() {
+		if producer.FlowID != "grandchild" || producer.Event.Canonical != "child/grandchild/task.done" {
+			continue
+		}
+		matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+		for _, match := range matches {
+			if match.Consumer.FlowID == "grandchild" && match.Consumer.Event.Authored == "task.*" {
+				if len(issues) != 0 || match.Kind != TypedPubSubMatchPattern || match.Boundary != TypedPubSubBoundarySameFlow || match.Authorization != nil {
+					t.Fatalf("match = %#v issues = %#v, want pattern/same_flow", match, issues)
+				}
+				return
+			}
+		}
+		t.Fatalf("matches = %#v issues = %#v, want imported package's own pattern", matches, issues)
+	}
+	t.Fatal("grandchild task.done producer missing")
+}
+
+func TestAuthoredEventEndpointCensusTypedRelationRejectsCrossFlowExactEquality(t *testing.T) {
+	source := endpointCensusFixture(nil)
+	producer := AuthoredEventEndpoint{ID: "producer", Direction: EventEndpointProducer, FlowID: "worker", Event: ResolveFlowEventProof(source, "worker", "work.completed")}
+	consumer := AuthoredEventEndpoint{ID: "root-consumer", Direction: EventEndpointConsumer, FlowID: "", Event: producer.Event}
+	census := AuthoredEventEndpointCensus{source: source, consumers: []AuthoredEventEndpoint{consumer}}
+
+	matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+	if len(matches) != 0 || len(issues) != 0 {
+		t.Fatalf("cross-flow exact relation = matches %#v issues %#v, want no authorization and no edge", matches, issues)
+	}
+}
+
+func TestTypedPubSubCrossFlowRelationDeduplicatesProofAndFailsClosedOnAmbiguity(t *testing.T) {
+	producer := AuthoredEventEndpoint{ID: "producer", FlowID: "producer"}
+	consumer := AuthoredEventEndpoint{ID: "consumer", FlowID: "consumer", Pattern: true}
+	proof := FlowEventProof{FlowID: "producer", Canonical: "producer/task.done"}
+	first := TypedPubSubAuthorizationProof{ParentPackageKey: ".", ChildPackageKey: "flows/consumer", ImportLabel: "consumer", Source: "producer", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant"}
+	duplicate := first
+	second := first
+	second.ImportLabel = "consumer-shadow"
+
+	deduplicated := matchingTypedPubSubAuthorizations([]ImportBoundaryWildcardPattern{
+		{ParentPackageKey: first.ParentPackageKey, ChildPackageKey: first.ChildPackageKey, ImportLabel: first.ImportLabel, Source: first.Source, EventPattern: first.EventPattern, MatchPattern: first.MatchPattern, LocalizedEvent: first.LocalizedEvent, RouteSource: first.RouteSource},
+		{ParentPackageKey: duplicate.ParentPackageKey, ChildPackageKey: duplicate.ChildPackageKey, ImportLabel: duplicate.ImportLabel, Source: duplicate.Source, EventPattern: duplicate.EventPattern, MatchPattern: duplicate.MatchPattern, LocalizedEvent: duplicate.LocalizedEvent, RouteSource: duplicate.RouteSource},
+	}, proof)
+	match, issue := resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, deduplicated)
+	if match == nil || issue != nil || match.AuthorizationProof != first.Identity() {
+		t.Fatalf("duplicate proof relation = match %#v issue %#v, want one deterministic edge", match, issue)
+	}
+
+	match, issue = resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, []TypedPubSubAuthorizationProof{first, second})
+	if match != nil || issue == nil || issue.Failure != TypedPubSubFailureAuthorizationAmbiguous || len(issue.Authorizations) != 2 {
+		t.Fatalf("distinct proof relation = match %#v issue %#v, want ambiguity and no edge", match, issue)
 	}
 }
 

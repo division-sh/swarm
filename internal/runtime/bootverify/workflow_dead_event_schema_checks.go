@@ -179,7 +179,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 		}
 	}
 	for _, edge := range routingtopology.Build(c.source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlow {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect {
 			continue
 		}
 		if deadEventSameScope(decl.FlowID, edge.Producer.FlowID) && eventidentity.Normalize(edge.Producer.Event.Canonical) == eventidentity.Normalize(decl.Canonical) {

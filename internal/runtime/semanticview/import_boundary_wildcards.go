@@ -83,6 +83,30 @@ func ResolveImportBoundaryWildcardSubscription(source Source, packageKey, flowID
 	return resolution
 }
 
+// ResolveImportBoundaryWildcardSubscriptionForRelation includes the root
+// package's imported child tree. The runtime resolver keeps root-local wildcard
+// handling separate, while static cross-flow proof must identify the imported
+// subtree that authorizes the relation.
+func ResolveImportBoundaryWildcardSubscriptionForRelation(source Source, packageKey, flowID, basePath string, localEvents map[string]struct{}, raw string) ImportBoundaryWildcardSubscriptionResolution {
+	resolution := ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
+	if resolution.Scoped || normalizeImportPackageKey(packageKey) != "." {
+		return resolution
+	}
+	raw = eventidentity.Normalize(raw)
+	if source == nil || raw == "" || !strings.Contains(raw, "*") {
+		return ImportBoundaryWildcardSubscriptionResolution{}
+	}
+	for _, pattern := range importBoundaryDefaultWildcardPatterns(source, ".", flowID, basePath, localEvents, raw) {
+		resolution.Patterns = appendUniqueImportBoundaryWildcardPattern(resolution.Patterns, pattern)
+	}
+	if len(resolution.Patterns) == 0 {
+		return ImportBoundaryWildcardSubscriptionResolution{}
+	}
+	resolution.Scoped = true
+	sortImportBoundaryWildcardPatterns(resolution.Patterns)
+	return resolution
+}
+
 func ResolveImportBoundaryWildcardSubscriptionForNode(source Source, nodeID, raw string) ImportBoundaryWildcardSubscriptionResolution {
 	if source == nil {
 		return ImportBoundaryWildcardSubscriptionResolution{}
@@ -482,11 +506,12 @@ func importBoundaryDefaultWildcardPatterns(source Source, packageKey, flowID, ba
 			continue
 		}
 		out = appendUniqueImportBoundaryWildcardPattern(out, ImportBoundaryWildcardPattern{
-			ChildPackageKey: packageKey,
-			EventPattern:    pattern,
-			MatchPattern:    raw,
-			LocalizedEvent:  raw,
-			RouteSource:     "import_boundary_wildcard_subtree",
+			ParentPackageKey: packageKey,
+			ChildPackageKey:  scope.PackageKey,
+			EventPattern:     pattern,
+			MatchPattern:     raw,
+			LocalizedEvent:   raw,
+			RouteSource:      "import_boundary_wildcard_subtree",
 		})
 	}
 	return out
@@ -881,16 +906,28 @@ func cloneImportBoundaryEventSet(in map[string]struct{}) map[string]struct{} {
 }
 
 func appendUniqueImportBoundaryWildcardPattern(in []ImportBoundaryWildcardPattern, value ImportBoundaryWildcardPattern) []ImportBoundaryWildcardPattern {
-	value.EventPattern = eventidentity.Normalize(value.EventPattern)
+	value = normalizeImportBoundaryWildcardPattern(value)
 	if value.EventPattern == "" {
 		return in
 	}
 	for _, existing := range in {
-		if existing.EventPattern == value.EventPattern && existing.RouteSource == value.RouteSource && existing.Source == value.Source {
+		if importBoundaryWildcardPatternSortKey(existing) == importBoundaryWildcardPatternSortKey(value) {
 			return in
 		}
 	}
 	return append(in, value)
+}
+
+func normalizeImportBoundaryWildcardPattern(value ImportBoundaryWildcardPattern) ImportBoundaryWildcardPattern {
+	value.ParentPackageKey = normalizeImportPackageKey(value.ParentPackageKey)
+	value.ChildPackageKey = normalizeImportPackageKey(value.ChildPackageKey)
+	value.ImportLabel = strings.TrimSpace(value.ImportLabel)
+	value.Source = strings.TrimSpace(value.Source)
+	value.EventPattern = eventidentity.Normalize(value.EventPattern)
+	value.MatchPattern = eventidentity.Normalize(value.MatchPattern)
+	value.LocalizedEvent = eventidentity.Normalize(value.LocalizedEvent)
+	value.RouteSource = strings.TrimSpace(value.RouteSource)
+	return value
 }
 
 func appendUniqueStringLocal(in []string, value string) []string {
@@ -913,12 +950,16 @@ func sortImportBoundaryWildcardPatterns(values []ImportBoundaryWildcardPattern) 
 }
 
 func importBoundaryWildcardPatternSortKey(value ImportBoundaryWildcardPattern) string {
+	value = normalizeImportBoundaryWildcardPattern(value)
 	return strings.Join([]string{
 		value.RouteSource,
 		value.ParentPackageKey,
 		value.ChildPackageKey,
+		value.ImportLabel,
 		value.Source,
 		value.EventPattern,
+		value.MatchPattern,
+		value.LocalizedEvent,
 	}, "|")
 }
 

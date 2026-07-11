@@ -59,6 +59,64 @@ type AuthoredEventEndpoint struct {
 	ResolutionMode string                 `json:"resolution_mode,omitempty"`
 }
 
+type TypedPubSubMatchKind string
+
+const (
+	TypedPubSubMatchExact   TypedPubSubMatchKind = "exact"
+	TypedPubSubMatchPattern TypedPubSubMatchKind = "pattern"
+)
+
+type TypedPubSubBoundary string
+
+const (
+	TypedPubSubBoundarySameFlow       TypedPubSubBoundary = "same_flow"
+	TypedPubSubBoundaryImportBoundary TypedPubSubBoundary = "import_boundary"
+)
+
+const TypedPubSubFailureAuthorizationAmbiguous = "typed_pubsub_authorization_ambiguous"
+
+type TypedPubSubAuthorizationProof struct {
+	ParentPackageKey string `json:"parent_package_key,omitempty"`
+	ChildPackageKey  string `json:"child_package_key"`
+	ImportLabel      string `json:"import_label,omitempty"`
+	Source           string `json:"source,omitempty"`
+	EventPattern     string `json:"event_pattern"`
+	MatchPattern     string `json:"match_pattern"`
+	LocalizedEvent   string `json:"localized_event"`
+	RouteSource      string `json:"route_source"`
+}
+
+func (p TypedPubSubAuthorizationProof) Identity() string {
+	return strings.Join([]string{
+		strings.TrimSpace(p.RouteSource),
+		strings.TrimSpace(p.ParentPackageKey),
+		strings.TrimSpace(p.ChildPackageKey),
+		strings.TrimSpace(p.ImportLabel),
+		strings.TrimSpace(p.Source),
+		eventidentity.Normalize(p.EventPattern),
+		eventidentity.Normalize(p.MatchPattern),
+		eventidentity.Normalize(p.LocalizedEvent),
+	}, "|")
+}
+
+type TypedPubSubConsumerMatch struct {
+	Producer           AuthoredEventEndpoint          `json:"producer"`
+	Consumer           AuthoredEventEndpoint          `json:"consumer"`
+	Event              FlowEventProof                 `json:"event"`
+	Kind               TypedPubSubMatchKind           `json:"kind"`
+	Boundary           TypedPubSubBoundary            `json:"boundary"`
+	Authorization      *TypedPubSubAuthorizationProof `json:"authorization,omitempty"`
+	AuthorizationProof string                         `json:"authorization_proof"`
+}
+
+type TypedPubSubConsumerIssue struct {
+	Failure        string                          `json:"failure"`
+	Producer       AuthoredEventEndpoint           `json:"producer"`
+	Consumer       AuthoredEventEndpoint           `json:"consumer"`
+	Event          FlowEventProof                  `json:"event"`
+	Authorizations []TypedPubSubAuthorizationProof `json:"authorizations"`
+}
+
 type LegacyQualifiedSubscription struct {
 	ID             string                `json:"id"`
 	Consumer       AuthoredEventEndpoint `json:"consumer"`
@@ -151,20 +209,153 @@ func (c AuthoredEventEndpointCensus) MatchingConsumers(flowID, eventType string)
 	return c.matchingEndpoints(c.consumers, flowID, eventType)
 }
 
-func (c AuthoredEventEndpointCensus) MatchingWildcardConsumersAcrossFlows(flowID, eventType string) []AuthoredEventEndpoint {
-	flowID = strings.TrimSpace(flowID)
-	proof := ResolveFlowEventProof(c.source, flowID, eventType)
-	if c.source == nil || proof.EventKey() == "" {
-		return nil
+// ResolveTypedPubSubConsumerMatches is the canonical static relation owner for
+// typed pub/sub. Each producer-to-consumer pair takes exactly one authorization
+// branch selected by canonical flow identity.
+func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer AuthoredEventEndpoint) ([]TypedPubSubConsumerMatch, []TypedPubSubConsumerIssue) {
+	if c.source == nil {
+		return nil, nil
 	}
-	out := make([]AuthoredEventEndpoint, 0)
-	for _, endpoint := range c.consumers {
-		if !endpoint.Pattern || !endpointMatchesProof(c.source, endpoint, proof) {
+	proof := producer.Event
+	if proof.EventKey() == "" {
+		proof = ResolveFlowEventProof(c.source, producer.FlowID, producer.Event.Authored)
+	}
+	if proof.EventKey() == "" {
+		return nil, nil
+	}
+
+	matches := make([]TypedPubSubConsumerMatch, 0)
+	issues := make([]TypedPubSubConsumerIssue, 0)
+	for _, consumer := range c.consumers {
+		if strings.TrimSpace(producer.FlowID) == strings.TrimSpace(consumer.FlowID) {
+			if !endpointMatchesProof(c.source, consumer, proof) {
+				continue
+			}
+			kind := TypedPubSubMatchExact
+			if consumer.Pattern {
+				kind = TypedPubSubMatchPattern
+			}
+			matches = append(matches, TypedPubSubConsumerMatch{
+				Producer:           producer,
+				Consumer:           consumer,
+				Event:              proof,
+				Kind:               kind,
+				Boundary:           TypedPubSubBoundarySameFlow,
+				AuthorizationProof: string(TypedPubSubBoundarySameFlow),
+			})
 			continue
 		}
-		out = append(out, endpoint)
+
+		if !consumer.Pattern {
+			continue
+		}
+		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(
+			c.source,
+			consumer.PackageKey,
+			consumer.FlowID,
+			"",
+			nil,
+			consumer.Event.Authored,
+		)
+		if !resolution.Scoped {
+			continue
+		}
+		authorizations := matchingTypedPubSubAuthorizations(resolution.Patterns, proof)
+		match, issue := resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, authorizations)
+		if match != nil {
+			matches = append(matches, *match)
+		}
+		if issue != nil {
+			issues = append(issues, *issue)
+		}
 	}
-	return cloneEventEndpoints(out)
+
+	sort.SliceStable(matches, func(i, j int) bool {
+		return typedPubSubConsumerMatchSortKey(matches[i]) < typedPubSubConsumerMatchSortKey(matches[j])
+	})
+	sort.SliceStable(issues, func(i, j int) bool {
+		return typedPubSubConsumerIssueSortKey(issues[i]) < typedPubSubConsumerIssueSortKey(issues[j])
+	})
+	return matches, issues
+}
+
+func resolveTypedPubSubCrossFlowRelation(producer, consumer AuthoredEventEndpoint, proof FlowEventProof, authorizations []TypedPubSubAuthorizationProof) (*TypedPubSubConsumerMatch, *TypedPubSubConsumerIssue) {
+	switch len(authorizations) {
+	case 0:
+		return nil, nil
+	case 1:
+		authorization := authorizations[0]
+		return &TypedPubSubConsumerMatch{
+			Producer:           producer,
+			Consumer:           consumer,
+			Event:              proof,
+			Kind:               TypedPubSubMatchPattern,
+			Boundary:           TypedPubSubBoundaryImportBoundary,
+			Authorization:      &authorization,
+			AuthorizationProof: authorization.Identity(),
+		}, nil
+	default:
+		return nil, &TypedPubSubConsumerIssue{
+			Failure:        TypedPubSubFailureAuthorizationAmbiguous,
+			Producer:       producer,
+			Consumer:       consumer,
+			Event:          proof,
+			Authorizations: append([]TypedPubSubAuthorizationProof(nil), authorizations...),
+		}
+	}
+}
+
+func matchingTypedPubSubAuthorizations(patterns []ImportBoundaryWildcardPattern, proof FlowEventProof) []TypedPubSubAuthorizationProof {
+	candidates := []string{proof.EventKey(), proof.Canonical, proof.Authored, proof.Local}
+	byIdentity := map[string]TypedPubSubAuthorizationProof{}
+	for _, pattern := range patterns {
+		matched := false
+		for _, candidate := range candidates {
+			if candidate = eventidentity.Normalize(candidate); candidate != "" && eventidentity.MatchPattern(pattern.EventPattern, candidate) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		authorization := TypedPubSubAuthorizationProof{
+			ParentPackageKey: strings.TrimSpace(pattern.ParentPackageKey),
+			ChildPackageKey:  strings.TrimSpace(pattern.ChildPackageKey),
+			ImportLabel:      strings.TrimSpace(pattern.ImportLabel),
+			Source:           strings.TrimSpace(pattern.Source),
+			EventPattern:     eventidentity.Normalize(pattern.EventPattern),
+			MatchPattern:     eventidentity.Normalize(pattern.MatchPattern),
+			LocalizedEvent:   eventidentity.Normalize(pattern.LocalizedEvent),
+			RouteSource:      strings.TrimSpace(pattern.RouteSource),
+		}
+		byIdentity[authorization.Identity()] = authorization
+	}
+	identities := make([]string, 0, len(byIdentity))
+	for identity := range byIdentity {
+		identities = append(identities, identity)
+	}
+	sort.Strings(identities)
+	out := make([]TypedPubSubAuthorizationProof, 0, len(identities))
+	for _, identity := range identities {
+		out = append(out, byIdentity[identity])
+	}
+	return out
+}
+
+func typedPubSubConsumerMatchSortKey(match TypedPubSubConsumerMatch) string {
+	return strings.Join([]string{
+		match.Producer.ID,
+		match.Consumer.ID,
+		match.Event.EventKey(),
+		string(match.Kind),
+		string(match.Boundary),
+		match.AuthorizationProof,
+	}, "\x00")
+}
+
+func typedPubSubConsumerIssueSortKey(issue TypedPubSubConsumerIssue) string {
+	return strings.Join([]string{issue.Producer.ID, issue.Consumer.ID, issue.Event.EventKey(), issue.Failure}, "\x00")
 }
 
 // LegacyQualifiedSubscriptions returns runtime-deliverable qualified subscriptions

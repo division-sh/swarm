@@ -505,8 +505,8 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	if issue == nil {
 		t.Fatalf("route issues = %#v, want route_plan_instance_key_adapter_invalid", view.RoutingTopology.Issues)
 	}
-	if issue.AuthoredLocation == "" || !strings.HasSuffix(issue.AuthoredLocation, "package.yaml") {
-		t.Fatalf("route issue authored location = %q, want package.yaml", issue.AuthoredLocation)
+	if issue.AuthoredLocation == "" || !strings.Contains(issue.AuthoredLocation, "package.yaml:") {
+		t.Fatalf("route issue authored location = %q, want exact package.yaml:line", issue.AuthoredLocation)
 	}
 
 	diag := diagnosticByCheckID(t, view, "composition_connect_validation")
@@ -736,7 +736,7 @@ func containsString(values []string, want string) bool {
 func interFlowRouteEdges(topology routingtopology.Topology) []routingtopology.Edge {
 	out := make([]routingtopology.Edge, 0)
 	for _, edge := range topology.Edges {
-		if edge.Scope == routingtopology.DeliveryScopeInterFlow {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect {
 			out = append(out, edge)
 		}
 	}

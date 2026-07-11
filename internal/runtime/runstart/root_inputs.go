@@ -95,7 +95,7 @@ func rootInputRoutableInTopology(topology routingtopology.Topology, eventType st
 		return false
 	}
 	for _, edge := range topology.Edges {
-		if edge.Scope != routingtopology.DeliveryScopeIntraFlow || edge.Producer.Direction != semanticview.EventEndpointInputPin {
+		if edge.Scope != routingtopology.DeliveryScopeTypedPubSub || edge.Producer.Direction != semanticview.EventEndpointInputPin {
 			continue
 		}
 		if edge.Producer.Event.Authored == eventType || edge.Producer.Event.Local == eventType || edge.Producer.Event.Canonical == eventType {

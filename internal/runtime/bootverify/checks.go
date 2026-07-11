@@ -1600,6 +1600,15 @@ func flowUsesAuthoredStages(source semanticview.Source, flowID string) bool {
 	return false
 }
 
+func bundleUsesAuthoredStages(source semanticview.Source) bool {
+	for _, entry := range lifecycleFlowSchemas(source) {
+		if entry.schema.UsesAuthoredStages() {
+			return true
+		}
+	}
+	return false
+}
+
 func stageDeclarationCoherenceFindings(flowID string, schema runtimecontracts.FlowSchemaDocument) []Finding {
 	if !schema.UsesAuthoredStages() {
 		return nil

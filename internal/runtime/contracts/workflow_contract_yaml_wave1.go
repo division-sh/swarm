@@ -542,7 +542,7 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("connect entry must be a mapping")
 	}
-	var out FlowPackageConnect
+	out := FlowPackageConnect{SourceLine: node.Line}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		value := node.Content[i+1]

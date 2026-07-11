@@ -155,9 +155,25 @@ func (c FlowPackageConnect) WithPackageKey(packageKey string) FlowPackageConnect
 	return out
 }
 
+func (c FlowPackageConnect) WithPackageSource(packageKey, sourceFile string) FlowPackageConnect {
+	out := c.WithPackageKey(packageKey)
+	out.SourceFile = strings.TrimSpace(sourceFile)
+	return out
+}
+
+func (c FlowPackageConnect) AuthoredLocation() string {
+	file := strings.TrimSpace(c.SourceFile)
+	if file == "" || c.SourceLine <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", file, c.SourceLine)
+}
+
 func (c FlowPackageConnect) normalized() FlowPackageConnect {
 	return FlowPackageConnect{
 		PackageKey: strings.TrimSpace(c.PackageKey),
+		SourceFile: strings.TrimSpace(c.SourceFile),
+		SourceLine: c.SourceLine,
 		From:       strings.TrimSpace(c.From),
 		To:         strings.TrimSpace(c.To),
 		Adapter:    strings.TrimSpace(c.Adapter),

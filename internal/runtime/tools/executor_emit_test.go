@@ -1433,6 +1433,11 @@ func emitRoutePlanSource(connects []runtimecontracts.FlowPackageConnect) semanti
 }
 
 func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {
+	connects = append([]runtimecontracts.FlowPackageConnect(nil), connects...)
+	for i := range connects {
+		connects[i].SourceFile = "package.yaml"
+		connects[i].SourceLine = i + 1
+	}
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
 	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))

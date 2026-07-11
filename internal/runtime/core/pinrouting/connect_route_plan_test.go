@@ -33,6 +33,9 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 		t.Fatalf("plans = %#v, want one", plans)
 	}
 	plan := plans[0]
+	if !strings.HasPrefix(plan.AuthoredLocation, filepath.Join(root, "package.yaml")+":") {
+		t.Fatalf("AuthoredLocation = %q, want exact root package.yaml:line", plan.AuthoredLocation)
+	}
 	if got, want := plan.Source.ResolvedEvent, "producer/deploy.done"; got != want {
 		t.Fatalf("Source.ResolvedEvent = %q, want %q", got, want)
 	}
@@ -47,6 +50,31 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	}
 	if plan.Target.FlowInstance != "consumer" {
 		t.Fatalf("Target = %#v, want concrete static consumer route", plan.Target)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlanRejectsOtherwiseValidConnectWithoutSourceLocation(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeConnectRoutePlanPackageFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	connects := source.CompositionConnects()
+	if len(connects) != 1 {
+		t.Fatalf("connects = %#v, want one", connects)
+	}
+	connects[0].SourceFile = ""
+	connects[0].SourceLine = 0
+
+	plan, issue := LowerCompositionConnectRoutePlan(source, connects[0])
+	if issue.Failure != ConnectFailureSourceLocationMissing || issue.AuthoredLocation != "" || plan.AuthoredLocation != "" {
+		t.Fatalf("plan = %#v issue = %#v, want source-location issue and no plan", plan, issue)
 	}
 }
 
@@ -120,6 +148,9 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 			}
 			if issues[0].Failure != tc.failure || !strings.Contains(issues[0].Detail, tc.detail) {
 				t.Fatalf("issue = %#v, want failure %s containing %q", issues[0], tc.failure, tc.detail)
+			}
+			if issues[0].AuthoredLocation == "" || !strings.Contains(issues[0].AuthoredLocation, "package.yaml:") {
+				t.Fatalf("issue location = %q, want exact package.yaml:line", issues[0].AuthoredLocation)
 			}
 		})
 	}
@@ -1169,6 +1200,11 @@ func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtime
 }
 
 func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	connects = append([]runtimecontracts.FlowPackageConnect(nil), connects...)
+	for i := range connects {
+		connects[i].SourceFile = "package.yaml"
+		connects[i].SourceLine = i + 1
+	}
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
 	inputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))

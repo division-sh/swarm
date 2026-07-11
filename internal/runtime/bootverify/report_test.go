@@ -4602,6 +4602,33 @@ func TestRun_PromotesLegacyQualifiedSubscriptionToErrorForStagesFlow(t *testing.
 	if !reportContains(report.Errors(), "event_consumer_exists", "child/task.done") {
 		t.Fatalf("errors = %#v, want stages-era legacy subscription hard invalidity", report.Errors())
 	}
+	if !reportContains(report.Errors(), "legacy_qualified_subscription", "child/task.done") {
+		t.Fatalf("errors = %#v, want dedicated stages-era legacy finding", report.Errors())
+	}
+}
+
+func TestRun_PromotesLegacyQualifiedSubscriptionForStagedConsumerOrUnrelatedFlow(t *testing.T) {
+	tests := []struct {
+		name  string
+		stage func(*runtimecontracts.WorkflowContractBundle)
+	}{
+		{name: "root consumer staged", stage: func(bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.RootSchema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
+		}},
+		{name: "unrelated sibling staged", stage: func(bundle *runtimecontracts.WorkflowContractBundle) {
+			bundle.FlowSchemas["unrelated"] = runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true}}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
+			tc.stage(bundle)
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), "event_consumer_exists", "child/task.done") || !reportContains(report.Errors(), "legacy_qualified_subscription", "child/task.done") {
+				t.Fatalf("errors = %#v, want bundle-wide hard findings", report.Errors())
+			}
+		})
+	}
 }
 
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
