@@ -107,6 +107,7 @@ type WorkflowSemanticView struct {
 	EventOwners            map[string][]string
 	HandlerTransitions     []HandlerTransitionSemantic
 	HandlerTransitionIndex map[string]map[string]HandlerTransitionSemantic
+	StageTopologies        map[string]WorkflowStageTopology
 }
 
 type SystemNodeEffectiveSemantics struct {
@@ -279,6 +280,7 @@ type HandlerTransitionSemantic struct {
 	NodeID               string
 	FlowID               string
 	EventType            string
+	CreateEntity         bool
 	Action               ActionSpec
 	Activity             ActivitySpec
 	SelectEntity         *SelectEntitySpec
@@ -336,6 +338,36 @@ type WorkflowLoopPlan struct {
 	EntryStage    string
 	RegionStages  []string
 	Operations    []WorkflowLoopOperationPlan
+}
+
+// WorkflowStageTopology is the canonical lowered lifecycle graph for one flow.
+// Verifier, runtime loop plans, and authoring projections consume this graph.
+type WorkflowStageTopology struct {
+	FlowID         string
+	InitialStage   string
+	Stages         []string
+	TerminalStages []string
+	Edges          []WorkflowStageTopologyEdge
+	Handlers       []WorkflowHandlerStageScope
+}
+
+type WorkflowHandlerStageScope struct {
+	NodeID    string
+	EventType string
+	Stages    []string
+}
+
+type WorkflowStageTopologyEdge struct {
+	From          string
+	To            string
+	Source        string
+	NodeID        string
+	EventType     string
+	LoopID        string
+	LoopOperation LoopOperationKind
+	TimerID       string
+	After         string
+	Timed         bool
 }
 
 type WorkflowLoopOperationPlan struct {

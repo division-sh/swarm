@@ -314,8 +314,12 @@ contract_formats:
           not alter an active loop's cap.
         escape: >
           Required advances_to target outside the loop's strongly connected
-          component, with an optional typed emit. Escape is a declared lifecycle
-          outcome, not a failure.
+          component, with an optional typed emit. The emit is part of the
+          canonical declarative emitted-site inventory: its event MUST exist,
+          every authored and required payload field MUST satisfy that event
+          schema, and the declared revision field MUST be required text carried
+          exactly from loop.revision_id. Escape is a declared lifecycle outcome,
+          not a failure.
       operations:
         start: Creates one durable activation at attempt 1 and enters the loop region.
         admit: >
@@ -333,9 +337,19 @@ contract_formats:
           persisted current stage to match it; no ambient or inferred source stage
           is accepted.
       topology: >
-        Verify requires one start, at least one repeat and close, disjoint flat
-        regions, and an escape outside the region. Nested, overlapping, computed,
-        unbounded, or arbitrary loops are rejected and belong to #1671.
+        One canonical lowered lifecycle graph owns handler, rule, completion,
+        join, timer, and loop transition edges for verify, runtime loop plans,
+        and describe --graph. The loop region is the exact strongly connected
+        component containing the start target; it is never reconstructed as a
+        union of operation endpoints. The start source MUST be outside that SCC,
+        repeat MUST return to the start target, and close plus cap escape MUST
+        leave the SCC. An ordinary edge that reconnects a close or escape target
+        to the SCC makes that target part of the SCC and is rejected. Every
+        handler whose canonical source-stage set intersects the SCC MUST declare
+        the matching loop operation; non-start handlers also require the
+        declared text revision field. Verify requires one start, at least one
+        repeat and close, and disjoint flat regions. Nested, overlapping,
+        computed, unbounded, or arbitrary loops are rejected and belong to #1671.
       identity_and_admission: >
         Activation and revision IDs are deterministic run/entity/flow/loop facts.
         Exact delivery identity remains idempotent. A prior or post-close revision
@@ -371,7 +385,14 @@ contract_formats:
         Restart reloads the activation and generation-owned machinery. Same-run
         replay preserves recorded identity. Timestamp forks preserve attempt and
         stamped cap but deterministically mint fork-local activation/revision IDs
-        and remint generation-bearing timer/join/accumulator identities.
+        and remint generation-bearing event payloads, timer/join/accumulator
+        identities, pending activity requests, journal evidence, and result IDs.
+        read_only activity requests use reexecute_read under fork-local identity.
+        non_idempotent_write requests use reuse_recorded_result: terminal source
+        evidence is copied into a fork-local terminal activity_attempt and the
+        existing dispatcher republishes that fork-local result without invoking
+        the connector. Missing, non-terminal, or policy-inconsistent activity
+        evidence fails the fork closed.
       expression_context: >
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL

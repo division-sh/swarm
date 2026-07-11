@@ -49,6 +49,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
 		EventOwners:            map[string][]string{},
 		HandlerTransitionIndex: map[string]map[string]HandlerTransitionSemantic{},
+		StageTopologies:        map[string]WorkflowStageTopology{},
 	}
 	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
 	semantics.Actions = appendPlatformBuiltinActionEntries(semantics.Actions, bundle.Platform.BuiltinHooks.Actions)
@@ -139,6 +140,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				NodeID:               nodeID,
 				FlowID:               strings.TrimSpace(source.FlowID),
 				EventType:            rawEventType,
+				CreateEntity:         handler.CreateEntity,
 				Action:               handler.Action,
 				SelectEntity:         handler.SelectEntity,
 				SelectOrCreateEntity: handler.SelectOrCreateEntity,
@@ -191,6 +193,8 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.NodeHandlers[nodeID] = handlers
 	}
 	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
+	semantics.StageTopologies = deriveWorkflowStageTopologies(semantics)
+	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 }
 
@@ -238,17 +242,42 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 				Emit:         cloneEmitSpec(transition.Emit),
 			}
 			plans[idx].Operations = append(plans[idx].Operations, operation)
-			plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.From)
 			if operation.Kind == LoopOperationStart && plans[idx].EntryStage == "" {
 				plans[idx].EntryStage = operation.AdvancesTo
-				plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.AdvancesTo)
-			}
-			if (operation.Kind == LoopOperationAdmit || operation.Kind == LoopOperationRepeat) && operation.AdvancesTo != "" {
-				plans[idx].RegionStages = appendIfMissingString(plans[idx].RegionStages, operation.AdvancesTo)
 			}
 		}
 	}
 	return plans
+}
+
+func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]WorkflowStageTopology {
+	out := map[string]WorkflowStageTopology{}
+	rootStages := make([]string, 0, len(semantics.Stages))
+	for _, stage := range semantics.Stages {
+		if id := strings.TrimSpace(stage.ID); id != "" {
+			rootStages = append(rootStages, id)
+		}
+	}
+	build := func(flowID, initial string, stages, terminal []string) {
+		timers := make([]WorkflowTimerContract, 0)
+		for _, timer := range semantics.Timers {
+			owner := strings.TrimSpace(timer.FlowID)
+			if flowID == "" {
+				if owner != "" && owner != strings.TrimSpace(semantics.Name) {
+					continue
+				}
+			} else if owner != flowID {
+				continue
+			}
+			timers = append(timers, timer)
+		}
+		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops)
+	}
+	build("", semantics.InitialStage, rootStages, semantics.TerminalStages)
+	for flowID, stages := range semantics.FlowStates {
+		build(flowID, semantics.FlowInitial[flowID], stages, semantics.FlowTerminal[flowID])
+	}
+	return out
 }
 
 func joinOutputField(path string) string {

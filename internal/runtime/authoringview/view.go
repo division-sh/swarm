@@ -469,7 +469,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		FlowID:   strings.TrimSpace(label),
 		FlowPath: strings.TrimSpace(path),
 		Nodes:    nodes,
-		Edges:    buildStageGraphEdgesForFlow(source, flowID, initial, states, terminalSet),
+		Edges:    buildStageGraphEdgesForFlow(source, flowID),
 		Timers:   buildStageGraphTimersForFlow(source, flowID),
 		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
 	}
@@ -509,164 +509,34 @@ func stageDescriptionSchemaForFlow(source semanticview.Source, flowID string) (r
 	return source.FlowSchemaByID(flowID)
 }
 
-func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphEdgeView {
-	stateSet := authoringStringSet(states)
-	nonTerminal := make([]string, 0, len(states))
-	for _, state := range states {
-		state = strings.TrimSpace(state)
-		if state == "" {
-			continue
-		}
-		if _, ok := terminalSet[state]; ok {
-			continue
-		}
-		nonTerminal = append(nonTerminal, state)
+func buildStageGraphEdgesForFlow(source semanticview.Source, flowID string) []StageGraphEdgeView {
+	topology, ok := semanticview.WorkflowStageTopology(source, flowID)
+	if !ok {
+		return nil
 	}
-	edges := make([]StageGraphEdgeView, 0)
-	nodes := source.NodeEntries()
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		if nodeID = strings.TrimSpace(nodeID); nodeID != "" {
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-	}
-	sort.Strings(nodeIDs)
-	for _, nodeID := range nodeIDs {
-		node := nodes[nodeID]
-		if nodeID == "" {
-			continue
-		}
-		if !authoringNodeBelongsToFlow(source, nodeID, flowID) {
-			continue
-		}
-		eventTypes := make([]string, 0, len(node.EventHandlers))
-		for eventType := range node.EventHandlers {
-			if eventType = strings.TrimSpace(eventType); eventType != "" {
-				eventTypes = append(eventTypes, eventType)
-			}
-		}
-		sort.Strings(eventTypes)
-		for _, eventType := range eventTypes {
-			handler := node.EventHandlers[eventType]
-			if handler.Loop != nil {
-				continue
-			}
-			from := append([]string{}, nonTerminal...)
-			if handler.CreateEntity {
-				from = nil
-				if strings.TrimSpace(initial) != "" {
-					from = []string{strings.TrimSpace(initial)}
-				}
-			}
-			for _, carrier := range runtimecontracts.HandlerAdvanceCarriers(handler) {
-				carrierFrom := from
-				carrierEvent := eventType
-				joinTimed := false
-				if handler.Join != nil && (carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinOnComplete || carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinTimeout) {
-					carrierFrom = []string{strings.TrimSpace(handler.Join.Stage)}
-				}
-				if handler.Join != nil && carrier.Kind == runtimecontracts.HandlerAdvanceCarrierJoinTimeout {
-					carrierEvent = "platform.join_timeout"
-					joinTimed = true
-				}
-				before := len(edges)
-				edges = appendStageGraphEdge(edges, carrierFrom, carrier.AdvancesTo, stateSet, carrier.Source(), nodeID, carrierEvent)
-				if joinTimed && len(edges) > before {
-					edge := &edges[len(edges)-1]
-					edge.After = strings.TrimSpace(handler.Join.Timeout.After)
-					edge.TimerID = strings.TrimSpace(handler.Join.EffectiveID())
-					edge.Timed = true
-				}
-			}
-		}
-	}
+	limits := map[string]string{}
 	for _, plan := range semanticview.WorkflowLoops(source) {
-		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		for _, operation := range plan.Operations {
-			before := len(edges)
-			edges = appendStageGraphEdge(edges, []string{operation.From}, operation.AdvancesTo, stateSet, "loop."+string(operation.Kind), operation.NodeID, operation.HandlerEvent)
-			if len(edges) > before {
-				edge := &edges[len(edges)-1]
-				edge.LoopID = plan.ID
-				edge.LoopOperation = string(operation.Kind)
-				edge.MaxAttempts = plan.MaxAttempts.String()
-			}
-			if operation.Kind == runtimecontracts.LoopOperationRepeat {
-				before = len(edges)
-				edges = appendStageGraphEdge(edges, []string{operation.From}, plan.Escape.AdvancesTo, stateSet, "loop.escape", operation.NodeID, operation.HandlerEvent)
-				if len(edges) > before {
-					edge := &edges[len(edges)-1]
-					edge.LoopID = plan.ID
-					edge.LoopOperation = string(operation.Kind)
-					edge.MaxAttempts = plan.MaxAttempts.String()
-					edge.LoopEscape = true
-				}
-			}
+		if strings.TrimSpace(plan.FlowID) == strings.TrimSpace(flowID) {
+			limits[strings.TrimSpace(plan.ID)] = plan.MaxAttempts.String()
 		}
 	}
-	for _, timer := range source.WorkflowTimers() {
-		if strings.TrimSpace(timer.FlowID) != strings.TrimSpace(flowID) || !timer.StageOwned || strings.TrimSpace(timer.AdvancesTo) == "" {
-			continue
-		}
-		edges = appendStageGraphTimedEdge(edges, []string{strings.TrimSpace(timer.Stage)}, timer.AdvancesTo, stateSet, timer)
+	edges := make([]StageGraphEdgeView, 0, len(topology.Edges))
+	for _, edge := range topology.Edges {
+		edges = append(edges, StageGraphEdgeView{
+			From:          []string{edge.From},
+			To:            edge.To,
+			Source:        edge.Source,
+			NodeID:        edge.NodeID,
+			EventType:     edge.EventType,
+			Timed:         edge.Timed,
+			TimerID:       edge.TimerID,
+			After:         edge.After,
+			LoopID:        edge.LoopID,
+			LoopOperation: string(edge.LoopOperation),
+			LoopEscape:    edge.Source == "loop.escape",
+			MaxAttempts:   limits[edge.LoopID],
+		})
 	}
-	sort.Slice(edges, func(i, j int) bool {
-		left := edges[i]
-		right := edges[j]
-		if strings.Join(left.From, "\x00") != strings.Join(right.From, "\x00") {
-			return strings.Join(left.From, "\x00") < strings.Join(right.From, "\x00")
-		}
-		if left.To != right.To {
-			return left.To < right.To
-		}
-		if left.Source != right.Source {
-			return left.Source < right.Source
-		}
-		if left.NodeID != right.NodeID {
-			return left.NodeID < right.NodeID
-		}
-		if left.EventType != right.EventType {
-			return left.EventType < right.EventType
-		}
-		if left.TimerID != right.TimerID {
-			return left.TimerID < right.TimerID
-		}
-		return left.After < right.After
-	})
-	return edges
-}
-
-func appendStageGraphEdge(edges []StageGraphEdgeView, from []string, target string, stateSet map[string]struct{}, source, nodeID, eventType string) []StageGraphEdgeView {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return edges
-	}
-	if len(stateSet) > 0 {
-		if _, ok := stateSet[target]; !ok {
-			return edges
-		}
-	}
-	return append(edges, StageGraphEdgeView{
-		From:      append([]string{}, from...),
-		To:        target,
-		Source:    strings.TrimSpace(source),
-		NodeID:    strings.TrimSpace(nodeID),
-		EventType: strings.TrimSpace(eventType),
-	})
-}
-
-func appendStageGraphTimedEdge(edges []StageGraphEdgeView, from []string, target string, stateSet map[string]struct{}, timer runtimecontracts.WorkflowTimerContract) []StageGraphEdgeView {
-	edgeCount := len(edges)
-	edges = appendStageGraphEdge(edges, from, target, stateSet, "timer", "runtime", "timer:"+strings.TrimSpace(timer.ID))
-	if len(edges) == edgeCount {
-		return edges
-	}
-	edge := &edges[len(edges)-1]
-	edge.TimerID = strings.TrimSpace(timer.ID)
-	edge.After = strings.TrimSpace(timer.Delay)
-	edge.Timed = true
 	return edges
 }
 

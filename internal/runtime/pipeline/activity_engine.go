@@ -17,8 +17,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -27,7 +27,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 const activityRequestEventType = events.EventType("platform.activity_requested")
@@ -463,37 +462,21 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 
 func activityRequestEventID(intent runtimeengine.ActivityIntent) string {
 	intent = intent.Normalized()
-	parts := []string{
-		intent.SourceRunID,
-		intent.SourceEventID,
-		intent.ParentEventID,
-		intent.EntityID.String(),
-		intent.FlowID.String(),
-		intent.NodeID.String(),
-		intent.HandlerEventKey,
-		intent.ActivityID,
-		fmt.Sprintf("%d", intent.Attempt),
-		intent.Generation.RevisionID,
-	}
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-request:"+strings.Join(parts, "\x00"))).String()
+	return activityidentity.RequestEventID(activityIdentityFact(intent))
 }
 
 func activityResultEventID(intent runtimeengine.ActivityIntent, eventType string) string {
 	intent = intent.Normalized()
-	parts := []string{
-		intent.SourceRunID,
-		intent.SourceEventID,
-		intent.ParentEventID,
-		intent.EntityID.String(),
-		intent.FlowID.String(),
-		intent.NodeID.String(),
-		intent.HandlerEventKey,
-		intent.ActivityID,
-		intent.Tool,
-		eventidentity.Normalize(eventType),
-		intent.Generation.RevisionID,
+	return activityidentity.ResultEventID(activityIdentityFact(intent), eventType)
+}
+
+func activityIdentityFact(intent runtimeengine.ActivityIntent) activityidentity.Fact {
+	return activityidentity.Fact{
+		RunID: intent.SourceRunID, SourceEventID: intent.SourceEventID, ParentEventID: intent.ParentEventID,
+		EntityID: intent.EntityID.String(), FlowID: intent.FlowID.String(), NodeID: intent.NodeID.String(),
+		HandlerEventKey: intent.HandlerEventKey, ActivityID: intent.ActivityID, Tool: intent.Tool,
+		Attempt: intent.Attempt, RevisionID: intent.Generation.RevisionID,
 	}
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-result:"+strings.Join(parts, "\x00"))).String()
 }
 
 func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass runtimecontracts.ActivityEffectClass) int {

@@ -20,16 +20,104 @@ func TestLoopValidationRejectsMissingAdmissionOnCorrelatedHandler(t *testing.T) 
 	handler := bundle.Nodes["controller"].EventHandlers["draft.ready"]
 	handler.Loop = nil
 	bundle.Nodes["controller"].EventHandlers["draft.ready"] = handler
-	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "consumes loop revision field revision_id but omits loop operation") {
+	refreshLoopValidationTopology(bundle)
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "may execute in the loop region but omits loop operation") {
 		t.Fatalf("findings = %#v, want missing admission", findings)
+	}
+}
+
+func TestLoopValidationRejectsMissingAdmissionAndRevisionField(t *testing.T) {
+	bundle := loopValidationBundle()
+	handler := bundle.Nodes["controller"].EventHandlers["draft.ready"]
+	handler.Loop = nil
+	bundle.Nodes["controller"].EventHandlers["draft.ready"] = handler
+	bundle.Events["draft.ready"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}
+	refreshLoopValidationTopology(bundle)
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "omits both loop operation and required text revision field revision_id") {
+		t.Fatalf("findings = %#v, want dual omission rejection", findings)
 	}
 }
 
 func TestLoopValidationRejectsEscapeInsideRegion(t *testing.T) {
 	bundle := loopValidationBundle()
 	bundle.Semantics.Loops[0].Escape.AdvancesTo = "drafting"
-	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "escape target drafting does not leave the loop region") {
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "escape target drafting does not leave the loop SCC") {
 		t.Fatalf("findings = %#v, want invalid escape", findings)
+	}
+}
+
+func TestLoopValidationRejectsCloseBackIntoCanonicalRegion(t *testing.T) {
+	bundle := loopValidationBundle()
+	handler := bundle.Nodes["controller"].EventHandlers["review.passed"]
+	handler.AdvancesTo = "drafting"
+	bundle.Nodes["controller"].EventHandlers["review.passed"] = handler
+	for idx := range bundle.Semantics.Loops[0].Operations {
+		if bundle.Semantics.Loops[0].Operations[idx].Kind == runtimecontracts.LoopOperationClose {
+			bundle.Semantics.Loops[0].Operations[idx].AdvancesTo = "drafting"
+		}
+	}
+	refreshLoopValidationTopology(bundle)
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "close target drafting does not leave the loop SCC") {
+		t.Fatalf("findings = %#v, want close exit rejection", findings)
+	}
+}
+
+func TestLoopValidationRejectsRepeatAwayFromEntry(t *testing.T) {
+	bundle := loopValidationBundle()
+	handler := bundle.Nodes["controller"].EventHandlers["review.issues"]
+	handler.AdvancesTo = "review"
+	bundle.Nodes["controller"].EventHandlers["review.issues"] = handler
+	for idx := range bundle.Semantics.Loops[0].Operations {
+		if bundle.Semantics.Loops[0].Operations[idx].Kind == runtimecontracts.LoopOperationRepeat {
+			bundle.Semantics.Loops[0].Operations[idx].AdvancesTo = "review"
+		}
+	}
+	refreshLoopValidationTopology(bundle)
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "must return to entry stage drafting") {
+		t.Fatalf("findings = %#v, want repeat entry rejection", findings)
+	}
+}
+
+func TestLoopValidationRejectsEscapeTargetThatReconnectsToRegion(t *testing.T) {
+	bundle := loopValidationBundle()
+	bundle.Semantics.TerminalStages = []string{"approved"}
+	bundle.Nodes["controller"].EventHandlers["escalation.reopened"] = runtimecontracts.SystemNodeEventHandler{AdvancesTo: "drafting"}
+	bundle.Events["escalation.reopened"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}
+	refreshLoopValidationTopology(bundle)
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "escape target exhausted does not leave the loop SCC") {
+		t.Fatalf("findings = %#v, want reconnecting escape rejection", findings)
+	}
+}
+
+func TestLoopValidationCanonicalRegionExcludesStartSource(t *testing.T) {
+	bundle := loopValidationBundle()
+	region := stringSet(bundle.Semantics.Loops[0].RegionStages)
+	if _, ok := region["research"]; ok {
+		t.Fatalf("loop region = %#v, start source must not be loop-owned", bundle.Semantics.Loops[0].RegionStages)
+	}
+}
+
+func TestLoopValidationRejectsUnownedEscapeEmit(t *testing.T) {
+	bundle := loopValidationBundle()
+	bundle.Semantics.Loops[0].Escape.Emit = runtimecontracts.EmitSpec{Event: "review.escalated", Fields: map[string]runtimecontracts.ExpressionValue{
+		"revision_id": runtimecontracts.RefExpression("loop.revision_id"),
+	}}
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "escape.emit event review.escalated has no typed event schema") {
+		t.Fatalf("findings = %#v, want unknown escape event rejection", findings)
+	}
+}
+
+func TestLoopValidationRejectsIncompleteEscapeEmitPayload(t *testing.T) {
+	bundle := loopValidationBundle()
+	bundle.Events["review.escalated"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
+		Properties: map[string]runtimecontracts.EventFieldSpec{"revision_id": {Type: "text"}, "reason": {Type: "text"}},
+		Required:   []string{"revision_id", "reason"},
+	}}
+	bundle.Semantics.Loops[0].Escape.Emit = runtimecontracts.EmitSpec{Event: "review.escalated", Fields: map[string]runtimecontracts.ExpressionValue{
+		"revision_id": runtimecontracts.RefExpression("loop.revision_id"),
+	}}
+	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "omits required payload field reason") {
+		t.Fatalf("findings = %#v, want incomplete escape payload rejection", findings)
 	}
 }
 
@@ -120,7 +208,7 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		events[eventType] = loopRevisionEvent(revisionField)
 	}
 	events["research.done"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
 			{ID: "research", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "exhausted", Terminal: true}, {ID: "approved", Terminal: true},
 		}}},
@@ -133,6 +221,25 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 			Loops:          []runtimecontracts.WorkflowLoopPlan{{ID: "revision", RevisionField: revisionField, MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "exhausted"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Operations: operations}},
 		},
 	}
+	refreshLoopValidationTopology(bundle)
+	return bundle
+}
+
+func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
+	transitions := make([]runtimecontracts.HandlerTransitionSemantic, 0)
+	for eventType, handler := range bundle.Nodes["controller"].EventHandlers {
+		transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
+			ID: eventType, NodeID: "controller", EventType: eventType, CreateEntity: handler.CreateEntity,
+			AdvancesTo: handler.AdvancesTo, Emit: handler.Emit, Loop: handler.Loop, OnComplete: handler.OnComplete,
+			Rules: handler.Rules, Accumulate: handler.Accumulate, Join: handler.Join,
+		})
+	}
+	bundle.Semantics.HandlerTransitions = transitions
+	topology := runtimecontracts.BuildWorkflowStageTopology("", bundle.Semantics.InitialStage,
+		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.Semantics.TerminalStages,
+		transitions, bundle.Semantics.Timers, bundle.Semantics.Loops)
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": topology}
+	bundle.Semantics.Loops = runtimecontracts.BindWorkflowLoopRegions(bundle.Semantics.Loops, bundle.Semantics.StageTopologies)
 }
 
 func loopRevisionEvent(field string) runtimecontracts.EventCatalogEntry {
