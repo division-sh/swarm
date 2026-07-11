@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	contextTokenHeader = "X-SWARM-Context-Token"
+	contextTokenHeader         = "X-SWARM-Context-Token"
+	claudeCodeToolUseIDMetaKey = "claudecode/toolUseId"
 
 	maxToolResultBytes        = 16 * 1024
 	maxReadFileResultBytes    = 256 * 1024

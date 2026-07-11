@@ -19,6 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
@@ -407,6 +409,138 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 	t.Cleanup(func() {
 		registry.UnregisterTurnContext(token)
 	})
+}
+
+func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay(t *testing.T) {
+	harness := effecttest.New()
+	registry := newTestTurnContextRegistry()
+	controller := runtimeeffects.NewController(harness)
+	putTurn := func(token, identity string) {
+		putTestTurnContext(t, registry, token, TurnContext{
+			Actor:              models.AgentConfig{ID: harness.Token.AgentID},
+			LifecycleToken:     harness.Token,
+			HasLifecycleToken:  true,
+			EffectController:   controller,
+			LogicalIdentity:    identity,
+			HasLogicalIdentity: true,
+			Allowed:            map[string]struct{}{"write_file": {}},
+		})
+	}
+	putTurn("ctx-provider-turn-1", "provider-turn-1")
+	putTurn("ctx-provider-turn-2", "provider-turn-2")
+
+	primitiveDispatches := 0
+	gateway := NewGateway(testToolExecutor(func(ctx context.Context, name string, input any) (any, error) {
+		request, err := json.Marshal(map[string]any{"name": name, "arguments": input})
+		if err != nil {
+			return nil, err
+		}
+		attempt, err := runtimeeffects.Begin(ctx, "authored_http_tool", request, map[string]string{"tool": name})
+		if err != nil {
+			return nil, err
+		}
+		if err := attempt.MarkLaunched(ctx); err != nil {
+			return nil, err
+		}
+		primitiveDispatches++
+		if err := attempt.Succeed(ctx, map[string]any{"ok": true}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext})
+
+	call := func(contextToken string, transportID any, toolUseID string, progressToken any) RPCResponse {
+		t.Helper()
+		body, err := json.Marshal(RPCRequest{
+			JSONRPC: "2.0",
+			Method:  "tools/call",
+			ID:      transportID,
+			Params: map[string]any{
+				"name":      "write_file",
+				"arguments": map[string]any{"path": "/workspace/result.txt", "content": "same"},
+				"_meta": map[string]any{
+					claudeCodeToolUseIDMetaKey: toolUseID,
+					"progressToken":            progressToken,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)), contextToken)
+		authorizeGatewayRequest(req)
+		rec := httptest.NewRecorder()
+		gateway.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("gateway status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		return mustRPCResponse(t, rec)
+	}
+
+	if resp := call("ctx-provider-turn-1", float64(1), "toolu-call-1", float64(1)); resp.Error != nil {
+		t.Fatalf("first sibling failed: %#v", resp.Error)
+	}
+	if resp := call("ctx-provider-turn-1", float64(2), "toolu-call-2", float64(2)); resp.Error != nil {
+		t.Fatalf("second identical sibling failed: %#v", resp.Error)
+	}
+	if primitiveDispatches != 2 || len(harness.Attempts) != 2 {
+		t.Fatalf("same-turn sibling dispatches=%d attempts=%d, want 2/2", primitiveDispatches, len(harness.Attempts))
+	}
+
+	replay := call("ctx-provider-turn-1", "replacement-json-rpc-id", "toolu-call-1", "replacement-progress-token")
+	replayResult, ok := replay.Result.(map[string]any)
+	if !ok || replayResult["isError"] != true {
+		t.Fatalf("replay result = %#v, want tool error result", replay.Result)
+	}
+	if primitiveDispatches != 2 || len(harness.Attempts) != 2 {
+		t.Fatalf("transport-correlation replay redispatched: dispatches=%d attempts=%d", primitiveDispatches, len(harness.Attempts))
+	}
+
+	if resp := call("ctx-provider-turn-2", float64(1), "toolu-call-1", float64(1)); resp.Error != nil {
+		t.Fatalf("cross-turn sibling failed: %#v", resp.Error)
+	}
+	if primitiveDispatches != 3 || len(harness.Attempts) != 3 {
+		t.Fatalf("cross-turn sibling dispatches=%d attempts=%d, want 3/3", primitiveDispatches, len(harness.Attempts))
+	}
+}
+
+func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecutor(t *testing.T) {
+	harness := effecttest.New()
+	registry := newTestTurnContextRegistry()
+	putTestTurnContext(t, registry, "ctx-managed", TurnContext{
+		Actor:              models.AgentConfig{ID: harness.Token.AgentID},
+		LifecycleToken:     harness.Token,
+		HasLifecycleToken:  true,
+		EffectController:   runtimeeffects.NewController(harness),
+		LogicalIdentity:    "provider-turn",
+		HasLogicalIdentity: true,
+		Allowed:            map[string]struct{}{"write_file": {}},
+	})
+	executed := false
+	gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {
+		executed = true
+		return nil, nil
+	}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext})
+	body, err := json.Marshal(RPCRequest{JSONRPC: "2.0", Method: "tools/call", ID: float64(1), Params: map[string]any{
+		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)), "ctx-managed")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	gateway.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gateway status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	resp := mustRPCResponse(t, rec)
+	if resp.Error == nil && resp.Result == nil {
+		t.Fatalf("missing-coordinate response = %#v", resp)
+	}
+	if executed {
+		t.Fatal("managed call without provider coordinate reached executor")
+	}
 }
 
 type gatewayCtxProbeKey string
