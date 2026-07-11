@@ -235,10 +235,20 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workflow instance SQLite implementation is the explicit backend-local pipeline instance SQL owner",
 		},
+		"internal/runtime/pipeline/workflow_join_lifecycle.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1848,
+			Reason:         "join stage arm, expected-zero intent, and timeout lifecycle consume the selected workflow instance RunPipelineMutation owner as one unit of work",
+		},
 		"internal/runtime/pipeline/workflow_nodes.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "workflow node construction carries pipeline SQL dependency to explicit node/unit-of-work owners",
+		},
+		"internal/runtime/pipeline/workflow_state_persistence.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1848,
+			Reason:         "workflow state, timer, and join lifecycle persistence share the selected workflow instance RunPipelineMutation owner",
 		},
 		"internal/runtime/pipeline/workflow_timer_lifecycle.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

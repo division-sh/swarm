@@ -22,6 +22,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
@@ -980,20 +981,20 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 21 {
-		t.Fatalf("step count = %d, want 21", len(steps))
+	if len(steps) != 22 {
+		t.Fatalf("step count = %d, want 22", len(steps))
 	}
 	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
 	}
-	if steps[5] != StepGroupBy {
-		t.Fatalf("expected group_by at index 5, got order %v", steps)
+	if steps[5] != StepFilter {
+		t.Fatalf("expected filter at index 5, got order %v", steps)
 	}
-	if steps[15] != StepProjection {
-		t.Fatalf("expected projection after data_writes at index 15, got order %v", steps)
+	if steps[16] != StepProjection {
+		t.Fatalf("expected projection after data_writes at index 16, got order %v", steps)
 	}
-	if steps[19] != StepActivity {
-		t.Fatalf("expected activity after action at index 19, got order %v", steps)
+	if steps[20] != StepActivity {
+		t.Fatalf("expected activity after action at index 20, got order %v", steps)
 	}
 }
 
@@ -1770,6 +1771,64 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	}
 	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component-scaffold/b/component.scaffolded")); ok {
 		t.Fatalf("second concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	}
+}
+
+func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: stubSource(), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := runtimecontracts.JoinSpec{
+		ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
+		Members:    runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
+		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
+		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	activation, err := joinruntime.NewActivation(spec.ID, spec.Stage, "join-node", "item.completed", "", []string{"a", "b"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := joinruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
+	first, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
+		Event: eventtest.RootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
+	})
+	if err != nil {
+		t.Fatalf("first arrival: %v", err)
+	}
+	if first.Status != OutcomeWaiting {
+		t.Fatalf("first status = %s, want waiting", first.Status)
+	}
+	second, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
+		Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
+		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
+	})
+	if err != nil {
+		t.Fatalf("second arrival: %v", err)
+	}
+	if second.StateMutation.NextState != "ready" {
+		t.Fatalf("next state = %q, want ready", second.StateMutation.NextState)
+	}
+	closed, ok, err := joinruntime.Load(second.StateMutation.StateCarrier.StateBuckets, "join-node", activation.Key())
+	if err != nil || !ok {
+		t.Fatalf("load closed activation = %#v, %v, %v", closed, ok, err)
+	}
+	if closed.Status != joinruntime.StatusClosed || closed.CloseReason != joinruntime.CloseReasonComplete {
+		t.Fatalf("closed activation = %#v", closed)
+	}
+	results := closed.Results()
+	if len(results) != 2 || results[0].(map[string]any)["score"] != float64(1) || results[1].(map[string]any)["score"] != float64(2) {
+		t.Fatalf("results = %#v, want membership order a,b", results)
 	}
 }
 

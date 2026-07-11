@@ -61,6 +61,9 @@ func (s bundleSource) WorkflowInitialStage() string { return s.bundle.WorkflowIn
 func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract {
 	return s.bundle.WorkflowTimers()
 }
+func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
+	return s.bundle.WorkflowJoins()
+}
 func (s bundleSource) WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool) {
 	return s.bundle.WorkflowTimerByID(id)
 }

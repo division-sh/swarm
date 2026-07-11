@@ -100,6 +100,11 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), bucket.EventType)
 		}
 	}
+	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
+		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
+			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), ref.HandlerEvent)
+		}
+	}
 	if !ok {
 		return false, false
 	}
@@ -154,6 +159,11 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
 		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			policy, ok = n.policies[bucket.EventType]
+		}
+	}
+	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
+		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
+			policy, ok = n.policies[ref.HandlerEvent]
 		}
 	}
 	if !ok {
@@ -212,6 +222,16 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 				handlerEventKey = bucket.EventType
 				ok = true
 				break
+			}
+		}
+	}
+	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
+		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
+			candidate, found := n.contract.EventHandlers[ref.HandlerEvent]
+			if found && candidate.Join != nil && candidate.Join.EffectiveID() == ref.JoinID {
+				handler = candidate
+				handlerEventKey = ref.HandlerEvent
+				ok = true
 			}
 		}
 	}

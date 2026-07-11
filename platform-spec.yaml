@@ -2783,6 +2783,58 @@ handler_specification:
         runtime-owned JSON result contract is part of this pattern.
       side_effect: Writes fan_out.count to handler context (available for data_accumulation). `fan_out.index`
         is scoped to per-item emit field evaluation and is not a durable handler value.
+    join:
+      field: join
+      type: object
+      purpose: >-
+        Declare one stage-anchored finite-membership barrier on an arriving event. Join is the sole public barrier owner
+        for stages: bundles; open/windowed stream accumulation remains owned by accumulate.
+      sub_fields:
+        id: Optional stable simple identifier. It defaults to stage; collisions in the same flow/stage require explicit unique IDs.
+        stage: Required stage in the same flow. Arrivals are admitted only against a persisted activation for this stage.
+        members: >-
+          Required `{from: entity.<field>, by: payload.<field>}`. from names a declared ordered list<text> that is
+          snapshotted once at stage arm; by names the declared text member identity on each arrival and is the sole
+          membership/dedup key.
+        window: >-
+          Optional `{from: entity.<field>, by: payload.<field>}` text identity. It is required when the static transition
+          graph permits re-entry into the join stage. from is snapshotted at arm and by must match exactly on arrival.
+        output: Required top-level declared payload field captured with its canonical value/hash per admitted member.
+        complete_when: >-
+          Optional CEL boolean over join.expected, join.completed, join.missing, join.results, and join.timed_out only.
+          Omission means all declared members. Authoring the default-all tautology is unnecessary.
+        remaining: >-
+          Required exactly as ignore when complete_when is authored and forbidden otherwise. terminate is unsupported
+          until a durable contributor-lifecycle/cancellation owner is promoted.
+        on_complete: >-
+          Required non-empty outcome using only existing data_accumulation, emit, and advances_to fields. Expressions may
+          read declared entity.* and typed join.* only.
+        timeout: >-
+          Required `{after: <positive literal or policy-scalar duration>, ...outcome}`. Bare joins are invalid. The outcome
+          supports the same fields and expression roots as on_complete.
+      context:
+        expected: Snapshotted member count.
+        completed: Persisted admitted-member count.
+        missing: Membership-ordered member IDs without output.
+        results: Membership-ordered typed outputs, independent of arrival order.
+        timed_out: True only while evaluating the timeout outcome.
+      execution: >-
+        The stage transition, membership/window snapshot, typed activation, timeout intent, and expected-zero completion
+        intent commit in one selected-store transaction. Arrivals never create activations. The existing entity lock and
+        selected-store row transaction admit exactly one arrival-versus-timeout close winner; losers observe closed state.
+      duplicate_policy: >-
+        An exact same-member/same-canonical-output arrival is idempotent. The same member with different canonical output
+        fails as platform.conflicting_duplicate. Non-members, arrivals before arm, and arrivals after close fail through
+        platform.unexpected_arrival, platform.early_arrival, and platform.stale_arrival respectively.
+      timeout_policy: >-
+        Timeout is evaluated once at arm and fire_at is persisted. It is the only missing/dead-contributor escape in this
+        slice. join.terminated, join.active, and remaining: terminate are invalid until a real contributor lifecycle owner lands.
+      staged_accumulate_retirement: >-
+        A stages: bundle may not author finite-barrier accumulate fields such as expected_from, threshold/completion,
+        timeout_ms, on_complete, or on_timeout. Non-staged migration remains separately tracked; accumulate continues to
+        own open/windowed streams.
+      graph_surface: >-
+        describe --graph renders stage-scoped join completion and timeout edges. Timeout edges include after and the join ID.
     query:
       field: query
       type: object or list of objects
@@ -4021,6 +4073,33 @@ engine:
       replays events through the same tracking — already-received items are skipped, accumulator state is consistent.
     cleanup: After completion fires and the handler commits, the accumulator record can be archived or deleted. The entity
       has moved past the accumulation state.
+  join_engine:
+    description: >-
+      The join engine is the canonical durable owner for staged finite-membership barrier activation, arrivals, deterministic
+      output assembly, timeout, and close. It consumes the typed lowered handler.join plan; route, timer, store, and test
+      surfaces do not reconstruct join semantics independently.
+    persisted_activation:
+      identity: entity + node + handler event + effective join ID + optional window
+      fields:
+      - ordered snapshotted members
+      - per-member canonical output value and hash
+      - open/closed status and close reason
+      - armed_at and persisted fire_at
+      - exact timer task/event identity
+      - expected-zero pending/fired completion disposition
+    arm: >-
+      Stage entry snapshots members and optional window only after transition data writes are visible. Empty membership
+      atomically persists a closed completion plus immediate internal completion intent; it never waits for an arrival.
+    arrival: >-
+      Runtime loads the persisted activation inside the entity lock and selected-store transaction, checks exact window and
+      member identity, stores canonical output, and evaluates default-all or complete_when over persisted join context.
+    ordering: join.results and join.missing always follow declared membership order, never arrival or map iteration order.
+    close: >-
+      Completion, timeout, and stage exit persist one closed reason. Completion/timeout outcomes and timer cancellation share
+      the selected-store transaction; in-memory scheduler registration/cancellation happens only after commit.
+    recovery: >-
+      Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
+      membership, synthesize an arrival-owned activation, or resurrect a closed timeout.
   runtime_store_backend_selection:
     promoted_by: '#1084'
     parent_tracker: '#1066'
@@ -5588,6 +5667,8 @@ engine:
       policy: Policy values from flow policy.yaml merged with root policy.yaml
       fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
         while evaluating fan_out.emit.fields for one item.
+      join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
+        are expected, completed, missing, results, and timed_out; join is read-only and never persisted as entity state.
       accumulated: Available inside on_complete after accumulation (list of received items)
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,13 +20,21 @@ func TestContextListCommandUsesSwarmDirRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{
+		httpClient: &http.Client{Transport: contextNoServerRoundTripper{}},
+	})
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "local") || !strings.Contains(out.String(), "no_server") {
 		t.Fatalf("output = %q, want local no_server row", out.String())
 	}
+}
+
+type contextNoServerRoundTripper struct{}
+
+func (contextNoServerRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("connection refused")
 }
 
 func TestContextListCommandSwarmDirFlagBypassesBrokenConfig(t *testing.T) {

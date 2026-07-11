@@ -252,6 +252,11 @@ func workflowNodeInputAliasEventHandlerResolution(source semanticview.Source, no
 }
 
 func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID string, evt events.Event) string {
+	if isJoinLifecycleEvent(evt.Type()) {
+		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok && ref.NodeID == strings.TrimSpace(nodeID) {
+			return ref.HandlerEvent
+		}
+	}
 	if isAccumulationTimeoutEvent(evt.Type()) {
 		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); ok && strings.TrimSpace(bucket.NodeID) == strings.TrimSpace(nodeID) {
 			return bucket.EventType
@@ -883,6 +888,13 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {
 					policy, ok = workflowNodePolicyForEventType(node.Policies, bucket.EventType)
+				}
+			}
+		}
+		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
+			if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == strings.TrimSpace(node.ID) {
+				if node.Policies != nil {
+					policy, ok = workflowNodePolicyForEventType(node.Policies, ref.HandlerEvent)
 				}
 			}
 		}

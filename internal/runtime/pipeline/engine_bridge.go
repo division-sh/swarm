@@ -63,7 +63,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		return contractHandlerExecutionResult{}, nil
 	}
 	owners := source.RuntimeEventOwners(trigger)
-	if len(owners) == 0 && !isAccumulationTimeoutEvent(events.EventType(trigger)) {
+	if len(owners) == 0 && !isAccumulationTimeoutEvent(events.EventType(trigger)) && !isJoinLifecycleEvent(events.EventType(trigger)) {
 		return contractHandlerExecutionResult{}, nil
 	}
 	var (
@@ -96,6 +96,17 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			}
 		}
 	}
+	if !matched && isJoinLifecycleEvent(events.EventType(trigger)) {
+		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok {
+			joinHandler, ok := findJoinHandlerForRef(source, ref)
+			if ok {
+				nodeID = ref.NodeID
+				handler = joinHandler
+				handlerEventKey = ref.HandlerEvent
+				matched = true
+			}
+		}
+	}
 	if !matched {
 		return contractHandlerExecutionResult{}, nil
 	}
@@ -108,6 +119,26 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 func isAccumulationTimeoutEvent(eventType events.EventType) bool {
 	eventName := strings.TrimSpace(string(eventType))
 	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
+}
+
+func isJoinLifecycleEvent(eventType events.EventType) bool {
+	eventName := strings.TrimSpace(string(eventType))
+	return eventName == joinTimeoutEvent || eventName == joinCompleteEvent
+}
+
+func findJoinHandlerForRef(source interface {
+	NodeEntries() map[string]runtimecontracts.SystemNodeContract
+	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
+}, ref timeridentity.JoinRef) (runtimecontracts.SystemNodeEventHandler, bool) {
+	ref = ref.Normalize()
+	if source == nil || !ref.Valid() {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	if _, ok := source.NodeEntries()[ref.NodeID]; !ok {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	handler, ok := source.NodeEventHandlers(ref.NodeID)[ref.HandlerEvent]
+	return handler, ok && handler.Join != nil && handler.Join.EffectiveID() == ref.JoinID
 }
 
 func findAccumulationTimeoutHandlerForBucket(source interface {
@@ -187,7 +218,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 		triggerCtx.State.EntityID = entityID
 	}
-	if terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler) {
+	if handler.Join == nil && terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler) {
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},

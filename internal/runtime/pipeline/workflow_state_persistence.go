@@ -40,36 +40,41 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		return nil
 	}
 	source := pc.SemanticSource()
-	currentState := ""
-	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
-		currentState = strings.TrimSpace(instance.CurrentState)
-		enteredStateAt := time.Now().UTC()
-		if currentState == nextState && !instance.EnteredStageAt.IsZero() {
-			enteredStateAt = instance.EnteredStageAt
+	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		currentState := ""
+		if err := pc.workflowStore.Mutate(txctx, entityID, func(instance *WorkflowInstance) {
+			currentState = strings.TrimSpace(instance.CurrentState)
+			enteredStateAt := time.Now().UTC()
+			if currentState == nextState && !instance.EnteredStageAt.IsZero() {
+				enteredStateAt = instance.EnteredStageAt
+			}
+			if strings.TrimSpace(instance.WorkflowName) == "" {
+				instance.WorkflowName = source.WorkflowName()
+			}
+			if strings.TrimSpace(instance.WorkflowVersion) == "" {
+				instance.WorkflowVersion = source.WorkflowVersion()
+			}
+			metadata := cloneStringAnyMap(instance.Metadata)
+			if sourceEvent != "" {
+				metadata["last_source_event"] = sourceEvent
+			}
+			instance.Metadata = metadata
+			instance.CurrentState = nextState
+			instance.EnteredStageAt = enteredStateAt
+			if currentState != "" && currentState != nextState {
+				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, sourceEvent))
+			} else if currentState == "" && len(instance.TransitionHistory) == 0 {
+				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, sourceEvent))
+			}
+		}); err != nil {
+			return err
 		}
-		if strings.TrimSpace(instance.WorkflowName) == "" {
-			instance.WorkflowName = source.WorkflowName()
+		pc.notifyTestEntityStateUpdated(entityID, nextState)
+		if err := pc.reconcileWorkflowStageTimers(txctx, entityID, currentState, nextState, sourceEvent); err != nil {
+			return err
 		}
-		if strings.TrimSpace(instance.WorkflowVersion) == "" {
-			instance.WorkflowVersion = source.WorkflowVersion()
-		}
-		metadata := cloneStringAnyMap(instance.Metadata)
-		if sourceEvent != "" {
-			metadata["last_source_event"] = sourceEvent
-		}
-		instance.Metadata = metadata
-		instance.CurrentState = nextState
-		instance.EnteredStageAt = enteredStateAt
-		if currentState != "" && currentState != nextState {
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, sourceEvent))
-		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, sourceEvent))
-		}
-	}); err != nil {
-		return err
-	}
-	pc.notifyTestEntityStateUpdated(entityID, nextState)
-	return pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
+		return pc.applyWorkflowJoinIntents(txctx, entityID, currentState, nextState)
+	})
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) error {

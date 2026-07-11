@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -36,6 +37,7 @@ const (
 	StepQuery      Step = "query"
 	StepClearGates Step = "clear_gates"
 	StepGuard      Step = "guard"
+	StepJoin       Step = "join"
 	StepAccumulate Step = "accumulate"
 	StepFilter     Step = "filter"
 	StepGroupBy    Step = "group_by"
@@ -60,6 +62,7 @@ var OrderedSteps = []Step{
 	StepQuery,
 	StepClearGates,
 	StepGuard,
+	StepJoin,
 	StepAccumulate,
 	StepFilter,
 	StepGroupBy,
@@ -111,6 +114,8 @@ const (
 	handlerRuleSourceOnComplete           handlerRuleSource = "handler.on_complete"
 	handlerRuleSourceAccumulateOnComplete handlerRuleSource = "handler.accumulate.on_complete"
 	handlerRuleSourceAccumulateOnTimeout  handlerRuleSource = "handler.accumulate.on_timeout"
+	handlerRuleSourceJoinOnComplete       handlerRuleSource = "handler.join.on_complete"
+	handlerRuleSourceJoinTimeout          handlerRuleSource = "handler.join.timeout"
 )
 
 type contextTx struct {
@@ -179,6 +184,12 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
+	}
+	if req.Handler.Join != nil && req.Handler.Accumulate != nil {
+		return fmt.Errorf("%w: handler declares both join and accumulate", ErrInvalidConfig)
+	}
+	if err := runtimecontracts.ValidateJoinHandlerIsolation(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
 		return fmt.Errorf("%w: handler declares both create_entity and select_entity", ErrInvalidConfig)
@@ -664,6 +675,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 			Computed:    map[string]any{},
 			Accumulated: map[string]any{},
 			FanOut:      map[string]any{},
+			Join:        map[string]any{},
 			Transformed: map[string]any{},
 		},
 		result: ExecutionResult{
@@ -697,6 +709,8 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepClearGates(frame)
 	case StepGuard:
 		return e.stepGuard(frame)
+	case StepJoin:
+		return e.stepJoin(frame)
 	case StepAccumulate:
 		return e.stepAccumulate(frame)
 	case StepFilter:
@@ -736,6 +750,160 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
+	spec := frame.req.Handler.Join
+	if spec == nil {
+		return false, nil
+	}
+	payload := frame.payload
+	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
+	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.JoinID != spec.EffectiveID()) {
+		return false, failures.New(failures.ClassUnexpectedArrival, "join_timer_identity_mismatch", "runtime.engine", "join", map[string]any{
+			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+		})
+	}
+	window := ""
+	if internal {
+		window = ref.Window
+	} else if spec.Window != nil {
+		value, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Window.ByPath, spec.Window.By)
+		if !ok || strings.TrimSpace(asString(value)) == "" {
+			return false, failures.New(failures.ClassUnexpectedArrival, "join_window_missing", "runtime.engine", "join", map[string]any{
+				"row_id": spec.EffectiveID(), "window_by": spec.Window.By,
+			})
+		}
+		window = strings.TrimSpace(asString(value))
+	}
+	key := joinruntime.ActivationKey(spec.EffectiveID(), window)
+	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.NodeID.String(), key)
+	if err != nil {
+		return false, fmt.Errorf("load join activation %s: %w", key, err)
+	}
+	if !found {
+		return false, e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", spec, window, "")
+	}
+	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
+		if activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete || !activation.OutcomePending || activation.OutcomeFired {
+			frame.result.Status = OutcomeDiscarded
+			return true, nil
+		}
+		activation.OutcomePending = false
+		activation.OutcomeFired = true
+		if err := e.storeJoinActivation(frame, activation); err != nil {
+			return false, err
+		}
+		e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation)
+		return false, nil
+	}
+	if activation.Status == joinruntime.StatusClosed {
+		if internal {
+			frame.result.Status = OutcomeDiscarded
+			return true, nil
+		}
+		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_closed", spec, window, "")
+	}
+	if internal && timerKind == timeridentity.TimerHandleJoinTimeout {
+		if !activation.Close(joinruntime.CloseReasonTimeout, false, true) {
+			frame.result.Status = OutcomeDiscarded
+			return true, nil
+		}
+		if err := e.storeJoinActivation(frame, activation); err != nil {
+			return false, err
+		}
+		timeout := spec.Timeout.Outcome
+		e.selectJoinOutcome(frame, &timeout, handlerRuleSourceJoinTimeout, activation)
+		return false, nil
+	}
+	if internal {
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_internal_event_invalid", spec, window, "")
+	}
+	if strings.TrimSpace(frame.state.State.CurrentState) != strings.TrimSpace(spec.Stage) {
+		return false, e.joinArrivalFailure(frame, failures.ClassStaleArrival, "join_stage_closed", spec, window, "")
+	}
+	memberValue, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Members.ByPath, spec.Members.By)
+	member := strings.TrimSpace(asString(memberValue))
+	if !ok || member == "" {
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_missing", spec, window, member)
+	}
+	output, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.OutputPath, spec.Output)
+	if !ok {
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_output_missing", spec, window, member)
+	}
+	disposition, err := activation.Add(member, output)
+	if err != nil {
+		return false, err
+	}
+	switch disposition {
+	case joinruntime.AddUnexpected:
+		return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_member_unexpected", spec, window, member)
+	case joinruntime.AddConflictingDuplicate:
+		return false, e.joinArrivalFailure(frame, failures.ClassConflictingDuplicate, "join_member_conflicting_duplicate", spec, window, member)
+	case joinruntime.AddExactDuplicate:
+		frame.state.Join = activation.Context()
+		frame.result.Status = OutcomeWaiting
+		return true, nil
+	case joinruntime.AddAccepted:
+	default:
+		return false, fmt.Errorf("unsupported join add disposition %q", disposition)
+	}
+	frame.state.Join = activation.Context()
+	complete := activation.Completed() == activation.Expected()
+	if spec.HasCustomCompletion() {
+		complete, err = e.evaluator.EvalBool(spec.CompleteWhen, e.currentContext(frame))
+		if err != nil {
+			return false, fmt.Errorf("join complete_when: %w", err)
+		}
+	}
+	if !complete {
+		if err := e.storeJoinActivation(frame, activation); err != nil {
+			return false, err
+		}
+		frame.result.Status = OutcomeWaiting
+		return true, nil
+	}
+	activation.Close(joinruntime.CloseReasonComplete, false, true)
+	if err := e.storeJoinActivation(frame, activation); err != nil {
+		return false, err
+	}
+	e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation)
+	return false, nil
+}
+
+func (e *Executor) storeJoinActivation(frame *executionFrame, activation joinruntime.Activation) error {
+	if frame.state.State.StateCarrier.StateBuckets == nil {
+		frame.state.State.StateCarrier.StateBuckets = map[string]map[string]any{}
+	}
+	if err := joinruntime.Store(frame.state.State.StateCarrier.StateBuckets, activation); err != nil {
+		return fmt.Errorf("store join activation: %w", err)
+	}
+	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
+	frame.state.Join = activation.Context()
+	return nil
+}
+
+func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) {
+	frame.state.Join = activation.Context()
+	frame.rule = rule
+	frame.ruleSource = source
+	e.applyRule(frame, rule)
+}
+
+func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Class, code string, spec *runtimecontracts.JoinSpec, window, member string) error {
+	attributes := map[string]any{
+		"row_id":        spec.EffectiveID(),
+		"stage":         strings.TrimSpace(spec.Stage),
+		"node_id":       frame.req.NodeID.String(),
+		"handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+	}
+	if strings.TrimSpace(window) != "" {
+		attributes["window"] = strings.TrimSpace(window)
+	}
+	if strings.TrimSpace(member) != "" {
+		attributes["member"] = strings.TrimSpace(member)
+	}
+	return failures.New(class, code, "runtime.engine", "join", attributes)
 }
 
 func (e *Executor) stepQuery(frame *executionFrame) error {
@@ -1674,6 +1842,9 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
+	if frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout {
+		return nil
+	}
 	if isAccumulationTimeoutEvent(frame.req.Event.Type()) &&
 		frame.req.Handler.Accumulate != nil &&
 		frame.req.Handler.Accumulate.OnTimeout != nil &&
@@ -1821,6 +1992,10 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 		frame.topLevelDataWritesApplied = true
 	}
 	return nil
+}
+
+func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
+	return workflowexpr.ValueExpressionOptions{AllowJoin: frame != nil && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout)}
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {
@@ -2068,7 +2243,7 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 	}
 	// Resolve emit.fields against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
 	if err != nil {
 		return err
 	}
@@ -2104,7 +2279,7 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 		if emitSpec.HasFields() && len(activeEmits) == 1 && len(frame.state.Transformed) > 0 {
 			payload = frame.state.Transformed
 		} else if emitSpec.HasFields() {
-			transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+			transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
 			if err != nil {
 				return err
 			}
@@ -2561,6 +2736,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithEvent(ctx, frame.req.Event.ContextMap(frame.state.State.CurrentState))
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
+	ctx = WithJoin(ctx, frame.state.Join)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
@@ -2587,6 +2763,8 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	case paths.RootFanOut:
 		frame.state.SetFanOut(strings.Join(parsed.Segments, "."), value)
 		return nil
+	case paths.RootJoin:
+		return fmt.Errorf("join context is read-only")
 	}
 	if frame.state.State.StateCarrier.Metadata == nil {
 		frame.state.State.StateCarrier.Metadata = map[string]any{}
@@ -2639,6 +2817,8 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		delete(frame.state.Accumulated, strings.Join(parsed.Segments, "."))
 	case paths.RootFanOut:
 		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
+	case paths.RootJoin:
+		return fmt.Errorf("join context is read-only")
 	case paths.RootEntity, paths.RootMetadata:
 		if parsed.Root == paths.RootEntity {
 			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
@@ -2785,7 +2965,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			continue
 		}
 		switch parsed := paths.Parse(target); parsed.Root {
-		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
+		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
 		if write.Value.HasLiteralValue() {
@@ -2795,7 +2975,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			continue
 		}
 		if write.Value.HasCELValue() {
-			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL, workflowexpr.ValueExpressionOptions{})
+			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL, joinExpressionOptions(frame))
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}

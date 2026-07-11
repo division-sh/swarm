@@ -22,6 +22,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
 		Transitions:            deriveStageTimerTransitions(bundle),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
+		Joins:                  nil,
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		Actions:                deriveWorkflowActionEntries(bundle),
 		GuardByID:              map[string]GuardActionEntry{},
@@ -152,6 +153,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				OnComplete:           handler.OnComplete,
 				Rules:                handler.Rules,
 				Accumulate:           handler.Accumulate,
+				Join:                 handler.Join,
 				Compute:              handler.Compute,
 				Query:                handler.Query,
 				FanOut:               handler.FanOut,
@@ -162,6 +164,14 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Clear:                handler.Clear,
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
+			if handler.Join != nil {
+				semantics.Joins = append(semantics.Joins, WorkflowJoinPlan{
+					FlowID:       strings.TrimSpace(source.FlowID),
+					NodeID:       nodeID,
+					HandlerEvent: rawEventType,
+					Spec:         *handler.Join,
+				})
+			}
 			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
 				semantics.Transitions = append(semantics.Transitions, derivedTransition)
 			}
@@ -169,6 +179,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			if timeoutTransition, ok := deriveAccumulateTimeoutTransition(transition); ok {
 				semantics.Transitions = append(semantics.Transitions, timeoutTransition)
 			}
+			semantics.Transitions = append(semantics.Transitions, deriveJoinTransitions(transition)...)
 			if semantics.HandlerTransitionIndex[nodeID] == nil {
 				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
 			}
@@ -351,6 +362,34 @@ func deriveAccumulateTimeoutTransition(transition HandlerTransitionSemantic) (Wo
 		}, true
 	}
 	return WorkflowTransitionContract{}, false
+}
+
+func deriveJoinTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
+	if transition.Join == nil {
+		return nil
+	}
+	join := transition.Join
+	from := []string{strings.TrimSpace(join.Stage)}
+	out := make([]WorkflowTransitionContract, 0, 2)
+	if target := strings.TrimSpace(join.OnComplete.AdvancesTo); target != "" {
+		out = append(out, WorkflowTransitionContract{
+			ID:      strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":complete",
+			From:    from,
+			To:      target,
+			Trigger: strings.TrimSpace(transition.EventType),
+			Node:    strings.TrimSpace(transition.NodeID),
+		})
+	}
+	if target := strings.TrimSpace(join.Timeout.Outcome.AdvancesTo); target != "" {
+		out = append(out, WorkflowTransitionContract{
+			ID:      strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":timeout",
+			From:    from,
+			To:      target,
+			Trigger: "platform.join_timeout",
+			Node:    strings.TrimSpace(transition.NodeID),
+		})
+	}
+	return out
 }
 
 func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {

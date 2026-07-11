@@ -329,6 +329,38 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
+		Semantics:  runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting"},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &runtimecontracts.JoinSpec{
+			ID: "line_items", Stage: "awaiting",
+			OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
+			Timeout:    runtimecontracts.JoinTimeoutSpec{After: "24h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}},
+		}}}}},
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := view.StageGraphs[0]
+	var complete, timeout StageGraphEdgeView
+	for _, edge := range graph.Edges {
+		switch edge.Source {
+		case string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete):
+			complete = edge
+		case string(runtimecontracts.HandlerAdvanceCarrierJoinTimeout):
+			timeout = edge
+		}
+	}
+	if len(complete.From) != 1 || complete.From[0] != "awaiting" || complete.To != "ready" {
+		t.Fatalf("complete edge = %#v", complete)
+	}
+	if len(timeout.From) != 1 || timeout.From[0] != "awaiting" || timeout.To != "attention" || !timeout.Timed || timeout.After != "24h" || timeout.TimerID != "line_items" {
+		t.Fatalf("timeout edge = %#v", timeout)
+	}
+}
+
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",

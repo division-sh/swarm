@@ -43,11 +43,13 @@ type ValueContext struct {
 	Policy         map[string]any
 	Computed       map[string]any
 	FanOut         map[string]any
+	Join           map[string]any
 }
 
 type ValueExpressionOptions struct {
 	AllowBareItem bool
 	ItemAlias     string
+	AllowJoin     bool
 }
 
 func ValidateValueExpression(expression string) error {
@@ -74,6 +76,9 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	}
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(expression, "index") {
 		return fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
+	}
+	if !opts.AllowJoin && ExpressionReferencesRoot(expression, "join") {
+		return fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
 	}
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
@@ -110,6 +115,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(normalized, "index") {
 		return nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
+	if !opts.AllowJoin && ExpressionReferencesRoot(normalized, "join") {
+		return nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
+	}
 	if err := ValidateEventReferences(normalized); err != nil {
 		return nil, err
 	}
@@ -132,6 +140,7 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 		"policy":   NormalizeCELInputMap(ctx.Policy),
 		"computed": NormalizeCELInputMap(ctx.Computed),
 		"fan_out":  NormalizeCELInputMap(ctx.FanOut),
+		"join":     NormalizeCELInputMap(ctx.Join),
 	}
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
@@ -144,6 +153,31 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 		return nil, err
 	}
 	return NormalizeCELValue(out), nil
+}
+
+func ExpressionReferencesRoot(expression, root string) bool {
+	expression = StripStringLiterals(strings.TrimSpace(expression))
+	root = strings.TrimSpace(root)
+	if expression == "" || root == "" {
+		return false
+	}
+	for i := 0; i < len(expression); i++ {
+		if !strings.HasPrefix(expression[i:], root) {
+			continue
+		}
+		if i > 0 && isIdentifierPart(expression[i-1]) {
+			continue
+		}
+		end := i + len(root)
+		if end < len(expression) && isIdentifierPart(expression[end]) {
+			continue
+		}
+		end = skipExpressionWhitespace(expression, end)
+		if end < len(expression) && (expression[end] == '.' || expression[end] == '[') {
+			return true
+		}
+	}
+	return false
 }
 
 func ExpressionReferencesEntity(expression string) bool {
@@ -740,6 +774,7 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string) (*cel.Env, error
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
+		cel.Variable("join", cel.DynType),
 	}
 	if allowBareItem {
 		variables = append(variables, cel.Variable("item", cel.DynType))

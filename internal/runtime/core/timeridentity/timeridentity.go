@@ -26,14 +26,26 @@ type TimerHandleKind string
 const (
 	TimerHandleWorkflowTimer       TimerHandleKind = "workflow_timer"
 	TimerHandleAccumulationTimeout TimerHandleKind = "accumulation_timeout"
+	TimerHandleJoinTimeout         TimerHandleKind = "join_timeout"
+	TimerHandleJoinComplete        TimerHandleKind = "join_complete"
 	timerHandlePayloadKey                          = "timer_handle"
 	accumulationTimeoutTaskPrefix                  = "accumulate_timeout:"
+	joinTimeoutTaskPrefix                          = "join_timeout:"
+	joinCompleteTaskPrefix                         = "join_complete:"
 )
 
 type TimerHandle struct {
 	Kind    TimerHandleKind
 	TimerID string
 	Bucket  AccumulatorBucketRef
+	Join    JoinRef
+}
+
+type JoinRef struct {
+	NodeID       string
+	HandlerEvent string
+	JoinID       string
+	Window       string
 }
 
 type AccumulatorBucketRef struct {
@@ -153,12 +165,22 @@ func AccumulationTimeoutHandle(bucket AccumulatorBucketRef) TimerHandle {
 	}
 }
 
+func JoinTimeoutHandle(ref JoinRef) TimerHandle {
+	return TimerHandle{Kind: TimerHandleJoinTimeout, Join: ref.Normalize()}
+}
+
+func JoinCompleteHandle(ref JoinRef) TimerHandle {
+	return TimerHandle{Kind: TimerHandleJoinComplete, Join: ref.Normalize()}
+}
+
 func (h TimerHandle) Valid() bool {
 	switch h.Kind {
 	case TimerHandleWorkflowTimer:
 		return strings.TrimSpace(h.TimerID) != ""
 	case TimerHandleAccumulationTimeout:
 		return h.Bucket.Valid()
+	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
+		return h.Join.Valid()
 	default:
 		return false
 	}
@@ -173,6 +195,10 @@ func (h TimerHandle) TaskID() string {
 			return ""
 		}
 		return accumulationTimeoutTaskPrefix + h.Bucket.Key()
+	case TimerHandleJoinTimeout:
+		return joinTimeoutTaskPrefix + h.Join.Key()
+	case TimerHandleJoinComplete:
+		return joinCompleteTaskPrefix + h.Join.Key()
 	default:
 		return ""
 	}
@@ -190,6 +216,8 @@ func (h TimerHandle) PayloadMetadata() map[string]any {
 		handle["timer_id"] = strings.TrimSpace(h.TimerID)
 	case TimerHandleAccumulationTimeout:
 		handle["bucket"] = h.Bucket.PayloadValue()
+	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
+		handle["join"] = h.Join.PayloadValue()
 	}
 	return map[string]any{
 		timerHandlePayloadKey: handle,
@@ -212,9 +240,79 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 		}
 		handle := AccumulationTimeoutHandle(bucket)
 		return handle, handle.Valid()
+	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
+		ref, ok := joinRefFromAny(handleMap["join"])
+		if !ok {
+			return TimerHandle{}, false
+		}
+		handle := JoinTimeoutHandle(ref)
+		if TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) == TimerHandleJoinComplete {
+			handle = JoinCompleteHandle(ref)
+		}
+		return handle, handle.Valid()
 	default:
 		return TimerHandle{}, false
 	}
+}
+
+func NewJoinRef(nodeID, handlerEvent, joinID, window string) JoinRef {
+	return JoinRef{
+		NodeID:       strings.TrimSpace(nodeID),
+		HandlerEvent: strings.TrimSpace(handlerEvent),
+		JoinID:       strings.TrimSpace(joinID),
+		Window:       strings.TrimSpace(window),
+	}
+}
+
+func (r JoinRef) Normalize() JoinRef {
+	return NewJoinRef(r.NodeID, r.HandlerEvent, r.JoinID, r.Window)
+}
+
+func (r JoinRef) Valid() bool {
+	r = r.Normalize()
+	return r.NodeID != "" && r.HandlerEvent != "" && r.JoinID != ""
+}
+
+func (r JoinRef) Key() string {
+	r = r.Normalize()
+	if !r.Valid() {
+		return ""
+	}
+	parts := []string{r.NodeID, r.HandlerEvent, r.JoinID, r.Window}
+	for i := range parts {
+		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
+	}
+	return strings.Join(parts, ".")
+}
+
+func (r JoinRef) PayloadValue() map[string]any {
+	r = r.Normalize()
+	if !r.Valid() {
+		return nil
+	}
+	return map[string]any{
+		"node_id":       r.NodeID,
+		"handler_event": r.HandlerEvent,
+		"join_id":       r.JoinID,
+		"window":        r.Window,
+	}
+}
+
+func ParseJoinRef(payload map[string]any) (JoinRef, TimerHandleKind, bool) {
+	handle, ok := ParseTimerHandle(payload)
+	if !ok || (handle.Kind != TimerHandleJoinTimeout && handle.Kind != TimerHandleJoinComplete) {
+		return JoinRef{}, "", false
+	}
+	return handle.Join, handle.Kind, handle.Join.Valid()
+}
+
+func joinRefFromAny(value any) (JoinRef, bool) {
+	raw, ok := stringAnyMap(value)
+	if !ok {
+		return JoinRef{}, false
+	}
+	ref := NewJoinRef(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["join_id"]), asString(raw["window"]))
+	return ref, ref.Valid()
 }
 
 func NewAccumulatorBucketRef(nodeID, eventType string) AccumulatorBucketRef {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -295,6 +296,77 @@ stages: []
 	}
 	if len(doc.LoweredStates()) != 0 || doc.LoweredInitialState() != "" || len(doc.LoweredTerminalStates()) != 0 {
 		t.Fatalf("lowered explicit stateless lifecycle = initial %q states %#v terminals %#v, want empty", doc.LoweredInitialState(), doc.LoweredStates(), doc.LoweredTerminalStates())
+	}
+}
+
+func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
+	var nodes map[string]SystemNodeContract
+	err := yaml.Unmarshal([]byte(`
+coordinator:
+  id: coordinator
+  execution_type: system_node
+  event_handlers:
+    item.completed:
+      join:
+        stage: awaiting_items
+        members:
+          from: entity.expected_item_ids
+          by: payload.item_id
+        window:
+          from: entity.dispatch_id
+          by: payload.dispatch_id
+        output: payload.result
+        complete_when: join.completed >= 2
+        remaining: ignore
+        on_complete:
+          emit:
+            event: items.completed
+            fields:
+              results: join.results
+          advances_to: ready
+        timeout:
+          after: 24h
+          emit:
+            event: items.timed_out
+            fields:
+              missing: join.missing
+          advances_to: attention
+`), &nodes)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal join: %v", err)
+	}
+	join := nodes["coordinator"].EventHandlers["item.completed"].Join
+	if join == nil {
+		t.Fatal("join = nil")
+	}
+	if got, want := join.EffectiveID(), "awaiting_items"; got != want {
+		t.Fatalf("join id = %q, want %q", got, want)
+	}
+	if join.Members.FromPath.Root != paths.RootEntity || join.Members.ByPath.Root != paths.RootPayload {
+		t.Fatalf("join member paths = %#v/%#v", join.Members.FromPath, join.Members.ByPath)
+	}
+	if join.Window == nil || join.Window.FromPath.Root != paths.RootEntity || join.Window.ByPath.Root != paths.RootPayload {
+		t.Fatalf("join window = %#v", join.Window)
+	}
+	if !join.OnCompleteFound || join.OnComplete.Emit.EventType() != "items.completed" || join.OnComplete.AdvancesTo != "ready" {
+		t.Fatalf("join on_complete = %#v", join.OnComplete)
+	}
+	if !join.TimeoutFound || join.Timeout.After != "24h" || join.Timeout.Outcome.Emit.EventType() != "items.timed_out" {
+		t.Fatalf("join timeout = %#v", join.Timeout)
+	}
+}
+
+func TestSystemNodeHandlerDecodeJoinRejectsUnsupportedFields(t *testing.T) {
+	for _, input := range []string{
+		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, interrupting: true}`,
+		`join: {stage: waiting, members: {from: entity.ids, by: payload.id, dedup_by: payload.id}, output: payload.result}`,
+		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, on_complete: {action: {id: noop}}}`,
+		`join: {stage: waiting, members: {from: entity.ids, by: payload.id}, output: payload.result, timeout: {after: 1h, repeat: 2}}`,
+	} {
+		var handler SystemNodeEventHandler
+		if err := yaml.Unmarshal([]byte(input), &handler); err == nil {
+			t.Fatalf("yaml.Unmarshal(%q) error = nil", input)
+		}
 	}
 }
 
