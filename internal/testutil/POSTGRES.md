@@ -12,6 +12,13 @@ that template for each test, and removes the databases during cleanup. Custom
 empty passwords are intentionally unsupported because cleanup runs in a separate
 process and must receive a self-contained connection value.
 
+The role also owns one permanent `mas_control_v1_*` database. That database is
+the durable pre-create intent authority that lets the harness distinguish a
+crash between `CREATE DATABASE` and metadata stamping from an unrelated or
+forged database. Valid older content-addressed `mas_template_v1_*` templates are
+retained as immutable caches; unstamped resources without a matching committed
+intent are left untouched and block reconciliation.
+
 ## Existing Host Postgres
 
 For a local PostgreSQL 16 server whose current administrator can create roles:

@@ -2,8 +2,11 @@ package testpostgres
 
 import (
 	"context"
+	"database/sql"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -114,6 +117,242 @@ func TestManagerLeavesUnprovableSandboxUntouched(t *testing.T) {
 	}
 }
 
+func TestManagerLeavesSignedUnstampedSandboxWithoutIntentUntouched(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+	name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	defer dropDatabase(context.Background(), db, name)
+	if err := manager.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "durable pre-create intent") {
+		t.Fatalf("Reconcile() error = %v, want durable-intent blocker", err)
+	}
+	assertDatabaseExists(t, manager.admin, name)
+}
+
+func TestManagerReclaimsSandboxInterruptedBetweenCreateAndMetadata(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+	name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
+	intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: advisoryKey("sandbox:" + identity)}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertDatabaseAbsent(t, manager.admin, name)
+	if _, found, err := manager.intent(ctx, name); err != nil || found {
+		t.Fatalf("intent found=%v err=%v, want cleared", found, err)
+	}
+}
+
+func TestManagerReclaimsTemplateInterruptedBetweenCreateAndMetadata(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	identity := "interrupted" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	name := manager.signedResourceName(templateNamePrefix, "template", identity)
+	if err := manager.putIntent(ctx, resourceIntent{Name: name, Kind: "template", Identity: identity}); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertDatabaseAbsent(t, manager.admin, name)
+}
+
+func TestManagerReconcilesAbruptCreateBeforeMetadataExit(t *testing.T) {
+	manager := integrationManager(t)
+	for _, kind := range []string{"sandbox", "template"} {
+		t.Run(kind, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "resource-name")
+			command := exec.Command(os.Args[0], "-test.run=^TestManagerCreateBeforeMetadataCrashHelper$")
+			command.Env = append(os.Environ(), "SWARM_TEST_MANAGER_CRASH_KIND="+kind, "SWARM_TEST_MANAGER_CRASH_OUTPUT="+output)
+			if raw, err := command.CombinedOutput(); err == nil {
+				t.Fatalf("crash helper unexpectedly succeeded: %s", raw)
+			}
+			rawName, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := strings.TrimSpace(string(rawName))
+			assertDatabaseExists(t, manager.admin, name)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := manager.Reconcile(ctx); err != nil {
+				t.Fatal(err)
+			}
+			assertDatabaseAbsent(t, manager.admin, name)
+		})
+	}
+}
+
+func TestManagerCreateBeforeMetadataCrashHelper(t *testing.T) {
+	kind := os.Getenv("SWARM_TEST_MANAGER_CRASH_KIND")
+	if kind == "" {
+		t.Skip("subprocess helper")
+	}
+	output := os.Getenv("SWARM_TEST_MANAGER_CRASH_OUTPUT")
+	connection, err := ConnectionFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	manager, err := NewManager(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := kind + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	prefix := sandboxNamePrefix
+	leaseKey := advisoryKey("sandbox:" + identity)
+	if kind == "template" {
+		prefix = templateNamePrefix
+		leaseKey = 0
+	}
+	name := manager.signedResourceName(prefix, kind, identity)
+	intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	lockKey := leaseKey
+	if kind == "template" {
+		lockKey = advisoryKey("template:" + name)
+	}
+	lockConn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, lockConn, lockKey, "crash-window "+name); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, []byte(name+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(91)
+}
+
+func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	identity := "oldschema" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	name := manager.signedResourceName(templateNamePrefix, "template", identity)
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	defer dropDatabase(context.Background(), db, name)
+	if err := setDatabaseMetadata(ctx, db, name, resourceMetadata{Version: 1, Kind: "template", Identity: identity}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertDatabaseExists(t, manager.admin, name)
+}
+
+func TestManagerDDLAdmissionSharesSandboxWorkAndFencesTemplateMutation(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	holder, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	key := advisoryKey("global-ddl-admission")
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_lock_shared($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.ExecContext(context.Background(), `SELECT pg_advisory_unlock_shared($1)`, key)
+	if err := manager.withDDLAdmission(ctx, db, "concurrent sandbox proof", func(*sql.Conn) error { return nil }); err != nil {
+		t.Fatalf("shared sandbox admission blocked by shared holder: %v", err)
+	}
+	exclusiveCtx, exclusiveCancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer exclusiveCancel()
+	err = manager.withExclusiveDDLAdmission(exclusiveCtx, db, "template fence proof", func(*sql.Conn) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("exclusive admission error = %v, want shared-holder fence", err)
+	}
+}
+
+func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+	name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
+	leaseKey := advisoryKey("sandbox:" + identity)
+	intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	defer dropDatabase(context.Background(), db, name)
+	candidate := databaseCandidate{name: name, owner: manager.role, comment: ""}
+	if err := setDatabaseMetadata(ctx, db, name, resourceMetadata{Version: 1, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.deleteIntent(ctx, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.reconcileDatabaseCandidate(ctx, db, candidate); err != nil {
+		t.Fatalf("stale CREATE-window snapshot produced a false blocker: %v", err)
+	}
+	assertDatabaseAbsent(t, manager.admin, name)
+}
+
 func integrationManager(t *testing.T) *Manager {
 	t.Helper()
 	raw := strings.TrimSpace(os.Getenv(SourceEnv))
@@ -146,5 +385,21 @@ func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {
 	}
 	if exists {
 		t.Fatalf("database %q still exists", name)
+	}
+}
+
+func assertDatabaseExists(t *testing.T, connection Connection, name string) {
+	t.Helper()
+	db, err := connection.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, name).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatalf("database %q is absent", name)
 	}
 }

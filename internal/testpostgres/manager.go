@@ -24,14 +24,18 @@ import (
 
 const (
 	resourceMetadataPrefix = "swarm-test-postgres:v1:"
+	controlNamePrefix      = "mas_control_v1_"
 	templateNamePrefix     = "mas_template_v1_"
 	sandboxNamePrefix      = "mas_test_v1_"
+	intentTableName        = "swarm_test_resource_intents_v1"
 )
 
 type Manager struct {
 	admin        Connection
 	role         string
 	ownershipKey []byte
+	controlName  string
+	control      Connection
 	templateID   string
 	templateName string
 	spec         runtimecontracts.PlatformSpecDocument
@@ -56,6 +60,20 @@ type resourceMetadata struct {
 	Identity string `json:"identity"`
 	LeaseKey int64  `json:"lease_key,omitempty"`
 	Template string `json:"template,omitempty"`
+}
+
+type resourceIntent struct {
+	Name     string
+	Kind     string
+	Identity string
+	LeaseKey int64
+	Template string
+}
+
+type databaseCandidate struct {
+	name    string
+	comment string
+	owner   string
 }
 
 func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
@@ -97,7 +115,16 @@ func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
 		admin: admin, role: role, ownershipKey: keyDigest[:], templateID: digest,
 		spec: spec, ddlPlans: plans,
 	}
+	controlID := hex.EncodeToString(keyDigest[:])[:24]
+	m.controlName = m.signedResourceName(controlNamePrefix, "control", controlID)
+	m.control, err = admin.WithDatabase(m.controlName)
+	if err != nil {
+		return nil, fmt.Errorf("project postgres test control database: %w", err)
+	}
 	m.templateName = m.signedResourceName(templateNamePrefix, "template", digest)
+	if err := m.ensureControlDatabase(ctx, db); err != nil {
+		return nil, err
+	}
 	if err := m.Reconcile(ctx); err != nil {
 		return nil, err
 	}
@@ -149,6 +176,13 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 			_ = leaseConn.Close()
 		}
 	}()
+	intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}
+	if withTemplate {
+		intent.Template = m.templateName
+	}
+	if err := m.putIntent(ctx, intent); err != nil {
+		return nil, err
+	}
 
 	if withTemplate {
 		err = m.withDDLAdmission(ctx, adminDB, "clone sandbox "+name, func(conn *sql.Conn) error {
@@ -160,6 +194,7 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 		})
 	}
 	if err != nil {
+		_ = m.deleteIntent(context.Background(), name)
 		return nil, fmt.Errorf("create postgres sandbox %q: %w", name, err)
 	}
 	metadata := resourceMetadata{Version: 1, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}
@@ -167,6 +202,11 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 		metadata.Template = m.templateName
 	}
 	if err := setDatabaseMetadata(ctx, adminDB, name, metadata); err != nil {
+		_ = m.dropSandbox(context.Background(), adminDB, name)
+		_ = m.deleteIntent(context.Background(), name)
+		return nil, err
+	}
+	if err := m.deleteIntent(ctx, name); err != nil {
 		_ = m.dropSandbox(context.Background(), adminDB, name)
 		return nil, err
 	}
@@ -218,6 +258,160 @@ func (s *Sandbox) Release(ctx context.Context) error {
 	return s.releaseErr
 }
 
+func (m *Manager) ensureControlDatabase(ctx context.Context, adminDB *sql.DB) error {
+	exists, err := m.validateControlDatabase(ctx, adminDB)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		err = m.withExclusiveDDLAdmission(ctx, adminDB, "initialize test control database", func(conn *sql.Conn) error {
+			exists, err := m.validateControlDatabase(ctx, conn)
+			if err != nil || exists {
+				return err
+			}
+			return createDatabase(ctx, conn, m.controlName)
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("initialize postgres test control database: %w", err)
+	}
+	controlDB, err := m.control.Open()
+	if err != nil {
+		return fmt.Errorf("open postgres test control database: %w", err)
+	}
+	defer controlDB.Close()
+	if err := waitForDatabase(ctx, controlDB, 30*time.Second); err != nil {
+		return fmt.Errorf("wait for postgres test control database: %w", err)
+	}
+	_, err = controlDB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+quoteIdent(intentTableName)+` (
+		resource_name text PRIMARY KEY,
+		kind text NOT NULL,
+		identity text NOT NULL,
+		lease_key bigint NOT NULL DEFAULT 0,
+		template_name text NOT NULL DEFAULT '',
+		created_at timestamptz NOT NULL DEFAULT now()
+	)`)
+	if err != nil {
+		return fmt.Errorf("create postgres test resource-intent authority: %w", err)
+	}
+	return nil
+}
+
+type databaseRowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (m *Manager) validateControlDatabase(ctx context.Context, db databaseRowQueryer) (bool, error) {
+	var owner string
+	err := db.QueryRowContext(ctx, `
+		SELECT r.rolname FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
+		WHERE d.datname=$1`, m.controlName).Scan(&owner)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if owner != m.role {
+		return false, fmt.Errorf("control database %q owner %q does not match authenticated role %q; left untouched", m.controlName, owner, m.role)
+	}
+	if _, signed := m.verifyResourceName(m.controlName, controlNamePrefix, "control"); !signed {
+		return false, fmt.Errorf("control database %q lacks valid ownership proof; left untouched", m.controlName)
+	}
+	return true, nil
+}
+
+func (m *Manager) putIntent(ctx context.Context, intent resourceIntent) error {
+	if !m.intentMatchesName(intent) {
+		return fmt.Errorf("refuse invalid postgres test resource intent for %q", intent.Name)
+	}
+	db, err := m.control.Open()
+	if err != nil {
+		return fmt.Errorf("open postgres test control authority: %w", err)
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `INSERT INTO `+quoteIdent(intentTableName)+`
+		(resource_name, kind, identity, lease_key, template_name) VALUES ($1,$2,$3,$4,$5)`,
+		intent.Name, intent.Kind, intent.Identity, intent.LeaseKey, intent.Template)
+	if err != nil {
+		return fmt.Errorf("record postgres test resource intent %q: %w", intent.Name, err)
+	}
+	return nil
+}
+
+func (m *Manager) intent(ctx context.Context, name string) (resourceIntent, bool, error) {
+	db, err := m.control.Open()
+	if err != nil {
+		return resourceIntent{}, false, err
+	}
+	defer db.Close()
+	var intent resourceIntent
+	err = db.QueryRowContext(ctx, `SELECT resource_name, kind, identity, lease_key, template_name FROM `+quoteIdent(intentTableName)+` WHERE resource_name=$1`, name).
+		Scan(&intent.Name, &intent.Kind, &intent.Identity, &intent.LeaseKey, &intent.Template)
+	if err == sql.ErrNoRows {
+		return resourceIntent{}, false, nil
+	}
+	if err != nil {
+		return resourceIntent{}, false, err
+	}
+	return intent, true, nil
+}
+
+func (m *Manager) intents(ctx context.Context) ([]resourceIntent, error) {
+	db, err := m.control.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT resource_name, kind, identity, lease_key, template_name FROM `+quoteIdent(intentTableName)+` ORDER BY resource_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var intents []resourceIntent
+	for rows.Next() {
+		var intent resourceIntent
+		if err := rows.Scan(&intent.Name, &intent.Kind, &intent.Identity, &intent.LeaseKey, &intent.Template); err != nil {
+			return nil, err
+		}
+		intents = append(intents, intent)
+	}
+	return intents, rows.Err()
+}
+
+func (m *Manager) deleteIntent(ctx context.Context, name string) error {
+	db, err := m.control.Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `DELETE FROM `+quoteIdent(intentTableName)+` WHERE resource_name=$1`, name)
+	return err
+}
+
+func (m *Manager) intentMatchesName(intent resourceIntent) bool {
+	if intent.Name == "" || intent.Identity == "" {
+		return false
+	}
+	switch intent.Kind {
+	case "sandbox":
+		identity, ok := m.verifyResourceName(intent.Name, sandboxNamePrefix, "sandbox")
+		if !ok || identity != intent.Identity || intent.LeaseKey != advisoryKey("sandbox:"+identity) {
+			return false
+		}
+		if intent.Template == "" {
+			return true
+		}
+		_, templateOK := m.verifyResourceName(intent.Template, templateNamePrefix, "template")
+		return templateOK
+	case "template":
+		identity, ok := m.verifyResourceName(intent.Name, templateNamePrefix, "template")
+		return ok && identity == intent.Identity && intent.LeaseKey == 0 && intent.Template == ""
+	default:
+		return false
+	}
+}
+
 func (m *Manager) Reconcile(ctx context.Context) error {
 	db, err := m.admin.Open()
 	if err != nil {
@@ -227,64 +421,141 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	rows, err := db.QueryContext(ctx, `
 		SELECT d.datname, COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
-		WHERE d.datname LIKE 'mas_test_v1_%'
+		WHERE d.datname LIKE 'mas_test_v1_%' OR d.datname LIKE 'mas_template_v1_%'
 		ORDER BY d.datname`)
 	if err != nil {
-		return fmt.Errorf("list postgres test sandboxes: %w", err)
+		return fmt.Errorf("list postgres test resources: %w", err)
 	}
-	type candidate struct{ name, comment, owner string }
-	var candidates []candidate
+	var candidates []databaseCandidate
+	seen := make(map[string]bool)
 	for rows.Next() {
-		var c candidate
+		var c databaseCandidate
 		if err := rows.Scan(&c.name, &c.comment, &c.owner); err != nil {
 			_ = rows.Close()
-			return fmt.Errorf("scan postgres test sandbox: %w", err)
+			return fmt.Errorf("scan postgres test resource: %w", err)
 		}
 		candidates = append(candidates, c)
+		seen[c.name] = true
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
 	for _, c := range candidates {
-		if c.owner != m.role {
-			return fmt.Errorf("unprovable postgres test sandbox %q left untouched: owner %q does not match authenticated role %q", c.name, c.owner, m.role)
-		}
-		identity, signed := m.verifyResourceName(c.name, sandboxNamePrefix, "sandbox")
-		if !signed {
-			return fmt.Errorf("unprovable postgres test sandbox %q left untouched: invalid ownership signature", c.name)
-		}
-		metadata, err := parseResourceMetadata(c.comment)
-		if err != nil {
-			if strings.TrimSpace(c.comment) != "" {
-				return fmt.Errorf("unprovable postgres test sandbox %q left untouched: %v", c.name, err)
-			}
-			metadata = resourceMetadata{Version: 1, Kind: "sandbox", Identity: identity, LeaseKey: advisoryKey("sandbox:" + identity)}
-		}
-		if metadata.Kind != "sandbox" || metadata.Identity != identity || metadata.LeaseKey != advisoryKey("sandbox:"+identity) {
-			return fmt.Errorf("unprovable postgres test sandbox %q left untouched: metadata mismatch", c.name)
-		}
-		conn, err := db.Conn(ctx)
-		if err != nil {
+		if err := m.reconcileDatabaseCandidate(ctx, db, c); err != nil {
 			return err
 		}
-		var acquired bool
-		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, metadata.LeaseKey).Scan(&acquired); err != nil {
-			_ = conn.Close()
+	}
+	intents, err := m.intents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, intent := range intents {
+		if seen[intent.Name] {
+			continue
+		}
+		if !m.intentMatchesName(intent) {
+			return fmt.Errorf("invalid postgres test resource intent %q left untouched", intent.Name)
+		}
+		lockKey := intent.LeaseKey
+		if intent.Kind == "template" {
+			lockKey = advisoryKey("template:" + intent.Name)
+		}
+		lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
+		if err != nil {
 			return err
 		}
 		if !acquired {
-			_ = conn.Close()
 			continue
 		}
-		if err := m.dropSandbox(ctx, db, c.name); err != nil {
-			_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, metadata.LeaseKey)
-			_ = conn.Close()
-			return fmt.Errorf("reconcile stale postgres sandbox %q: %w", c.name, err)
+		err = m.deleteIntent(ctx, intent.Name)
+		releaseAdvisoryLock(lockConn, lockKey)
+		if err != nil {
+			return err
 		}
-		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, metadata.LeaseKey)
-		_ = conn.Close()
 	}
 	return nil
+}
+
+func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, candidate databaseCandidate) error {
+	if candidate.owner != m.role {
+		return fmt.Errorf("unprovable postgres test resource %q left untouched: owner %q does not match authenticated role %q", candidate.name, candidate.owner, m.role)
+	}
+	kind, prefix := "sandbox", sandboxNamePrefix
+	if strings.HasPrefix(candidate.name, templateNamePrefix) {
+		kind, prefix = "template", templateNamePrefix
+	}
+	identity, signed := m.verifyResourceName(candidate.name, prefix, kind)
+	if !signed {
+		return fmt.Errorf("unprovable postgres test %s %q left untouched: invalid ownership signature", kind, candidate.name)
+	}
+	lockKey := advisoryKey("template:" + candidate.name)
+	if kind == "sandbox" {
+		lockKey = advisoryKey("sandbox:" + identity)
+	}
+	lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
+	if err != nil || !acquired {
+		return err
+	}
+	defer releaseAdvisoryLock(lockConn, lockKey)
+
+	// Refresh the comment only after fencing the creator. The original namespace
+	// scan may have observed CREATE before COMMENT while the durable intent was
+	// subsequently retired after a successful stamp.
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname=$1`, candidate.name).Scan(&candidate.comment); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	metadata, metadataErr := parseResourceMetadata(candidate.comment)
+	intent, hasIntent, err := m.intent(ctx, candidate.name)
+	if err != nil {
+		return fmt.Errorf("read postgres test resource intent %q: %w", candidate.name, err)
+	}
+	if metadataErr != nil {
+		if strings.TrimSpace(candidate.comment) != "" || !hasIntent || !m.intentMatchesName(intent) || intent.Kind != kind || intent.Identity != identity {
+			return fmt.Errorf("unprovable postgres test %s %q left untouched: valid stamped metadata or matching durable pre-create intent is required", kind, candidate.name)
+		}
+	} else {
+		if metadata.Kind != kind || metadata.Identity != identity || !m.validResourceMetadata(metadata) {
+			return fmt.Errorf("unprovable postgres test %s %q left untouched: metadata mismatch", kind, candidate.name)
+		}
+		if hasIntent {
+			if !m.intentMatchesName(intent) || intent.Kind != kind || intent.Identity != identity {
+				return fmt.Errorf("unprovable postgres test %s %q left untouched: durable intent mismatch", kind, candidate.name)
+			}
+			if err := m.deleteIntent(ctx, candidate.name); err != nil {
+				return err
+			}
+		}
+		if kind == "template" {
+			// Content-addressed templates are immutable retained caches. A newer
+			// schema digest creates a sibling without mutating or deleting this one.
+			return nil
+		}
+	}
+	if err := m.dropSandbox(ctx, db, candidate.name); err != nil {
+		return fmt.Errorf("reconcile stale postgres test %s %q: %w", kind, candidate.name, err)
+	}
+	return m.deleteIntent(ctx, candidate.name)
+}
+
+func (m *Manager) validResourceMetadata(metadata resourceMetadata) bool {
+	switch metadata.Kind {
+	case "sandbox":
+		if metadata.LeaseKey != advisoryKey("sandbox:"+metadata.Identity) {
+			return false
+		}
+		if metadata.Template == "" {
+			return true
+		}
+		_, ok := m.verifyResourceName(metadata.Template, templateNamePrefix, "template")
+		return ok
+	case "template":
+		return metadata.LeaseKey == 0 && metadata.Template == ""
+	default:
+		return false
+	}
 }
 
 func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
@@ -310,27 +581,38 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		}
 		metadata, parseErr := parseResourceMetadata(comment)
 		if parseErr != nil {
-			if strings.TrimSpace(comment) != "" {
-				return fmt.Errorf("template database %q has invalid Swarm metadata; left untouched", m.templateName)
+			intent, found, intentErr := m.intent(ctx, m.templateName)
+			if intentErr != nil {
+				return intentErr
 			}
-			if _, signed := m.verifyResourceName(m.templateName, templateNamePrefix, "template"); !signed {
-				return fmt.Errorf("template database %q lacks valid ownership proof; left untouched", m.templateName)
+			if strings.TrimSpace(comment) != "" || !found || !m.intentMatchesName(intent) || intent.Kind != "template" || intent.Identity != m.templateID {
+				return fmt.Errorf("template database %q lacks valid stamped metadata or matching durable pre-create intent; left untouched", m.templateName)
 			}
 			if err := m.dropSandbox(ctx, adminDB, m.templateName); err != nil {
-				return fmt.Errorf("recover incomplete signed template %q: %w", m.templateName, err)
+				return fmt.Errorf("recover incomplete intended template %q: %w", m.templateName, err)
+			}
+			if err := m.deleteIntent(ctx, m.templateName); err != nil {
+				return err
 			}
 		} else if metadata.Kind != "template" || metadata.Identity != m.templateID {
 			return fmt.Errorf("template database %q metadata mismatch; left untouched", m.templateName)
 		} else {
+			if err := m.deleteIntent(ctx, m.templateName); err != nil {
+				return err
+			}
 			return nil
 		}
 	}
 	if err != sql.ErrNoRows {
 		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
 	}
-	if err := m.withDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
+	if err := m.putIntent(ctx, resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}); err != nil {
+		return err
+	}
+	if err := m.withExclusiveDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
 		return createDatabase(ctx, conn, m.templateName)
 	}); err != nil {
+		_ = m.deleteIntent(context.Background(), m.templateName)
 		return fmt.Errorf("create postgres template %q: %w", m.templateName, err)
 	}
 	projected, err := m.admin.WithDatabase(m.templateName)
@@ -355,9 +637,10 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 	metadata := resourceMetadata{Version: 1, Kind: "template", Identity: m.templateID}
 	if err := setDatabaseMetadata(ctx, adminDB, m.templateName, metadata); err != nil {
 		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
+		_ = m.deleteIntent(context.Background(), m.templateName)
 		return err
 	}
-	return nil
+	return m.deleteIntent(ctx, m.templateName)
 }
 
 func initializeDatabase(ctx context.Context, db *sql.DB, role string, spec runtimecontracts.PlatformSpecDocument, plans []platformschema.TableDDL) error {
@@ -397,13 +680,25 @@ func inspectSession(ctx context.Context, db *sql.DB) (string, string, error) {
 }
 
 func acquireAdvisoryLock(ctx context.Context, conn *sql.Conn, key int64, resource string) error {
+	return acquireAdvisoryLockQuery(ctx, conn, key, resource, `SELECT pg_try_advisory_lock($1)`)
+}
+
+func acquireDDLAdmission(ctx context.Context, conn *sql.Conn, key int64, resource string, shared bool) error {
+	query := `SELECT pg_try_advisory_lock($1)`
+	if shared {
+		query = `SELECT pg_try_advisory_lock_shared($1)`
+	}
+	return acquireAdvisoryLockQuery(ctx, conn, key, resource, query)
+}
+
+func acquireAdvisoryLockQuery(ctx context.Context, conn *sql.Conn, key int64, resource, query string) error {
 	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var ok bool
-		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&ok); err != nil {
+		if err := conn.QueryRowContext(ctx, query, key).Scan(&ok); err != nil {
 			return fmt.Errorf("acquire postgres admission for %s: %w", resource, err)
 		}
 		if ok {
@@ -418,6 +713,31 @@ func acquireAdvisoryLock(ctx context.Context, conn *sql.Conn, key int64, resourc
 		case <-ticker.C:
 		}
 	}
+}
+
+func tryAdvisoryLock(ctx context.Context, db *sql.DB, key int64) (*sql.Conn, bool, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	var acquired bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&acquired); err != nil {
+		_ = conn.Close()
+		return nil, false, err
+	}
+	if !acquired {
+		_ = conn.Close()
+		return nil, false, nil
+	}
+	return conn, true, nil
+}
+
+func releaseAdvisoryLock(conn *sql.Conn, key int64) {
+	if conn == nil {
+		return
+	}
+	_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, key)
+	_ = conn.Close()
 }
 
 func advisoryBlockers(ctx context.Context, conn *sql.Conn, key int64) string {
@@ -449,16 +769,28 @@ func advisoryBlockers(ctx context.Context, conn *sql.Conn, key int64) string {
 }
 
 func (m *Manager) withDDLAdmission(ctx context.Context, db *sql.DB, resource string, fn func(*sql.Conn) error) error {
+	return m.withDDLAdmissionMode(ctx, db, resource, true, fn)
+}
+
+func (m *Manager) withExclusiveDDLAdmission(ctx context.Context, db *sql.DB, resource string, fn func(*sql.Conn) error) error {
+	return m.withDDLAdmissionMode(ctx, db, resource, false, fn)
+}
+
+func (m *Manager) withDDLAdmissionMode(ctx context.Context, db *sql.DB, resource string, shared bool, fn func(*sql.Conn) error) error {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("open DDL admission connection for %s: %w", resource, err)
 	}
 	defer conn.Close()
 	key := advisoryKey("global-ddl-admission")
-	if err := acquireAdvisoryLock(ctx, conn, key, resource); err != nil {
+	if err := acquireDDLAdmission(ctx, conn, key, resource, shared); err != nil {
 		return err
 	}
-	defer func() { _, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, key) }()
+	unlockQuery := `SELECT pg_advisory_unlock($1)`
+	if shared {
+		unlockQuery = `SELECT pg_advisory_unlock_shared($1)`
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), unlockQuery, key) }()
 	if _, err := conn.ExecContext(ctx, `SET lock_timeout='15s'`); err != nil {
 		return fmt.Errorf("set postgres DDL lock timeout for %s: %w", resource, err)
 	}
@@ -469,7 +801,11 @@ func (m *Manager) withDDLAdmission(ctx context.Context, db *sql.DB, resource str
 }
 
 func (m *Manager) dropSandbox(ctx context.Context, db *sql.DB, name string) error {
-	return m.withDDLAdmission(ctx, db, "drop database "+name, func(conn *sql.Conn) error {
+	admit := m.withDDLAdmission
+	if strings.HasPrefix(name, templateNamePrefix) || strings.HasPrefix(name, controlNamePrefix) {
+		admit = m.withExclusiveDDLAdmission
+	}
+	return admit(ctx, db, "drop database "+name, func(conn *sql.Conn) error {
 		return dropDatabase(ctx, conn, name)
 	})
 }
