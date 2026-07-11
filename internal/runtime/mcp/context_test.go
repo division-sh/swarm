@@ -86,19 +86,37 @@ func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTranspor
 
 	requestOne := RPCRequest{JSONRPC: "2.0", Method: "tools/call", ID: float64(1), Params: map[string]any{
 		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "x"},
+		"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-call-1", "progressToken": float64(1)},
 	}}
 	requestReplay := requestOne
 	requestReplay.ID = "replacement-transport-id"
-	firstSegment, err := mcpToolCallLogicalIdentitySegment(requestOne)
+	requestReplay.Params = map[string]any{
+		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "x"},
+		"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-call-1", "progressToken": "replacement-progress-token"},
+	}
+	managedCtx := harness.Context("provider-turn")
+	firstSegment, err := mcpToolCallLogicalIdentitySegment(managedCtx, requestOne)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replaySegment, err := mcpToolCallLogicalIdentitySegment(requestReplay)
+	replaySegment, err := mcpToolCallLogicalIdentitySegment(managedCtx, requestReplay)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if firstSegment != replaySegment {
-		t.Fatalf("transport ID changed semantic child identity: %q != %q", firstSegment, replaySegment)
+		t.Fatalf("transport correlation changed provider call identity: %q != %q", firstSegment, replaySegment)
+	}
+	requestSibling := requestOne
+	requestSibling.Params = map[string]any{
+		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "x"},
+		"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-call-2", "progressToken": float64(2)},
+	}
+	siblingSegment, err := mcpToolCallLogicalIdentitySegment(managedCtx, requestSibling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstSegment == siblingSegment {
+		t.Fatal("identical same-turn calls with distinct provider tool-use IDs collapsed")
 	}
 
 	gateway := &Gateway{}
@@ -121,6 +139,20 @@ func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTranspor
 	}
 	if len(harness.Attempts) != 2 {
 		t.Fatalf("managed attempts = %d, want two siblings and no replay attempt", len(harness.Attempts))
+	}
+}
+
+func TestMCPToolCallLogicalIdentityRequiresProviderCallCoordinateForManagedTurns(t *testing.T) {
+	harness := effecttest.New()
+	req := RPCRequest{JSONRPC: "2.0", Method: "tools/call", ID: float64(1), Params: map[string]any{
+		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt"},
+	}}
+	if _, err := mcpToolCallLogicalIdentitySegment(harness.Context("provider-turn"), req); err == nil {
+		t.Fatal("managed MCP call without provider call coordinate was accepted")
+	}
+	unmanaged := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerRuntimeDependency)
+	if segment, err := mcpToolCallLogicalIdentitySegment(unmanaged, req); err != nil || segment != "" {
+		t.Fatalf("different-owner call identity = %q err=%v, want empty identity", segment, err)
 	}
 }
 

@@ -253,13 +253,15 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		logicalSegment, err := mcpToolCallLogicalIdentitySegment(req)
+		logicalSegment, err := mcpToolCallLogicalIdentitySegment(ctx, req)
 		if err != nil {
 			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.identity", err, nil)
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, logicalSegment)
+		if logicalSegment != "" {
+			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, logicalSegment)
+		}
 		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
 			err := g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", nil, map[string]any{"tool": toolName})
@@ -782,12 +784,20 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	return ctx
 }
 
-func mcpToolCallLogicalIdentitySegment(req RPCRequest) (string, error) {
-	raw, err := mcpEffectFingerprint(req)
-	if err != nil {
-		return "", err
+func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (string, error) {
+	if _, managed := runtimeeffects.LifecycleTokenFromContext(ctx); !managed {
+		return "", nil
 	}
-	return "mcp_tool_call:" + runtimeeffects.Fingerprint(raw), nil
+	meta, ok := req.Params["_meta"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("managed MCP tools/call requires params._meta.%s", claudeCodeToolUseIDMetaKey)
+	}
+	toolUseID, ok := meta[claudeCodeToolUseIDMetaKey].(string)
+	toolUseID = strings.TrimSpace(toolUseID)
+	if !ok || toolUseID == "" {
+		return "", fmt.Errorf("managed MCP tools/call requires non-empty params._meta.%s", claudeCodeToolUseIDMetaKey)
+	}
+	return "mcp_tool_call:" + runtimeeffects.Fingerprint([]byte(claudeCodeToolUseIDMetaKey+"\x00"+toolUseID)), nil
 }
 
 func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
