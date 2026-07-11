@@ -9,14 +9,15 @@ import (
 )
 
 type ImportBoundaryWildcardPattern struct {
-	ParentPackageKey string
-	ChildPackageKey  string
-	ImportLabel      string
-	Source           string
-	EventPattern     string
-	MatchPattern     string
-	LocalizedEvent   string
-	RouteSource      string
+	ParentPackageKey     string
+	ChildPackageKey      string
+	ImportLabel          string
+	Source               string
+	EventPattern         string
+	AuthorizationPattern string
+	MatchPattern         string
+	LocalizedEvent       string
+	RouteSource          string
 }
 
 type ImportBoundaryWildcardIssue struct {
@@ -49,6 +50,7 @@ type importBoundaryWildcardGrantPattern struct {
 	Source           string
 	EventPattern     string
 	LocalizedEvent   string
+	DeclaredEvents   []string
 }
 
 func ResolveImportBoundaryWildcardSubscription(source Source, packageKey, flowID, basePath string, localEvents map[string]struct{}, raw string) ImportBoundaryWildcardSubscriptionResolution {
@@ -65,19 +67,19 @@ func ResolveImportBoundaryWildcardSubscription(source Source, packageKey, flowID
 		resolution.Patterns = appendUniqueImportBoundaryWildcardPattern(resolution.Patterns, pattern)
 	}
 	for _, grant := range importBoundaryWildcardGrantPatterns(source, packageKey) {
-		if !importBoundaryWildcardGrantIntersects(raw, grant.LocalizedEvent, grant.EventPattern) {
-			continue
+		for _, eventType := range importBoundaryWildcardGrantIntersection(raw, grant.EventPattern, grant.DeclaredEvents) {
+			resolution.Patterns = appendUniqueImportBoundaryWildcardPattern(resolution.Patterns, ImportBoundaryWildcardPattern{
+				ParentPackageKey:     grant.ParentPackageKey,
+				ChildPackageKey:      grant.ChildPackageKey,
+				ImportLabel:          grant.ImportLabel,
+				Source:               grant.Source,
+				EventPattern:         eventType,
+				AuthorizationPattern: grant.EventPattern,
+				MatchPattern:         raw,
+				LocalizedEvent:       grant.LocalizedEvent,
+				RouteSource:          "import_boundary_wildcard_grant",
+			})
 		}
-		resolution.Patterns = appendUniqueImportBoundaryWildcardPattern(resolution.Patterns, ImportBoundaryWildcardPattern{
-			ParentPackageKey: grant.ParentPackageKey,
-			ChildPackageKey:  grant.ChildPackageKey,
-			ImportLabel:      grant.ImportLabel,
-			Source:           grant.Source,
-			EventPattern:     grant.EventPattern,
-			MatchPattern:     raw,
-			LocalizedEvent:   grant.LocalizedEvent,
-			RouteSource:      "import_boundary_wildcard_grant",
-		})
 	}
 	sortImportBoundaryWildcardPatterns(resolution.Patterns)
 	return resolution
@@ -478,7 +480,12 @@ func importBoundaryWildcardGrantPatterns(source Source, childPackageKey string) 
 					if eventPattern == "" || importBoundaryWildcardGrantPatternBroad(eventPattern) || !importBoundaryGrantPatternMatchesKnownEvent(sourceScopes, eventPattern) {
 						continue
 					}
-					for _, resolved := range importBoundaryResolveGrantPatterns(sourceScopes, eventPattern) {
+					for _, sourceScope := range sourceScopes {
+						resolved := importBoundaryResolvePatternInScope(sourceScope, eventPattern)
+						declaredEvents := importBoundaryGrantPatternDeclaredEvents(sourceScope, resolved)
+						if resolved == "" || len(declaredEvents) == 0 {
+							continue
+						}
 						out = append(out, importBoundaryWildcardGrantPattern{
 							ParentPackageKey: parent.Key,
 							ChildPackageKey:  child.Key,
@@ -486,6 +493,7 @@ func importBoundaryWildcardGrantPatterns(source Source, childPackageKey string) 
 							Source:           strings.TrimSpace(grant.Source),
 							EventPattern:     resolved,
 							LocalizedEvent:   eventPattern,
+							DeclaredEvents:   declaredEvents,
 						})
 					}
 				}
@@ -693,22 +701,24 @@ func importBoundaryGrantPatternMatchesKnownEvent(scopes []importBoundaryWildcard
 	return false
 }
 
-func importBoundaryResolveGrantPatterns(scopes []importBoundaryWildcardScope, raw string) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, scope := range scopes {
-		pattern := importBoundaryResolvePatternInScope(scope, raw)
-		if pattern == "" {
-			continue
-		}
-		if _, ok := seen[pattern]; ok {
-			continue
-		}
-		seen[pattern] = struct{}{}
-		out = append(out, pattern)
+func importBoundaryGrantPatternDeclaredEvents(scope importBoundaryWildcardScope, pattern string) []string {
+	pattern = eventidentity.Normalize(pattern)
+	if pattern == "" {
+		return nil
 	}
-	sort.Strings(out)
-	return out
+	seen := map[string]struct{}{}
+	for eventType := range scope.LocalEvents {
+		local := eventidentity.Normalize(eventType)
+		concrete := importBoundaryResolveEventInScope(scope, eventType)
+		if concrete == "" || !eventidentity.MatchPattern(pattern, concrete) {
+			continue
+		}
+		seen[concrete] = struct{}{}
+		if local != "" {
+			seen[local] = struct{}{}
+		}
+	}
+	return sortedStringSet(seen)
 }
 
 func importBoundaryResolvePatternInScope(scope importBoundaryWildcardScope, raw string) string {
@@ -743,23 +753,20 @@ func rawWildcardScope(basePath string, localEvents map[string]struct{}) eventide
 	}
 }
 
-func importBoundaryWildcardGrantIntersects(raw, grantLocal, grantPattern string) bool {
+func importBoundaryWildcardGrantIntersection(raw, grantPattern string, declaredEvents []string) []string {
 	raw = eventidentity.Normalize(raw)
-	grantLocal = eventidentity.Normalize(grantLocal)
 	grantPattern = eventidentity.Normalize(grantPattern)
-	if raw == "" {
-		return false
+	if raw == "" || grantPattern == "" {
+		return nil
 	}
-	if grantLocal != "" && eventidentity.MatchPattern(raw, grantLocal) {
-		return true
+	seen := map[string]struct{}{}
+	for _, eventType := range declaredEvents {
+		eventType = eventidentity.Normalize(eventType)
+		if eventType != "" && eventidentity.MatchPattern(raw, eventType) && eventidentity.MatchPattern(grantPattern, eventType) {
+			seen[eventType] = struct{}{}
+		}
 	}
-	if grantPattern != "" && eventidentity.MatchPattern(raw, grantPattern) {
-		return true
-	}
-	if leaf := eventidentity.LeafName(grantPattern); leaf != "" && eventidentity.MatchPattern(raw, leaf) {
-		return true
-	}
-	return false
+	return sortedStringSet(seen)
 }
 
 func importBoundaryWildcardGrantPatternBroad(raw string) bool {
@@ -924,6 +931,7 @@ func normalizeImportBoundaryWildcardPattern(value ImportBoundaryWildcardPattern)
 	value.ImportLabel = strings.TrimSpace(value.ImportLabel)
 	value.Source = strings.TrimSpace(value.Source)
 	value.EventPattern = eventidentity.Normalize(value.EventPattern)
+	value.AuthorizationPattern = eventidentity.Normalize(value.AuthorizationPattern)
 	value.MatchPattern = eventidentity.Normalize(value.MatchPattern)
 	value.LocalizedEvent = eventidentity.Normalize(value.LocalizedEvent)
 	value.RouteSource = strings.TrimSpace(value.RouteSource)
@@ -958,6 +966,7 @@ func importBoundaryWildcardPatternSortKey(value ImportBoundaryWildcardPattern) s
 		value.ImportLabel,
 		value.Source,
 		value.EventPattern,
+		value.AuthorizationPattern,
 		value.MatchPattern,
 		value.LocalizedEvent,
 	}, "|")

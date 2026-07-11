@@ -481,10 +481,13 @@ func matchingTypedPubSubAuthorizations(patterns []ImportBoundaryWildcardPattern,
 			ChildPackageKey:  strings.TrimSpace(pattern.ChildPackageKey),
 			ImportLabel:      strings.TrimSpace(pattern.ImportLabel),
 			Source:           strings.TrimSpace(pattern.Source),
-			EventPattern:     eventidentity.Normalize(pattern.EventPattern),
+			EventPattern:     eventidentity.Normalize(pattern.AuthorizationPattern),
 			MatchPattern:     eventidentity.Normalize(pattern.MatchPattern),
 			LocalizedEvent:   eventidentity.Normalize(pattern.LocalizedEvent),
 			RouteSource:      strings.TrimSpace(pattern.RouteSource),
+		}
+		if authorization.EventPattern == "" {
+			authorization.EventPattern = eventidentity.Normalize(pattern.EventPattern)
 		}
 		byIdentity[authorization.Identity()] = authorization
 	}
