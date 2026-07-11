@@ -1163,6 +1163,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Registry, contractsRoot, bundle, source, rt, opts.Dev)
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+	supervisor.runtimeLifetime = ctx
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
@@ -2915,6 +2916,15 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 
 func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler http.Handler) *http.Server {
 	mux := http.NewServeMux()
+	gateReady := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ready != nil && !ready.Load() {
+				http.Error(w, "booting", http.StatusServiceUnavailable)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
@@ -2928,17 +2938,11 @@ func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler 
 		_, _ = w.Write([]byte("ready\n"))
 	})
 	if apiV1Handler != nil {
-		mux.Handle("/v1/rpc", apiV1Handler)
-		mux.Handle("/v1/ws", apiV1Handler)
+		mux.Handle("/v1/rpc", gateReady(apiV1Handler))
+		mux.Handle("/v1/ws", gateReady(apiV1Handler))
 	}
 	if inboundHandler != nil {
-		mux.Handle("/webhooks/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ready != nil && !ready.Load() {
-				http.Error(w, "booting", http.StatusServiceUnavailable)
-				return
-			}
-			inboundHandler.ServeHTTP(w, r)
-		}))
+		mux.Handle("/webhooks/", gateReady(inboundHandler))
 	}
 	return &http.Server{
 		Handler:           mux,

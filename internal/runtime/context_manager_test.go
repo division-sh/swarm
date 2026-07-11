@@ -70,6 +70,40 @@ func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextManagerReplacementTransactionWithdrawsAndPublishesAuthority(t *testing.T) {
+	predecessor := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	candidate := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := NewRuntimeContextManager(nil, predecessor)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+
+	withdrawn, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, candidate)
+	if err != nil {
+		t.Fatalf("BeginBundleHashReplacement: %v", err)
+	}
+	if withdrawn.Runtime != predecessor.Runtime {
+		t.Fatalf("withdrawn runtime = %p, want %p", withdrawn.Runtime, predecessor.Runtime)
+	}
+	if !predecessor.Runtime.shutdownAdmissionClosed() {
+		t.Fatal("replacement withdrawal did not close predecessor admission")
+	}
+	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	if lookup.Loaded() || lookup.State != RuntimeContextStateUnloaded || lookup.Cause != RuntimeContextCauseReplacing || lookup.Context != nil {
+		t.Fatalf("replacement lookup = %#v, want unavailable replacing state", lookup)
+	}
+	if err := manager.PublishBundleHashReplacement(runtimeContextTestHashA, candidate); err != nil {
+		t.Fatalf("PublishBundleHashReplacement: %v", err)
+	}
+	lookup = manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	if !lookup.Loaded() || lookup.Context.Runtime != candidate.Runtime || lookup.Cause != "" {
+		t.Fatalf("published replacement lookup = %#v", lookup)
+	}
+	if err := manager.PublishBundleHashReplacement(runtimeContextTestHashA, predecessor); err == nil || !strings.Contains(err.Error(), "not unavailable for replacement") {
+		t.Fatalf("duplicate replacement publication error = %v", err)
+	}
+}
+
 func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
 	_, err := NewRuntimeContextManager(nil,
 		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),

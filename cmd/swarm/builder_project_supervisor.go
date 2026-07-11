@@ -47,6 +47,7 @@ type runtimeProjectSupervisor struct {
 	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 	cloneRuntime        func(context.Context, *runtime.Runtime) (*runtime.Runtime, error)
 	replacementShutdown runtime.ShutdownOptions
+	runtimeLifetime     context.Context
 	operationMu         sync.Mutex
 
 	mu                              sync.RWMutex
@@ -409,8 +410,14 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 		s.mu.RLock()
 		oldRT := s.currentRT
 		s.mu.RUnlock()
+		s.setReady(false)
+		if _, err := manager.BeginBundleHashReplacement(oldHash, contextDef); err != nil {
+			s.setReady(true)
+			return s.CurrentProject(), fmt.Errorf("withdraw predecessor runtime context for replacement: %w", err)
+		}
 		if err := s.quiesceCurrentRuntimeWithOptions(ctx, oldRT, s.replacementShutdown); err != nil {
-			return s.CurrentProject(), fmt.Errorf("quiesce predecessor runtime before replacement: %w", err)
+			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
+			return s.CurrentProject(), errors.Join(fmt.Errorf("quiesce predecessor runtime before replacement: %w", err), restoreErr)
 		}
 		handoff, err := newRT.PrepareStartupOwnershipHandoff(oldRT)
 		if err != nil {
@@ -439,7 +446,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 			rollbackErr := handoff.Rollback()
 			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
-		if err := manager.ReplaceBundleHash(oldHash, contextDef); err != nil {
+		if err := manager.PublishBundleHashReplacement(oldHash, contextDef); err != nil {
 			quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
 			return s.CurrentProject(), errors.Join(err, quiesceErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
@@ -460,6 +467,12 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 		return builderpkg.ProjectStatus{}, err
 	}
 	return s.attachCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT), nil
+}
+
+func (s *runtimeProjectSupervisor) setReady(ready bool) {
+	if s != nil && s.ready != nil {
+		s.ready.Store(ready)
+	}
 }
 
 func (s *runtimeProjectSupervisor) swapCurrentRuntime(resolvedRoot string, source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity, newRT *runtime.Runtime) *runtime.Runtime {
@@ -516,6 +529,7 @@ func (s *runtimeProjectSupervisor) startCurrentRuntime(ctx context.Context, rt *
 	if s == nil || rt == nil {
 		return nil
 	}
+	ctx = s.runtimeStartContext(ctx)
 	if s.startRuntime != nil {
 		return s.startRuntime(ctx, rt)
 	}
@@ -541,7 +555,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		return fmt.Errorf("restore predecessor runtime: predecessor is required")
 	}
 	restoreGrace := s.replacementShutdown.Grace
-	if restoreGrace <= 0 {
+	if restoreGrace < runtime.DefaultShutdownGrace {
 		restoreGrace = runtime.DefaultShutdownGrace
 	}
 	restoreCtx, cancelRestore := context.WithTimeout(context.Background(), restoreGrace)
@@ -571,7 +585,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 			_ = handoff.Rollback()
 		}
 	}()
-	if err := s.startCurrentRuntime(ctx, restored); err != nil {
+	if err := s.startCurrentRuntime(s.runtimeStartContext(context.Background()), restored); err != nil {
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("restart predecessor runtime: %w", err)
 	}
@@ -586,7 +600,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	}
 	predecessorContext.Runtime = restored
 	predecessorContext.StandingTargets = targets
-	if err := manager.ReplaceBundleHash(predecessorContext.BundleHash, predecessorContext); err != nil {
+	if err := manager.PublishBundleHashReplacement(predecessorContext.BundleHash, predecessorContext); err != nil {
 		quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		rollbackErr := handoff.Rollback()
 		return errors.Join(fmt.Errorf("restore predecessor runtime context: %w", err), quiesceErr, rollbackErr)
@@ -597,6 +611,13 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	return nil
 }
 
+func (s *runtimeProjectSupervisor) completeFailedQuiescenceAndRestore(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime) error {
+	if err := s.quiesceCurrentRuntimeWithOptions(context.Background(), predecessor, runtime.DefaultShutdownOptions()); err != nil {
+		return fmt.Errorf("complete failed predecessor quiescence before restoration: %w", err)
+	}
+	return s.restoreQuiescedPredecessor(ctx, manager, predecessorContext, predecessor)
+}
+
 func (s *runtimeProjectSupervisor) shutdownCurrentRuntimeWithOptions(ctx context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {
 	if s == nil || rt == nil {
 		return nil
@@ -605,6 +626,16 @@ func (s *runtimeProjectSupervisor) shutdownCurrentRuntimeWithOptions(ctx context
 		return s.shutdownRuntime(ctx, rt, opts)
 	}
 	return rt.ShutdownWithOptions(opts)
+}
+
+func (s *runtimeProjectSupervisor) runtimeStartContext(fallback context.Context) context.Context {
+	if s != nil && s.runtimeLifetime != nil {
+		return s.runtimeLifetime
+	}
+	if fallback != nil {
+		return fallback
+	}
+	return context.Background()
 }
 
 func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatus {
