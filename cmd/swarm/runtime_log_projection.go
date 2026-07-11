@@ -27,6 +27,21 @@ type runtimeLogEntry struct {
 	Details   map[string]any  `json:"details,omitempty"`
 }
 
+func (e *runtimeLogEntry) UnmarshalJSON(raw []byte) error {
+	type wire runtimeLogEntry
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var decoded wire
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := runtimeLogRequireJSONEOF(decoder); err != nil {
+		return err
+	}
+	*e = runtimeLogEntry(decoded)
+	return nil
+}
+
 type runtimeLogSemanticProjection struct {
 	Action          string
 	Failure         string
@@ -200,14 +215,21 @@ func runtimeLogDecodeJSONValue(raw []byte) (any, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, fmt.Errorf("trailing JSON value")
-		}
+	if err := runtimeLogRequireJSONEOF(decoder); err != nil {
 		return nil, err
 	}
 	return value, nil
+}
+
+func runtimeLogRequireJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func runtimeLogCompactRawJSON(raw []byte) string {
