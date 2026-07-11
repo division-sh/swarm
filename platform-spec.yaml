@@ -8650,8 +8650,12 @@ flow_model:
             intersect imported wildcard subscriptions over the declared typed event catalog. Each finite witness retains one
             source-relative local identity paired with its source-qualified canonical identity; these identities must not be
             flattened into independent candidates. The authored consumer pattern may match either identity according to its
-            namespace, while the normalized grant pattern and runtime route match the canonical identity. That paired witness
-            drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
+            namespace, while the normalized grant pattern matches the canonical identity. For a static source, runtime route
+            matching uses that canonical identity. For a template source, the same finite base witness projects a constrained
+            `{template_path}/*/{local_event}` runtime pattern: it becomes active only for concrete event paths added by
+            flow-instance route materialization and is removed with that instance route. The static witness remains the sole
+            authorization and ambiguity proof; runtime projection cannot broaden it to another local event or static flow.
+            That paired witness drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
             distinct proofs for one relation are a typed ambiguity and produce an issue, not an edge. Authorization-conflict
             enumeration also evaluates every declared materializable event independently of current producer-census membership,
             because low-level event.publish can publish a declared event without an authored static producer endpoint. The
