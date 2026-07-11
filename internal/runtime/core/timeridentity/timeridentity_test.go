@@ -125,3 +125,15 @@ func TestParseAccumulatorBucketKey(t *testing.T) {
 		t.Fatalf("bucket = %#v", bucket)
 	}
 }
+
+func TestJoinHandleRoundTripIncludesStageIdentity(t *testing.T) {
+	awaiting := JoinTimeoutHandle(NewJoinRef("join-node", "item.completed", "awaiting", "shared", "window-1"))
+	reviewing := JoinTimeoutHandle(NewJoinRef("join-node", "item.completed", "reviewing", "shared", "window-1"))
+	if awaiting.TaskID() == reviewing.TaskID() {
+		t.Fatalf("join task ids collide across stages: %q", awaiting.TaskID())
+	}
+	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
+	if !ok || parsed.Join.Stage != "awaiting" || parsed.Join.JoinID != "shared" || parsed.Join.Window != "window-1" {
+		t.Fatalf("parsed join handle = %#v, %v", parsed, ok)
+	}
+}

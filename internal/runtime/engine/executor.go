@@ -759,7 +759,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	payload := frame.payload
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
-	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.JoinID != spec.EffectiveID()) {
+	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.Stage != strings.TrimSpace(spec.Stage) || ref.JoinID != spec.EffectiveID()) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_timer_identity_mismatch", "runtime.engine", "join", map[string]any{
 			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
@@ -776,7 +776,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		}
 		window = strings.TrimSpace(asString(value))
 	}
-	key := joinruntime.ActivationKey(spec.EffectiveID(), window)
+	key := joinruntime.ActivationKey(spec.Stage, spec.EffectiveID(), window)
 	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.NodeID.String(), key)
 	if err != nil {
 		return false, fmt.Errorf("load join activation %s: %w", key, err)
@@ -849,12 +849,12 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		return false, fmt.Errorf("unsupported join add disposition %q", disposition)
 	}
 	frame.state.Join = activation.Context()
-	complete := activation.Completed() == activation.Expected()
-	if spec.HasCustomCompletion() {
-		complete, err = e.evaluator.EvalBool(spec.CompleteWhen, e.currentContext(frame))
-		if err != nil {
-			return false, fmt.Errorf("join complete_when: %w", err)
-		}
+	complete, err := joinruntime.CompletionSatisfied(activation, spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
+		frame.state.Join = joinContext
+		return e.evaluator.EvalBool(expression, e.currentContext(frame))
+	})
+	if err != nil {
+		return false, fmt.Errorf("join complete_when: %w", err)
 	}
 	if !complete {
 		if err := e.storeJoinActivation(frame, activation); err != nil {

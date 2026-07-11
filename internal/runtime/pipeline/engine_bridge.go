@@ -138,7 +138,7 @@ func findJoinHandlerForRef(source interface {
 		return runtimecontracts.SystemNodeEventHandler{}, false
 	}
 	handler, ok := source.NodeEventHandlers(ref.NodeID)[ref.HandlerEvent]
-	return handler, ok && handler.Join != nil && handler.Join.EffectiveID() == ref.JoinID
+	return handler, ok && handler.Join != nil && handler.Join.EffectiveID() == ref.JoinID && strings.TrimSpace(handler.Join.Stage) == ref.Stage
 }
 
 func findAccumulationTimeoutHandlerForBucket(source interface {

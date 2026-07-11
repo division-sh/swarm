@@ -60,3 +60,33 @@ func TestNewActivationRejectsInvalidMembership(t *testing.T) {
 		}
 	}
 }
+
+func TestActivationKeyIncludesStageIdentity(t *testing.T) {
+	awaiting := ActivationKey("awaiting", "shared", "window-1")
+	reviewing := ActivationKey("reviewing", "shared", "window-1")
+	if awaiting == "" || reviewing == "" || awaiting == reviewing {
+		t.Fatalf("activation keys = awaiting:%q reviewing:%q, want distinct stage-scoped identities", awaiting, reviewing)
+	}
+}
+
+func TestCompletionSatisfiedUsesOneDefaultAndCustomOwner(t *testing.T) {
+	now := time.Now().UTC()
+	activation, err := NewActivation("join", "awaiting", "node", "item.done", "", []string{}, now, now.Add(time.Hour), "task", "platform.join_timeout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := CompletionSatisfied(activation, "", nil); err != nil || !complete {
+		t.Fatalf("default zero-member completion = %v, %v, want true", complete, err)
+	}
+	called := false
+	complete, err := CompletionSatisfied(activation, "join.completed >= 1", func(expression string, joinContext map[string]any) (bool, error) {
+		called = true
+		if expression != "join.completed >= 1" || joinContext["completed"] != 0 {
+			t.Fatalf("custom completion input = %q %#v", expression, joinContext)
+		}
+		return false, nil
+	})
+	if err != nil || complete || !called {
+		t.Fatalf("custom zero-member completion = complete:%v called:%v err:%v, want false/true/nil", complete, called, err)
+	}
+}

@@ -62,7 +62,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok {
 				t.Fatalf("load activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -124,7 +124,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok || activation.Status != tc.wantStatus {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -132,6 +132,148 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 				t.Fatalf("schedule parity = schedules:%#v tx:%#v", schedules.schedules, schedules.upsertTx)
 			}
 		})
+	}
+}
+
+func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bundle := workflowJoinLifecycleBundle()
+			node := bundle.Nodes["join-node"]
+			handler := node.EventHandlers["item.completed"]
+			spec := *handler.Join
+			spec.CompleteWhen = "join.completed >= 1"
+			spec.Remaining = runtimecontracts.JoinRemainingIgnore
+			handler.Join = &spec
+			node.EventHandlers["item.completed"] = handler
+			bundle.Nodes["join-node"] = node
+			bundle.Semantics.Joins[0].Spec = spec
+			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
+
+			schedules := &recordingSchedulePersistence{}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+				WorkflowStore:      store,
+				TimerScheduleStore: schedules,
+			})
+			path := "orders/" + uuid.NewString()
+			entityID := FlowInstanceEntityID(path)
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.armWorkflowCurrentStageLifecycle(ctx, entityID, "state:awaiting"); err != nil {
+				t.Fatalf("arm custom join: %v", err)
+			}
+			instance, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok {
+				t.Fatalf("load custom join = %v, %v", ok, err)
+			}
+			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			if err != nil || !ok || activation.Status != joinruntime.StatusOpen || activation.CloseReason != "" {
+				t.Fatalf("custom zero activation = %#v, %v, %v, want open", activation, ok, err)
+			}
+			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != joinTimeoutEvent {
+				t.Fatalf("custom zero schedules = %#v, want timeout", schedules.schedules)
+			}
+		})
+	}
+}
+
+func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bundle := workflowJoinLifecycleBundle()
+			node := bundle.Nodes["join-node"]
+			first := *node.EventHandlers["item.completed"].Join
+			first.ID = "shared"
+			first.Stage = "awaiting"
+			second := first
+			second.Stage = "reviewing"
+			node.EventHandlers["item.completed"] = runtimecontracts.SystemNodeEventHandler{Join: &first}
+			node.EventHandlers["approval.completed"] = runtimecontracts.SystemNodeEventHandler{Join: &second}
+			bundle.Nodes["join-node"] = node
+			bundle.Events["approval.completed"] = bundle.Events["item.completed"]
+			bundle.RootSchema.StageDeclarations.Entries = append(bundle.RootSchema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{ID: "reviewing"})
+			bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "reviewing"})
+			bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{
+				{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: first},
+				{FlowID: "", NodeID: "join-node", HandlerEvent: "approval.completed", Spec: second},
+			}
+			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
+			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
+
+			schedules := &recordingSchedulePersistence{}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+				WorkflowStore:      store,
+				TimerScheduleStore: schedules,
+			})
+			path := "orders/" + uuid.NewString()
+			entityID := FlowInstanceEntityID(path)
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.armWorkflowCurrentStageLifecycle(ctx, entityID, "state:awaiting"); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.applyWorkflowJoinIntents(ctx, entityID, "awaiting", "reviewing"); err != nil {
+				t.Fatal(err)
+			}
+			instance, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok {
+				t.Fatalf("load stage-scoped joins = %v, %v", ok, err)
+			}
+			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			awaiting, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("awaiting", "shared", ""))
+			if err != nil || !ok || awaiting.CloseReason != joinruntime.CloseReasonStageExit {
+				t.Fatalf("awaiting activation = %#v, %v, %v", awaiting, ok, err)
+			}
+			reviewing, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("reviewing", "shared", ""))
+			if err != nil || !ok || reviewing.Status != joinruntime.StatusOpen || reviewing.Stage != "reviewing" {
+				t.Fatalf("reviewing activation = %#v, %v, %v", reviewing, ok, err)
+			}
+			if awaiting.Key() == reviewing.Key() || len(schedules.schedules) != 2 {
+				t.Fatalf("stage identities/schedules = awaiting:%q reviewing:%q schedules:%#v", awaiting.Key(), reviewing.Key(), schedules.schedules)
+			}
+		})
+	}
+}
+
+type workflowJoinStoreCase struct {
+	name string
+	open func(*testing.T) (*WorkflowInstanceStore, context.Context)
+}
+
+func workflowJoinStoreCases() []workflowJoinStoreCase {
+	return []workflowJoinStoreCase{
+		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+		}},
+		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			runID := uuid.NewString()
+			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+				t.Fatal(err)
+			}
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(context.Background(), runID)
+		}},
 	}
 }
 
@@ -176,7 +318,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			member := eventtest.RootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
-			ref := timeridentity.NewJoinRef("join-node", "item.completed", "awaiting", "")
+			ref := timeridentity.NewJoinRef("join-node", "item.completed", "awaiting", "awaiting", "")
 			handle := timeridentity.JoinTimeoutHandle(ref)
 			timeout := eventtest.RootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
 			triggerState := pc.currentWorkflowState(ctx, entityID)
@@ -219,7 +361,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			closed, ok, err := joinruntime.Load(finalCarrier.StateBuckets, "join-node", "awaiting")
+			closed, ok, err := joinruntime.Load(finalCarrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok || closed.Status != joinruntime.StatusClosed {
 				t.Fatalf("closed activation = %#v, %v, %v", closed, ok, err)
 			}
@@ -300,7 +442,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			if loadErr != nil {
 				t.Fatal(loadErr)
 			}
-			activation, ok, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			activation, ok, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if loadErr != nil || !ok || activation.Status != joinruntime.StatusOpen {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, loadErr)
 			}
@@ -390,7 +532,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			closed, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			closed, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok || closed.Status != joinruntime.StatusClosed || closed.Completed() != 2 {
 				t.Fatalf("closed activation = %#v, %v, %v", closed, ok, err)
 			}
@@ -482,7 +624,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok || !activation.OutcomeFired || activation.OutcomePending || !activation.TimerCancelled {
 				t.Fatalf("zero activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -555,7 +697,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", "awaiting")
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
 			if err != nil || !ok || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonStageExit || activation.OutcomePending || activation.OutcomeFired || !activation.TimerCancelled {
 				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -675,4 +817,8 @@ func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 	}
+}
+
+func workflowJoinActivationKey() string {
+	return joinruntime.ActivationKey("awaiting", "awaiting", "")
 }

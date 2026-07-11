@@ -31,6 +31,26 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.CompleteWhen = "join.completed >= 1"
 			h.Join.Remaining = "terminate"
 		}, wantError: "requires remaining: ignore"},
+		{name: "unsupported dotted join fact", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = "join.active == 0"
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "unsupported join.active"},
+		{name: "bracket join fact rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = `join["active"] == 0`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "bracket access on join is unsupported"},
+		{name: "approved fact bracket spelling rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = `join["completed"] >= 1`
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "bracket access on join is unsupported"},
+		{name: "bare join root rejected", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = "join == join"
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "join must be accessed as join.<field>"},
+		{name: "custom completion must be boolean", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = "join.expected"
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "must return bool"},
 		{name: "outcome payload forbidden", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("payload.result")
 		}, wantError: "may not reference payload.*"},

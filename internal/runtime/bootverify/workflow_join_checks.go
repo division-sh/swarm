@@ -14,7 +14,6 @@ import (
 const joinValidationCheckID = "join_validation"
 
 var joinPolicyDelayPattern = regexp.MustCompile(`^\{\{\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*\}\}(ms|s|m|h|d)$`)
-var joinFieldReferencePattern = regexp.MustCompile(`\bjoin\.([a-zA-Z_][a-zA-Z0-9_]*)`)
 
 func checkJoinValidation(c *checkerContext) []Finding {
 	if c == nil || c.source == nil {
@@ -134,14 +133,8 @@ func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimeco
 }
 
 func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool) []Finding {
-	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true}); err != nil {
+	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly}); err != nil {
 		return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
-	}
-	allowed := map[string]struct{}{"expected": {}, "completed": {}, "missing": {}, "results": {}, "timed_out": {}}
-	for _, match := range joinFieldReferencePattern.FindAllStringSubmatch(workflowexpr.StripStringLiterals(expression), -1) {
-		if _, ok := allowed[match[1]]; !ok {
-			return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s references unsupported join.%s", label, match[1]))}
-		}
 	}
 	for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
 		if workflowexpr.ExpressionReferencesRoot(expression, root) {

@@ -2819,9 +2819,11 @@ handler_specification:
         results: Membership-ordered typed outputs, independent of arrival order.
         timed_out: True only while evaluating the timeout outcome.
       execution: >-
-        The stage transition, membership/window snapshot, typed activation, timeout intent, and expected-zero completion
-        intent commit in one selected-store transaction. Arrivals never create activations. The existing entity lock and
-        selected-store row transaction admit exactly one arrival-versus-timeout close winner; losers observe closed state.
+        The stage transition, membership/window snapshot, typed activation, timeout intent, and any zero-member completion
+        intent commit in one selected-store transaction. Empty membership evaluates the same default-all or authored
+        complete_when plan used on arrival; an unsatisfied custom condition remains open until an arrival satisfies it or
+        timeout closes it. Arrivals never create activations. The existing entity lock and selected-store row transaction
+        admit exactly one arrival-versus-timeout close winner; losers observe closed state.
       duplicate_policy: >-
         An exact same-member/same-canonical-output arrival is idempotent. The same member with different canonical output
         fails as platform.conflicting_duplicate. Non-members, arrivals before arm, and arrivals after close fail through
@@ -4079,7 +4081,9 @@ engine:
       output assembly, timeout, and close. It consumes the typed lowered handler.join plan; route, timer, store, and test
       surfaces do not reconstruct join semantics independently.
     persisted_activation:
-      identity: entity + node + handler event + effective join ID + optional window
+      identity: >-
+        flow instance + stage + effective join ID + optional window. Node and handler event remain exact internal routing
+        identity for arrival and timer delivery, but may not narrow or replace the verified stage-scoped semantic identity.
       fields:
       - ordered snapshotted members
       - per-member canonical output value and hash
@@ -4089,7 +4093,8 @@ engine:
       - expected-zero pending/fired completion disposition
     arm: >-
       Stage entry snapshots members and optional window only after transition data writes are visible. Empty membership
-      atomically persists a closed completion plus immediate internal completion intent; it never waits for an arrival.
+      evaluates the same canonical completion plan as arrival: default-all closes immediately, while authored complete_when
+      closes only when that boolean is true. A false custom condition persists an open activation and its mandatory timeout.
     arrival: >-
       Runtime loads the persisted activation inside the entity lock and selected-store transaction, checks exact window and
       member identity, stores canonical output, and evaluates default-all or complete_when over persisted join context.

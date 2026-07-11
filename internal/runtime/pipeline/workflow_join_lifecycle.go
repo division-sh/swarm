@@ -74,7 +74,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 					return
 				}
 			}
-			key := joinruntime.ActivationKey(plan.Spec.EffectiveID(), window)
+			key := joinruntime.ActivationKey(plan.Spec.Stage, plan.Spec.EffectiveID(), window)
 			if _, found, err := joinruntime.Load(carrier.StateBuckets, plan.NodeID, key); err != nil {
 				lifecycleErr = fmt.Errorf("load join %s: %w", key, err)
 				return
@@ -87,7 +87,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 				lifecycleErr = fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", plan.Spec.EffectiveID(), plan.Spec.Timeout.After)
 				return
 			}
-			ref := timeridentity.NewJoinRef(plan.NodeID, plan.HandlerEvent, plan.Spec.EffectiveID(), window)
+			ref := timeridentity.NewJoinRef(plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window)
 			handle := timeridentity.JoinTimeoutHandle(ref)
 			activation, err := joinruntime.NewActivation(
 				plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, window, members,
@@ -98,7 +98,17 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 				return
 			}
 			kind := timeridentity.TimerHandleJoinTimeout
-			if activation.Expected() == 0 {
+			complete, err := joinruntime.CompletionSatisfied(activation, plan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
+				return pc.expressionEval.EvalBool(expression, workflowExpressionContext{
+					Join:         joinContext,
+					WorkflowName: instance.WorkflowName,
+				})
+			})
+			if err != nil {
+				lifecycleErr = fmt.Errorf("evaluate join %s completion at arm: %w", plan.Spec.EffectiveID(), err)
+				return
+			}
+			if complete {
 				activation.Close(joinruntime.CloseReasonComplete, true, false)
 				kind = timeridentity.TimerHandleJoinComplete
 				completionHandle := timeridentity.JoinCompleteHandle(ref)
@@ -266,7 +276,7 @@ func joinTopLevelField(path, root string) string {
 }
 
 func joinSchedule(entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) Schedule {
-	ref := timeridentity.NewJoinRef(activation.NodeID, activation.HandlerEvent, activation.JoinID, activation.Window)
+	ref := timeridentity.NewJoinRef(activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window)
 	handle := timeridentity.JoinTimeoutHandle(ref)
 	eventType := joinTimeoutEvent
 	if kind == timeridentity.TimerHandleJoinComplete {
