@@ -194,7 +194,8 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			COALESCE(tools, '[]'::jsonb),
 			COALESCE(permissions, '[]'::jsonb),
 			COALESCE(status, 'active'),
-			COALESCE(created_at, now())
+			COALESCE(created_at, now()),
+			lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
@@ -209,6 +210,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 	for rows.Next() {
 		var rec runtimemanager.PersistedAgent
 		var row persistedAgentProjection
+		var lifecycleGeneration int64
 		if err := rows.Scan(
 			&row.AgentID,
 			&row.FlowInstance,
@@ -226,6 +228,10 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			&row.PermissionsJSON,
 			&rec.Status,
 			&rec.StartedAt,
+			&rec.LifecycleEpoch,
+			&lifecycleGeneration,
+			&rec.LifecyclePhase,
+			&rec.LifecycleRunMode,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
 		}
@@ -234,6 +240,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			return nil, fmt.Errorf("hydrate agent row %s: %w", strings.TrimSpace(row.AgentID), err)
 		}
 		rec.ParentAgentID = row.ParentAgentID
+		rec.LifecycleGeneration = uint64(lifecycleGeneration)
 		rec.Config = cfg
 		out = append(out, rec)
 	}

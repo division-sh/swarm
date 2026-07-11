@@ -32,7 +32,7 @@ type fakeAgentConversationReadSource struct {
 	agents    []runtimemanager.PersistedAgent
 	pending   map[string]PendingAgentDeliveryFacts
 	details   map[string]PendingAgentDeliveryPage
-	lifecycle map[string]AgentLifecycleFacts
+	lifecycle map[string]AgentDeliveryLifecycleFacts
 	err       error
 	detailErr error
 }
@@ -67,8 +67,8 @@ func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ conte
 	return page, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListAgentLifecycleFacts(_ context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error) {
-	out := make(map[string]AgentLifecycleFacts, len(agentIDs))
+func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
+	out := make(map[string]AgentDeliveryLifecycleFacts, len(agentIDs))
 	for _, agentID := range agentIDs {
 		out[agentID] = s.lifecycle[agentID]
 	}
@@ -408,7 +408,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 		pending: map[string]PendingAgentDeliveryFacts{
 			"agent-1": {},
 		},
-		lifecycle: map[string]AgentLifecycleFacts{
+		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 0)
@@ -480,7 +480,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 				NextCursor: "cursor-2",
 			},
 		},
-		lifecycle: map[string]AgentLifecycleFacts{
+		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
 		},
 	}, 0)
@@ -1589,7 +1589,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		lifecycle: map[string]AgentLifecycleFacts{
+		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 0)
@@ -1715,7 +1715,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		lifecycle: map[string]AgentLifecycleFacts{
+		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "blocked", BlockingLayer: "session_execution"},
 		},
 	}, 0)

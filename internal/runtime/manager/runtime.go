@@ -98,7 +98,7 @@ func (am *AgentManager) RestartAgent(agentID string) error {
 	return legacyAgentControlError(err)
 }
 
-func (am *AgentManager) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
+func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	if am.shutdownAdmissionClosed() {
 		return runtimeagentcontrol.RestartResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
 	}
@@ -113,19 +113,18 @@ func (am *AgentManager) Restart(_ context.Context, req runtimeagentcontrol.Resta
 		return runtimeagentcontrol.RestartResult{}, agentControlNotFound(agentID)
 	}
 
-	am.runMu.Lock()
-	if cancel, ok := am.loopCancel[agentID]; ok {
-		cancel()
-		delete(am.loopCancel, agentID)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	ctx := am.runCtx
-	running := am.running
-	am.runMu.Unlock()
-
-	if running {
-		am.startAgentLoop(ctx, agent)
+	operationID := strings.TrimSpace(req.OperationID)
+	if operationID == "" {
+		operationID = uuid.NewString()
 	}
-	return runtimeagentcontrol.RestartResult{AgentID: agentID}, nil
+	if err := am.startAgentLoopTransition(ctx, agent, agent.Subscriptions(), "restart", operationID, nil); err != nil {
+		return runtimeagentcontrol.RestartResult{}, err
+	}
+	token, _ := am.lifecycle.token(agentID)
+	return runtimeagentcontrol.RestartResult{AgentID: agentID, OperationID: operationID, Generation: token.Generation}, nil
 }
 
 func (am *AgentManager) Shutdown() error {
@@ -133,6 +132,10 @@ func (am *AgentManager) Shutdown() error {
 }
 
 func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
+	return am.shutdownWithOptions(opts, false)
+}
+
+func (am *AgentManager) shutdownWithOptions(opts ShutdownOptions, continueReset bool) error {
 	grace, err := ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
@@ -140,39 +143,37 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 
-	am.runMu.Lock()
-	if am.shuttingDown {
-		am.runMu.Unlock()
+	if am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown {
 		return am.waitForRunShutdown(grace)
 	}
-	am.shuttingDown = true
-	am.running = false
-	am.runMu.Unlock()
+	am.lifecycle.beginShutdownAdmission()
 
 	var shutdownErr error
 	if err := am.WaitForQuiescence(drainCtx); err != nil {
 		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
 	}
 
-	am.runMu.Lock()
-	if am.cancelRun != nil {
-		am.cancelRun()
-		am.cancelRun = nil
+	_, loopDone := am.lifecycle.cancelShutdownWork()
+	for _, done := range loopDone {
+		select {
+		case <-done:
+		case <-drainCtx.Done():
+			if shutdownErr == nil {
+				shutdownErr = fmt.Errorf("agent manager shutdown loop wait timed out after %s", grace)
+			}
+		}
 	}
-	for id, cancel := range am.loopCancel {
-		cancel()
-		delete(am.loopCancel, id)
-	}
-	am.runMu.Unlock()
 
 	if err := am.waitForRunShutdown(grace); err != nil {
 		if shutdownErr == nil {
 			shutdownErr = err
 		}
 	}
-	am.runMu.Lock()
-	am.shuttingDown = false
-	am.runMu.Unlock()
+	if continueReset {
+		am.lifecycle.beginReset()
+	} else {
+		am.lifecycle.finishShutdown()
+	}
 	return shutdownErr
 }
 
@@ -183,26 +184,22 @@ func (am *AgentManager) Count() int {
 }
 
 func (am *AgentManager) IsRunning() bool {
-	am.runMu.Lock()
-	defer am.runMu.Unlock()
-	return am.running
+	_, _, running := am.lifecycle.runSnapshot()
+	return running
 }
 
 func (am *AgentManager) isShuttingDown() bool {
 	if am == nil {
 		return false
 	}
-	am.runMu.Lock()
-	defer am.runMu.Unlock()
-	return am.shuttingDown
+	phase := am.lifecycle.phaseSnapshot()
+	return phase == runtimeLifecycleShuttingDown || phase == runtimeLifecycleResetting
 }
 
 func (am *AgentManager) shutdownAdmissionClosed() bool {
 	if am == nil {
 		return false
 	}
-	am.runMu.Lock()
-	defer am.runMu.Unlock()
 	return am.shutdownAdmissionClosedLocked()
 }
 
@@ -210,7 +207,8 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 	if am == nil {
 		return false
 	}
-	if am.shuttingDown {
+	phase := am.lifecycle.phaseSnapshot()
+	if phase == runtimeLifecycleShuttingDown || phase == runtimeLifecycleResetting {
 		return true
 	}
 	if am.runtimeShutdownAdmissionClosed != nil {
@@ -575,6 +573,18 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	}
 	directiveCtx := runtimecorrelation.WithRunID(ctx, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
+	directiveCtx, err = am.lifecycle.effectContext(directiveCtx, admitted.AgentID)
+	if err != nil {
+		executionFailure := runtimeagentcontrol.DirectiveBoardStepFailure(err)
+		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, executionFailure, time.Now().UTC(), directiveOperationTTL)
+		if persistErr != nil {
+			admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
+			failure := runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedFailure()
+			admitted.Failure = &failure
+			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
+		}
+		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(failed)
+	}
 	heartbeatConfig := am.directiveHeartbeat.normalized()
 	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
 	heartbeatDone := make(chan struct{})
@@ -723,14 +733,14 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agen
 }
 
 func (am *AgentManager) Run(ctx context.Context) {
-	am.runMu.Lock()
-	if am.running || am.shutdownAdmissionClosedLocked() {
-		am.runMu.Unlock()
+	if am.shutdownAdmissionClosedLocked() {
 		return
 	}
-	runRoot := runtimebus.WithRuntimeEpoch(ctx, runtimebus.CurrentRuntimeEpoch())
-	am.runCtx, am.cancelRun = context.WithCancel(runRoot)
-	am.running = true
+	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeStandard)
+	if !started {
+		return
+	}
+	am.runMu.Lock()
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 
@@ -742,24 +752,22 @@ func (am *AgentManager) Run(ctx context.Context) {
 	am.mu.RUnlock()
 
 	for _, a := range agents {
-		am.startAgentLoop(am.runCtx, a)
+		am.startAgentLoop(runCtx, a)
 	}
 
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()
-		am.retryLoop(am.runCtx)
+		am.retryLoop(runCtx)
 	}()
 
 	go func() {
-		<-am.runCtx.Done()
-		am.runMu.Lock()
-		am.running = false
-		for id, cancel := range am.loopCancel {
-			cancel()
-			delete(am.loopCancel, id)
+		<-runCtx.Done()
+		initiated := am.lifecycle.beginShutdownAdmission()
+		if initiated {
+			am.lifecycle.cancelShutdownWork()
+			am.lifecycle.finishShutdown()
 		}
-		am.runMu.Unlock()
 	}()
 }
 
@@ -768,14 +776,14 @@ func (am *AgentManager) Run(ctx context.Context) {
 // retry/recovery loops so selected-fork execution can consume canonical
 // recipient planning without reintroducing subscription-derived recipient truth.
 func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) {
-	am.runMu.Lock()
-	if am.running || am.shutdownAdmissionClosedLocked() {
-		am.runMu.Unlock()
+	if am.shutdownAdmissionClosedLocked() {
 		return
 	}
-	runRoot := runtimebus.WithRuntimeEpoch(ctx, runtimebus.CurrentRuntimeEpoch())
-	am.runCtx, am.cancelRun = context.WithCancel(runRoot)
-	am.running = true
+	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeAuthoritativeDeliveryOnly)
+	if !started {
+		return
+	}
+	am.runMu.Lock()
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 
@@ -787,18 +795,16 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) {
 	am.mu.RUnlock()
 
 	for _, a := range agents {
-		am.startAgentLoopWithSubscriptions(am.runCtx, a, nil)
+		am.startAgentLoopWithSubscriptions(runCtx, a, nil)
 	}
 
 	go func() {
-		<-am.runCtx.Done()
-		am.runMu.Lock()
-		am.running = false
-		for id, cancel := range am.loopCancel {
-			cancel()
-			delete(am.loopCancel, id)
+		<-runCtx.Done()
+		initiated := am.lifecycle.beginShutdownAdmission()
+		if initiated {
+			am.lifecycle.cancelShutdownWork()
+			am.lifecycle.finishShutdown()
 		}
-		am.runMu.Unlock()
 	}()
 }
 
@@ -1257,7 +1263,7 @@ func platformResetSourceAuthorized(source string) bool {
 }
 
 func (am *AgentManager) resetRuntimeState(source string) error {
-	if err := am.Shutdown(); err != nil {
+	if err := am.shutdownWithOptions(DefaultShutdownOptions(), true); err != nil {
 		return err
 	}
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
@@ -1331,6 +1337,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 			return fmt.Errorf("publish platform.reset: %w", err)
 		}
 	}
+	am.lifecycle.finishReset()
 	return nil
 }
 
@@ -1365,23 +1372,35 @@ func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, r
 }
 
 func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
-	am.startAgentLoopWithSubscriptions(parent, agent, agent.Subscriptions())
+	_ = am.startAgentLoopTransition(parent, agent, agent.Subscriptions(), "start", "", nil)
 }
 
 func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, agent Agent, subscriptions []events.EventType) {
-	loopCtx, cancel := context.WithCancel(parent)
+	_ = am.startAgentLoopTransition(parent, agent, subscriptions, "start", "", nil)
+}
 
-	am.runMu.Lock()
-	if old, ok := am.loopCancel[agent.ID()]; ok {
-		old()
+func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent Agent, subscriptions []events.EventType, trigger, operationID string, rec *PersistedAgent) error {
+	loopCtx, token, done, err := am.lifecycle.replaceLoop(parent, agent.ID(), trigger, operationID, rec)
+	if err != nil {
+		return err
 	}
-	am.loopCancel[agent.ID()] = cancel
-	am.runMu.Unlock()
+	if loopCtx == nil {
+		return nil
+	}
 
 	ch := am.bus.Subscribe(agent.ID(), subscriptions...)
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()
+		defer func() {
+			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
+				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
+				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+					Level: "error", Component: "agent-manager", Action: "agent_loop_release_failed",
+					AgentID: agent.ID(), Failure: &failure.Failure,
+				})
+			}
+		}()
 		consecutivePanics := 0
 		for {
 			panicked := false
@@ -1480,6 +1499,7 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 			}
 		}
 	}()
+	return nil
 }
 
 func panicBackoff(consecutivePanics int) time.Duration {

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 type AgentManager struct {
@@ -46,14 +47,10 @@ type AgentManager struct {
 	workflowInstances               flowInstancePersistence
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
+	lifecycle                       *agentLifecycleCoordinator
 
 	runMu              sync.Mutex
-	running            bool
-	shuttingDown       bool
 	authBreakerTripped bool
-	runCtx             context.Context
-	cancelRun          context.CancelFunc
-	loopCancel         map[string]context.CancelFunc
 	runWG              sync.WaitGroup
 
 	poisonMu            sync.Mutex
@@ -138,7 +135,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
-		loopCancel:                      make(map[string]context.CancelFunc),
+		lifecycle:                       newAgentLifecycleCoordinator(opts.LifecycleStore),
 		poisonPanicCounts:               make(map[string]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
@@ -151,9 +148,7 @@ func (am *AgentManager) runtimeContext() context.Context {
 	if am == nil {
 		return context.Background()
 	}
-	am.runMu.Lock()
-	ctx := am.runCtx
-	am.runMu.Unlock()
+	ctx, _, _ := am.lifecycle.runSnapshot()
 	if ctx != nil && ctx.Err() == nil {
 		return ctx
 	}
@@ -288,11 +283,23 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 		return err
 	}
 
-	am.mu.Lock()
+	am.mu.RLock()
 	if _, exists := am.agents[a.ID()]; exists {
-		am.mu.Unlock()
+		am.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
+	am.mu.RUnlock()
+	if err := am.lifecycle.register(ctx, rec, persist); err != nil {
+		return err
+	}
+	if persist && am.lifecycle.store == nil && am.store != nil {
+		if err := am.store.UpsertAgent(ctx, rec); err != nil {
+			am.lifecycle.unregisterLocal(a.ID())
+			return fmt.Errorf("persist agent %s: %w", rec.Config.ID, err)
+		}
+	}
+
+	am.mu.Lock()
 	am.agents[a.ID()] = a
 	am.agentCfg[a.ID()] = rec.Config
 	startedAt := rec.StartedAt
@@ -302,21 +309,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	am.agentUpAt[a.ID()] = startedAt
 	am.mu.Unlock()
 
-	if persist && am.store != nil {
-		if err := am.store.UpsertAgent(ctx, rec); err != nil {
-			am.mu.Lock()
-			delete(am.agents, a.ID())
-			delete(am.agentCfg, a.ID())
-			delete(am.agentUpAt, a.ID())
-			am.mu.Unlock()
-			return fmt.Errorf("persist agent %s: %w", rec.Config.ID, err)
-		}
-	}
-
-	am.runMu.Lock()
-	isRunning := am.running
-	runCtx := am.runCtx
-	am.runMu.Unlock()
+	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
 	if isRunning {
 		am.startAgentLoop(runCtx, a)
@@ -439,6 +432,12 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	if err != nil {
 		return err
 	}
+	rec := PersistedAgent{Config: updated, Status: "active", HiredBy: "reconfigure"}
+	revision, err := lifecycleConfigRevision(rec)
+	if err != nil {
+		return err
+	}
+	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"reconfigure", agentID, revision}, "\x00"))).String()
 
 	// Spec v2.0: reconfigure triggers session rotation so the agent restarts on a
 	// clean session with the new prompt/tool set. Fail fast if rotation fails.
@@ -455,6 +454,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 		rotationCtx := models.WithActor(am.runtimeContext(), updated)
 		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, runtimeMode, sessions.NormalizeSessionScope(updated.SessionScope), "reconfigure", sessions.RotationMetadata{
 			CheckpointSummary: "agent reconfigured",
+			OperationID:       operationID,
 		}, scopeKey)
 		if err != nil {
 			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
@@ -462,32 +462,18 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 			llm.LogSessionRotatedForRun(am.runtimeContext(), am.bus, agentID, conversationMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
 		}
 	}
-	if am.store != nil {
-		if err := am.store.UpsertAgent(am.runtimeContext(), PersistedAgent{
-			Config:  updated,
-			Status:  "active",
-			HiredBy: "reconfigure",
-		}); err != nil {
+	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", operationID, &rec); err != nil {
+		return err
+	}
+	if am.lifecycle.store == nil && am.store != nil {
+		if err := am.store.UpsertAgent(am.runtimeContext(), rec); err != nil {
 			return fmt.Errorf("persist reconfigured agent %s: %w", agentID, err)
 		}
 	}
-
 	am.mu.Lock()
 	am.agents[agentID] = newAgent
 	am.agentCfg[agentID] = updated
 	am.mu.Unlock()
-
-	am.runMu.Lock()
-	if cancel, ok := am.loopCancel[agentID]; ok {
-		cancel()
-		delete(am.loopCancel, agentID)
-	}
-	ctx := am.runCtx
-	running := am.running
-	am.runMu.Unlock()
-	if running {
-		am.startAgentLoop(ctx, newAgent)
-	}
 	return nil
 }
 
@@ -495,19 +481,17 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	if strings.TrimSpace(agentID) == "" {
 		return errors.New("agentID is required")
 	}
-	am.runMu.Lock()
-	if cancel, ok := am.loopCancel[agentID]; ok {
-		cancel()
-		delete(am.loopCancel, agentID)
-	}
-	am.runMu.Unlock()
-
-	am.mu.Lock()
+	am.mu.RLock()
 	_, exists := am.agents[agentID]
+	am.mu.RUnlock()
 	if !exists {
-		am.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
+	if err := am.lifecycle.terminate(am.runtimeContext(), agentID, "teardown", AgentLifecycleTerminated); err != nil {
+		return err
+	}
+
+	am.mu.Lock()
 	delete(am.agents, agentID)
 	delete(am.agentCfg, agentID)
 	delete(am.agentUpAt, agentID)
@@ -516,7 +500,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	if am.bus != nil {
 		am.bus.Unsubscribe(agentID)
 	}
-	if am.store != nil {
+	if am.lifecycle.store == nil && am.store != nil {
 		if err := am.store.MarkAgentTerminated(am.runtimeContext(), agentID); err != nil {
 			return err
 		}

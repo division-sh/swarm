@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 )
 
@@ -546,9 +548,16 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 	for key, value := range profile.StaticHeaders {
 		req.Header.Set(key, value)
 	}
-	resp, err := client.Do(req)
+	attempt, err := runtimeeffects.Begin(ctx, "managed_credential", []byte(tokenURL+"\x00"+values.Encode()), map[string]string{"credential_key": record.Key})
 	if err != nil {
 		return Record{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return Record{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "transport"}, err)
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -562,7 +571,7 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		Message      string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return Record{}, fmt.Errorf("decode token response: %w", err)
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "decode"}, err)
 	}
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(body.Error)
@@ -574,11 +583,12 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		} else if desc := strings.TrimSpace(body.Message); desc != "" {
 			msg += ": " + desc
 		}
-		return Record{}, fmt.Errorf("%s", msg)
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", msg))
 	}
 	access := strings.TrimSpace(body.AccessToken)
 	if access == "" {
-		return Record{}, fmt.Errorf("token endpoint did not return access_token")
+		err := fmt.Errorf("token endpoint did not return access_token")
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key}, err)
 	}
 	updated := record
 	updated.AccessToken = access
@@ -595,6 +605,9 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 	}
 	if body.ExpiresIn > 0 {
 		updated.ExpiresAt = s.now().Add(time.Duration(body.ExpiresIn) * time.Second).UTC()
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode}); err != nil {
+		return Record{}, err
 	}
 	return updated, nil
 }
@@ -633,9 +646,17 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	attempt, err := runtimeeffects.Begin(ctx, "managed_credential", []byte(tokenURL+"\x00"+installationID), map[string]string{"credential_key": record.Key})
+	if err != nil {
+		return Record{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return Record{}, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Record{}, fmt.Errorf("%s", RedactString(err.Error(), jwt))
+		redacted := fmt.Errorf("%s", RedactString(err.Error(), jwt))
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "transport"}, redacted)
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -645,7 +666,7 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return Record{}, fmt.Errorf("decode github installation token response: %w", err)
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "decode"}, err)
 	}
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(body.Error)
@@ -655,11 +676,12 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		if msg == "" {
 			msg = fmt.Sprintf("github installation token endpoint returned status %d", resp.StatusCode)
 		}
-		return Record{}, fmt.Errorf("%s", RedactString(msg, jwt))
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", RedactString(msg, jwt)))
 	}
 	token := strings.TrimSpace(body.Token)
 	if token == "" {
-		return Record{}, fmt.Errorf("github installation token endpoint did not return token")
+		err := fmt.Errorf("github installation token endpoint did not return token")
+		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key}, err)
 	}
 	updated := record
 	updated.AccessToken = token
@@ -673,6 +695,9 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 			return Record{}, fmt.Errorf("parse github installation token expires_at: %w", err)
 		}
 		updated.ExpiresAt = parsed.UTC()
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode}); err != nil {
+		return Record{}, err
 	}
 	return updated, nil
 }

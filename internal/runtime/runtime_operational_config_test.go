@@ -27,6 +27,10 @@ type recoveryGuardManagerStore struct {
 	agents []runtimemanager.PersistedAgent
 }
 
+func (*recoveryGuardManagerStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return startupRecoveryLifecycleResult(req), nil
+}
+
 func (s *recoveryGuardManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
 	return nil
 }

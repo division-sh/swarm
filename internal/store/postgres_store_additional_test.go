@@ -6690,6 +6690,9 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	if err := pg.ensureAgentLLMBackendProfiles(ctx); err != nil {
 		t.Fatalf("ensureAgentLLMBackendProfiles: %v", err)
 	}
+	if err := pg.ensurePostgresAgentLifecycleColumns(ctx); err != nil {
+		t.Fatalf("ensurePostgresAgentLifecycleColumns: %v", err)
+	}
 
 	_, err := pg.LoadAgents(ctx)
 	if err == nil || !strings.Contains(err.Error(), "invalid opaque config: config contains runtime-owned keys: mode, session_scope, type") {
@@ -6765,6 +6768,9 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColum
 	}
 	if err := pg.ensureAgentLLMBackendProfiles(ctx); err != nil {
 		t.Fatalf("ensureAgentLLMBackendProfiles: %v", err)
+	}
+	if err := pg.ensurePostgresAgentLifecycleColumns(ctx); err != nil {
+		t.Fatalf("ensurePostgresAgentLifecycleColumns: %v", err)
 	}
 
 	agents, err := pg.LoadAgents(ctx)

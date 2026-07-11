@@ -169,6 +169,9 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		if err := s.ensureSQLiteAgentModelAliases(ctx); err != nil {
 			return err
 		}
+		if err := s.ensureSQLiteAgentLifecycleColumns(ctx); err != nil {
+			return err
+		}
 	}
 	if err := s.ensureSQLiteMailboxDeferredUntil(ctx); err != nil {
 		return err

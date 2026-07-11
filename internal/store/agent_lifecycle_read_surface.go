@@ -12,7 +12,7 @@ import (
 	"github.com/lib/pq"
 )
 
-type AgentLifecycleFacts struct {
+type AgentDeliveryLifecycleFacts struct {
 	CurrentState  string
 	BlockingLayer string
 }
@@ -32,7 +32,7 @@ func RequireCanonicalAgentLifecycleCapabilities(caps StoreSchemaCapabilities) er
 	return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 }
 
-func (s *PostgresStore) ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error) {
+func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -42,22 +42,22 @@ func (s *PostgresStore) ListAgentLifecycleFacts(ctx context.Context, agentIDs []
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)
 	if len(normalized) == 0 {
-		return map[string]AgentLifecycleFacts{}, nil
+		return map[string]AgentDeliveryLifecycleFacts{}, nil
 	}
 	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]AgentLifecycleFacts, len(normalized))
+	out := make(map[string]AgentDeliveryLifecycleFacts, len(normalized))
 	for _, agentID := range normalized {
-		out[agentID] = AgentLifecycleFacts{}
+		out[agentID] = AgentDeliveryLifecycleFacts{}
 	}
 	grouped := make(map[string][]agentLifecycleDeliveryRecord, len(normalized))
 	for _, record := range records {
 		grouped[record.AgentID] = append(grouped[record.AgentID], record)
 	}
 	for _, agentID := range normalized {
-		out[agentID] = canonicalAgentLifecycleFactsFromRecords(grouped[agentID])
+		out[agentID] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[agentID])
 	}
 	return out, nil
 }
@@ -102,12 +102,12 @@ func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, agent
 }
 
 type agentLifecycleCandidate struct {
-	facts      AgentLifecycleFacts
+	facts      AgentDeliveryLifecycleFacts
 	observedAt time.Time
 	priority   int
 }
 
-func canonicalAgentLifecycleFactsFromRecords(records []agentLifecycleDeliveryRecord) AgentLifecycleFacts {
+func canonicalAgentDeliveryLifecycleFactsFromRecords(records []agentLifecycleDeliveryRecord) AgentDeliveryLifecycleFacts {
 	var live *agentLifecycleCandidate
 	var exhausted *agentLifecycleCandidate
 	for _, record := range records {
@@ -116,7 +116,7 @@ func canonicalAgentLifecycleFactsFromRecords(records []agentLifecycleDeliveryRec
 			continue
 		}
 		candidate := agentLifecycleCandidate{
-			facts: AgentLifecycleFacts{
+			facts: AgentDeliveryLifecycleFacts{
 				CurrentState:  string(state),
 				BlockingLayer: agentLifecycleBlockingLayer(state),
 			},
@@ -140,7 +140,7 @@ func canonicalAgentLifecycleFactsFromRecords(records []agentLifecycleDeliveryRec
 	if exhausted != nil {
 		return exhausted.facts
 	}
-	return AgentLifecycleFacts{}
+	return AgentDeliveryLifecycleFacts{}
 }
 
 func agentLifecycleObservedAt(record agentLifecycleDeliveryRecord) time.Time {

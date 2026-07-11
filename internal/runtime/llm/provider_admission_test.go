@@ -228,21 +228,15 @@ func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
 	requireProviderAdmissionRateLimited(t, err)
 }
 
-func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
+func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.T) {
 	var requests atomic.Int32
-	var firstRequest, secondRequest atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := requests.Add(1)
-		now := time.Now().UnixNano()
 		w.Header().Set("content-type", "application/json")
 		switch n {
 		case 1:
-			firstRequest.Store(now)
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"provider busy"}}`))
-		case 2:
-			secondRequest.Store(now)
-			_, _ = w.Write([]byte(`{"model":"claude-3-5-sonnet","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"done"}]}`))
 		default:
 			t.Fatalf("unexpected request %d", n)
 		}
@@ -255,10 +249,6 @@ func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
 				LockTTL:               time.Second,
 				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
-			},
-			ClaudeAPI: config.ClaudeAPIConfig{
-				MaxRetries:   2,
-				RetryBackoff: time.Millisecond,
 			},
 			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
 				llmselection.BackendAnthropic: {
@@ -278,19 +268,11 @@ func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	resp, err := runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
-	if err != nil {
-		t.Fatalf("ContinueSession: %v", err)
+	if _, err := runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"}); err == nil {
+		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}
-	if resp.Message.Content != "done" {
-		t.Fatalf("response content = %q, want done", resp.Message.Content)
-	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("requests = %d, want retry request", got)
-	}
-	elapsed := time.Duration(secondRequest.Load() - firstRequest.Load())
-	if elapsed < 25*time.Millisecond {
-		t.Fatalf("retry elapsed = %s, want provider admission to delay retry", elapsed)
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want exactly one request with no redispatch", got)
 	}
 }
 

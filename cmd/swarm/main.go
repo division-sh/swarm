@@ -2204,10 +2204,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
-			ClaudeAPI: config.ClaudeAPIConfig{
-				MaxRetries:   1,
-				RetryBackoff: 2 * time.Second,
-			},
+			ClaudeAPI: config.ClaudeAPIConfig{},
 			ClaudeCLI: config.ClaudeCLIConfig{
 				Command:              "claude",
 				Timeout:              time.Hour,

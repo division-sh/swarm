@@ -264,10 +264,7 @@ func waitForManagerShuttingDown(t *testing.T, am *AgentManager) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		am.runMu.Lock()
-		shuttingDown := am.shuttingDown
-		am.runMu.Unlock()
-		if shuttingDown {
+		if am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)

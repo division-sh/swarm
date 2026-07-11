@@ -5785,6 +5785,8 @@ engine:
           - platform.unexpected_arrival
           - platform.conflicting_duplicate
           - platform.reply_already_terminal
+          - platform.superseded_generation
+          - platform.lifecycle_conflict
           - platform.schema_invalid
           - platform.dependency_unavailable
           - platform.internal_failure
@@ -5804,6 +5806,8 @@ engine:
           - platform.target_ambiguous
           - platform.fan_out_bound_exceeded
           - platform.chain_depth_exceeded
+          - platform.superseded_generation
+          - platform.lifecycle_conflict
           - platform.schema_invalid
           - platform.dependency_unavailable
           - platform.internal_failure
@@ -5988,6 +5992,20 @@ engine:
           deterministic: true
           message_template: Request already has a terminal reply (%s).
           remediation_template: Do not send a second distinct terminal reply (%s).
+        platform.superseded_generation:
+          family: runtime_lifecycle
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Agent generation was superseded (%s).
+          remediation_template: Start new work under the current lifecycle generation (%s).
+        platform.lifecycle_conflict:
+          family: runtime_lifecycle
+          task_failure: true
+          retryable: false
+          deterministic: true
+          message_template: Agent lifecycle authority conflicts with the requested transition (%s).
+          remediation_template: Reload the canonical lifecycle cell before retrying (%s).
         platform.schema_invalid:
           family: boundary_platform
           task_failure: true
@@ -6924,7 +6942,6 @@ tool_model:
           headers: object — header name to value template. Supports {{credentials.key}} and {{input.field_name}} substitution.
           body: object — request body template. Same substitution. Sent as JSON.
           timeout_seconds: integer — request timeout. Default 30.
-          retry: 'object — max_retries: integer (default 0), backoff: string (exponential)'
       optional_fields:
         output_schema: object — field names and types the tool returns (for documentation and LLM context)
         response_mapping: object — maps response body fields to tool output fields. If omitted, the entire response body is
@@ -9873,6 +9890,7 @@ platform_tables:
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
+      - Agent lifecycle operations, transition facts, diagnostic outbox rows, and external-effect operation/attempt evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry.
       - Generated node-state tables and legacy/future product optimization tables remain split-preserved until a separate
         owner gives them exact run-scoped identity. Normal runtime boot does not create generated typed entity tables.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -9913,6 +9931,11 @@ platform_tables:
         - api_idempotency
         - runtime_ingress_state
         - agents
+        - agent_lifecycle_operations
+        - agent_lifecycle_transition_facts
+        - agent_lifecycle_diagnostic_outbox
+        - agent_external_effect_operations
+        - agent_external_effect_attempts
         - flow_instances
         - routing_rules
       request_scoped_bundle_catalog:
@@ -9990,6 +10013,109 @@ platform_tables:
             INDEX idx_agent_directive_operations_recovery (state, execution_lease_expires_at, updated_at),
             INDEX idx_agent_directive_operations_expiry (expires_at),
             INDEX idx_agent_directive_operations_run (resolved_run_id, created_at)
+        );
+    agent_lifecycle_operations:
+      description: >-
+        Durable operation/outcome owner for per-agent lifecycle create, start, restart,
+        reconfigure, teardown, stop, self-release, and failure transitions. The selected
+        store commits the authoritative agents lifecycle cell, immutable transition fact,
+        operation outcome, API projection when applicable, and diagnostic outbox atomically.
+      ddl: |
+        CREATE TABLE agent_lifecycle_operations (
+            operation_id       UUID PRIMARY KEY,
+            agent_id           TEXT NOT NULL REFERENCES agents(agent_id),
+            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('spawn', 'start', 'restart', 'reconfigure', 'teardown', 'stop', 'self_release', 'fail')),
+            request_hash       TEXT NOT NULL,
+            expected_epoch     BIGINT NOT NULL,
+            expected_generation BIGINT NOT NULL,
+            target_generation BIGINT NOT NULL,
+            target_phase      TEXT NOT NULL CHECK (target_phase IN ('registered', 'running', 'terminated', 'failed')),
+            config_revision   TEXT NOT NULL,
+            run_mode          TEXT NOT NULL CHECK (run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),
+            state             TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'succeeded', 'failed', 'indeterminate')),
+            result            JSONB,
+            failure           JSONB,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at      TIMESTAMPTZ,
+            CHECK ((state = 'succeeded') = (result IS NOT NULL)),
+            CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
+            INDEX idx_agent_lifecycle_operations_agent (agent_id, created_at),
+            INDEX idx_agent_lifecycle_operations_recovery (state, updated_at)
+        );
+    agent_lifecycle_transition_facts:
+      description: Immutable committed per-agent lifecycle transition evidence.
+      ddl: |
+        CREATE TABLE agent_lifecycle_transition_facts (
+            transition_id      UUID PRIMARY KEY,
+            operation_id       UUID NOT NULL UNIQUE,
+            agent_id           TEXT NOT NULL REFERENCES agents(agent_id),
+            trigger            TEXT NOT NULL,
+            previous_phase     TEXT NOT NULL,
+            next_phase         TEXT NOT NULL,
+            previous_generation BIGINT NOT NULL,
+            next_generation    BIGINT NOT NULL,
+            runtime_epoch      BIGINT NOT NULL,
+            config_revision   TEXT NOT NULL,
+            run_mode          TEXT NOT NULL,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            INDEX idx_agent_lifecycle_transition_facts_agent (agent_id, created_at)
+        );
+    agent_lifecycle_diagnostic_outbox:
+      description: Durable non-authoritative projection queue for lifecycle diagnostics.
+      ddl: |
+        CREATE TABLE agent_lifecycle_diagnostic_outbox (
+            outbox_id          UUID PRIMARY KEY,
+            operation_id       UUID NOT NULL UNIQUE,
+            agent_id           TEXT NOT NULL REFERENCES agents(agent_id),
+            event_name         TEXT NOT NULL,
+            payload            JSONB NOT NULL,
+            projected_at       TIMESTAMPTZ,
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
+        );
+    agent_external_effect_operations:
+      description: >-
+        Generic durable logical operation owner for every managed external provider,
+        HTTP tool, credential, web-search, MCP, native command/write, and relay effect.
+      ddl: |
+        CREATE TABLE agent_external_effect_operations (
+            operation_id       UUID PRIMARY KEY,
+            effect_kind        TEXT NOT NULL,
+            effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
+            agent_id           TEXT NOT NULL REFERENCES agents(agent_id),
+            runtime_epoch      BIGINT NOT NULL,
+            generation         BIGINT NOT NULL,
+            lineage            JSONB NOT NULL DEFAULT '{}',
+            request_fingerprint TEXT NOT NULL,
+            state              TEXT NOT NULL CHECK (state IN ('prepared', 'authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at       TIMESTAMPTZ,
+            INDEX idx_agent_external_effect_operations_agent (agent_id, created_at),
+            INDEX idx_agent_external_effect_operations_recovery (state, updated_at)
+        );
+    agent_external_effect_attempts:
+      description: One actual transport/process/write attempt under a durable external-effect operation.
+      ddl: |
+        CREATE TABLE agent_external_effect_attempts (
+            attempt_id         UUID PRIMARY KEY,
+            operation_id       UUID NOT NULL,
+            attempt_ordinal    INTEGER NOT NULL CHECK (attempt_ordinal > 0),
+            adapter            TEXT NOT NULL,
+            transport          TEXT NOT NULL,
+            runtime_epoch      BIGINT NOT NULL,
+            generation         BIGINT NOT NULL,
+            state              TEXT NOT NULL CHECK (state IN ('authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
+            evidence           JSONB NOT NULL DEFAULT '{}',
+            failure            JSONB,
+            authorized_at      TIMESTAMPTZ NOT NULL,
+            launched_at        TIMESTAMPTZ,
+            response_observed_at TIMESTAMPTZ,
+            completed_at       TIMESTAMPTZ,
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (operation_id, attempt_ordinal),
+            INDEX idx_agent_external_effect_attempts_recovery (state, updated_at)
         );
     reply_contexts:
       description: >-
@@ -10152,8 +10278,8 @@ platform_tables:
         \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
-        \ NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
-        \ 'terminated')),\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    last_active_at    TIMESTAMPTZ,\n    created_at\
+        \ NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    lifecycle_phase   TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'terminated', 'failed')),\n    lifecycle_generation BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_generation >= 0),\n    lifecycle_runtime_epoch BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_runtime_epoch >= 0),\n    lifecycle_config_revision TEXT NOT NULL DEFAULT '',\n    lifecycle_run_mode TEXT NOT NULL DEFAULT 'stopped' CHECK (lifecycle_run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),\n    lifecycle_last_transition_id UUID,\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
+        \ 'terminated', 'failed')),\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    last_active_at    TIMESTAMPTZ,\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_agents_flow (flow_instance) WHERE flow_instance IS NOT\
         \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\
         \ WHERE parent_agent_id IS NOT NULL\n);"
@@ -13808,8 +13934,6 @@ configuration_source_authority:
             provider_limits: project_safe
             claude_api.default_model: split_unsupported
             claude_api.haiku_model: split_unsupported
-            claude_api.max_retries: project_safe
-            claude_api.retry_backoff: project_safe
             claude_cli.command: elevated
             claude_cli.timeout: project_safe
             claude_cli.output_format: project_safe
@@ -27271,3 +27395,67 @@ api_specification:
     - Every method in method_catalog maps to one OpenRPC method object with params (array of contentDescriptors), result (contentDescriptor),
       errors (array of error objects derived from components.errors with unique numeric OpenRPC codes and canonical data.code
       string discriminators).
+
+agent_lifecycle_authority:
+  owner: typed AgentManager lifecycle coordinator plus the selected SQLite/Postgres store
+  durable_cell:
+    table: agents
+    fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id]
+    rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority.
+  lifecycle_token:
+    fields: [runtime_epoch, agent_id, generation]
+    rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
+  transitions:
+    operations: [spawn, hydrate, materialize, start, restart, reconfigure, teardown, self_release, shutdown, reset]
+    serialization: All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision point.
+    ordering:
+      - Validate and build candidate state before transition admission.
+      - Commit the lifecycle cell, immutable transition fact, durable operation outcome, and diagnostic outbox atomically.
+      - Fence the predecessor generation before cancellation and await its generation-aware release before starting a successor loop.
+      - Persistence failure leaves the prior process-local owner unchanged and cannot be acknowledged as success.
+    replay: Repeating one operation_id returns its stored outcome and never cancels, restarts, rotates, or advances generation again.
+    generation: A new create/replace/destroy transition advances exactly one generation; self-release conditionally changes phase without advancing generation.
+  public_restart:
+    idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
+    diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
+  reconfigure:
+    operation_identity: Derived from agent id and candidate config revision.
+    session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
+  recovery:
+    rule: Recovery hydrates only durable non-terminal cells and reconciles operation/outbox state without inferring success from process-local loop presence.
+  forbidden:
+    - direct lifecycle map writes outside the coordinator
+    - memory-only fallback for a selected persistent runtime store
+    - best-effort lifecycle persistence or diagnostic ownership
+    - tolerant dual lifecycle readers or compatibility aliases
+
+managed_external_effect_authority:
+  owner: agent_external_effect_operations and agent_external_effect_attempts in the selected store
+  registration:
+    required_fields: [effect_kind, effect_class, adapter, transport, launch_site, launch_observed, outcome_mapping, canonical_evidence, settlement_recovery, proof]
+    rule: Registration is incomplete unless every field is present and the source-derived primitive manifest maps the actual launch/write boundary to exactly one owner.
+  effect_classes:
+    read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
+    write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
+  launch:
+    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt immediately before HTTP dispatch, process start, MCP stdio write, or filesystem mutation.
+    stale: platform.superseded_generation with zero launch or mutation.
+  settlement:
+    success: Correlated known success settles the same attempt exactly once with immutable evidence.
+    prelaunch_failure: Proven zero-effect rejection is terminal.
+    postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
+    postlaunch_write_or_unknown_failure: platform.outcome_uncertain with an adapter-specific detail; automatic redispatch is forbidden.
+    mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
+  automatic_redispatch_allowlist: []
+  adapters:
+    provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
+    tool: [authored_http_tool, managed_credential, native_web_search]
+    mcp: [mcp_tools_call_http, mcp_tools_call_stdio]
+    native: [native_bash, native_read_file, native_write_file]
+    relay: [tool_result_relay, claude_tool_result_relay]
+  forbidden:
+    - provider or authored HTTP automatic retries
+    - managed-credential 401 refresh followed by target redispatch
+    - effect classification derived from HTTP status, JSON-RPC correlation, exit code, or provider self-description
+    - post-mutation native file failure reported as a proven terminal no-effect outcome
+    - recovery redispatch of an authorized, launched, response-observed, or uncertain attempt

@@ -20,7 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestExecutorHTTPToolUsesManagedCredentialAndRefreshesOnUnauthorized(t *testing.T) {
+func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testing.T) {
 	ctx := context.Background()
 	var apiCalls atomic.Int32
 	var tokenCalls atomic.Int32
@@ -73,18 +73,14 @@ func TestExecutorHTTPToolUsesManagedCredentialAndRefreshesOnUnauthorized(t *test
 		WorkflowSource:     managedCredentialSource(server.URL+"/api", "github", []string{"repo.read"}),
 		ManagedCredentials: store,
 	})
-	out, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
-	if err != nil {
-		t.Fatalf("Execute(send_provider): %v", err)
+	if _, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{}); err == nil {
+		t.Fatal("Execute(send_provider) succeeded after unauthorized target response")
 	}
-	if got := out.(map[string]any)["ok"]; got != true {
-		t.Fatalf("result ok = %#v, want true", got)
+	if apiCalls.Load() != 1 || tokenCalls.Load() != 0 {
+		t.Fatalf("api/token calls = (%d, %d), want (1, 0)", apiCalls.Load(), tokenCalls.Load())
 	}
-	if apiCalls.Load() != 2 || tokenCalls.Load() != 1 {
-		t.Fatalf("api/token calls = (%d, %d), want (2, 1)", apiCalls.Load(), tokenCalls.Load())
-	}
-	if strings.Join(sawAuth, ",") != "Bearer old-token,Bearer refreshed-token" {
-		t.Fatalf("Authorization sequence = %v, want old then refreshed", sawAuth)
+	if strings.Join(sawAuth, ",") != "Bearer old-token" {
+		t.Fatalf("Authorization sequence = %v, want old token exactly once", sawAuth)
 	}
 }
 

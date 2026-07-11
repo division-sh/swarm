@@ -11,6 +11,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/google/uuid"
 )
 
 const agentControlIdempotencyTTL = 24 * time.Hour
@@ -122,6 +123,10 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 	if err != nil {
 		return nil, err
 	}
+	operationID := ""
+	if strings.TrimSpace(idempotencyKey) != "" {
+		operationID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{req.Method, req.ActorTokenID, idempotencyKey}, "\x00"))).String()
+	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
@@ -131,7 +136,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID})
+		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, OperationID: operationID})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}

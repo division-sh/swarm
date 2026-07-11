@@ -175,10 +175,8 @@ type LLMProviderLimitPolicy struct {
 }
 
 type ClaudeAPIConfig struct {
-	DefaultModel string        `yaml:"default_model"`
-	HaikuModel   string        `yaml:"haiku_model"`
-	MaxRetries   int           `yaml:"max_retries"`
-	RetryBackoff time.Duration `yaml:"retry_backoff"`
+	DefaultModel string `yaml:"default_model"`
+	HaikuModel   string `yaml:"haiku_model"`
 }
 
 type ClaudeCLIConfig struct {

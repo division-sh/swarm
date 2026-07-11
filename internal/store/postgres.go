@@ -167,6 +167,9 @@ func schemaDDLIncludesPlatformTables(plans []SchemaTableDDL) bool {
 }
 
 func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) error {
+	if err := s.ensurePostgresAgentLifecycleColumns(ctx); err != nil {
+		return err
+	}
 	if s == nil || s.DB == nil {
 		return nil
 	}

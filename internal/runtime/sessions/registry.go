@@ -61,6 +61,7 @@ type RotationMetadata struct {
 	CheckpointSummary string
 	RetryReason       string
 	TerminationReason TerminationReason
+	OperationID       string
 }
 
 type Record struct {
@@ -81,6 +82,7 @@ type Record struct {
 	TerminationDetail    string
 	SuccessorSessionID   string
 	TerminatedAt         time.Time
+	RotationOperationID  string
 }
 
 // InMemoryRegistry is the process-local bootstrap implementation.
@@ -207,6 +209,15 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	if !ok {
 		return nil, fmt.Errorf("session for agent %s not found", agentID)
 	}
+	operationID := strings.TrimSpace(rotation.OperationID)
+	if operationID != "" && rec.RotationOperationID == operationID && rec.Status == "active" {
+		return &Lease{
+			SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, AgentID: rec.AgentID,
+			RuntimeMode: rec.RuntimeMode, SessionScope: resolved.Scope, RetryReason: rec.RetryReason,
+			RetriesFromSessionID: rec.RetriesFromSessionID, LockOwner: rec.LockOwner,
+			ScopeKey: rec.ScopeKey, ExpiresAt: rec.LockExpiresAt,
+		}, nil
+	}
 
 	now := time.Now()
 	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
@@ -251,6 +262,7 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	rec.TerminationDetail = ""
 	rec.SuccessorSessionID = ""
 	rec.TerminatedAt = time.Time{}
+	rec.RotationOperationID = operationID
 
 	return &Lease{
 		SessionID:            rec.SessionID,

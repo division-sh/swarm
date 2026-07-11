@@ -16,9 +16,6 @@
 #   system_monthly_cap: 0 # System actor monthly budget cap; zero leaves enforcement disabled.
 # llm:
 #   backend: anthropic # Active LLM backend profile.
-#   claude_api:
-#     max_retries: 1 # Anthropic API retry count.
-#     retry_backoff: 2s # Anthropic API retry backoff.
 #   claude_cli:
 #     output_format: stream-json # Claude CLI output format.
 #     timeout: 1h # Claude CLI request timeout.

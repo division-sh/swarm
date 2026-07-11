@@ -942,7 +942,7 @@ type stubSQLAgents struct {
 	caps           store.StoreSchemaCapabilities
 	err            error
 	facts          map[string]store.PendingAgentDeliveryFacts
-	lifecycleFacts map[string]store.AgentLifecycleFacts
+	lifecycleFacts map[string]store.AgentDeliveryLifecycleFacts
 }
 
 type stubSQLAgentsWithoutLifecycle struct {
@@ -983,8 +983,8 @@ func (s stubSQLAgents) ListPendingAgentDeliveryFacts(_ context.Context, agentIDs
 	return out, nil
 }
 
-func (s stubSQLAgents) ListAgentLifecycleFacts(_ context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error) {
-	out := make(map[string]store.AgentLifecycleFacts, len(agentIDs))
+func (s stubSQLAgents) ListAgentDeliveryLifecycleFacts(_ context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error) {
+	out := make(map[string]store.AgentDeliveryLifecycleFacts, len(agentIDs))
 	for _, agentID := range agentIDs {
 		out[agentID] = s.lifecycleFacts[agentID]
 	}
@@ -1988,7 +1988,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 		facts: map[string]store.PendingAgentDeliveryFacts{
 			"agent-1": {PendingCount: 2, OldestPendingAgeSec: 45},
 		},
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "launching", BlockingLayer: "session_launch"},
 		},
 	}, 12)
@@ -2049,7 +2049,7 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 		facts: map[string]store.PendingAgentDeliveryFacts{
 			"agent-1": {PendingCount: 1, OldestPendingAgeSec: 12},
 		},
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
 		},
 	}, 12)
@@ -2101,7 +2101,7 @@ func TestSQLAgentReader_ListGenericAgents_DoesNotDeriveLifecycleFromActiveLeaseW
 		facts: map[string]store.PendingAgentDeliveryFacts{
 			"agent-1": {},
 		},
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 12)
@@ -2154,7 +2154,7 @@ func TestSQLAgentReader_GetGenericAgent_DoesNotDeriveLifecycleFromActiveLeaseWhe
 		facts: map[string]store.PendingAgentDeliveryFacts{
 			"agent-1": {},
 		},
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 12)
@@ -2216,7 +2216,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 			Status: "active",
 		}},
 		caps: canonicalEventAndConversationCaps(),
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 12)
@@ -2254,7 +2254,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapa
 			Status: "active",
 		}},
 		caps: caps,
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 12)
@@ -2307,7 +2307,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnCapabil
 			Status: "active",
 		}},
 		caps: caps,
-		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 12)

@@ -142,15 +142,15 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT session_id::text, lease_holder, lease_expires_at\\s+FROM agent_sessions").
+	mock.ExpectQuery("SELECT session_id::text, lease_holder, lease_expires_at, runtime_state\\s+FROM agent_sessions").
 		WithArgs("a1", "global", RuntimeModeSession).
-		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lease_holder", "lease_expires_at"}).
-			AddRow("sess-1", "owner-1", fixedNow.Add(10*time.Second)))
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lease_holder", "lease_expires_at", "runtime_state"}).
+			AddRow("sess-1", "owner-1", fixedNow.Add(10*time.Second), []byte(`{}`)))
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'terminated',").
 		WithArgs(TerminationReasonContaminated, "session not found", fixedNow, "sess-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("INSERT INTO agent_sessions").
-		WithArgs(sqlmock.AnyArg(), "a1", "", "", "global", "global", RuntimeModeSession, "sum", "session not found", "sess-1", "owner-1", fixedNow.Add(30*time.Second)).
+		WithArgs(sqlmock.AnyArg(), "a1", "", "", "global", "global", RuntimeModeSession, "sum", "session not found", "sess-1", "owner-1", fixedNow.Add(30*time.Second), "").
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET successor_session_id = \\$1::uuid,").
 		WithArgs(sqlmock.AnyArg(), "sess-1").

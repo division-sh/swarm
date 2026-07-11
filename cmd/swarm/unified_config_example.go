@@ -53,8 +53,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		dynamic("llm.provider_limits.anthropic.max_concurrency_max_wait", "30s", "Maximum wait for provider-wide concurrency limiting.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit", "10/m", "Model-specific request rate limit.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit_max_wait", "30s", "Maximum wait for model-specific rate limiting.", unifiedConfigExampleTierProjectSafe),
-		e("llm.claude_api.max_retries", "1", "Anthropic API retry count.", unifiedConfigExampleTierProjectSafe),
-		e("llm.claude_api.retry_backoff", "2s", "Anthropic API retry backoff.", unifiedConfigExampleTierProjectSafe),
 		e("llm.claude_cli.timeout", "1h", "Claude CLI request timeout.", unifiedConfigExampleTierProjectSafe),
 		e("llm.claude_cli.output_format", "stream-json", "Claude CLI output format.", unifiedConfigExampleTierProjectSafe),
 		e("budget.global_monthly_cap", "0", "Global monthly budget cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),

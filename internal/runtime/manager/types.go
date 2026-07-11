@@ -44,13 +44,17 @@ type Bus interface {
 }
 
 type PersistedAgent struct {
-	Config          models.AgentConfig
-	ParentAgentID   string
-	CoordinatorID   string
-	Status          string
-	HiredBy         string
-	TemplateVersion string
-	StartedAt       time.Time
+	Config              models.AgentConfig
+	ParentAgentID       string
+	CoordinatorID       string
+	Status              string
+	HiredBy             string
+	TemplateVersion     string
+	StartedAt           time.Time
+	LifecycleEpoch      int64
+	LifecycleGeneration uint64
+	LifecyclePhase      AgentLifecyclePhase
+	LifecycleRunMode    AgentRunMode
 }
 
 type PersistedRoutingRule struct {
@@ -98,6 +102,60 @@ type AgentPersistence interface {
 	MarkAgentTerminated(ctx context.Context, agentID string) error
 }
 
+type AgentLifecyclePhase string
+
+const (
+	AgentLifecycleRegistered AgentLifecyclePhase = "registered"
+	AgentLifecycleRunning    AgentLifecyclePhase = "running"
+	AgentLifecycleTerminated AgentLifecyclePhase = "terminated"
+	AgentLifecycleFailed     AgentLifecyclePhase = "failed"
+)
+
+type AgentRunMode string
+
+const (
+	AgentRunModeStopped                   AgentRunMode = "stopped"
+	AgentRunModeStandard                  AgentRunMode = "standard"
+	AgentRunModeAuthoritativeDeliveryOnly AgentRunMode = "authoritative_delivery_only"
+)
+
+type AgentLifecycleTransition struct {
+	OperationID        string
+	OperationKind      string
+	RequestHash        string
+	AgentID            string
+	Trigger            string
+	ExpectedEpoch      int64
+	ExpectedGeneration uint64
+	ExpectedPhase      AgentLifecyclePhase
+	TargetEpoch        int64
+	TargetGeneration   uint64
+	TargetPhase        AgentLifecyclePhase
+	ConfigRevision     string
+	RunMode            AgentRunMode
+	Agent              *PersistedAgent
+	Now                time.Time
+}
+
+type AgentLifecycleTransitionResult struct {
+	OperationID        string              `json:"operation_id"`
+	TransitionID       string              `json:"transition_id"`
+	AgentID            string              `json:"agent_id"`
+	PreviousEpoch      int64               `json:"previous_epoch"`
+	RuntimeEpoch       int64               `json:"runtime_epoch"`
+	PreviousGeneration uint64              `json:"previous_generation"`
+	Generation         uint64              `json:"generation"`
+	PreviousPhase      AgentLifecyclePhase `json:"previous_phase"`
+	Phase              AgentLifecyclePhase `json:"phase"`
+	ConfigRevision     string              `json:"config_revision"`
+	RunMode            AgentRunMode        `json:"run_mode"`
+	Replayed           bool                `json:"-"`
+}
+
+type AgentLifecyclePersistence interface {
+	CommitAgentLifecycleTransition(context.Context, AgentLifecycleTransition) (AgentLifecycleTransitionResult, error)
+}
+
 type EntitySchemaPersistence interface {
 	EnsureEntitySchema(ctx context.Context, entityID string) error
 }
@@ -128,6 +186,7 @@ type BudgetGuard interface {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
+	LifecycleStore                 AgentLifecyclePersistence
 	Workspaces                     workspace.Lifecycle
 	Sessions                       sessions.Registry
 	SemanticSource                 semanticview.Source

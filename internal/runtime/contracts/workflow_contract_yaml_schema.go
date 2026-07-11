@@ -293,7 +293,6 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	if t.HTTP != nil {
 		t.HTTP.Method = strings.TrimSpace(t.HTTP.Method)
 		t.HTTP.URL = strings.TrimSpace(t.HTTP.URL)
-		t.HTTP.Retry.Backoff = strings.TrimSpace(t.HTTP.Retry.Backoff)
 		headers := make(map[string]string, len(t.HTTP.Headers))
 		for key, value := range t.HTTP.Headers {
 			key = strings.TrimSpace(key)

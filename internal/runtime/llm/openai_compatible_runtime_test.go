@@ -169,13 +169,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 
 	turns := &turnCapture{}
 	budget := &budgetCapture{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{
-		LLM: config.LLMConfig{
-			ClaudeAPI: config.ClaudeAPIConfig{
-				MaxRetries: 1,
-			},
-		},
-	}, sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, budget, nil)
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, budget, nil)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
@@ -189,8 +183,8 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
-	if len(turns.records) != 0 {
-		t.Fatalf("turn records = %#v, want no persisted successful turn", turns.records)
+	if len(turns.records) != 1 || turns.records[0].ParseOK || turns.records[0].Failure == nil {
+		t.Fatalf("turn records = %#v, want one immutable missing-usage failure turn", turns.records)
 	}
 	if budget.usage.InputTokens != 0 || budget.usage.OutputTokens != 0 {
 		t.Fatalf("budget usage = %#v, want no recorded usage", budget.usage)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -69,26 +70,34 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	if strings.TrimSpace(input) != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
+	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", []byte(strings.Join(args, "\x00")+"\x00"+input), nil)
+	if err != nil {
+		return nil, err
+	}
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", nil, err)
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, err
+	}
+	if err := cmd.Wait(); err != nil {
 		stderrText := strings.TrimSpace(stderr.String())
 		stdoutText := strings.TrimSpace(stdout.String())
+		cause := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run", err)
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			errOut := summarizeCLIErrorOutput(stderrText)
-			if errOut == "" {
-				errOut = summarizeCLIErrorOutput(stdoutText)
-			}
-			if errOut == "" {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
-			}
-			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
+			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
-		return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run", err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", map[string]any{"timeout": timeout.String(), "stderr": summarizeCLIErrorOutput(stderrText), "stdout": summarizeCLIErrorOutput(stdoutText)}, cause)
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
 	resp := parseCLIResponse(raw)
 	resp.Raw = raw
+	if err := attempt.Succeed(ctx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
+		return nil, err
+	}
 	return resp, nil
 }
 
@@ -104,6 +113,10 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 	if strings.TrimSpace(input) != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
+	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", []byte(input), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	monitor, monitorErr := r.openMonitorTurn(ctx, meta)
 	if monitorErr != nil {
@@ -114,7 +127,11 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("claude cli run failed: %w", err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", nil, err)
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, err
 	}
 
 	stdoutCh := make(chan [][]byte, 1)
@@ -131,17 +148,11 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 		if monitor != nil {
 			monitor.WriteNotice("turn.end ok=false")
 		}
+		cause := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run_streaming", waitErr)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			errOut := summarizeCLIErrorOutput(stderrText)
-			if errOut == "" {
-				errOut = summarizeCLIErrorOutput(stdoutText)
-			}
-			if errOut == "" {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
-			}
-			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
+			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
-		return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run_streaming", waitErr)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": summarizeCLIErrorOutput(stderrText), "stdout": summarizeCLIErrorOutput(stdoutText)}, cause)
 	}
 
 	acc := newCLIStreamAccumulator()
@@ -151,6 +162,9 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 	resp := acc.Response()
 	if monitor != nil {
 		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(coalesce(resp.SessionID, meta.SessionID)))
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(joinRawLines(stdoutLines))}); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }

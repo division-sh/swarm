@@ -17,6 +17,8 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -69,7 +71,7 @@ func (e *Executor) execNativeBash(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 	start := time.Now()
-	stdout, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, timeout, "", "sh", "-lc", command)
+	stdout, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, "native_bash", timeout, "", "sh", "-lc", command)
 	duration := time.Since(start)
 	if execErr != nil && (ctx.Err() != nil || errors.Is(execErr, context.DeadlineExceeded)) {
 		return nil, execErr
@@ -105,7 +107,7 @@ func (e *Executor) execNativeReadFile(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, err
 	}
-	stdout, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, "", "sh", "-lc", `cat -- "$1"`, "swarm-read-file", path)
+	stdout, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, "native_read_file", 30*time.Second, "", "sh", "-lc", `cat -- "$1"`, "swarm-read-file", path)
 	if execErr != nil || exitCode != 0 {
 		return nil, fmt.Errorf("read_file failed for %s: %s", path, strings.TrimSpace(string(stderr)))
 	}
@@ -129,13 +131,13 @@ func (e *Executor) execNativeWriteFile(ctx context.Context, actor models.AgentCo
 	}
 	execTarget := target.ExecutionTarget()
 	if execTarget.Mode == workspace.ExecutionModeHostLocal {
-		return execNativeHostWriteFile(execTarget, in.Path, in.Content)
+		return execNativeHostWriteFile(ctx, execTarget, in.Path, in.Content)
 	}
 	path, err := resolveNativeWritePath(target, in.Path)
 	if err != nil {
 		return nil, err
 	}
-	_, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, in.Content, "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-write-file", path)
+	_, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, "native_write_file", 30*time.Second, in.Content, "sh", "-lc", `dir="$(dirname -- "$1")" && mkdir -p -- "$dir" && tmp="$(mktemp "$dir/.swarm-write.XXXXXX")" && trap 'rm -f -- "$tmp"' EXIT && cat > "$tmp" && sync "$tmp" && mv -f -- "$tmp" "$1"`, "swarm-write-file", path)
 	if execErr != nil || exitCode != 0 {
 		return nil, fmt.Errorf("write_file failed for %s: %s", path, strings.TrimSpace(string(stderr)))
 	}
@@ -272,26 +274,35 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 	if err := e.admitExternalDispatch(ctx, policy); err != nil {
 		return nil, err
 	}
-	resp, err := e.httpClient.Do(req)
+	attempt, err := runtimeeffects.Begin(ctx, "native_web_search", []byte(req.Method+"\x00"+req.URL.String()), nil)
 	if err != nil {
 		return nil, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_transport_failed", "tool-executor", "web_search", map[string]any{"stage": "transport"}, err)
 	}
 	defer resp.Body.Close()
 	raw, err := ioReadAll(resp)
 	if err != nil {
-		return nil, err
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_read_failed", "tool-executor", "web_search", map[string]any{"stage": "read"}, err)
 	}
 	parsed := parseHTTPResponseBody(resp, raw)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("web_search returned status %d: %s", resp.StatusCode, strings.TrimSpace(asString(parsed)))
+		err := fmt.Errorf("web_search returned status %d: %s", resp.StatusCode, strings.TrimSpace(asString(parsed)))
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_status_failed", "tool-executor", "web_search", map[string]any{"status": resp.StatusCode}, err)
 	}
 	arrayValue, err := nestedValue(parsed, responsePath)
 	if err != nil {
-		return nil, err
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_mapping_failed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
 	}
 	items, ok := arrayValue.([]any)
 	if !ok {
-		return nil, fmt.Errorf("web_search response path %q did not resolve to an array", responsePath)
+		err := fmt.Errorf("web_search response path %q did not resolve to an array", responsePath)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_web_search_mapping_failed", "tool-executor", "web_search", map[string]any{"response_path": responsePath}, err)
 	}
 	results := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -309,6 +320,9 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 		}
 		results = append(results, result)
 	}
+	if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
+		return nil, err
+	}
 	return results, nil
 }
 
@@ -319,7 +333,7 @@ func (e *Executor) resolveNativeWorkspace(ctx context.Context, actor models.Agen
 	return e.workspaces.ResolveWorkspace(ctx, actor)
 }
 
-func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Target, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
+func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Target, adapter string, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	execTarget := target.ExecutionTarget()
@@ -363,16 +377,32 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	err := cmd.Run()
+	attempt, err := runtimeeffects.Begin(ctx, adapter, []byte(strings.Join(args, "\x00")+"\x00"+stdin), map[string]string{"execution_mode": string(execTarget.Mode)})
+	if err != nil {
+		return nil, nil, -1, err
+	}
+	if err := cmd.Start(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "native_command_start_failed", "tool-executor", adapter, map[string]any{"execution_mode": string(execTarget.Mode)}, err)
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		_ = cmd.Process.Kill()
+		return stdout.Bytes(), stderr.Bytes(), -1, err
+	}
+	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		} else if runCtx.Err() != nil {
-			return stdout.Bytes(), stderr.Bytes(), -1, runCtx.Err()
-		} else {
-			return stdout.Bytes(), stderr.Bytes(), -1, err
 		}
+		registration, _ := runtimeeffects.RegistrationFor(adapter)
+		state, class, code := runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_command_effect_outcome_unconfirmed"
+		if registration.Class == runtimeeffects.EffectReadOnly {
+			state, class, code = runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "native_read_command_failed"
+		}
+		return stdout.Bytes(), stderr.Bytes(), exitCode, attempt.Fail(ctx, state, class, code, "tool-executor", adapter, map[string]any{"execution_mode": string(execTarget.Mode), "exit_code": exitCode}, err)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"execution_mode": string(execTarget.Mode), "exit_code": exitCode, "stdout_fingerprint": runtimeeffects.Fingerprint(stdout.Bytes())}); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), exitCode, err
 	}
 	return stdout.Bytes(), stderr.Bytes(), exitCode, err
 }
@@ -412,7 +442,7 @@ func execNativeHostReadFile(target workspace.ExecutionTarget, rawPath string) (a
 	}, nil
 }
 
-func execNativeHostWriteFile(target workspace.ExecutionTarget, rawPath string, content string) (any, error) {
+func execNativeHostWriteFile(ctx context.Context, target workspace.ExecutionTarget, rawPath string, content string) (any, error) {
 	resolved, err := target.ResolveHostPath(rawPath, workspace.PathAccessWrite)
 	if err != nil {
 		return nil, err
@@ -421,8 +451,36 @@ func execNativeHostWriteFile(target workspace.ExecutionTarget, rawPath string, c
 		return nil, fmt.Errorf("write_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
 	}
 	data := []byte(content)
-	if err := os.WriteFile(resolved.HostPath, data, 0o644); err != nil {
-		return nil, fmt.Errorf("write_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+	attempt, err := runtimeeffects.Begin(ctx, "native_write_file", append([]byte(resolved.LogicalPath+"\x00"), data...), map[string]string{"logical_path": resolved.LogicalPath, "execution_mode": string(workspace.ExecutionModeHostLocal)})
+	if err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(resolved.HostPath), ".swarm-write-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		_ = tmp.Close()
+		return nil, err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "write_temp"}, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "sync_temp"}, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "close_temp"}, err)
+	}
+	if err := os.Rename(tmpPath, resolved.HostPath); err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_file_write_host_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"logical_path": resolved.LogicalPath, "mutation_stage": "replace"}, err)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"logical_path": resolved.LogicalPath, "content_fingerprint": runtimeeffects.Fingerprint(data)}); err != nil {
+		return nil, err
 	}
 	return map[string]any{
 		"bytes_written": len(data),

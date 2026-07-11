@@ -32,6 +32,20 @@ type startupRecoveryManagerStore struct {
 	agents  []runtimemanager.PersistedAgent
 }
 
+func startupRecoveryLifecycleResult(req runtimemanager.AgentLifecycleTransition) runtimemanager.AgentLifecycleTransitionResult {
+	return runtimemanager.AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: req.OperationID, AgentID: req.AgentID,
+		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
+		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+	}
+}
+
+func (startupRecoveryManagerStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return startupRecoveryLifecycleResult(req), nil
+}
+
 func (s startupRecoveryManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
 	return nil
 }
@@ -58,6 +72,10 @@ func (startupRecoveryManagerStore) ListPendingSubscribedEvents(context.Context, 
 type startupRecoveryFlakyManagerStore struct {
 	remainingFailures int
 	loadErr           error
+}
+
+func (*startupRecoveryFlakyManagerStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return startupRecoveryLifecycleResult(req), nil
 }
 
 func (s *startupRecoveryFlakyManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
@@ -94,6 +112,10 @@ type startupManagerReplayRuntimeStore struct {
 	agents   []runtimemanager.PersistedAgent
 	pending  map[string][]events.Event
 	receipts map[string]runtimemanager.EventReceipt
+}
+
+func (*startupManagerReplayRuntimeStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return startupRecoveryLifecycleResult(req), nil
 }
 
 func (*startupManagerReplayRuntimeStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {

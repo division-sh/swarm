@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -222,9 +223,10 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 		currentSessionID string
 		existingOwner    sql.NullString
 		existingExpiry   sql.NullTime
+		runtimeStateRaw  []byte
 	)
 	if err := tx.QueryRowContext(ctx, `
-		SELECT session_id::text, lease_holder, lease_expires_at
+		SELECT session_id::text, lease_holder, lease_expires_at, runtime_state
 		FROM agent_sessions
 		WHERE agent_id = $1
 		  AND scope_key = $2
@@ -233,7 +235,7 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 		ORDER BY created_at DESC
 		LIMIT 1
 		FOR UPDATE
-	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&currentSessionID, &existingOwner, &existingExpiry); err != nil {
+	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&currentSessionID, &existingOwner, &existingExpiry, &runtimeStateRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("no active session to rotate for agent=%s", agentID)
 		}
@@ -241,6 +243,21 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	}
 
 	now := sr.nowFn()
+	operationID := strings.TrimSpace(rotation.OperationID)
+	if operationID != "" {
+		var runtimeState map[string]any
+		if err := json.Unmarshal(runtimeStateRaw, &runtimeState); err != nil {
+			return nil, fmt.Errorf("decode active session runtime state: %w", err)
+		}
+		if strings.TrimSpace(fmt.Sprint(runtimeState["rotation_operation_id"])) == operationID {
+			_ = tx.Rollback()
+			return &Lease{
+				SessionID: currentSessionID, AgentID: agentID, RuntimeMode: resolved.RuntimeMode,
+				SessionScope: resolved.Scope, LockOwner: existingOwner.String, ScopeKey: resolved.ScopeKey,
+				ExpiresAt: existingExpiry.Time,
+			}, nil
+		}
+	}
 	if existingOwner.Valid && existingExpiry.Valid && existingExpiry.Time.After(now) && existingOwner.String != lockOwner {
 		return nil, ErrSessionLeased
 	}
@@ -288,14 +305,15 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 			jsonb_strip_nulls(jsonb_build_object(
 				'summary', NULLIF($8,''),
 				'retry_reason', NULLIF($9,''),
-				'retries_from_session_id', NULLIF($10,'')
+				'retries_from_session_id', NULLIF($10,''),
+				'rotation_operation_id', NULLIF($13,'')
 			)),
 			$11, $12, 'active',
 			NULL, NULL, NULL, NULL,
 			now(), now()
 		)
 		RETURNING lease_expires_at
-	`, newSessionID, agentID, resolved.EntityID, resolved.FlowInstance, resolved.ScopeKey, resolved.Scope, resolved.RuntimeMode, strings.TrimSpace(rotation.CheckpointSummary), retryReason, currentSessionID, lockOwner, now.Add(sr.lockTTL)).Scan(&expiresAt); err != nil {
+	`, newSessionID, agentID, resolved.EntityID, resolved.FlowInstance, resolved.ScopeKey, resolved.Scope, resolved.RuntimeMode, strings.TrimSpace(rotation.CheckpointSummary), retryReason, currentSessionID, lockOwner, now.Add(sr.lockTTL), operationID).Scan(&expiresAt); err != nil {
 		return nil, fmt.Errorf("insert rotated successor session row: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

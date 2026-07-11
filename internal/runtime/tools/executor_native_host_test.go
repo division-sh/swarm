@@ -30,7 +30,7 @@ func TestNativeWorkspaceCommandRunsInExplicitHostBackendWorkdir(t *testing.T) {
 			{LogicalPath: workspace.LogicalDataMount, HostPath: dataDir, Access: workspace.MountAccessReadOnly},
 			{LogicalPath: workspace.LogicalContractsMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
 		},
-	}, time.Second, "", "sh", "-lc", "mkdir -p nested && printf host-ok > nested/out.txt && printf done")
+	}, "native_bash", time.Second, "", "sh", "-lc", "mkdir -p nested && printf host-ok > nested/out.txt && printf done")
 	if err != nil {
 		t.Fatalf("runWorkspaceCommand host error = %v stderr=%s", err, stderr)
 	}
@@ -57,7 +57,7 @@ func TestNativeWorkspaceCommandFailsClosedForHostTargetWithoutBackingPath(t *tes
 	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
 		Workdir: t.TempDir(),
 		Backend: workspace.BackendHost,
-	}, time.Second, "", "sh", "-lc", "true")
+	}, "native_bash", time.Second, "", "sh", "-lc", "true")
 	if err == nil || !strings.Contains(err.Error(), "host native command workspace path is unavailable") {
 		t.Fatalf("runWorkspaceCommand error = %v, want host backing path fail-closed error", err)
 	}
@@ -74,7 +74,7 @@ func TestNativeWorkspaceCommandDoesNotFallbackFromDockerToHost(t *testing.T) {
 		Backend:   workspace.BackendDocker,
 		Container: "swarm-agent",
 		Workdir:   workspace.LogicalWorkspaceMount,
-	}, time.Second, "", "sh", "-lc", "printf fallback > "+shellQuote(marker))
+	}, "native_bash", time.Second, "", "sh", "-lc", "printf fallback > "+shellQuote(marker))
 	if err == nil {
 		t.Fatal("runWorkspaceCommand docker with missing binary succeeded, want fail closed")
 	}

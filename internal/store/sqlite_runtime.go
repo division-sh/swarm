@@ -372,7 +372,8 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		SELECT agent_id, COALESCE(flow_instance, ''), role, model, llm_backend, conversation_mode,
 		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, COALESCE(runtime_descriptor, '{}'),
 		       COALESCE(subscriptions, '[]'), COALESCE(emit_events, '[]'), COALESCE(tools, '[]'), COALESCE(permissions, '[]'),
-		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP)
+		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP),
+		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
@@ -386,9 +387,10 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		var rec runtimemanager.PersistedAgent
 		var row persistedAgentProjection
 		var startedAt any
+		var lifecycleGeneration int64
 		if err := rows.Scan(&row.AgentID, &row.FlowInstance, &row.Role, &row.Model, &row.LLMBackend, &row.ConversationMode,
 			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
-			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt); err != nil {
+			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt, &rec.LifecycleEpoch, &lifecycleGeneration, &rec.LifecyclePhase, &rec.LifecycleRunMode); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent: %w", err)
 		}
 		if at, ok, err := sqliteTimeValue(startedAt); err != nil {
@@ -401,6 +403,7 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 			return nil, fmt.Errorf("hydrate sqlite agent row %s: %w", strings.TrimSpace(row.AgentID), err)
 		}
 		rec.ParentAgentID = row.ParentAgentID
+		rec.LifecycleGeneration = uint64(lifecycleGeneration)
 		rec.Config = cfg
 		out = append(out, rec)
 	}
