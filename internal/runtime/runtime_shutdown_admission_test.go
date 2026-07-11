@@ -120,7 +120,8 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	rt.Manager = am
 
 	inboundStore := &runtimeShutdownInboundStore{}
-	rt.InboundGateway = newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
+	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
+	rt.InboundGateway = testInbound.InboundGateway
 
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
@@ -161,7 +162,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
-	rt.InboundGateway.Handler().ServeHTTP(rec, req)
+	testInbound.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("inbound status = %d, want 503", rec.Code)
 	}

@@ -117,7 +117,7 @@ var guaranteeRegistry = map[string]struct {
 }{
 	GuaranteeEmitDeclaredEventsOnly: {"internal/providertriggers.Manifest.resolveEventName"},
 	GuaranteeAdmissionBeforeCode:    {"internal/providertriggers.Manifest.Accept"},
-	GuaranteeBoundResourcesOnly:     {"internal/runtime.InboundGateway.handleWebhook"},
+	GuaranteeBoundResourcesOnly:     {"internal/runtime.InboundGateway.HandleResolvedWebhook"},
 	GuaranteeActivityJournal:        {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
 	GuaranteeNoAutomaticWriteRetry:  {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
 	GuaranteeCredentialRedaction:    {"internal/runtime/pipeline.executePreparedActivityHTTPTool"},

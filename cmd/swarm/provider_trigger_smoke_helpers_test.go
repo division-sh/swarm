@@ -68,6 +68,16 @@ type providerTriggerSmokeCaptureWriter struct {
 	body   bytes.Buffer
 }
 
+type providerTriggerSmokeCredentialStore map[string]string
+
+func (s providerTriggerSmokeCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	value, ok := s[key]
+	return value, ok, nil
+}
+func (providerTriggerSmokeCredentialStore) Set(context.Context, string, string) error { return nil }
+func (providerTriggerSmokeCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
+func (providerTriggerSmokeCredentialStore) Delete(context.Context, string) error      { return nil }
+
 func (w *providerTriggerSmokeCaptureWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
@@ -88,15 +98,18 @@ func startProviderTriggerSmokeServer(
 	bus *runtimebus.EventBus,
 	sqliteStore *store.SQLiteRuntimeStore,
 	responseCapture *providerTriggerSmokeResponseCapture,
+	target runtimepkg.InboundTarget,
+	signingSecret string,
 ) string {
 	t.Helper()
 	if strings.TrimSpace(listenAddr) == "" {
 		listenAddr = "localhost:0"
 	}
 	gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, nil, nil, testProviderTriggerRegistry(t), sqliteStore)
+	gateway.SetCredentialStore(providerTriggerSmokeCredentialStore{target.SigningSecret: signingSecret})
 	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &providerTriggerSmokeCaptureWriter{ResponseWriter: w, status: http.StatusOK}
-		gateway.Handler().ServeHTTP(rec, r.WithContext(ctx))
+		gateway.HandleResolvedWebhook(rec, r.WithContext(ctx), target, nil)
 		if responseCapture != nil && r.Method == http.MethodPost {
 			responseCapture.record(rec.status, rec.body.String())
 		}

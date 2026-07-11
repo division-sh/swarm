@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
@@ -67,7 +68,10 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 	defer bus.Unsubscribe(agentID)
 
 	responseCapture := newProviderTriggerSmokeResponseCapture()
-	baseURL := startProviderTriggerSmokeServer(t, ctx, "localhost:0", bus, sqliteStore, responseCapture)
+	baseURL := startProviderTriggerSmokeServer(t, ctx, "localhost:0", bus, sqliteStore, responseCapture, runtimepkg.InboundTarget{
+		RunID: runID, FlowInstance: flowInstance, EntityID: entityID, EntitySlug: entitySlug,
+		Alias: entitySlug, Provider: provider, SigningSecret: "bounded_smoke.shopify",
+	}, clientSecret)
 
 	address := baseURL + "/webhooks/" + entitySlug + "/" + provider
 	output := runShopifyWebhookTrigger(t, shopifyPath, address, topic, apiVersion, clientID, clientSecret, appPath)

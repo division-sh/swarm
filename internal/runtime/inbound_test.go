@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,36 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 )
 
-func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
+type testInboundTargetResolver interface {
+	ResolveInboundTarget(context.Context, string, string) (InboundTarget, error)
+}
+
+type testInboundGateway struct {
+	*InboundGateway
+	resolver testInboundTargetResolver
+}
+
+func (g *testInboundGateway) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		alias, provider, ok := parseWebhookPath(r.URL.Path)
+		if !ok {
+			http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
+			return
+		}
+		if g == nil || g.resolver == nil {
+			http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
+			return
+		}
+		target, err := g.resolver.ResolveInboundTarget(r.Context(), alias, provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
+			return
+		}
+		g.HandleResolvedWebhook(w, r, target, nil)
+	})
+}
+
+func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *testInboundGateway {
 	t.Helper()
 	root := filepath.Join("..", "..", "packs", "provider-triggers")
 	entries, err := os.ReadDir(root)
@@ -48,7 +78,11 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 	}
 	gateway := NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, registry, stores...)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
-	return gateway
+	var resolver testInboundTargetResolver
+	if len(stores) > 0 {
+		resolver, _ = any(stores[0]).(testInboundTargetResolver)
+	}
+	return &testInboundGateway{InboundGateway: gateway, resolver: resolver}
 }
 
 type identityInboundCredentialStore struct{}

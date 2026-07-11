@@ -124,7 +124,7 @@ func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 	ownerFiles := map[string]string{
 		"internal/providertriggers.Manifest.resolveEventName":                                     "internal/providertriggers/providertriggers.go",
 		"internal/providertriggers.Manifest.Accept":                                               "internal/providertriggers/providertriggers.go",
-		"internal/runtime.InboundGateway.handleWebhook":                                           "internal/runtime/inbound.go",
+		"internal/runtime.InboundGateway.HandleResolvedWebhook":                                   "internal/runtime/inbound.go",
 		"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent": "internal/runtime/pipeline/activity_engine.go",
 		"internal/runtime/pipeline.executePreparedActivityHTTPTool":                               "internal/runtime/pipeline/activity_engine.go",
 	}
