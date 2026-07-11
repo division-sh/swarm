@@ -148,6 +148,94 @@ func TestImportBoundaryWildcardLocalExactGrantDeliversAcrossSurfaces(t *testing.
 	assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t, source, "producer/task.done", "task.*")
 }
 
+func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *testing.T) {
+	opts := importBoundaryWildcardFixtureOptions{
+		ProducerMode:       "template",
+		ProducerAuthored:   true,
+		ObserveGrant:       "      observe:\n        - source: producer\n          events: [task.*]\n",
+		ProducerExtraEvent: "task.failed",
+	}
+	source := loadBusImportBoundaryWildcardSource(t, opts)
+	resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, "flows/worker", "worker", "worker", map[string]struct{}{"task.done": {}}, "**/task.done")
+	var grantPattern *semanticview.ImportBoundaryWildcardPattern
+	for i := range resolution.Patterns {
+		if resolution.Patterns[i].RouteSource == "import_boundary_wildcard_grant" {
+			grantPattern = &resolution.Patterns[i]
+		}
+	}
+	if grantPattern == nil || grantPattern.EventPattern != "producer/task.done" || grantPattern.RuntimeEventPattern != "producer/*/task.done" {
+		t.Fatalf("template grant resolution = %#v, want static proof witness and constrained runtime pattern", resolution)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		prebuilt bool
+	}{
+		{name: "default route admission"},
+		{name: "supplied route admission", prebuilt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := loadBusImportBoundaryWildcardSource(t, opts)
+			var prebuilt *runtimebus.RouteTable
+			if tc.prebuilt {
+				var err error
+				prebuilt, err = runtimebus.DeriveRouteTable(source)
+				if err != nil {
+					t.Fatalf("DeriveRouteTable: %v", err)
+				}
+			}
+			store := &routePersistenceTestStore{}
+			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuilt})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve before materialization = %#v, want no template-instance route", got)
+			}
+			if got := eb.RouteTable().Resolve("producer/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve template base event = %#v, want no static template route", got)
+			}
+			identity := runtimeflowidentity.DeriveRoute("producer", "inst-1")
+			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+				t.Fatalf("AddFlowInstanceRoute: %v", err)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].ID != "worker-listener" || got[0].RouteSource != "import_boundary_wildcard_grant" {
+				t.Fatalf("Resolve materialized template event = %#v, want grant-backed worker route", got)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.failed"); len(got) != 0 {
+				t.Fatalf("Resolve non-intersecting template event = %#v, want no route", got)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve unmaterialized sibling instance = %#v, want no route", got)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/nested/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve deeper nested event = %#v, want one-instance-segment grant scope", got)
+			}
+
+			evt := eventtest.RootIngress("evt-template-grant-"+strings.ReplaceAll(tc.name, " ", "-"), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "worker-listener" || len(plan.DeliveryRoutes) != 1 {
+				t.Fatalf("publish recipient plan = %#v, want one grant-backed worker delivery", plan)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if got := store.deliveries[evt.ID()]; len(got) != 1 || got[0] != "worker-listener" {
+				t.Fatalf("persisted deliveries = %#v, want worker-listener", got)
+			}
+			if err := eb.RemoveFlowInstanceRoute(identity); err != nil {
+				t.Fatalf("RemoveFlowInstanceRoute: %v", err)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve after route removal = %#v, want no template-instance route", got)
+			}
+		})
+	}
+}
+
 func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.T, source semanticview.Source, eventPattern, matchPattern string) {
 	t.Helper()
 	if issues := semanticview.ImportBoundaryWildcardGrantIssues(source); len(issues) != 0 {
@@ -248,6 +336,25 @@ func TestImportBoundaryWildcardLocalBoundedAndExactAuthorizationAmbiguityFailsCl
 	}
 	if !patterns["producer/task.*"] || !patterns["producer/task.done"] || len(patterns) != 2 {
 		t.Fatalf("authorization patterns = %#v, want distinct local bounded and exact proofs", patterns)
+	}
+}
+
+func TestImportBoundaryWildcardTemplateSourceBoundedAndExactAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerMode: "template",
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.*]\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n",
+	})
+	issue := assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t, source)
+	patterns := map[string]bool{}
+	for _, authorization := range issue.Authorizations {
+		patterns[authorization.EventPattern] = true
+	}
+	if !patterns["producer/task.*"] || !patterns["producer/task.done"] || len(patterns) != 2 {
+		t.Fatalf("template-source authorization patterns = %#v, want distinct bounded and exact proofs", patterns)
 	}
 }
 
@@ -437,6 +544,7 @@ func TestRootWildcardSubscriptionsRemainUnchanged(t *testing.T) {
 type importBoundaryWildcardFixtureOptions struct {
 	ObserveGrant       string
 	WorkerMode         string
+	ProducerMode       string
 	WorkerSubscription string
 	RootWildcard       bool
 	ProducerAuthored   bool
@@ -464,6 +572,10 @@ func writeBusImportBoundaryWildcardFixture(t *testing.T, opts importBoundaryWild
 	mode := strings.TrimSpace(opts.WorkerMode)
 	if mode == "" {
 		mode = "static"
+	}
+	producerMode := strings.TrimSpace(opts.ProducerMode)
+	if producerMode == "" {
+		producerMode = "static"
 	}
 	workerSubscription := strings.TrimSpace(opts.WorkerSubscription)
 	if workerSubscription == "" {
@@ -494,7 +606,7 @@ flows:
     mode: `+mode+`
 `+workerBind+`  - id: producer
     flow: producer
-    mode: static
+    mode: `+producerMode+`
 `)
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: bus-import-boundary-wildcard\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -527,7 +639,7 @@ worker-listener:
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "package.yaml"), "name: producer\nversion: \"1.0.0\"\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
-mode: static
+mode: `+producerMode+`
 initial_state: active
 terminal_states: [done]
 states: [active, done]

@@ -931,7 +931,10 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 			if resolution.Scoped {
 				out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
 				for _, pattern := range resolution.Patterns {
-					eventPattern := eventidentity.Normalize(pattern.EventPattern)
+					eventPattern := eventidentity.Normalize(pattern.RuntimeEventPattern)
+					if eventPattern == "" && pattern.RouteSource != "import_boundary_wildcard_grant" {
+						eventPattern = eventidentity.Normalize(pattern.EventPattern)
+					}
 					if eventPattern == "" {
 						continue
 					}

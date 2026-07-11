@@ -14,6 +14,7 @@ type ImportBoundaryWildcardPattern struct {
 	ImportLabel          string
 	Source               string
 	EventPattern         string
+	RuntimeEventPattern  string
 	AuthorizationPattern string
 	MatchPattern         string
 	LocalizedEvent       string
@@ -51,6 +52,8 @@ type importBoundaryWildcardGrantPattern struct {
 	EventPattern     string
 	LocalizedEvent   string
 	DeclaredEvents   []importBoundaryDeclaredEventWitness
+	SourcePath       string
+	SourceTemplate   bool
 }
 
 type importBoundaryDeclaredEventWitness struct {
@@ -79,6 +82,7 @@ func ResolveImportBoundaryWildcardSubscription(source Source, packageKey, flowID
 				ImportLabel:          grant.ImportLabel,
 				Source:               grant.Source,
 				EventPattern:         eventType,
+				RuntimeEventPattern:  importBoundaryWildcardGrantRuntimeEventPattern(grant, eventType),
 				AuthorizationPattern: grant.EventPattern,
 				MatchPattern:         raw,
 				LocalizedEvent:       grant.LocalizedEvent,
@@ -499,6 +503,8 @@ func importBoundaryWildcardGrantPatterns(source Source, childPackageKey string) 
 							EventPattern:     resolved,
 							LocalizedEvent:   eventPattern,
 							DeclaredEvents:   declaredEvents,
+							SourcePath:       sourceScope.Path,
+							SourceTemplate:   importBoundaryWildcardScopeIsTemplate(source, sourceScope),
 						})
 					}
 				}
@@ -783,6 +789,44 @@ func importBoundaryWildcardGrantIntersection(raw, grantPattern string, declaredE
 	return sortedStringSet(seen)
 }
 
+func importBoundaryWildcardGrantRuntimeEventPattern(grant importBoundaryWildcardGrantPattern, eventType string) string {
+	eventType = eventidentity.Normalize(eventType)
+	sourcePath := eventidentity.Normalize(grant.SourcePath)
+	if eventType == "" || !grant.SourceTemplate || sourcePath == "" {
+		return eventType
+	}
+	if !strings.HasPrefix(eventType, sourcePath+"/") {
+		return ""
+	}
+	localEvent := strings.TrimPrefix(eventType, sourcePath+"/")
+	if localEvent == "" {
+		return ""
+	}
+	return eventidentity.Normalize(sourcePath + "/*/" + localEvent)
+}
+
+func importBoundaryWildcardScopeIsTemplate(source Source, scope importBoundaryWildcardScope) bool {
+	if source == nil {
+		return false
+	}
+	if scope.Kind == "flow" {
+		flow, ok := source.FlowScopeByID(strings.TrimSpace(scope.ID))
+		return ok && strings.EqualFold(strings.TrimSpace(flow.Mode), "template")
+	}
+	if scope.Kind != "package" {
+		return false
+	}
+	packageKey := normalizeImportPackageKey(scope.PackageKey)
+	for _, project := range source.ProjectScopes() {
+		if normalizeImportPackageKey(project.Key) != packageKey {
+			continue
+		}
+		flow, ok := source.FlowScopeByID(strings.TrimSpace(project.OwningFlowID))
+		return ok && strings.EqualFold(strings.TrimSpace(flow.Mode), "template")
+	}
+	return false
+}
+
 func importBoundaryWildcardGrantPatternBroad(raw string) bool {
 	raw = eventidentity.Normalize(raw)
 	if raw == "" || raw == "*" || raw == "**" {
@@ -945,6 +989,7 @@ func normalizeImportBoundaryWildcardPattern(value ImportBoundaryWildcardPattern)
 	value.ImportLabel = strings.TrimSpace(value.ImportLabel)
 	value.Source = strings.TrimSpace(value.Source)
 	value.EventPattern = eventidentity.Normalize(value.EventPattern)
+	value.RuntimeEventPattern = eventidentity.Normalize(value.RuntimeEventPattern)
 	value.AuthorizationPattern = eventidentity.Normalize(value.AuthorizationPattern)
 	value.MatchPattern = eventidentity.Normalize(value.MatchPattern)
 	value.LocalizedEvent = eventidentity.Normalize(value.LocalizedEvent)
@@ -980,6 +1025,7 @@ func importBoundaryWildcardPatternSortKey(value ImportBoundaryWildcardPattern) s
 		value.ImportLabel,
 		value.Source,
 		value.EventPattern,
+		value.RuntimeEventPattern,
 		value.AuthorizationPattern,
 		value.MatchPattern,
 		value.LocalizedEvent,
