@@ -110,6 +110,22 @@ func TestServiceRegistryActiveLeaseIsUntouched(t *testing.T) {
 	}
 }
 
+func TestServiceRegistryRowlessActiveProvisionLeaseIsUntouched(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServicePrepared)
+	deleteRegistryRecord(t, registry, record.LeaseID)
+	lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("acquire pre-row provision lease: acquired=%v err=%v", acquired, err)
+	}
+	defer lease.Close()
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(registry.leasePath(record.LeaseID)); err != nil {
+		t.Fatalf("active pre-row provision authority removed: %v", err)
+	}
+}
+
 func TestServiceRegistryFailedCreatorRequiresNoContainerEvidence(t *testing.T) {
 	registry, record := testRegistryRecord(t, ServiceCreateFailed)
 	if err := os.WriteFile(record.CIDFile, []byte("ambiguous"), 0o600); err != nil {
@@ -383,6 +399,93 @@ func TestServiceCloseRemovesAllAuthorityFiles(t *testing.T) {
 	assertServiceAuthorityAbsent(t, registry, record)
 }
 
+func TestServiceRegistryRetirementWriteFailureIsReplayable(t *testing.T) {
+	for _, path := range []string{"close", "reconcile"} {
+		t.Run(path, func(t *testing.T) {
+			state := ServiceTearingDown
+			if path == "close" {
+				state = ServiceReady
+			}
+			registry, record := terminalRegistryRecord(t, state)
+			var service *Service
+			if path == "close" {
+				lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+				if err != nil || !acquired {
+					t.Fatalf("acquire service lease: acquired=%v err=%v", acquired, err)
+				}
+				service = &Service{registry: registry, record: record, lease: lease}
+			}
+			injected := errors.New("injected registry commit failure")
+			registry.beforeRegistrySave = func(doc registryDocument) error {
+				if _, exists := doc.Services[record.LeaseID]; !exists {
+					return injected
+				}
+				return nil
+			}
+			var err error
+			if path == "close" {
+				err = service.Close(context.Background())
+			} else {
+				err = registry.Reconcile(context.Background())
+			}
+			if !errors.Is(err, injected) {
+				t.Fatalf("terminal %s error = %v, want injected commit failure", path, err)
+			}
+			if _, err := registry.record(record.LeaseID); err != nil {
+				t.Fatalf("registry row lost after failed commit: %v", err)
+			}
+			assertServiceAuthorityPresent(t, registry, record)
+
+			registry.beforeRegistrySave = nil
+			if err := registry.Reconcile(context.Background()); err != nil {
+				t.Fatalf("reconcile after failed %s retirement: %v", path, err)
+			}
+			assertServiceAuthorityAbsent(t, registry, record)
+		})
+	}
+}
+
+func TestServiceRegistryRetirementCrashAfterRowCommitIsReplayable(t *testing.T) {
+	for _, path := range []string{"close", "reconcile"} {
+		t.Run(path, func(t *testing.T) {
+			state := ServiceTearingDown
+			if path == "close" {
+				state = ServiceReady
+			}
+			registry, record := terminalRegistryRecord(t, state)
+			var service *Service
+			if path == "close" {
+				lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+				if err != nil || !acquired {
+					t.Fatalf("acquire service lease: acquired=%v err=%v", acquired, err)
+				}
+				service = &Service{registry: registry, record: record, lease: lease}
+			}
+			injected := errors.New("injected process death after row commit")
+			registry.afterRecordDelete = func(ServiceRecord) error { return injected }
+			var err error
+			if path == "close" {
+				err = service.Close(context.Background())
+			} else {
+				err = registry.Reconcile(context.Background())
+			}
+			if !errors.Is(err, injected) {
+				t.Fatalf("terminal %s error = %v, want injected crash window", path, err)
+			}
+			if _, err := registry.record(record.LeaseID); !os.IsNotExist(err) {
+				t.Fatalf("registry row survived committed retirement: %v", err)
+			}
+			assertServiceAuthorityPresent(t, registry, record)
+
+			registry.afterRecordDelete = nil
+			if err := registry.Reconcile(context.Background()); err != nil {
+				t.Fatalf("reconcile after %s retirement crash: %v", path, err)
+			}
+			assertServiceAuthorityAbsent(t, registry, record)
+		})
+	}
+}
+
 func TestServiceRegistryRejectsUnknownState(t *testing.T) {
 	registry, record := testRegistryRecord(t, ServicePrepared)
 	record.State = "future_state"
@@ -511,6 +614,35 @@ func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, Ser
 		t.Fatal(err)
 	}
 	return registry, record
+}
+
+func terminalRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, ServiceRecord) {
+	t.Helper()
+	registry, record := testRegistryRecord(t, state)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	creator, acquired, err := acquireFileLock(registry.creatorPath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("create terminal creator authority: acquired=%v err=%v", acquired, err)
+	}
+	if err := creator.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fake := registry.docker.(*fakeDocker)
+	fake.outputs["inspect "+record.ContainerID] = []byte("Error: No such object: " + record.ContainerID)
+	fake.errors["inspect "+record.ContainerID] = errors.New("exit status 1")
+	return registry, record
+}
+
+func assertServiceAuthorityPresent(t *testing.T, registry *ServiceRegistry, record ServiceRecord) {
+	t.Helper()
+	for _, path := range []string{record.CIDFile, registry.creatorPath(record.LeaseID), registry.leasePath(record.LeaseID)} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("terminal service authority %q missing: %v", path, err)
+		}
+	}
 }
 
 func assertServiceAuthorityAbsent(t *testing.T, registry *ServiceRegistry, record ServiceRecord) {

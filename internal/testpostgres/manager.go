@@ -41,6 +41,8 @@ type Manager struct {
 	templateName string
 	spec         runtimecontracts.PlatformSpecDocument
 	ddlPlans     []platformschema.TableDDL
+
+	afterCandidateSnapshot func()
 }
 
 type Sandbox struct {
@@ -455,6 +457,9 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	if m.afterCandidateSnapshot != nil {
+		m.afterCandidateSnapshot()
 	}
 	for _, c := range candidates {
 		if err := m.reconcileDatabaseCandidate(ctx, db, c); err != nil {
