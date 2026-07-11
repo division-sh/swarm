@@ -2813,11 +2813,15 @@ handler_specification:
           Required `{after: <positive literal or policy-scalar duration>, ...outcome}`. Bare joins are invalid. The outcome
           supports the same fields and expression roots as on_complete.
       context:
-        expected: Snapshotted member count.
-        completed: Persisted admitted-member count.
-        missing: Membership-ordered member IDs without output.
-        results: Membership-ordered typed outputs, independent of arrival order.
-        timed_out: True only while evaluating the timeout outcome.
+        expected: Integer snapshotted member count.
+        completed: Integer persisted admitted-member count.
+        missing: list<text> of membership-ordered member IDs without output.
+        results: List of the declared join.output payload type, membership-ordered and independent of arrival order.
+        timed_out: Boolean true only while evaluating the timeout outcome.
+      expression_typing: >-
+        Verify and runtime evaluation type-check every direct join.* access against the context types above. A boolean
+        result alone is insufficient: expressions with invalid typed operands fail closed at load and may not reach
+        execution. Bracket, dynamic, bare-root, and undeclared join access remain invalid.
       execution: >-
         The stage transition, membership/window snapshot, typed activation, timeout intent, and any zero-member completion
         intent commit in one selected-store transaction. Empty membership evaluates the same default-all or authored

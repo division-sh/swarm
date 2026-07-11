@@ -82,6 +82,11 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	if normalized == "" {
 		return false, fmt.Errorf("workflow expression is empty")
 	}
+	if workflowexpr.ExpressionReferencesRoot(normalized, "join") {
+		if err := workflowexpr.ValidateValueExpressionWithOptions(normalized, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: true}); err != nil {
+			return false, fmt.Errorf("join expression: %w", err)
+		}
+	}
 	if missing := missingEntityReferences(normalized, normalizedCtx.Entity); len(missing) > 0 {
 		return false, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}

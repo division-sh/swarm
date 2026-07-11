@@ -158,6 +158,18 @@ func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
 	}
 }
 
+func TestWorkflowExpressionEvaluatorRejectsTypeInvalidJoinExpressionBeforeEval(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`join.missing > 1`, workflowExpressionContext{
+		Join: map[string]any{
+			"expected": 2, "completed": 1, "missing": []any{"b"}, "results": []any{"ok"}, "timed_out": false,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no matching overload") {
+		t.Fatalf("EvalBool type-invalid join error = %v, want typed overload rejection before runtime evaluation", err)
+	}
+}
+
 func TestValidateConditionCEL_RejectsLegacyEventReceiverProjections(t *testing.T) {
 	for _, expression := range []string{
 		`event.entity_id != ""`,
