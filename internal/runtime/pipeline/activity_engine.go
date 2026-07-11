@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
@@ -851,8 +852,9 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
 	}
 	tokenSource := &runtimemanagedcredentials.TokenSource{
-		Store:      store,
-		HTTPClient: client,
+		Store:          store,
+		HTTPClient:     client,
+		DifferentOwner: runtimeeffects.OwnerPipelineActivity,
 	}
 	token, record, err := tokenSource.AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
 		Key:            storeKey,

@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"context"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -55,7 +54,7 @@ review_subject:
 		if !ok || cap.Visible || cap.Callable {
 			t.Fatalf("legacy entity tool %q capability = %#v ok=%v, want denied", legacy, cap, ok)
 		}
-		_, err := exec.Execute(runtimetools.WithActor(context.Background(), actor), legacy, map[string]any{})
+		_, err := exec.Execute(runtimetools.WithActor(unmanagedToolTestContext(), actor), legacy, map[string]any{})
 		failure, ok := runtimefailures.As(err)
 		if !ok || failure.Failure.Class != runtimefailures.ClassAuthorizationDenied || failure.Failure.Detail.Code != "tool_not_allowed" {
 			t.Fatalf("direct legacy %s execution error = %v, want typed authorization denial", legacy, err)

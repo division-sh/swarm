@@ -89,6 +89,11 @@ func (s *PostgresStore) AuthorizeExternalAttempt(ctx context.Context, token runt
 	if epoch != token.RuntimeEpoch || generation != int64(token.Generation) || strings.TrimSpace(phase) != "running" {
 		return runtimeeffects.Attempt{}, supersededExternalAttempt(token, epoch, generation, phase)
 	}
+	if existing, found, err := loadExistingExternalAttemptPostgres(ctx, tx, req.OperationID); err != nil {
+		return runtimeeffects.Attempt{}, err
+	} else if found {
+		return runtimeeffects.Attempt{}, externalEffectReplayRefusal(token, req, existing)
+	}
 	attempt, err := insertExternalAttemptPostgres(ctx, tx, token, req)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -114,11 +119,87 @@ func (s *SQLiteRuntimeStore) AuthorizeExternalAttempt(ctx context.Context, token
 		if epoch != token.RuntimeEpoch || generation != int64(token.Generation) || strings.TrimSpace(phase) != "running" {
 			return supersededExternalAttempt(token, epoch, generation, phase)
 		}
+		if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
+			return err
+		} else if found {
+			return externalEffectReplayRefusal(token, req, existing)
+		}
 		var err error
 		attempt, err = insertExternalAttemptSQLiteTx(txctx, tx, token, req)
 		return err
 	})
 	return attempt, err
+}
+
+type existingExternalAttempt struct {
+	kind           string
+	class          string
+	agentID        string
+	epoch          int64
+	generation     uint64
+	fingerprint    string
+	operationState string
+	attemptID      string
+	adapter        string
+	transport      string
+	attemptState   string
+}
+
+func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operationID string) (existingExternalAttempt, bool, error) {
+	var existing existingExternalAttempt
+	err := tx.QueryRowContext(ctx, `
+		SELECT o.effect_kind, o.effect_class, o.agent_id, o.runtime_epoch, o.generation,
+		       o.request_fingerprint, o.state, a.attempt_id::text, a.adapter, a.transport, a.state
+		FROM agent_external_effect_operations o
+		JOIN agent_external_effect_attempts a ON a.operation_id = o.operation_id AND a.attempt_ordinal = 1
+		WHERE o.operation_id = $1::uuid
+	`, operationID).Scan(&existing.kind, &existing.class, &existing.agentID, &existing.epoch, &existing.generation,
+		&existing.fingerprint, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState)
+	if err == sql.ErrNoRows {
+		return existingExternalAttempt{}, false, nil
+	}
+	if err != nil {
+		return existingExternalAttempt{}, false, fmt.Errorf("load external effect replay authority: %w", err)
+	}
+	return existing, true, nil
+}
+
+func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operationID string) (existingExternalAttempt, bool, error) {
+	var existing existingExternalAttempt
+	err := tx.QueryRowContext(ctx, `
+		SELECT o.effect_kind, o.effect_class, o.agent_id, o.runtime_epoch, o.generation,
+		       o.request_fingerprint, o.state, a.attempt_id, a.adapter, a.transport, a.state
+		FROM agent_external_effect_operations o
+		JOIN agent_external_effect_attempts a ON a.operation_id = o.operation_id AND a.attempt_ordinal = 1
+		WHERE o.operation_id = ?
+	`, operationID).Scan(&existing.kind, &existing.class, &existing.agentID, &existing.epoch, &existing.generation,
+		&existing.fingerprint, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState)
+	if err == sql.ErrNoRows {
+		return existingExternalAttempt{}, false, nil
+	}
+	if err != nil {
+		return existingExternalAttempt{}, false, fmt.Errorf("load sqlite external effect replay authority: %w", err)
+	}
+	return existing, true, nil
+}
+
+func externalEffectReplayRefusal(token runtimeeffects.LifecycleToken, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) error {
+	detail := map[string]any{
+		"operation_id": req.OperationID, "attempt_id": existing.attemptID,
+		"operation_state": existing.operationState, "attempt_state": existing.attemptState,
+	}
+	if existing.kind != string(req.Kind) || existing.class != string(req.Class) || existing.agentID != token.AgentID ||
+		existing.adapter != req.Adapter || existing.transport != req.Transport || existing.fingerprint != req.RequestFingerprint {
+		detail["expected_fingerprint"] = existing.fingerprint
+		detail["request_fingerprint"] = req.RequestFingerprint
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_replay_fingerprint_conflict", "external-effects", "authorize_attempt", detail)
+	}
+	switch runtimeeffects.State(existing.attemptState) {
+	case runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved, runtimeeffects.StateOutcomeUncertain:
+		return runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "external_effect_replay_outcome_uncertain", "external-effects", "authorize_attempt", detail)
+	default:
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_replay_refused", "external-effects", "authorize_attempt", detail)
+	}
 }
 
 func supersededExternalAttempt(token runtimeeffects.LifecycleToken, currentEpoch, currentGeneration int64, phase string) error {
@@ -179,12 +260,22 @@ func authorizedAttempt(token runtimeeffects.LifecycleToken, req runtimeeffects.A
 }
 
 func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND state = 'authorized'`, attempt.AttemptID, now.UTC())
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID)
 	if err := requireExternalAttemptTransition(res, err); err == nil {
-		return nil
+		operationRes, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
+		if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var state string
-	if queryErr := s.DB.QueryRowContext(ctx, `SELECT state FROM agent_external_effect_attempts WHERE attempt_id = $1::uuid`, attempt.AttemptID).Scan(&state); queryErr == nil && state == string(runtimeeffects.StateLaunched) {
+	var operationState string
+	if queryErr := tx.QueryRowContext(ctx, `SELECT a.state, o.state FROM agent_external_effect_attempts a JOIN agent_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = $1::uuid AND a.operation_id = $2::uuid`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr == nil && state == string(runtimeeffects.StateLaunched) && operationState == string(runtimeeffects.StateLaunched) {
 		return nil
 	}
 	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
@@ -192,12 +283,17 @@ func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
 	return s.runRuntimeMutation(ctx, "sqlite mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID)
+		res, err := tx.ExecContext(txctx, `UPDATE agent_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND operation_id = ? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID, attempt.OperationID)
 		if err := requireExternalAttemptTransition(res, err); err == nil {
+			operationRes, err := tx.ExecContext(txctx, `UPDATE agent_external_effect_operations SET state = 'launched', updated_at = ? WHERE operation_id = ? AND state = 'authorized'`, now.UTC(), attempt.OperationID)
+			if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+				return err
+			}
 			return nil
 		}
 		var state string
-		if queryErr := tx.QueryRowContext(txctx, `SELECT state FROM agent_external_effect_attempts WHERE attempt_id = ?`, attempt.AttemptID).Scan(&state); queryErr == nil && state == string(runtimeeffects.StateLaunched) {
+		var operationState string
+		if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM agent_external_effect_attempts a JOIN agent_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = ? AND a.operation_id = ?`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr == nil && state == string(runtimeeffects.StateLaunched) && operationState == string(runtimeeffects.StateLaunched) {
 			return nil
 		}
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})

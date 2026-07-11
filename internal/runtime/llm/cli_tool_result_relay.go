@@ -142,12 +142,11 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if strings.TrimSpace(stdin) != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	if err := cmd.Start(); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_tool_result_relay_start_failed", "claude-cli-adapter", "write_tool_result_relay", nil, err)
-	}
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		_ = cmd.Process.Kill()
 		return stdout.Bytes(), stderr.Bytes(), -1, err
+	}
+	if err := cmd.Start(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_tool_result_relay_start_failed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"launch_rejected": true}, err)
 	}
 	err = cmd.Wait()
 	exitCode := 0

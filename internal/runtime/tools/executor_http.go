@@ -239,15 +239,18 @@ func (e *Executor) managedTokenSource() *runtimemanagedcredentials.TokenSource {
 	}
 }
 
-func rewindBodyReader(body io.Reader) {
-	if seeker, ok := body.(io.Seeker); ok {
-		_, _ = seeker.Seek(0, io.SeekStart)
-	}
-}
-
 func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, headers http.Header, body io.Reader, timeout time.Duration, tool RegisteredTool, secrets []string) (any, error) {
 	if err := e.admitExternalDispatch(ctx, e.httpToolExternalDispatchPolicy(tool)); err != nil {
 		return nil, err
+	}
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("read HTTP tool request body: %w", err)
+		}
+		body = bytes.NewReader(bodyBytes)
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -260,7 +263,21 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 			req.Header.Add(key, value)
 		}
 	}
-	attempt, err := runtimeeffects.Begin(ctx, "authored_http_tool", []byte(method+"\x00"+url), map[string]string{"tool": strings.TrimSpace(tool.Name)})
+	fingerprintHeaders := req.Header.Clone()
+	for key, values := range fingerprintHeaders {
+		for index, value := range values {
+			values[index] = runtimemanagedcredentials.RedactString(value, secrets...)
+		}
+		fingerprintHeaders[key] = values
+	}
+	headerEvidence, err := json.Marshal(fingerprintHeaders)
+	if err != nil {
+		return nil, fmt.Errorf("encode HTTP tool request headers: %w", err)
+	}
+	requestEvidence := append([]byte(method+"\x00"+url+"\x00"), headerEvidence...)
+	requestEvidence = append(requestEvidence, '\x00')
+	requestEvidence = append(requestEvidence, bodyBytes...)
+	attempt, err := runtimeeffects.Begin(ctx, "authored_http_tool", requestEvidence, map[string]string{"tool": strings.TrimSpace(tool.Name)})
 	if err != nil {
 		return nil, err
 	}

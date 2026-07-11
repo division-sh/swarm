@@ -19,11 +19,16 @@ import (
 	"testing"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 )
 
+func managedCredentialTestContext() context.Context {
+	return runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerCredentialLifecycle)
+}
+
 func TestTokenSourceAuthCodePKCEPersistsStructuredTokenRecord(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	var sawGrant string
 	var sawVerifier string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +126,7 @@ func TestTokenSourceAuthCodePKCEPersistsStructuredTokenRecord(t *testing.T) {
 }
 
 func TestTokenSourceAuthCodeFailureRedactsCallbackCode(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
@@ -172,7 +177,7 @@ func TestTokenSourceAuthCodeFailureRedactsCallbackCode(t *testing.T) {
 }
 
 func TestTokenSourceAuthCodeUsesBasicJSONTokenRequestProfile(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	var sawBody map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/token" {
@@ -268,7 +273,7 @@ func TestTokenSourceAuthCodeUsesBasicJSONTokenRequestProfile(t *testing.T) {
 }
 
 func TestTokenSourceAuthCodeBasicProfileRequiresClientSecretBeforePersisting(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	store := NewMemoryStore()
 	source := TokenSource{Store: store}
 	_, err := source.BeginAuthCode(ctx, BeginAuthCodeRequest{
@@ -296,7 +301,7 @@ func TestTokenSourceAuthCodeBasicProfileRequiresClientSecretBeforePersisting(t *
 }
 
 func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -357,7 +362,7 @@ func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testi
 }
 
 func TestTokenSourceClientCredentialsUsesMicrosoftDefaultScopeAndNeverRefreshToken(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	var requests []url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -438,7 +443,7 @@ func TestTokenSourceClientCredentialsUsesMicrosoftDefaultScopeAndNeverRefreshTok
 }
 
 func TestTokenSourceGitHubAppInstallationExchangesJWTAndRequiresInstallationSelection(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	privateKeyPEM, publicKey := testGitHubAppPrivateKey(t)
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	var tokenRequests int
@@ -544,7 +549,7 @@ func TestTokenSourceGitHubAppInstallationExchangesJWTAndRequiresInstallationSele
 }
 
 func TestTokenSourceGitHubAppInstallationExchangeErrorRedactsGeneratedJWT(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	privateKeyPEM, _ := testGitHubAppPrivateKey(t)
 	var rawAuth string
 	store := NewMemoryStore(Record{
@@ -592,7 +597,7 @@ func TestTokenSourceGitHubAppInstallationExchangeErrorRedactsGeneratedJWT(t *tes
 }
 
 func TestTokenSourceGitHubAppInstallationHTTPErrorBodyRedactsGeneratedJWT(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	privateKeyPEM, _ := testGitHubAppPrivateKey(t)
 	var rawAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -649,7 +654,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToken(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != "notion-client" || pass != "notion-secret" {
@@ -718,7 +723,7 @@ func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToke
 }
 
 func TestTokenSourceAccessTokenFailsClosedWhenTokenRequestProfileDoesNotSatisfyRequirement(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	store := NewMemoryStore(Record{
 		Key:         "notion_oauth",
 		Provider:    "notion",
@@ -754,7 +759,7 @@ func TestTokenSourceAccessTokenFailsClosedWhenTokenRequestProfileDoesNotSatisfyR
 }
 
 func TestTokenSourceClientCredentialsFailureRedactsProviderSecretEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -793,7 +798,7 @@ func TestTokenSourceClientCredentialsFailureRedactsProviderSecretEcho(t *testing
 }
 
 func TestTokenSourceClientCredentialsFailurePropagatesFailureStatePersistenceError(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -837,7 +842,7 @@ func TestTokenSourceClientCredentialsFailurePropagatesFailureStatePersistenceErr
 }
 
 func TestTokenSourceAccessTokenFailsClosedWhenRefreshNarrowsScopes(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
@@ -899,7 +904,7 @@ func TestTokenSourceAccessTokenFailsClosedWhenRefreshNarrowsScopes(t *testing.T)
 }
 
 func TestTokenSourceRefreshFailureFailsClosedAndRedactsSecrets(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -943,7 +948,7 @@ func TestTokenSourceRefreshFailureFailsClosedAndRedactsSecrets(t *testing.T) {
 }
 
 func TestTokenSourceRefreshFailurePropagatesFailureStatePersistenceError(t *testing.T) {
-	ctx := context.Background()
+	ctx := managedCredentialTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{

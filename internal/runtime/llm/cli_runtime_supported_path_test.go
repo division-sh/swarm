@@ -138,7 +138,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(
 		sessions.WithScope(
-			runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+			runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 				ID:       "market-research-agent",
 				FlowPath: "market/inst-1",
 				NativeTools: runtimeactors.NativeToolConfig{

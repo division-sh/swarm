@@ -157,10 +157,18 @@ type AccessTokenRequest struct {
 }
 
 type TokenSource struct {
-	Store         Store
-	HTTPClient    *http.Client
-	Now           func() time.Time
-	RefreshWindow time.Duration
+	Store          Store
+	HTTPClient     *http.Client
+	DifferentOwner runtimeeffects.DifferentOwner
+	Now            func() time.Time
+	RefreshWindow  time.Duration
+}
+
+func (s *TokenSource) effectContext(ctx context.Context) context.Context {
+	if s != nil && s.DifferentOwner != "" {
+		return runtimeeffects.WithDifferentOwner(ctx, s.DifferentOwner)
+	}
+	return ctx
 }
 
 func DefaultFilePath() (string, error) {
@@ -518,6 +526,7 @@ func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error
 }
 
 func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Values) (Record, error) {
+	ctx = s.effectContext(ctx)
 	tokenURL := strings.TrimSpace(record.TokenURL)
 	if tokenURL == "" {
 		return Record{}, fmt.Errorf("managed credential %q token_url is required", record.Key)
@@ -613,6 +622,7 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 }
 
 func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record Record, installationID string) (Record, error) {
+	ctx = s.effectContext(ctx)
 	installationID = normalizeInstallationID(installationID)
 	if installationID == "" {
 		return Record{}, fmt.Errorf("managed credential %q installation_id is required", record.Key)

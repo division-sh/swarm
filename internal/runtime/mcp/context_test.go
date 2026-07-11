@@ -10,6 +10,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 )
 
 func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
@@ -41,9 +43,30 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 	}
 }
 
+func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
+	harness := effecttest.New()
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	ctx := models.WithActor(harness.Context("gateway-turn"), models.AgentConfig{ID: harness.Token.AgentID})
+	token := registry.RegisterTurnContext(ctx)
+	turn, ok := registry.ResolveTurnContext(token)
+	if !ok {
+		t.Fatal("ResolveTurnContext returned false")
+	}
+	if !turn.HasLifecycleToken || turn.LifecycleToken != harness.Token || turn.EffectController == nil {
+		t.Fatalf("managed effect authority was not preserved: %#v", turn)
+	}
+	base := (&Gateway{}).baseContextForResolvedTurn(context.Background(), turn)
+	if restored, ok := runtimeeffects.LifecycleTokenFromContext(base); !ok || restored != harness.Token {
+		t.Fatalf("restored lifecycle token = %+v ok=%v", restored, ok)
+	}
+	if _, ok := runtimeeffects.ControllerFromContext(base); !ok {
+		t.Fatal("restored effect controller is missing")
+	}
+}
+
 func TestTurnContextRegistry_PreservesTypedRuntimeLineage(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "selected-agent"})
+	ctx := models.WithActor(unmanagedMCPTestContext(), models.AgentConfig{ID: "selected-agent"})
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
 		RunID:               "9b06692c-353c-4479-8e92-70927f5e4937",

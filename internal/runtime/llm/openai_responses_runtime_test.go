@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -92,7 +91,7 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "cheap",
 		EntityID: "entity-1",
@@ -159,7 +158,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	turns := &turnCapture{}
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -183,7 +182,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	defer server.Close()
 
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

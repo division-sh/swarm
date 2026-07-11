@@ -70,6 +70,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	activeCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
 		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation,
 	}), controller)
+	activeCtx = runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-primary")
 	handle, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("request"), map[string]string{"test": "true"})
 	if err != nil {
 		t.Fatalf("authorize current generation effect: %v", err)
@@ -88,20 +89,30 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err := handle.Settle(activeCtx, runtimeeffects.StateOutcomeUncertain, &envelope, map[string]any{"stage": "transport"}); err != nil {
 		t.Fatalf("replay settle effect uncertain: %v", err)
 	}
+	if _, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("request"), map[string]string{"test": "true"}); err == nil {
+		t.Fatal("settled logical operation replay was admitted for redispatch")
+	}
+	if _, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("changed-request"), map[string]string{"test": "true"}); err == nil {
+		t.Fatal("same logical operation accepted a changed request fingerprint")
+	}
 	if current, err := runtimeeffects.ProjectionCurrent(activeCtx); err != nil || !current {
 		t.Fatalf("current generation projection authorization = %v, err=%v", current, err)
 	}
-	prelaunch, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("recover-prelaunch"), nil)
+	prelaunchCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-prelaunch")
+	prelaunch, err := runtimeeffects.Begin(prelaunchCtx, "authored_http_tool", []byte("recover-prelaunch"), nil)
 	if err != nil {
 		t.Fatalf("authorize recoverable prelaunch effect: %v", err)
 	}
-	launched, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("recover-launched"), nil)
+	launchedCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-launched")
+	launched, err := runtimeeffects.Begin(launchedCtx, "authored_http_tool", []byte("recover-launched"), nil)
 	if err != nil {
 		t.Fatalf("authorize recoverable launched effect: %v", err)
 	}
 	if err := launched.MarkLaunched(activeCtx); err != nil {
 		t.Fatalf("mark recoverable effect launched: %v", err)
 	}
+	requireExternalOperationState(t, db, sqlite, prelaunch.Attempt().OperationID, runtimeeffects.StateAuthorized)
+	requireExternalOperationState(t, db, sqlite, launched.Attempt().OperationID, runtimeeffects.StateLaunched)
 	recoveryStore := store.(runtimeeffects.RecoveryStore)
 	summary, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, now.Add(2*time.Second))
 	if err != nil {
@@ -112,23 +123,46 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	requireExternalAttemptState(t, db, sqlite, prelaunch.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
 	requireExternalAttemptState(t, db, sqlite, launched.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+	requireExternalOperationState(t, db, sqlite, prelaunch.Attempt().OperationID, runtimeeffects.StateTerminalFailure)
+	requireExternalOperationState(t, db, sqlite, launched.Attempt().OperationID, runtimeeffects.StateOutcomeUncertain)
+
+	restarted, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: "00000000-0000-0000-0000-000000001903", OperationKind: "restart", RequestHash: "restart-hash",
+		AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch,
+		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
+		TargetEpoch: started.RuntimeEpoch, TargetGeneration: started.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("restart lifecycle transition: %v", err)
+	}
+	restartedCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
+		RuntimeEpoch: restarted.RuntimeEpoch, AgentID: restarted.AgentID, Generation: restarted.Generation,
+	}), controller)
+	restartedCtx = runtimeeffects.WithLogicalOperationIdentity(restartedCtx, "effect-authority-launched")
+	if _, err := runtimeeffects.Begin(restartedCtx, "authored_http_tool", []byte("recover-launched"), nil); err == nil {
+		t.Fatal("successor generation redispatched the uncertain logical operation")
+	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain {
+		t.Fatalf("successor replay failure = %v, want outcome uncertain", err)
+	}
 
 	diagnosticsStore := store.(runtimemanager.AgentLifecycleDiagnosticPersistence)
 	diagnostics, err := diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
-	if err != nil || len(diagnostics) != 2 {
-		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn and start", diagnostics, err)
+	if err != nil || len(diagnostics) != 3 {
+		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn, start, and restart", diagnostics, err)
 	}
 	if err := diagnosticsStore.MarkAgentLifecycleDiagnosticProjected(ctx, diagnostics[0].OutboxID, now.Add(3*time.Second)); err != nil {
 		t.Fatalf("mark lifecycle diagnostic projected: %v", err)
 	}
 	diagnostics, err = diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
-	if err != nil || len(diagnostics) != 1 {
-		t.Fatalf("remaining lifecycle diagnostics = %#v err=%v, want one", diagnostics, err)
+	if err != nil || len(diagnostics) != 2 {
+		t.Fatalf("remaining lifecycle diagnostics = %#v err=%v, want two", diagnostics, err)
 	}
 
 	staleCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
 		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1,
 	}), controller)
+	staleCtx = runtimeeffects.WithLogicalOperationIdentity(staleCtx, "effect-authority-stale")
 	if current, err := runtimeeffects.ProjectionCurrent(staleCtx); err != nil || current {
 		t.Fatalf("stale generation projection authorization = %v, err=%v", current, err)
 	}
@@ -154,6 +188,21 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	if operationState != string(runtimeeffects.StateOutcomeUncertain) || attemptState != string(runtimeeffects.StateOutcomeUncertain) {
 		t.Fatalf("settled states operation=%s attempt=%s", operationState, attemptState)
+	}
+}
+
+func requireExternalOperationState(t *testing.T, db *sql.DB, sqlite bool, operationID string, want runtimeeffects.State) {
+	t.Helper()
+	placeholder := "?"
+	if !sqlite {
+		placeholder = "$1"
+	}
+	var state string
+	if err := db.QueryRow("SELECT state FROM agent_external_effect_operations WHERE operation_id = "+placeholder, operationID).Scan(&state); err != nil {
+		t.Fatalf("load external operation state: %v", err)
+	}
+	if state != string(want) {
+		t.Fatalf("external operation state = %q, want %q", state, want)
 	}
 }
 

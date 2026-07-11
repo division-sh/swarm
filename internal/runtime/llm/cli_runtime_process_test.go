@@ -30,7 +30,7 @@ func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.A
 
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID: "campaign-coordinator",
 	})
 
@@ -42,7 +42,7 @@ func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresContainerTarget(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, workspaceResolverStub{}, nil, nil)
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID: "campaign-coordinator",
 	})
 
@@ -59,7 +59,7 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 		AgentID: "campaign-coordinator",
 	}
 
-	_, err := runtime.runWithInput(context.Background(), nil, nil, "hello", MonitorTurnMeta{})
+	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, nil, "hello", MonitorTurnMeta{})
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("expected ErrClaudeWorkspaceRequired, got %v", err)
 	}
@@ -74,7 +74,7 @@ func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
 		Backend: workspace.BackendHost,
 	}
 
-	_, err := runtime.runWithInput(context.Background(), nil, target, "hello", MonitorTurnMeta{})
+	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, target, "hello", MonitorTurnMeta{})
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceRequired", err)
 	}
@@ -90,7 +90,7 @@ func TestClaudeCLIRuntimeWorkspaceCommandRejectsHostWorkspaceBackend(t *testing.
 		Backend: workspace.BackendHost,
 	}
 
-	_, _, exitCode, err := runtime.runWorkspaceCommand(context.Background(), target, "", "sh", "-lc", "true")
+	_, _, exitCode, err := runtime.runWorkspaceCommand(unmanagedLLMTestContext(), target, "", "sh", "-lc", "true")
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("runWorkspaceCommand error = %v, want ErrClaudeWorkspaceRequired", err)
 	}
@@ -112,7 +112,7 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	runtime.toolGateway = testToolGatewayBinding("http://127.0.0.1:8082", "http://host.docker.internal:8082", "gateway-token")
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "stored-oauth-token")
 
-	cmd, err := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
+	cmd, err := runtime.buildCommand(unmanagedLLMTestContext(), []string{"--print", "hello"}, &workspace.Target{
 		Backend:   workspace.BackendDocker,
 		Container: "swarm-agent-market-research",
 		Workdir:   "/workspace",
@@ -161,7 +161,7 @@ exit 127
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-	_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("runWithInput failure = %#v, want generic connector failure", failure)
@@ -213,7 +213,7 @@ exit 1
 			runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
 			runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-			_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+			_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
 			assertClaudeAuthenticationFailure(t, err)
 		})
 	}
@@ -252,7 +252,7 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleF
 		gotArgs = append([]string(nil), args...)
 		return nil, nil, 0, nil
 	}
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "market-research-agent"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "market-research-agent"})
 
 	relay, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
 	if err != nil {
@@ -282,7 +282,7 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_PropagatesWorkspaceWrit
 	runtime.execWorkspaceFn = func(context.Context, *workspace.Target, string, ...string) ([]byte, []byte, int, error) {
 		return nil, []byte("permission denied"), 1, errors.New("exit 1")
 	}
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "market-research-agent"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "market-research-agent"})
 
 	_, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
 	failure, ok := runtimefailures.As(err)
@@ -296,16 +296,16 @@ func TestEffectiveCLITimeoutForConfigIgnoresRetiredEnvAndPreservesActorFloor(t *
 	cfg := &config.Config{}
 	cfg.LLM.ClaudeCLI.Timeout = 45 * time.Second
 
-	if got := effectiveCLITimeoutForConfig(context.Background(), cfg); got != 45*time.Second {
+	if got := effectiveCLITimeoutForConfig(unmanagedLLMTestContext(), cfg); got != 45*time.Second {
 		t.Fatalf("timeout without actor = %v, want config timeout", got)
 	}
 
-	globalActorCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "global-agent"})
+	globalActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "global-agent"})
 	if got := effectiveCLITimeoutForConfig(globalActorCtx, cfg); got != 300*time.Second {
 		t.Fatalf("timeout for global/no-entity actor = %v, want floor", got)
 	}
 
-	entityActorCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "entity-agent", EntityID: "customer-1"})
+	entityActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "entity-agent", EntityID: "customer-1"})
 	if got := effectiveCLITimeoutForConfig(entityActorCtx, cfg); got != 45*time.Second {
 		t.Fatalf("timeout for entity actor = %v, want config timeout", got)
 	}

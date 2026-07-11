@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +35,7 @@ func TestClientCallWithCredentialKeyResolverUsesBoundDeploymentCredential(t *tes
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := store.Set(context.Background(), "tenant_mcp_key", "mcp-secret"); err != nil {
+	if err := store.Set(unmanagedMCPTestContext(), "tenant_mcp_key", "mcp-secret"); err != nil {
 		t.Fatalf("Set tenant_mcp_key: %v", err)
 	}
 	client := NewClient(store)
@@ -53,7 +52,7 @@ func TestClientCallWithCredentialKeyResolverUsesBoundDeploymentCredential(t *tes
 		ServerName: "infra",
 	}
 
-	out, err := client.CallWithCredentialKeyResolver(context.Background(), "infra.ping", map[string]any{}, func(key string) (string, error) {
+	out, err := client.CallWithCredentialKeyResolver(unmanagedMCPTestContext(), "infra.ping", map[string]any{}, func(key string) (string, error) {
 		if key != "provider_key" {
 			t.Fatalf("resolver key = %q, want package handle provider_key", key)
 		}

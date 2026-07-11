@@ -64,7 +64,7 @@ func TestExternalMCPHTTPStatusPrecedesBodySemantics(t *testing.T) {
 			} {
 				client, cleanup := newHTTPExternalMCPClient(t, tt.status, body, nil)
 				defer cleanup()
-				out, err := client.Call(context.Background(), externalTestTool, map[string]any{})
+				out, err := client.Call(unmanagedMCPTestContext(), externalTestTool, map[string]any{})
 				if out != nil {
 					t.Fatalf("status %d output = %#v, want nil", tt.status, out)
 				}
@@ -233,7 +233,7 @@ func TestExternalMCPHTTPAndStdioShareStrictUntrustedInterpretation(t *testing.T)
 				t.Run(transport, func(t *testing.T) {
 					client, cleanup := newExternalMCPClientForRaw(t, transport, raw)
 					defer cleanup()
-					out, err := client.Call(context.Background(), externalTestTool, map[string]any{})
+					out, err := client.Call(unmanagedMCPTestContext(), externalTestTool, map[string]any{})
 					if tt.wantClass == "" {
 						if err != nil {
 							t.Fatalf("Call: %v", err)
@@ -267,7 +267,7 @@ func TestExternalMCPWireBoundsHTTPAndStdio(t *testing.T) {
 		t.Run(transport, func(t *testing.T) {
 			client, cleanup := newExternalMCPClientForRaw(t, transport, raw)
 			defer cleanup()
-			_, err := client.Call(context.Background(), externalTestTool, map[string]any{})
+			_, err := client.Call(unmanagedMCPTestContext(), externalTestTool, map[string]any{})
 			failure := assertMCPFailure(t, err, runtimefailures.ClassDataLimitExceeded, "mcp_wire_response_limit_exceeded")
 			if failure.Detail.Attributes["limit_kind"] != "mcp_wire_response_bytes" {
 				t.Fatalf("limit evidence = %#v", failure.Detail.Attributes)
@@ -291,7 +291,7 @@ func TestExternalMCPTransportFailuresAreLocallyClassified(t *testing.T) {
 			client.httpClient = &http.Client{Transport: mcpTestRoundTripper(func(*http.Request) (*http.Response, error) {
 				return nil, tt.err
 			})}
-			_, err := client.Call(context.Background(), externalTestTool, map[string]any{})
+			_, err := client.Call(unmanagedMCPTestContext(), externalTestTool, map[string]any{})
 			failure := assertMCPFailure(t, err, tt.class, tt.code)
 			if strings.Contains(failure.Message, "secret prose") {
 				t.Fatalf("transport prose survived canonical message: %q", failure.Message)
@@ -309,7 +309,7 @@ func TestExternalMCPStdioDeadlineDoesNotBlockPastContext(t *testing.T) {
 		stdin:  mcpTestWriteCloser{Writer: io.Discard},
 		stdout: bufio.NewReader(reader),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithTimeout(unmanagedMCPTestContext(), 25*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	_, err := client.Call(ctx, externalTestTool, map[string]any{})
@@ -328,7 +328,7 @@ func TestExternalMCPCredentialBoundary(t *testing.T) {
 			}
 		})
 		defer cleanup()
-		if _, err := client.Call(context.Background(), externalTestTool, map[string]any{}); err != nil {
+		if _, err := client.Call(unmanagedMCPTestContext(), externalTestTool, map[string]any{}); err != nil {
 			t.Fatalf("Call: %v", err)
 		}
 	})
@@ -350,7 +350,7 @@ func TestExternalMCPCredentialBoundary(t *testing.T) {
 			defer cleanup()
 			client.store = tt.store
 			client.servers["test"].cfg.CredentialsKey = "declared"
-			_, err := client.CallWithCredentialKeyResolver(context.Background(), externalTestTool, map[string]any{}, tt.resolver)
+			_, err := client.CallWithCredentialKeyResolver(unmanagedMCPTestContext(), externalTestTool, map[string]any{}, tt.resolver)
 			assertMCPFailure(t, err, tt.class, tt.detail)
 		})
 	}
@@ -364,7 +364,7 @@ func TestExternalMCPCredentialBoundary(t *testing.T) {
 		defer cleanup()
 		client.store = mcpTestCredentialStore{value: "secret", ok: true}
 		client.servers["test"].cfg.CredentialsKey = "declared"
-		if _, err := client.CallWithCredentialKeyResolver(context.Background(), externalTestTool, map[string]any{}, func(string) (string, error) { return "deployment", nil }); err != nil {
+		if _, err := client.CallWithCredentialKeyResolver(unmanagedMCPTestContext(), externalTestTool, map[string]any{}, func(string) (string, error) { return "deployment", nil }); err != nil {
 			t.Fatalf("CallWithCredentialKeyResolver: %v", err)
 		}
 	})

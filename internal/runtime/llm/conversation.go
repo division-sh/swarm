@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -187,7 +188,8 @@ func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response
 			"limit":       c.MaxTurns,
 		})
 	}
-	resp, err := c.runtime.ContinueSession(ctx, c.Session, msg)
+	turnCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("provider_turn:%d", c.TurnCount+1))
+	resp, err := c.runtime.ContinueSession(turnCtx, c.Session, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -234,9 +236,11 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
-	for _, tc := range calls {
+	for callIndex, tc := range calls {
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
-		out, err := c.safeExecuteTool(ctx, tc.Name, tc.Arguments)
+		callIdentity := fmt.Sprintf("tool_call:%d:%d:%s:%s", c.TurnCount, callIndex, strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Name))
+		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
+		out, err := c.safeExecuteTool(callCtx, tc.Name, tc.Arguments)
 		entry := map[string]any{
 			"name": tc.Name,
 		}
@@ -244,7 +248,7 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 			entry["tool_call_id"] = id
 		}
 		if err == nil {
-			projected, projectErr := c.projectToolResult(ctx, tc.Name, tc.Arguments, out)
+			projected, projectErr := c.projectToolResult(callCtx, tc.Name, tc.Arguments, out)
 			if projectErr != nil {
 				err = projectErr
 			} else {

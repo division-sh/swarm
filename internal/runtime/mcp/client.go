@@ -72,6 +72,7 @@ func NewClient(store runtimecredentials.Store) *Client {
 }
 
 func (c *Client) Refresh(ctx context.Context, source semanticview.Source) []error {
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerRuntimeDependency)
 	configs, err := parseServerConfigs(source)
 	if err != nil {
 		return []error{err}
@@ -325,7 +326,11 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 		}
 		httpReq.Header.Set("authorization", "Bearer "+strings.TrimSpace(token))
 	}
-	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_http", body, map[string]string{"server": cfg.Name, "method": req.Method})
+	fingerprintBody, err := mcpEffectFingerprint(req)
+	if err != nil {
+		return RPCResponse{}, err
+	}
+	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_http", fingerprintBody, map[string]string{"server": cfg.Name, "method": req.Method})
 	if err != nil {
 		return RPCResponse{}, err
 	}
@@ -441,7 +446,11 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	raw = append(raw, '\n')
-	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_stdio", raw, map[string]string{"server": cfg.Name, "method": req.Method})
+	fingerprintBody, err := mcpEffectFingerprint(req)
+	if err != nil {
+		return RPCResponse{}, err
+	}
+	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_stdio", fingerprintBody, map[string]string{"server": cfg.Name, "method": req.Method})
 	if err != nil {
 		return RPCResponse{}, err
 	}
@@ -498,6 +507,15 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		resp.effect = attempt
 		return resp, nil
 	}
+}
+
+func mcpEffectFingerprint(req RPCRequest) ([]byte, error) {
+	req.ID = nil
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("encode MCP effect fingerprint: %w", err)
+	}
+	return raw, nil
 }
 
 func readBoundedStdioFrame(reader *bufio.Reader) ([]byte, int, error) {

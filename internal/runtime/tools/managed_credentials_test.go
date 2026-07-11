@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -21,7 +21,7 @@ import (
 )
 
 func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	var apiCalls atomic.Int32
 	var tokenCalls atomic.Int32
 	var sawAuth []string
@@ -112,7 +112,7 @@ func TestValidateToolImplementationsRejectsMalformedManagedCredentialReferences(
 }
 
 func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("HTTP server should not be called when installation_id_input is used outside activity execution")
 	}))
@@ -160,7 +160,7 @@ func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testin
 }
 
 func TestExecutorHTTPToolRefreshesManagedCredentialBeforeUse(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	var sawAuth string
 	var tokenCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +209,7 @@ func TestExecutorHTTPToolRefreshesManagedCredentialBeforeUse(t *testing.T) {
 }
 
 func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	serverCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serverCalled = true
@@ -280,7 +280,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 }
 
 func TestExecutorHTTPToolUsesImportedManagedCredentialBinding(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	var sawAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawAuth = r.Header.Get("Authorization")
@@ -307,7 +307,7 @@ func TestExecutorHTTPToolUsesImportedManagedCredentialBinding(t *testing.T) {
 }
 
 func TestExecutorHTTPToolRejectsAmbientManagedCredentialFallback(t *testing.T) {
-	ctx := context.Background()
+	ctx := unmanagedToolTestContext()
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("HTTP server should not be called when managed credential binding is missing")
 	}))
@@ -370,8 +370,9 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 				return runtimemcp.TurnContext{}, false
 			}
 			return runtimemcp.TurnContext{
-				Actor:   actor,
-				Allowed: map[string]struct{}{"send_provider": {}},
+				Actor:          actor,
+				Allowed:        map[string]struct{}{"send_provider": {}},
+				DifferentOwner: runtimeeffects.OwnerBuildTestInfrastructure,
 			}, true
 		},
 	})
