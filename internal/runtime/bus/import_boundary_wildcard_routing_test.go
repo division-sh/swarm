@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -95,6 +97,88 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 		t.Fatalf("persisted deliveries = %#v, want worker-listener", got)
 	}
 
+}
+
+func TestImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerAuthored: true,
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n" +
+			"        - source: flows/producer\n" +
+			"          events: [task.done]\n",
+	})
+
+	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
+	if len(relations.Matches) != 0 || len(relations.Issues) != 1 {
+		t.Fatalf("typed pub/sub relations = %#v, want one ambiguity and no edge authority", relations)
+	}
+	if issue := relations.Issues[0]; issue.Failure != semanticview.TypedPubSubFailureAuthorizationAmbiguous || len(issue.Authorizations) != 2 {
+		t.Fatalf("typed pub/sub issue = %#v, want two-proof authorization ambiguity", issue)
+	}
+
+	topology := routingtopology.Build(source)
+	if len(topology.Edges) != 0 || len(topology.Issues) != 1 || topology.Issues[0].Failure != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
+		t.Fatalf("routing topology = %#v, want ambiguity issue and no edge", topology)
+	}
+
+	report := bootverify.Run(context.Background(), source, bootverify.Options{})
+	if !importBoundaryWildcardReportContains(report.Errors(), semanticview.TypedPubSubFailureAuthorizationAmbiguous, "multiple distinct import authorization proofs") {
+		t.Fatalf("verify errors = %#v, want typed pub/sub authorization hard invalidity", report.Errors())
+	}
+	if importBoundaryWildcardReportContains(report.Findings, "event_consumer_exists", "producer/task.done") {
+		t.Fatalf("verify findings = %#v, ambiguity should replace the generic missing-consumer warning", report.Findings)
+	}
+
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if routes != nil {
+		t.Fatalf("route table = %#v, want no runtime authority for ambiguous relation", routes)
+	}
+	var authorizationErr *runtimebus.TypedPubSubAuthorizationError
+	if !errors.As(err, &authorizationErr) || len(authorizationErr.Issues) != 1 {
+		t.Fatalf("DeriveRouteTable error = %v, want typed pub/sub authorization error", err)
+	}
+	if eb, err := runtimebus.NewEventBusWithOptions(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || eb != nil {
+		t.Fatalf("NewEventBusWithOptions = (%#v, %v), want fail-closed startup", eb, err)
+	}
+	validSource := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerAuthored: true,
+		ObserveGrant:     "      observe:\n        - source: producer\n          events: [task.done]\n",
+	})
+	prebuiltRoutes, err := runtimebus.DeriveRouteTable(validSource)
+	if err != nil {
+		t.Fatalf("derive valid prebuilt route table: %v", err)
+	}
+	if eb, err := runtimebus.NewEventBusWithOptions(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuiltRoutes}); err == nil || eb != nil {
+		t.Fatalf("NewEventBusWithOptions with prebuilt routes = (%#v, %v), want contract ambiguity to remain authoritative", eb, err)
+	}
+}
+
+func TestImportBoundaryWildcardExactDuplicateAuthorizationCollapsesAcrossSurfaces(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerAuthored: true,
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n",
+	})
+
+	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
+	if len(relations.Issues) != 0 || len(relations.Matches) != 1 {
+		t.Fatalf("typed pub/sub relations = %#v, want one deduplicated match", relations)
+	}
+	topology := routingtopology.Build(source)
+	if len(topology.Issues) != 0 || len(topology.Edges) != 1 {
+		t.Fatalf("routing topology = %#v, want one deduplicated edge", topology)
+	}
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].ID != "worker-listener" {
+		t.Fatalf("Resolve(producer/task.done) = %#v, want one deduplicated worker route", got)
+	}
 }
 
 func TestImportBoundaryWildcardGrantFailsClosedWhenInvalid(t *testing.T) {
@@ -184,6 +268,7 @@ type importBoundaryWildcardFixtureOptions struct {
 	WorkerMode         string
 	WorkerSubscription string
 	RootWildcard       bool
+	ProducerAuthored   bool
 }
 
 func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildcardFixtureOptions) semanticview.Source {
@@ -280,8 +365,25 @@ pins:
 `)
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "task.done: {}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	producerEvents := "task.done: {}\n"
+	producerNodes := "{}\n"
+	if opts.ProducerAuthored {
+		producerEvents += "task.start: {}\n"
+		producerNodes = `
+producer-source:
+  id: producer-source
+  execution_type: system_node
+  subscribes_to: [task.start]
+  produces: [task.done]
+  event_handlers:
+    task.start:
+      emit:
+        event: task.done
+        broadcast: true
+`
+	}
+	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), producerEvents)
+	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), producerNodes)
 	return root
 }
 

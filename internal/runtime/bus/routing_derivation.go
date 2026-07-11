@@ -61,10 +61,39 @@ type routeResolvedPattern struct {
 	RoutePath      string
 }
 
+type TypedPubSubAuthorizationError struct {
+	Issues []semanticview.TypedPubSubConsumerIssue
+}
+
+func (e *TypedPubSubAuthorizationError) Error() string {
+	if e == nil || len(e.Issues) == 0 {
+		return "typed pub/sub authorization failed"
+	}
+	messages := make([]string, 0, len(e.Issues))
+	for _, issue := range e.Issues {
+		messages = append(messages, fmt.Sprintf("%s: %s", issue.Failure, issue.Message()))
+	}
+	return strings.Join(messages, "; ")
+}
+
+func validateTypedPubSubAuthorizations(source semanticview.Source) error {
+	if source == nil {
+		return nil
+	}
+	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
+	if len(relations.Issues) == 0 {
+		return nil
+	}
+	return &TypedPubSubAuthorizationError{Issues: relations.Issues}
+}
+
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	rt := newRouteTable(source)
 	if source == nil {
 		return rt, nil
+	}
+	if err := validateTypedPubSubAuthorizations(source); err != nil {
+		return nil, err
 	}
 
 	for _, scope := range semanticview.ProjectScopes(source) {
