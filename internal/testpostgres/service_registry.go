@@ -116,6 +116,9 @@ func NewServiceRegistry(stateRoot, dockerBin string) *ServiceRegistry {
 }
 
 func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Service, error) {
+	if err := validateCreatorProcessSupport(); err != nil {
+		return nil, err
+	}
 	if err := r.initialize(); err != nil {
 		return nil, err
 	}
@@ -174,8 +177,11 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 		_ = creator.Close()
 		return nil, err
 	}
-	cmd := exec.CommandContext(context.Background(), executable, "--internal-create", "--state-root", r.StateRoot, "--lease-id", leaseID, "--creator-fd", "3")
-	cmd.ExtraFiles = []*os.File{creator.File()}
+	cmd, err := creatorProcessCommand(executable, r.StateRoot, leaseID, creator)
+	if err != nil {
+		_ = creator.Close()
+		return nil, err
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
