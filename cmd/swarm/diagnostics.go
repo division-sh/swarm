@@ -28,6 +28,9 @@ type diagnosticRunListOptions struct {
 	status     string
 	since      string
 	until      string
+	sinceSet   bool
+	untilSet   bool
+	reference  time.Time
 	limit      int
 	cursor     string
 }
@@ -50,6 +53,7 @@ type diagnosticTraceOptions struct {
 	subscriberTypes  []string
 	sinceSet         bool
 	untilSet         bool
+	reference        time.Time
 	limitSet         bool
 	cursorSet        bool
 }
@@ -221,6 +225,9 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "List runs.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			runOpts.sinceSet = cmd.Flags().Changed("since")
+			runOpts.untilSet = cmd.Flags().Changed("until")
+			runOpts.reference = captureCLIReadWindowReference(runOpts.apiOptions)
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
 				return fmt.Errorf("--limit must be between 1 and 500")
 			}
@@ -303,6 +310,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
 			traceOpts.untilSet = cmd.Flags().Changed("until")
+			traceOpts.reference = captureCLIReadWindowReference(traceOpts.apiOptions)
 			traceOpts.limitSet = cmd.Flags().Changed("limit")
 			traceOpts.cursorSet = cmd.Flags().Changed("cursor")
 			runID := ""
@@ -318,8 +326,8 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().BoolVar(&traceOpts.deliveryDetail, "delivery-detail", false, "Show snapshot delivery lifecycle fields from RunTraceRow")
 	cmd.Flags().BoolVar(&traceOpts.deliverySummary, "delivery-summary", false, "Summarize snapshot delivery lifecycle fields from all RunTraceRow pages")
-	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
-	cmd.Flags().StringVar(&traceOpts.until, "until", "", "Snapshot-only inclusive RFC3339 trace materialization upper bound")
+	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 or relative trace materialization watermark")
+	cmd.Flags().StringVar(&traceOpts.until, "until", "", "Snapshot-only inclusive RFC3339 or relative trace materialization upper bound")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Event name filter; repeat to match any")
@@ -450,8 +458,8 @@ func writeInvestigateTraceRetiredMessage(w io.Writer) {
 
 func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptions) {
 	cmd.Flags().StringVar(&opts.status, "status", "", "Optional run status filter")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Optional RFC3339 lower started_at bound")
-	cmd.Flags().StringVar(&opts.until, "until", "", "Optional RFC3339 upper started_at bound")
+	cmd.Flags().StringVar(&opts.since, "since", "", "Optional RFC3339 or relative lower started_at bound")
+	cmd.Flags().StringVar(&opts.until, "until", "", "Optional RFC3339 or relative upper started_at bound")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&opts.cursor, "cursor", "", "Optional pagination cursor")
 }
@@ -459,7 +467,7 @@ func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptio
 func runDiagnosticRunListCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticRunListOptions) error {
 	params, err := opts.params()
 	if err != nil {
-		return err
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -519,7 +527,7 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
 	traceParams, err := opts.traceParams()
 	if err != nil {
-		return err
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -538,7 +546,7 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	traceParams["run_id"] = runID
 	if opts.deliverySummary {
 		if !opts.untilSet {
-			traceParams["until"] = time.Now().UTC().Format(time.RFC3339Nano)
+			traceParams["until"] = opts.reference.UTC().Format(time.RFC3339Nano)
 		}
 		result, err := fetchDiagnosticRunTraceSummary(ctx, client, traceParams)
 		if err != nil {
@@ -586,29 +594,15 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["cursor"] = cursor
 	}
-	var sinceTime *time.Time
-	if o.sinceSet {
-		since := strings.TrimSpace(o.since)
-		parsed, err := parseRFC3339Flag("--since", since)
-		if err != nil {
-			return nil, err
-		}
-		sinceTime = &parsed
-		params["since"] = since
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: o.since, Set: o.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: o.until, Set: o.untilSet},
+		ReferenceUTC: o.reference,
+	})
+	if err != nil {
+		return nil, err
 	}
-	var untilTime *time.Time
-	if o.untilSet {
-		until := strings.TrimSpace(o.until)
-		parsed, err := parseRFC3339Flag("--until", until)
-		if err != nil {
-			return nil, err
-		}
-		untilTime = &parsed
-		params["until"] = until
-	}
-	if sinceTime != nil && untilTime != nil && sinceTime.After(*untilTime) {
-		return nil, fmt.Errorf("--until must be at or after --since")
-	}
+	window.addParams(params)
 	filter, err := o.traceFilter()
 	if err != nil {
 		return nil, err
@@ -1120,18 +1114,15 @@ func (o diagnosticRunListOptions) params() (map[string]any, error) {
 		}
 		params["limit"] = o.limit
 	}
-	if since := strings.TrimSpace(o.since); since != "" {
-		if err := validateRFC3339Flag("--since", since); err != nil {
-			return nil, err
-		}
-		params["since"] = since
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: o.since, Set: o.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: o.until, Set: o.untilSet},
+		ReferenceUTC: o.reference,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if until := strings.TrimSpace(o.until); until != "" {
-		if err := validateRFC3339Flag("--until", until); err != nil {
-			return nil, err
-		}
-		params["until"] = until
-	}
+	window.addParams(params)
 	return params, nil
 }
 

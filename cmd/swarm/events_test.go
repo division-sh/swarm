@@ -304,7 +304,7 @@ func TestEventsRejectInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "list invalid limit", args: []string{"event", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 1000"},
-		{name: "list invalid since", args: []string{"event", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "list invalid since", args: []string{"event", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
 		{name: "list invalid delivery status", args: []string{"event", "list", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "view blank event id", args: []string{"event", "view", "  "}, wantStderr: "event id is required"},
 		{name: "replay missing event id", args: []string{"event", "replay"}, wantStderr: "requires <event-id>"},

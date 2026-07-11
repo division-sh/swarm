@@ -202,7 +202,7 @@ func TestLogsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "invalid level", args: []string{"logs", "--level", "fatal"}, wantStderr: "--level must be one of"},
 		{name: "invalid order", args: []string{"logs", "--order", "sideways"}, wantStderr: "--order must be one of"},
 		{name: "invalid limit", args: []string{"logs", "--limit", "0"}, wantStderr: "--limit must be between 1 and 1000"},
-		{name: "invalid since", args: []string{"logs", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "invalid since", args: []string{"logs", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
 		{name: "invalid window", args: []string{"logs", "--since", "2026-05-19T11:00:00Z", "--until", "2026-05-19T10:00:00Z"}, wantStderr: "--until must be greater than or equal to --since"},
 		{name: "replay without follow", args: []string{"logs", "--replay-since", "2026-05-19T10:00:00Z"}, wantStderr: "--replay-since requires --follow"},
 		{name: "follow rejects limit", args: []string{"logs", "--follow", "--limit", "10"}, wantStderr: "--limit is not supported with --follow"},

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
@@ -46,6 +47,9 @@ type eventListCommandOptions struct {
 	filter     eventFilterOptions
 	since      string
 	until      string
+	sinceSet   bool
+	untilSet   bool
+	reference  time.Time
 	limit      int
 	limitSet   bool
 	cursor     string
@@ -212,12 +216,15 @@ func newEventsListCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.filter.hasDeadLetterSet = cmd.Flags().Changed("has-dead-letter")
 			listOpts.limitSet = cmd.Flags().Changed("limit")
+			listOpts.sinceSet = cmd.Flags().Changed("since")
+			listOpts.untilSet = cmd.Flags().Changed("until")
+			listOpts.reference = captureCLIReadWindowReference(listOpts.apiOptions)
 			return runEventListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
 		},
 	}
 	bindEventFilterFlags(cmd, &listOpts.filter)
-	cmd.Flags().StringVar(&listOpts.since, "since", "", "Optional RFC3339 lower created_at bound")
-	cmd.Flags().StringVar(&listOpts.until, "until", "", "Optional RFC3339 upper created_at bound")
+	cmd.Flags().StringVar(&listOpts.since, "since", "", "Optional RFC3339 or relative lower created_at bound")
+	cmd.Flags().StringVar(&listOpts.until, "until", "", "Optional RFC3339 or relative upper created_at bound")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-1000")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Optional pagination cursor")
 	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
@@ -290,8 +297,7 @@ func bindEventFilterFlags(cmd *cobra.Command, opts *eventFilterOptions) {
 func runEventListCommand(ctx context.Context, out, errOut io.Writer, opts eventListCommandOptions) error {
 	params, err := opts.params()
 	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: eventObservationExitValidation}
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -426,18 +432,15 @@ func (opts eventListCommandOptions) params() (map[string]any, error) {
 		}
 		params["limit"] = opts.limit
 	}
-	if since := strings.TrimSpace(opts.since); since != "" {
-		if err := validateRFC3339Flag("--since", since); err != nil {
-			return nil, err
-		}
-		params["since"] = since
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: opts.since, Set: opts.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: opts.until, Set: opts.untilSet},
+		ReferenceUTC: opts.reference,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if until := strings.TrimSpace(opts.until); until != "" {
-		if err := validateRFC3339Flag("--until", until); err != nil {
-			return nil, err
-		}
-		params["until"] = until
-	}
+	window.addParams(params)
 	return params, nil
 }
 

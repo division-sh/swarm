@@ -52,6 +52,7 @@ type rootCommandOptions struct {
 	runReadyTimeout        time.Duration
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration
+	now                    func() time.Time
 }
 
 func defaultRootCommandOptions() rootCommandOptions {
@@ -63,6 +64,7 @@ func defaultRootCommandOptions() rootCommandOptions {
 		runReadyTimeout: 30 * time.Second,
 		runReadyPoll:    250 * time.Millisecond,
 		runStatusPoll:   time.Second,
+		now:             time.Now,
 	}
 }
 

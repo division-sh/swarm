@@ -15993,6 +15993,52 @@ cli_specification:
           Cobra unknown-command behavior until a later tracked row promotes hidden fail-closed
           stubs with exact migration text and proof.
   foundations:
+    read_window_input:
+      promoted_by: '#1955'
+      implementation_status: implemented
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.read_window_input
+      scope: >
+        Shared public CLI input authority for optional lower/upper read-window bounds. It applies exactly to
+        `swarm run list`, snapshot `swarm run trace`, `swarm event list`, and snapshot `swarm logs`. It owns CLI
+        flag presence, accepted input grammar, invocation-clock capture, absolute UTC projection, and resolved
+        window ordering before those commands call their existing API owners.
+      accepted_input:
+        absolute: RFC3339 or RFC3339Nano timestamp.
+        relative: >
+          One or more additive unsigned whole-number components using lowercase `h`, `m`, `s`, or `ms` only.
+          Examples are `2h`, `90m`, `1h30m`, and `250ms`. Every component and the total MUST be positive.
+          Signs, surrounding whitespace, decimals, bare numbers, uppercase units, `d`/`w`/other units, zero
+          components, malformed sequences, and duration overflow are invalid.
+      presence_rule: >
+        Omitted bounds remain optional. An explicitly supplied empty or whitespace value is invalid and MUST NOT be
+        collapsed into omission.
+      resolution_rule: >
+        Each command invocation captures one UTC reference time before resolving either bound. Both relative
+        `--since` and relative `--until` mean the captured reference time minus the supplied elapsed duration.
+        Mixed absolute/relative bounds consume the same captured reference. `swarm run trace --delivery-summary`
+        also uses that reference as its fixed omitted `until` and reuses the resulting value across every page.
+      wire_rule: >
+        Every accepted bound is projected to an absolute UTC RFC3339Nano string before the existing API request.
+        The API/OpenRPC timestamp grammar, filtering, ordering, pagination, storage, and runtime semantics do not
+        accept relative syntax and are unchanged.
+      ordering_rule: >
+        A resolved `since` after `until` is a CLI validation failure before any request. Equal bounds are valid for
+        these four selected read API contracts.
+      diagnostic_rule: >
+        Invalid, blank, zero, signed, malformed, unsupported-unit, overflow, and reversed-window input consumes
+        cli_specification.foundations.output_contract.diagnostic_convention and exits 2 before any API or WebSocket
+        request.
+      consumers:
+      - swarm run list --since/--until
+      - swarm run trace --since/--until in snapshot mode
+      - swarm event list --since/--until
+      - swarm logs --since/--until in snapshot mode
+      excluded_different_concepts:
+      - run/event/log follow recovery replay_since watermarks
+      - mailbox and scenario future deadlines
+      - forkchat historical point selectors
+      - incident aggregation horizons
+      - API-only usage windows
     command_router:
       canonical_owner: cmd/swarm Cobra command tree
       implementation_framework: github.com/spf13/cobra
@@ -19069,6 +19115,10 @@ cli_specification:
       implementation_status: implemented
       owner: /v1/rpc run.list
       behavior: List runs through the canonical run.list read owner; no direct DB/store/runtime-state reads.
+      read_window_input_contract: cli_specification.foundations.read_window_input
+      flags:
+      - --since <RFC3339-or-relative-duration>
+      - --until <RFC3339-or-relative-duration>
     status:
       command: swarm run status [<run-id>]
       group: run_operate
@@ -19083,7 +19133,7 @@ cli_specification:
         present. Test/internal labels such as test_quiescence_ready, heuristics, blocking_layer, and blocking_reason
         never appear in human output. JSON preserves the exact run.diagnose or run.get result shape.
     trace:
-      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <RFC3339-or-relative-duration>] [--until <RFC3339-or-relative-duration>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       group: run_operate
       tier: must_have
       implementation_status: implemented
@@ -19102,6 +19152,7 @@ cli_specification:
         - until
         - filter
         - include_internal
+        cli_read_window_input_contract: cli_specification.foundations.read_window_input
         filter_schema: RunTraceFilter
         filter_fields:
           event_name: Repeatable event-name predicate. The CLI sends an array of non-empty names as `filter.event_name` and the server matches any value against RunTraceRow.event_name.
@@ -19110,11 +19161,15 @@ cli_specification:
           subscriber_id: Repeatable subscriber identity predicate. The CLI sends an array of non-empty subscriber ids as `filter.subscriber_id` and the server matches any value against RunTraceRow.subscriber_id.
           subscriber_type: Repeatable subscriber type predicate. The CLI sends an array of SubscriberType enum values as `filter.subscriber_type` and the server matches any value against RunTraceRow.subscriber_type.
         since_semantics: >
-          `since` is an RFC3339/RFC3339Nano timestamp watermark. The server returns trace rows whose canonical
+          The API `since` parameter is an absolute RFC3339/RFC3339Nano timestamp watermark. Snapshot CLI input
+          additionally consumes cli_specification.foundations.read_window_input and sends its resolved UTC value.
+          The server returns trace rows whose canonical
           materialization watermark is strictly after `since`, where that watermark is the greatest available
           timestamp across the joined event, delivery, session, and turn fields owned by RunTraceRow.
         until_semantics: >
-          `until` is a snapshot-only RFC3339/RFC3339Nano timestamp upper bound. The server returns trace rows whose
+          The API `until` parameter is a snapshot-only absolute RFC3339/RFC3339Nano timestamp upper bound. Snapshot
+          CLI input additionally consumes cli_specification.foundations.read_window_input and sends its resolved UTC
+          value. The server returns trace rows whose
           canonical materialization watermark is less than or equal to `until`, using the same greatest-available
           event, delivery, session, and turn timestamp owner as `since`. Combined `since` and `until` define the
           half-open window `(since, until]`; `since` after `until` is invalid, while equal timestamps are allowed and
@@ -19720,6 +19775,7 @@ cli_specification:
       implementation_status: implemented
       owner: /v1/rpc event.list
       behavior: Read-only event observation CLI consumer. The CLI sends only EventListFilter fields plus list-only limit/cursor/since/until params to /v1/rpc event.list through the shared v1 API client, renders server-owned EventFull summaries, and never reconstructs event, delivery, or dead-letter truth locally.
+      read_window_input_contract: cli_specification.foundations.read_window_input
       flags:
       - --run-id <run-id>
       - --entity-id <entity-id>
@@ -19729,8 +19785,8 @@ cli_specification:
       - --subscriber-type <node|agent>
       - --reason-code <code>
       - --has-dead-letter[=true|false]
-      - --since <RFC3339>
-      - --until <RFC3339>
+      - --since <RFC3339-or-relative-duration>
+      - --until <RFC3339-or-relative-duration>
       - --limit <1-1000>
       - --cursor <cursor>
       output:
@@ -20327,6 +20383,7 @@ cli_specification:
         params through the shared v1 API client. Follow mode sends only runtime-log identity/content filters plus optional
         replay_since through /v1/ws runtime.subscribe_logs. The CLI renders server-owned LogEntry rows and never reads
         runtime logs directly from DB/store/runtime/EventBus/dashboard/process logs/container logs.
+      read_window_input_contract: cli_specification.foundations.read_window_input
       flags:
         shared_filters:
         - --run-id <run-id>
@@ -20337,8 +20394,8 @@ cli_specification:
         - --error-code <code>
         - --source <source>
         snapshot_only:
-        - --since <RFC3339>
-        - --until <RFC3339>
+        - --since <RFC3339-or-relative-duration>
+        - --until <RFC3339-or-relative-duration>
         - --limit <1-1000>
         - --cursor <cursor>
         - --order <asc|desc>
