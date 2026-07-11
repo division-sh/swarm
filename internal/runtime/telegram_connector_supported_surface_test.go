@@ -252,10 +252,13 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	}
 	waitForInboundBusQuiescence(t, bus)
 	requireNoTelegramConnectorSupportedSurfaceCall(t, calls, backend.name, "missing token")
-	if got := countTelegramConnectorSupportedSurfaceActivityAttemptsForEvent(t, backend, "123456790"); got != 0 {
-		t.Fatalf("%s missing-token activity attempts = %d, want 0", backend.name, got)
-	}
 	requireTelegramConnectorSupportedSurfaceFailureEventEventually(t, backend, "123456790")
+	if got := countTelegramConnectorSupportedSurfaceActivityAttemptsForEvent(t, backend, "123456790"); got != 1 {
+		t.Fatalf("%s missing-token activity attempts = %d, want one failed claim", backend.name, got)
+	}
+	if got := telegramConnectorSupportedSurfaceActivityStatusForEvent(t, backend, "123456790"); got != runtimepipeline.ActivityAttemptStatusFailed {
+		t.Fatalf("%s missing-token activity status = %q, want failed", backend.name, got)
+	}
 	assertTelegramConnectorSupportedSurfaceNoStoredSecret(t, backend, "provider-secret")
 }
 
@@ -695,6 +698,22 @@ func countTelegramConnectorSupportedSurfaceActivityAttemptsForEvent(t *testing.T
 		t.Fatalf("%s count activity attempts for provider event %s: %v", backend.name, providerEventID, err)
 	}
 	return count
+}
+
+func telegramConnectorSupportedSurfaceActivityStatusForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) string {
+	t.Helper()
+	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
+	var status string
+	var err error
+	if backend.sqlite {
+		err = backend.db.QueryRowContext(backend.ctx, `SELECT status FROM activity_attempts WHERE run_id = ? AND tool = 'telegram.send_message' AND source_event_id = ?`, backend.runID, inboundEventID).Scan(&status)
+	} else {
+		err = backend.db.QueryRowContext(backend.ctx, `SELECT status FROM activity_attempts WHERE run_id = $1::uuid AND tool = 'telegram.send_message' AND source_event_id = $2::uuid`, backend.runID, inboundEventID).Scan(&status)
+	}
+	if err != nil {
+		t.Fatalf("%s load activity status for provider event %s: %v", backend.name, providerEventID, err)
+	}
+	return status
 }
 
 func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) int {

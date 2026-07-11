@@ -460,8 +460,11 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 	if got := fake.providerHTTPRequestCount(); got != graphRequestsBefore {
 		t.Fatalf("%s %s Graph HTTP requests = %d, want unchanged %d", backend.name, label, got, graphRequestsBefore)
 	}
-	if got := countMicrosoftGraphActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
-		t.Fatalf("%s %s activity attempts = %d, want 0", backend.name, label, got)
+	if attempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, inboundEventID); attempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
+		t.Fatalf("%s %s activity status = %q, want failed", backend.name, label, attempt.Status)
+	}
+	if got := countMicrosoftGraphActivityAttemptsForSource(t, backend, inboundEventID); got != 1 {
+		t.Fatalf("%s %s activity attempts = %d, want one failed claim", backend.name, label, got)
 	}
 	waitForMicrosoftGraphFailureEventsForSource(t, backend, inboundEventID, 1, label)
 }

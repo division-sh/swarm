@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -41,6 +42,8 @@ type ActivityAttemptRecord struct {
 	Failure         *runtimefailures.Envelope
 	InputHash       string
 	ReplyContextID  string
+	Generation      attemptgeneration.Generation
+	LoopStage       string
 	StartedAt       time.Time
 	CompletedAt     *time.Time
 	UpdatedAt       time.Time
@@ -54,14 +57,18 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 	}
 	var out ActivityAttemptRecord
 	var inserted bool
-	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	generationJSON, err := json.Marshal(rec.Generation)
+	if err != nil {
+		return ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity loop generation: %w", err)
+	}
+	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		query := `
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 				node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-				success_event, failure_event, input_hash, reply_context_id
+				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id
 			) VALUES (
-				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')
+				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')
 			)
 			ON CONFLICT (request_event_id) DO NOTHING
 		`
@@ -70,17 +77,17 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 				INSERT INTO activity_attempts (
 					request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 					node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-					success_event, failure_event, input_hash, reply_context_id
+					success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id
 				) VALUES (
 					$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, ''),
-					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')
+					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NULLIF($18, ''), NULLIF($19, '')
 				)
 				ON CONFLICT (request_event_id) DO NOTHING
 			`
 		}
 		res, err := dbExecContext(txctx, s.db, query, rec.RequestEventID, rec.RunID, nullableUUID(rec.SourceEventID), nullableUUID(rec.ParentEventID), nullableUUID(rec.EntityID), nullableString(rec.FlowInstance),
 			rec.NodeID, rec.HandlerEventKey, rec.ActivityID, rec.Tool, rec.EffectClass, rec.Attempt, rec.Status,
-			rec.SuccessEvent, rec.FailureEvent, rec.InputHash, rec.ReplyContextID)
+			rec.SuccessEvent, rec.FailureEvent, rec.InputHash, string(generationJSON), nullableString(rec.LoopStage), rec.ReplyContextID)
 		if err != nil {
 			return fmt.Errorf("start activity attempt %s: %w", rec.RequestEventID, err)
 		}
@@ -94,12 +101,73 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 			return fmt.Errorf("activity attempt %s was not readable after start", rec.RequestEventID)
 		}
 		out = loaded
+		if err := validateActivityAttemptClaimIdentity(out, rec); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return ActivityAttemptRecord{}, false, err
 	}
 	return out, inserted, nil
+}
+
+func (s *WorkflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
+	rec = rec.normalized()
+	if !rec.Generation.Valid() {
+		return s.StartActivityAttempt(ctx, rec)
+	}
+	var out ActivityAttemptRecord
+	var inserted bool
+	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		instance, ok, err := s.Load(txctx, rec.EntityID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return runtimefailures.New(runtimefailures.ClassUnexpectedArrival, "activity_loop_instance_missing", "activity-runtime", "claim_activity_attempt", map[string]any{
+				"activity_id": rec.ActivityID, "entity_id": rec.EntityID, "loop_id": rec.Generation.LoopID,
+			})
+		}
+		current, err := workflowLoopGenerationCurrent(&instance, rec.Generation, rec.LoopStage)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "claim_activity_attempt", map[string]any{
+				"activity_id": rec.ActivityID, "entity_id": rec.EntityID, "loop_id": rec.Generation.LoopID,
+				"revision_id": rec.Generation.RevisionID, "expected_stage": rec.LoopStage,
+			})
+		}
+		out, inserted, err = s.StartActivityAttempt(txctx, rec)
+		if err != nil {
+			return err
+		}
+		if err := validateActivityAttemptClaimIdentity(out, rec); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return ActivityAttemptRecord{}, false, err
+	}
+	return out, inserted, nil
+}
+
+func validateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord) error {
+	actual, expected = actual.normalized(), expected.normalized()
+	if actual.RequestEventID == expected.RequestEventID && actual.RunID == expected.RunID &&
+		actual.EntityID == expected.EntityID && actual.NodeID == expected.NodeID &&
+		actual.HandlerEventKey == expected.HandlerEventKey && actual.ActivityID == expected.ActivityID &&
+		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass &&
+		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&
+		actual.InputHash == expected.InputHash && actual.LoopStage == expected.LoopStage &&
+		((!actual.Generation.Valid() && !expected.Generation.Valid()) || actual.Generation.Equal(expected.Generation)) {
+		return nil
+	}
+	return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "activity_loop_claim_conflict", "activity-runtime", "claim_activity_attempt", map[string]any{
+		"activity_id": expected.ActivityID, "request_event_id": expected.RequestEventID,
+	})
 }
 
 func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
@@ -243,7 +311,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 		       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 		       success_event, failure_event, result_event_id, result_event_type, result_payload,
-		       failure, input_hash, reply_context_id, started_at, completed_at, updated_at
+		       failure, input_hash, loop_generation, loop_stage, reply_context_id, started_at, completed_at, updated_at
 		FROM activity_attempts
 		WHERE request_event_id = ?
 	`
@@ -252,7 +320,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 			SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 			       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
-			       failure, input_hash, reply_context_id, started_at, completed_at, updated_at
+			       failure, input_hash, loop_generation, loop_stage, reply_context_id, started_at, completed_at, updated_at
 			FROM activity_attempts
 			WHERE request_event_id = $1::uuid
 		`
@@ -271,14 +339,14 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	var rec ActivityAttemptRecord
 	var sourceEventID, parentEventID, entityID, flowInstance sql.NullString
-	var resultEventID, resultEventType, replyContextID sql.NullString
-	var rawPayload, rawFailure any
+	var resultEventID, resultEventType, loopStage, replyContextID sql.NullString
+	var rawPayload, rawFailure, rawGeneration any
 	var startedAtRaw, completedAtRaw, updatedAtRaw any
 	if err := row.Scan(
 		&rec.RequestEventID, &rec.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
 		&rec.NodeID, &rec.HandlerEventKey, &rec.ActivityID, &rec.Tool, &rec.EffectClass, &rec.Attempt, &rec.Status,
 		&rec.SuccessEvent, &rec.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
-		&rawFailure, &rec.InputHash, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
+		&rawFailure, &rec.InputHash, &rawGeneration, &loopStage, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
 	); err != nil {
 		return ActivityAttemptRecord{}, err
 	}
@@ -310,6 +378,12 @@ func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	rec.ResultEventID = resultEventID.String
 	rec.ResultEventType = resultEventType.String
 	rec.ReplyContextID = replyContextID.String
+	rec.LoopStage = loopStage.String
+	if raw := activityAttemptJSONRaw(rawGeneration); len(raw) > 0 && string(raw) != "null" && string(raw) != "{}" {
+		if err := json.Unmarshal(raw, &rec.Generation); err != nil {
+			return ActivityAttemptRecord{}, fmt.Errorf("decode activity attempt loop generation: %w", err)
+		}
+	}
 	if raw := activityAttemptJSONRaw(rawFailure); len(raw) > 0 && string(raw) != "null" {
 		failure, err := runtimefailures.UnmarshalEnvelope(raw)
 		if err != nil {
@@ -421,6 +495,8 @@ func (rec ActivityAttemptRecord) normalized() ActivityAttemptRecord {
 	rec.Failure = runtimefailures.CloneEnvelope(rec.Failure)
 	rec.InputHash = strings.TrimSpace(rec.InputHash)
 	rec.ReplyContextID = strings.TrimSpace(rec.ReplyContextID)
+	rec.Generation = rec.Generation.Normalize()
+	rec.LoopStage = strings.TrimSpace(rec.LoopStage)
 	if rec.Attempt <= 0 {
 		rec.Attempt = 1
 	}

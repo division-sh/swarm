@@ -10,10 +10,40 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestMailboxDecisionCarriesLoopRevisionWithoutExposingInternalGeneration(t *testing.T) {
+	generation := attemptgeneration.Generation{
+		FlowID: "validation", LoopID: "revision", ActivationID: "activation-1",
+		RevisionField: "revision_id", RevisionID: "revision-2", Attempt: 2,
+	}
+	row := mailboxV1Row{
+		ID: uuid.NewString(), Type: "approval", SourceEventID: uuid.NewString(),
+		Payload: map[string]any{"question": "approve?", attemptgeneration.PayloadKey: generation.PayloadValue()},
+	}
+	if projected := row.projectItem().Payload; projected[attemptgeneration.PayloadKey] != nil {
+		t.Fatalf("public mailbox payload leaked generation: %#v", projected)
+	}
+	evt, err := row.decisionEvent(uuid.NewString(), uuid.NewString(), "review.decided", "approved", "operator", "", nil, time.Time{}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["revision_id"] != "revision-2" {
+		t.Fatalf("decision revision = %#v", payload["revision_id"])
+	}
+	mailboxPayload, _ := payload["mailbox_payload"].(map[string]any)
+	if _, leaked := mailboxPayload[attemptgeneration.PayloadKey]; leaked {
+		t.Fatalf("decision mailbox_payload leaked generation: %#v", mailboxPayload)
+	}
+}
 
 func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)

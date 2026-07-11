@@ -4,7 +4,18 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 )
+
+func TestActivationKeyIsolatesLoopGenerations(t *testing.T) {
+	first := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-1", Attempt: 1}
+	second := first
+	second.RevisionID, second.Attempt = "rev-2", 2
+	if left, right := ActivationKeyForGeneration("review", "items", "window", first), ActivationKeyForGeneration("review", "items", "window", second); left == right || left == "" || right == "" {
+		t.Fatalf("generation keys collide: %q %q", left, right)
+	}
+}
 
 func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

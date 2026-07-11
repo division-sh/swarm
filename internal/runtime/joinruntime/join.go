@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 )
 
 const bucketKey = "handler_joins"
@@ -33,23 +34,24 @@ type MemberOutput struct {
 }
 
 type Activation struct {
-	JoinID          string                  `json:"join_id"`
-	Stage           string                  `json:"stage"`
-	NodeID          string                  `json:"node_id"`
-	HandlerEvent    string                  `json:"handler_event"`
-	Window          string                  `json:"window,omitempty"`
-	Members         []string                `json:"members"`
-	Outputs         map[string]MemberOutput `json:"outputs"`
-	Status          Status                  `json:"status"`
-	CloseReason     CloseReason             `json:"close_reason,omitempty"`
-	ArmedAt         time.Time               `json:"armed_at"`
-	FireAt          time.Time               `json:"fire_at"`
-	TimerTaskID     string                  `json:"timer_task_id"`
-	TimerEventType  string                  `json:"timer_event_type"`
-	TimerCancelled  bool                    `json:"timer_cancelled,omitempty"`
-	OutcomePending  bool                    `json:"outcome_pending,omitempty"`
-	OutcomeFired    bool                    `json:"outcome_fired,omitempty"`
-	CompletionEvent string                  `json:"completion_event,omitempty"`
+	JoinID          string                       `json:"join_id"`
+	Stage           string                       `json:"stage"`
+	NodeID          string                       `json:"node_id"`
+	HandlerEvent    string                       `json:"handler_event"`
+	Window          string                       `json:"window,omitempty"`
+	Members         []string                     `json:"members"`
+	Outputs         map[string]MemberOutput      `json:"outputs"`
+	Status          Status                       `json:"status"`
+	CloseReason     CloseReason                  `json:"close_reason,omitempty"`
+	ArmedAt         time.Time                    `json:"armed_at"`
+	FireAt          time.Time                    `json:"fire_at"`
+	TimerTaskID     string                       `json:"timer_task_id"`
+	TimerEventType  string                       `json:"timer_event_type"`
+	TimerCancelled  bool                         `json:"timer_cancelled,omitempty"`
+	OutcomePending  bool                         `json:"outcome_pending,omitempty"`
+	OutcomeFired    bool                         `json:"outcome_fired,omitempty"`
+	CompletionEvent string                       `json:"completion_event,omitempty"`
+	Generation      attemptgeneration.Generation `json:"loop_generation,omitempty"`
 }
 
 type AddDisposition string
@@ -61,7 +63,7 @@ const (
 	AddUnexpected           AddDisposition = "unexpected"
 )
 
-func NewActivation(joinID, stage, nodeID, handlerEvent, window string, members []string, armedAt, fireAt time.Time, taskID, eventType string) (Activation, error) {
+func NewActivation(joinID, stage, nodeID, handlerEvent, window string, members []string, armedAt, fireAt time.Time, taskID, eventType string, generations ...attemptgeneration.Generation) (Activation, error) {
 	normalizedMembers, err := normalizeMembers(members)
 	if err != nil {
 		return Activation{}, err
@@ -79,6 +81,9 @@ func NewActivation(joinID, stage, nodeID, handlerEvent, window string, members [
 		FireAt:         fireAt.UTC(),
 		TimerTaskID:    strings.TrimSpace(taskID),
 		TimerEventType: strings.TrimSpace(eventType),
+	}
+	if len(generations) > 0 {
+		activation.Generation = generations[0].Normalize()
 	}
 	if err := activation.Validate(); err != nil {
 		return Activation{}, err
@@ -121,10 +126,30 @@ func (a Activation) Validate() error {
 }
 
 func (a Activation) Key() string {
-	return ActivationKey(a.Stage, a.JoinID, a.Window)
+	return ActivationKeyForGeneration(a.Stage, a.JoinID, a.Window, a.Generation)
+}
+
+func ReplaceGeneration(buckets map[string]map[string]any, activation Activation, generation attemptgeneration.Generation) error {
+	oldKey := activation.Key()
+	activation.Generation = generation.Normalize()
+	if err := Store(buckets, activation); err != nil {
+		return err
+	}
+	if oldKey != activation.Key() {
+		if nodeBucket := buckets[activation.NodeID]; nodeBucket != nil {
+			if joins, ok := nodeBucket[bucketKey].(map[string]any); ok {
+				delete(joins, oldKey)
+			}
+		}
+	}
+	return nil
 }
 
 func ActivationKey(stage, joinID, window string) string {
+	return ActivationKeyForGeneration(stage, joinID, window, attemptgeneration.Generation{})
+}
+
+func ActivationKeyForGeneration(stage, joinID, window string, generation attemptgeneration.Generation) string {
 	stage = strings.TrimSpace(stage)
 	joinID = strings.TrimSpace(joinID)
 	window = strings.TrimSpace(window)
@@ -138,7 +163,11 @@ func ActivationKey(stage, joinID, window string) string {
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
-	return strings.Join(parts, ".")
+	key := strings.Join(parts, ".")
+	if suffix := generation.Normalize().KeySuffix(); suffix != "" {
+		key += ".generation." + suffix
+	}
+	return key
 }
 
 type CompletionEvaluator func(expression string, joinContext map[string]any) (bool, error)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/google/uuid"
 )
 
@@ -42,10 +43,11 @@ type OperatorEntitySummary struct {
 }
 
 type OperatorEntityFull struct {
-	Entity      OperatorEntitySummary `json:"entity"`
-	Fields      map[string]any        `json:"fields"`
-	Gates       map[string]bool       `json:"gates"`
-	Accumulated map[string]any        `json:"accumulated"`
+	Entity      OperatorEntitySummary          `json:"entity"`
+	Fields      map[string]any                 `json:"fields"`
+	Gates       map[string]bool                `json:"gates"`
+	Accumulated map[string]any                 `json:"accumulated"`
+	Loops       []loopruntime.PublicActivation `json:"loops,omitempty"`
 }
 
 type OperatorEntityAggregateOptions struct {
@@ -637,9 +639,14 @@ func (s *PostgresStore) loadOperatorEntityRow(ctx context.Context, entityID, run
 	if err != nil {
 		return OperatorEntityFull{}, fmt.Errorf("decode operator entity accumulated: %w", err)
 	}
+	loops, err := loopruntime.PublicActivations(decodedAccumulated)
+	if err != nil {
+		return OperatorEntityFull{}, fmt.Errorf("decode operator entity loops: %w", err)
+	}
 	out.Fields = decodedFields
 	out.Gates = decodedGates
-	out.Accumulated = decodedAccumulated
+	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
+	out.Loops = loops
 	return out, nil
 }
 
@@ -690,9 +697,14 @@ func (s *SQLiteRuntimeStore) loadSQLiteOperatorEntityRow(ctx context.Context, en
 	if err != nil {
 		return OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity accumulated: %w", err)
 	}
+	loops, err := loopruntime.PublicActivations(decodedAccumulated)
+	if err != nil {
+		return OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity loops: %w", err)
+	}
 	out.Fields = decodedFields
 	out.Gates = decodedGates
-	out.Accumulated = decodedAccumulated
+	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
+	out.Loops = loops
 	return out, nil
 }
 

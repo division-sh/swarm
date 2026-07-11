@@ -37,6 +37,7 @@ var (
 	workflowExpressionEntityNullEqualPattern         = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
 	workflowExpressionNullEntityNotEqualPattern      = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 	workflowExpressionNullEntityEqualPattern         = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
+	workflowExpressionLoopRootPattern                = regexp.MustCompile(`\bloop\.`)
 )
 
 type ValueContext struct {
@@ -48,6 +49,7 @@ type ValueContext struct {
 	Computed       map[string]any
 	FanOut         map[string]any
 	Join           map[string]any
+	Loop           map[string]any
 }
 
 type ValueExpressionOptions struct {
@@ -89,7 +91,7 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
 	}
-	_, err = compileValueExpression(env, expression, opts)
+	_, err = compileValueExpression(env, RewriteLoopRoot(expression), opts)
 	return err
 }
 
@@ -372,7 +374,7 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
 		return nil, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
-	ast, err := compileValueExpression(env, normalized, opts)
+	ast, err := compileValueExpression(env, RewriteLoopRoot(normalized), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +391,7 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 		"computed": NormalizeCELInputMap(ctx.Computed),
 		"fan_out":  NormalizeCELInputMap(ctx.FanOut),
 		"join":     NormalizeCELInputMap(ctx.Join),
+		"_loop":    NormalizeCELInputMap(ctx.Loop),
 	}
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
@@ -496,6 +499,14 @@ func RewriteEntityNullPresenceChecks(expression string) string {
 		segment = workflowExpressionEntityNullEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
 		segment = workflowExpressionNullEntityEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
 		return segment
+	})
+}
+
+// RewriteLoopRoot preserves the public loop.* vocabulary while avoiding CEL's
+// reserved loop keyword. It only rewrites outside string literals.
+func RewriteLoopRoot(expression string) string {
+	return rewriteOutsideStringLiterals(expression, func(segment string) string {
+		return workflowExpressionLoopRootPattern.ReplaceAllString(segment, `_loop.`)
 	})
 }
 
@@ -1023,6 +1034,7 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string) (*cel.Env, error
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
 		cel.Variable("join", cel.DynType),
+		cel.Variable("_loop", cel.DynType),
 	}
 	if allowBareItem {
 		variables = append(variables, cel.Variable("item", cel.DynType))

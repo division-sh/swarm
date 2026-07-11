@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 )
 
 type TriggerKind string
@@ -35,10 +37,11 @@ const (
 )
 
 type TimerHandle struct {
-	Kind    TimerHandleKind
-	TimerID string
-	Bucket  AccumulatorBucketRef
-	Join    JoinRef
+	Kind       TimerHandleKind
+	TimerID    string
+	Bucket     AccumulatorBucketRef
+	Join       JoinRef
+	Generation attemptgeneration.Generation
 }
 
 type JoinRef struct {
@@ -47,12 +50,14 @@ type JoinRef struct {
 	Stage        string
 	JoinID       string
 	Window       string
+	Generation   attemptgeneration.Generation
 }
 
 type AccumulatorBucketRef struct {
-	NodeID    string
-	EventType string
-	Window    string
+	NodeID     string
+	EventType  string
+	Window     string
+	Generation attemptgeneration.Generation
 }
 
 func ParseStartTrigger(raw string) (Trigger, error) {
@@ -161,17 +166,18 @@ func WorkflowTimerHandle(timerID string) TimerHandle {
 
 func AccumulationTimeoutHandle(bucket AccumulatorBucketRef) TimerHandle {
 	return TimerHandle{
-		Kind:   TimerHandleAccumulationTimeout,
-		Bucket: bucket.Normalize(),
+		Kind:       TimerHandleAccumulationTimeout,
+		Bucket:     bucket.Normalize(),
+		Generation: bucket.Generation.Normalize(),
 	}
 }
 
 func JoinTimeoutHandle(ref JoinRef) TimerHandle {
-	return TimerHandle{Kind: TimerHandleJoinTimeout, Join: ref.Normalize()}
+	return TimerHandle{Kind: TimerHandleJoinTimeout, Join: ref.Normalize(), Generation: ref.Generation.Normalize()}
 }
 
 func JoinCompleteHandle(ref JoinRef) TimerHandle {
-	return TimerHandle{Kind: TimerHandleJoinComplete, Join: ref.Normalize()}
+	return TimerHandle{Kind: TimerHandleJoinComplete, Join: ref.Normalize(), Generation: ref.Generation.Normalize()}
 }
 
 func (h TimerHandle) Valid() bool {
@@ -188,9 +194,16 @@ func (h TimerHandle) Valid() bool {
 }
 
 func (h TimerHandle) TaskID() string {
+	generationSuffix := h.Generation.Normalize().KeySuffix()
+	appendGeneration := func(value string) string {
+		if generationSuffix == "" {
+			return value
+		}
+		return value + ":generation:" + generationSuffix
+	}
 	switch h.Kind {
 	case TimerHandleWorkflowTimer:
-		return strings.TrimSpace(h.TimerID)
+		return appendGeneration(strings.TrimSpace(h.TimerID))
 	case TimerHandleAccumulationTimeout:
 		if !h.Bucket.Valid() {
 			return ""
@@ -220,6 +233,9 @@ func (h TimerHandle) PayloadMetadata() map[string]any {
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
 		handle["join"] = h.Join.PayloadValue()
 	}
+	if generation := h.Generation.Normalize(); generation.Valid() {
+		handle[attemptgeneration.PayloadKey] = generation.PayloadValue()
+	}
 	return map[string]any{
 		timerHandlePayloadKey: handle,
 	}
@@ -230,9 +246,11 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 	if !ok {
 		return TimerHandle{}, false
 	}
+	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: handleMap[attemptgeneration.PayloadKey]})
 	switch TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) {
 	case TimerHandleWorkflowTimer:
 		handle := WorkflowTimerHandle(asString(handleMap["timer_id"]))
+		handle.Generation = generation
 		return handle, handle.Valid()
 	case TimerHandleAccumulationTimeout:
 		bucket, ok := bucketFromAny(handleMap["bucket"])
@@ -240,6 +258,7 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 			return TimerHandle{}, false
 		}
 		handle := AccumulationTimeoutHandle(bucket)
+		handle.Generation = generation
 		return handle, handle.Valid()
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
 		ref, ok := joinRefFromAny(handleMap["join"])
@@ -250,6 +269,7 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 		if TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) == TimerHandleJoinComplete {
 			handle = JoinCompleteHandle(ref)
 		}
+		handle.Generation = generation
 		return handle, handle.Valid()
 	default:
 		return TimerHandle{}, false
@@ -266,8 +286,14 @@ func NewJoinRef(nodeID, handlerEvent, stage, joinID, window string) JoinRef {
 	}
 }
 
+func NewJoinRefForGeneration(nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) JoinRef {
+	ref := NewJoinRef(nodeID, handlerEvent, stage, joinID, window)
+	ref.Generation = generation.Normalize()
+	return ref
+}
+
 func (r JoinRef) Normalize() JoinRef {
-	return NewJoinRef(r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window)
+	return NewJoinRefForGeneration(r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window, r.Generation)
 }
 
 func (r JoinRef) Valid() bool {
@@ -284,7 +310,11 @@ func (r JoinRef) Key() string {
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
-	return strings.Join(parts, ".")
+	key := strings.Join(parts, ".")
+	if suffix := r.Generation.KeySuffix(); suffix != "" {
+		key += ".generation." + suffix
+	}
+	return key
 }
 
 func (r JoinRef) PayloadValue() map[string]any {
@@ -292,13 +322,17 @@ func (r JoinRef) PayloadValue() map[string]any {
 	if !r.Valid() {
 		return nil
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"node_id":       r.NodeID,
 		"handler_event": r.HandlerEvent,
 		"stage":         r.Stage,
 		"join_id":       r.JoinID,
 		"window":        r.Window,
 	}
+	if generation := r.Generation.Normalize(); generation.Valid() {
+		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
+	}
+	return payload
 }
 
 func ParseJoinRef(payload map[string]any) (JoinRef, TimerHandleKind, bool) {
@@ -314,7 +348,8 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	if !ok {
 		return JoinRef{}, false
 	}
-	ref := NewJoinRef(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]))
+	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: raw[attemptgeneration.PayloadKey]})
+	ref := NewJoinRefForGeneration(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
 	return ref, ref.Valid()
 }
 
@@ -331,6 +366,12 @@ func NewAccumulatorWindowBucketRef(nodeID, eventType, window string) Accumulator
 	return ref
 }
 
+func NewAccumulatorBucketRefForGeneration(nodeID, eventType, window string, generation attemptgeneration.Generation) AccumulatorBucketRef {
+	ref := NewAccumulatorWindowBucketRef(nodeID, eventType, window)
+	ref.Generation = generation.Normalize()
+	return ref
+}
+
 func ParseAccumulatorBucketRef(payload map[string]any) (AccumulatorBucketRef, bool) {
 	handle, ok := ParseTimerHandle(payload)
 	if !ok || handle.Kind != TimerHandleAccumulationTimeout {
@@ -343,6 +384,11 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return AccumulatorBucketRef{}, false
+	}
+	generation := attemptgeneration.Generation{}
+	if base, encoded, ok := strings.Cut(key, "@generation="); ok {
+		key = strings.TrimSpace(base)
+		generation, _ = attemptgeneration.ParseKeySuffix(strings.TrimSpace(encoded))
 	}
 	window := ""
 	if base, encoded, ok := strings.Cut(key, "@window="); ok {
@@ -357,12 +403,12 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 	if !ok {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorWindowBucketRef(nodeID, eventType, window)
+	bucket := NewAccumulatorBucketRefForGeneration(nodeID, eventType, window, generation)
 	return bucket, bucket.Valid()
 }
 
 func (r AccumulatorBucketRef) Normalize() AccumulatorBucketRef {
-	return NewAccumulatorWindowBucketRef(r.NodeID, r.EventType, r.Window)
+	return NewAccumulatorBucketRefForGeneration(r.NodeID, r.EventType, r.Window, r.Generation)
 }
 
 func (r AccumulatorBucketRef) Valid() bool {
@@ -376,9 +422,16 @@ func (r AccumulatorBucketRef) Key() string {
 	}
 	key := r.NodeID + ":" + r.EventType
 	if r.Window == "" {
+		if suffix := r.Generation.KeySuffix(); suffix != "" {
+			return key + "@generation=" + suffix
+		}
 		return key
 	}
-	return key + "@window=" + base64.RawURLEncoding.EncodeToString([]byte(r.Window))
+	key += "@window=" + base64.RawURLEncoding.EncodeToString([]byte(r.Window))
+	if suffix := r.Generation.KeySuffix(); suffix != "" {
+		key += "@generation=" + suffix
+	}
+	return key
 }
 
 func (r AccumulatorBucketRef) PayloadValue() map[string]any {
@@ -392,6 +445,9 @@ func (r AccumulatorBucketRef) PayloadValue() map[string]any {
 	}
 	if r.Window != "" {
 		payload["window"] = r.Window
+	}
+	if generation := r.Generation.Normalize(); generation.Valid() {
+		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
 	}
 	return payload
 }
@@ -409,7 +465,8 @@ func bucketFromAny(value any) (AccumulatorBucketRef, bool) {
 	if !ok {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorWindowBucketRef(asString(payload["node_id"]), asString(payload["event_type"]), asString(payload["window"]))
+	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: payload[attemptgeneration.PayloadKey]})
+	bucket := NewAccumulatorBucketRefForGeneration(asString(payload["node_id"]), asString(payload["event_type"]), asString(payload["window"]), generation)
 	return bucket, bucket.Valid()
 }
 

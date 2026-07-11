@@ -46,7 +46,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"request_event_id", "run_id", "source_event_id", "parent_event_id", "entity_id", "flow_instance",
 		"node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status",
 		"success_event", "failure_event", "result_event_id", "result_event_type", "result_payload",
-		"failure", "input_hash", "started_at", "completed_at", "updated_at",
+		"failure", "input_hash", "loop_generation", "loop_stage", "started_at", "completed_at", "updated_at",
 	)
 	addColumns("entity_state",
 		"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name",

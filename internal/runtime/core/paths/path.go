@@ -16,6 +16,7 @@ const (
 	RootAccumulated
 	RootFanOut
 	RootJoin
+	RootLoop
 	RootComputed
 )
 
@@ -41,6 +42,8 @@ func (r PathRoot) String() string {
 		return "fan_out"
 	case RootJoin:
 		return "join"
+	case RootLoop:
+		return "loop"
 	case RootComputed:
 		return "computed"
 	default:
@@ -100,6 +103,8 @@ func parseRoot(text string) PathRoot {
 		return RootFanOut
 	case "join":
 		return RootJoin
+	case "loop":
+		return RootLoop
 	case "computed":
 		return RootComputed
 	default:

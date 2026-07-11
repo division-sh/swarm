@@ -193,6 +193,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 				"request_event_id", "run_id", "activity_id", "tool", "effect_class",
 				"attempt", "status", "success_event", "failure_event", "result_event_id",
 				"result_event_type", "result_payload", "failure", "input_hash",
+				"loop_generation", "loop_stage",
 				"started_at", "completed_at", "updated_at",
 			},
 			nil,

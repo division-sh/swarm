@@ -2341,8 +2341,6 @@ func applyCatalogClear(spec *runtimecontracts.ClearSpec, entity map[string]any) 
 			delete(entity, "accumulated_count")
 			delete(entity, "accumulated_total")
 			delete(entity, "received_items")
-		case "cycle_counters":
-			delete(entity, "cycle_index")
 		case "pending_dedup":
 			delete(entity, "dedup_key")
 		default:

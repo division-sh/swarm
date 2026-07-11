@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -93,6 +94,9 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	payload, err := mailboxWritePayload(execCtx.Base, spec.Payload)
 	if err != nil {
 		return err
+	}
+	if generation, ok := attemptgeneration.FromLoopContext(execCtx.Base.Loop.Raw()); ok {
+		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -181,6 +185,7 @@ func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecont
 			Policy:         base.Policy.Raw(),
 			Computed:       base.Computed.Raw(),
 			FanOut:         base.FanOut.Raw(),
+			Loop:           base.Loop.Raw(),
 		}, workflowexpr.ValueExpressionOptions{})
 		if err != nil {
 			return nil, false, err

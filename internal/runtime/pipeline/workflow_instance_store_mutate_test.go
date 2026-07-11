@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,29 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestWorkflowInstanceStoreMutateE_RollsBackCallbackFailure(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	store := NewWorkflowInstanceStore(db)
+	entityID := uuid.NewString()
+	seedWorkflowInstanceForMutationTest(t, store, entityID)
+	ctx := testWorkflowStoreRunContext(t, store)
+	sentinel := errors.New("supersession failed")
+	if err := store.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+		instance.CurrentState = "must_not_commit"
+		return sentinel
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("MutateE error = %v, want sentinel", err)
+	}
+	loaded, ok, err := store.Load(ctx, entityID)
+	if err != nil || !ok {
+		t.Fatalf("Load = found %v err %v", ok, err)
+	}
+	if loaded.CurrentState == "must_not_commit" {
+		t.Fatalf("callback failure committed state: %#v", loaded)
+	}
+}
 
 func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)

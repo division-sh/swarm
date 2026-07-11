@@ -8,9 +8,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 )
 
@@ -248,6 +250,7 @@ type ExecutionState struct {
 	Accumulated map[string]any
 	FanOut      map[string]any
 	Join        map[string]any
+	Loop        map[string]any
 	Transformed map[string]any
 }
 
@@ -265,6 +268,10 @@ func (s ExecutionState) FanOutBucket() values.Bucket {
 
 func (s ExecutionState) JoinBucket() values.Bucket {
 	return values.Wrap(s.Join)
+}
+
+func (s ExecutionState) LoopBucket() values.Bucket {
+	return values.Wrap(s.Loop)
 }
 
 func (s *ExecutionState) SetComputed(key string, value any) {
@@ -293,6 +300,10 @@ func (s *ExecutionState) SetJoin(key string, value any) {
 		s.Join = map[string]any{}
 	}
 	values.Wrap(s.Join).Set(key, value)
+}
+
+func (s *ExecutionState) SetLoop(values map[string]any) {
+	s.Loop = cloneStringAnyMap(values)
 }
 
 type EmitIntent struct {
@@ -338,6 +349,8 @@ type ActivityIntent struct {
 	ParentEventID    string
 	ChainDepth       int
 	Attempt          int
+	Generation       attemptgeneration.Generation
+	LoopStage        string
 }
 
 func (i ActivityIntent) Normalized() ActivityIntent {
@@ -350,6 +363,8 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.HandlerEventKey = strings.TrimSpace(i.HandlerEventKey)
 	i.SourceEventID = strings.TrimSpace(i.SourceEventID)
 	i.ParentEventID = strings.TrimSpace(i.ParentEventID)
+	i.Generation = i.Generation.Normalize()
+	i.LoopStage = strings.TrimSpace(i.LoopStage)
 	if i.Attempt <= 0 {
 		i.Attempt = 1
 	}
@@ -452,6 +467,18 @@ type ExecutionResult struct {
 	DeadLetterIntents                []EmitIntent
 	ChainDepth                       int
 	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
+	LoopTrace                        *LoopExecutionTrace
+}
+
+type LoopExecutionTrace struct {
+	LoopID       string                  `json:"loop_id"`
+	Operation    string                  `json:"operation"`
+	RevisionID   string                  `json:"revision_id"`
+	Attempt      int                     `json:"attempt"`
+	MaxAttempts  int                     `json:"max_attempts"`
+	CurrentStage string                  `json:"current_stage"`
+	Status       loopruntime.Status      `json:"status"`
+	CloseReason  loopruntime.CloseReason `json:"close_reason,omitempty"`
 }
 
 type ComputeModuleTrace = computemodule.ReplayEnvelope

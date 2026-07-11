@@ -91,14 +91,18 @@ type StageGraphNodeView struct {
 }
 
 type StageGraphEdgeView struct {
-	From      []string `json:"from,omitempty"`
-	To        string   `json:"to"`
-	Source    string   `json:"source"`
-	NodeID    string   `json:"node_id,omitempty"`
-	EventType string   `json:"event_type,omitempty"`
-	TimerID   string   `json:"timer_id,omitempty"`
-	After     string   `json:"after,omitempty"`
-	Timed     bool     `json:"timed,omitempty"`
+	From          []string `json:"from,omitempty"`
+	To            string   `json:"to"`
+	Source        string   `json:"source"`
+	NodeID        string   `json:"node_id,omitempty"`
+	EventType     string   `json:"event_type,omitempty"`
+	TimerID       string   `json:"timer_id,omitempty"`
+	After         string   `json:"after,omitempty"`
+	Timed         bool     `json:"timed,omitempty"`
+	LoopID        string   `json:"loop_id,omitempty"`
+	LoopOperation string   `json:"loop_operation,omitempty"`
+	MaxAttempts   string   `json:"max_attempts,omitempty"`
+	LoopEscape    bool     `json:"loop_escape,omitempty"`
 }
 
 type StageGraphTimerView struct {
@@ -544,6 +548,9 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 		sort.Strings(eventTypes)
 		for _, eventType := range eventTypes {
 			handler := node.EventHandlers[eventType]
+			if handler.Loop != nil {
+				continue
+			}
 			from := append([]string{}, nonTerminal...)
 			if handler.CreateEntity {
 				from = nil
@@ -569,6 +576,32 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 					edge.After = strings.TrimSpace(handler.Join.Timeout.After)
 					edge.TimerID = strings.TrimSpace(handler.Join.EffectiveID())
 					edge.Timed = true
+				}
+			}
+		}
+	}
+	for _, plan := range semanticview.WorkflowLoops(source) {
+		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		for _, operation := range plan.Operations {
+			before := len(edges)
+			edges = appendStageGraphEdge(edges, []string{operation.From}, operation.AdvancesTo, stateSet, "loop."+string(operation.Kind), operation.NodeID, operation.HandlerEvent)
+			if len(edges) > before {
+				edge := &edges[len(edges)-1]
+				edge.LoopID = plan.ID
+				edge.LoopOperation = string(operation.Kind)
+				edge.MaxAttempts = plan.MaxAttempts.String()
+			}
+			if operation.Kind == runtimecontracts.LoopOperationRepeat {
+				before = len(edges)
+				edges = appendStageGraphEdge(edges, []string{operation.From}, plan.Escape.AdvancesTo, stateSet, "loop.escape", operation.NodeID, operation.HandlerEvent)
+				if len(edges) > before {
+					edge := &edges[len(edges)-1]
+					edge.LoopID = plan.ID
+					edge.LoopOperation = string(operation.Kind)
+					edge.MaxAttempts = plan.MaxAttempts.String()
+					edge.LoopEscape = true
 				}
 			}
 		}

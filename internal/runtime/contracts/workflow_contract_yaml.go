@@ -64,6 +64,7 @@ var flowSchemaDocumentFields = map[string]struct{}{
 	"terminal_states":     {},
 	"states":              {},
 	"stages":              {},
+	"loops":               {},
 	"pins":                {},
 	"tool_surface":        {},
 	"required_agents":     {},

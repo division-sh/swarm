@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
@@ -832,6 +833,9 @@ func (r mailboxV1Row) decisionEvent(eventID, decisionID, eventType, action, acto
 		"source_flow":         mailboxV1SourceFlow(r.FlowInstance),
 		"source_entity_id":    strings.TrimSpace(r.EntityID),
 	}
+	if generation, ok := attemptgeneration.FromPayload(r.Payload); ok {
+		eventPayload[generation.RevisionField] = generation.RevisionID
+	}
 	if action == "deferred" {
 		eventPayload["until"] = deferUntil.UTC().Format(time.RFC3339Nano)
 		eventPayload["deferred_by"] = strings.TrimSpace(actorTokenID)
@@ -938,6 +942,9 @@ func cloneMailboxV1Payload(in map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(in))
 	for k, v := range in {
+		if strings.TrimSpace(k) == attemptgeneration.PayloadKey {
+			continue
+		}
 		out[k] = v
 	}
 	return out

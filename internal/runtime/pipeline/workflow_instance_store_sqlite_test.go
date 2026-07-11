@@ -183,6 +183,31 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 	}
 }
 
+func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	runner := &recordingRuntimeMutationRunner{db: db}
+	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	instance := WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}}
+	if err := store.Upsert(ctx, instance); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	sentinel := errors.New("supersession failed")
+	if err := store.MutateE(ctx, instance.InstanceID, func(item *WorkflowInstance) error {
+		item.CurrentState = "must_not_commit"
+		return sentinel
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("MutateE error = %v, want sentinel", err)
+	}
+	loaded, ok, err := store.Load(ctx, instance.InstanceID)
+	if err != nil || !ok {
+		t.Fatalf("Load = found %v err %v", ok, err)
+	}
+	if loaded.CurrentState != "queued" {
+		t.Fatalf("CurrentState = %q, want queued", loaded.CurrentState)
+	}
+}
+
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
@@ -388,6 +413,34 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			started_at TIMESTAMP,
 			delivered_at TIMESTAMP,
 			created_at TIMESTAMP
+		)`,
+		`CREATE TABLE activity_attempts (
+			request_event_id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			source_event_id TEXT,
+			parent_event_id TEXT,
+			entity_id TEXT,
+			flow_instance TEXT,
+			node_id TEXT NOT NULL,
+			handler_event_key TEXT NOT NULL,
+			activity_id TEXT NOT NULL,
+			tool TEXT NOT NULL,
+			effect_class TEXT NOT NULL,
+			attempt INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL,
+			success_event TEXT NOT NULL,
+			failure_event TEXT NOT NULL,
+			result_event_id TEXT,
+			result_event_type TEXT,
+			result_payload TEXT,
+			failure TEXT,
+			input_hash TEXT NOT NULL,
+			loop_generation TEXT NOT NULL DEFAULT '{}',
+			loop_stage TEXT,
+			reply_context_id TEXT,
+			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			completed_at TEXT,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {

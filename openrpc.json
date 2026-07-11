@@ -9029,6 +9029,51 @@
         "description": "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) — state is running or terminal\n  \"scoring_terminal_outcome\" — scoring entities have not reached\n    a terminal scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" — no active deliveries but events exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays string (not enum) for\nforward compatibility — additive owner extensions must not\nrequire a /v2/ bump.\n",
         "type": "string"
       },
+      "BoundedLoopActivation": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "close_reason": {
+            "enum": [
+              "completed",
+              "escaped"
+            ],
+            "type": "string"
+          },
+          "current_stage": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_attempts": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revision_id",
+          "attempt",
+          "max_attempts",
+          "current_stage",
+          "status"
+        ],
+        "type": "object"
+      },
       "BundleAgentDefinition": {
         "additionalProperties": false,
         "properties": {
@@ -10218,6 +10263,13 @@
             },
             "description": "Gate state. Map of gate_name → boolean.",
             "type": "object"
+          },
+          "loops": {
+            "description": "Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.",
+            "items": {
+              "$ref": "#/components/schemas/BoundedLoopActivation"
+            },
+            "type": "array"
           }
         },
         "required": [

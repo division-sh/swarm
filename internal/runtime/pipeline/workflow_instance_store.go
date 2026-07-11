@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -61,14 +63,69 @@ type WorkflowTransitionRecord struct {
 }
 
 type WorkflowTimerState struct {
-	TimerID   string    `json:"timer_id"`
-	EventType string    `json:"event_type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	FiresAt   time.Time `json:"fires_at"`
-	StartedBy string    `json:"started_by,omitempty"`
-	Recurring bool      `json:"recurring,omitempty"`
-	Cancelled bool      `json:"cancelled,omitempty"`
-	Fired     bool      `json:"fired,omitempty"`
+	TimerID    string                       `json:"timer_id"`
+	TaskID     string                       `json:"task_id,omitempty"`
+	EventType  string                       `json:"event_type,omitempty"`
+	CreatedAt  time.Time                    `json:"created_at"`
+	FiresAt    time.Time                    `json:"fires_at"`
+	StartedBy  string                       `json:"started_by,omitempty"`
+	Recurring  bool                         `json:"recurring,omitempty"`
+	Cancelled  bool                         `json:"cancelled,omitempty"`
+	Fired      bool                         `json:"fired,omitempty"`
+	Generation attemptgeneration.Generation `json:"loop_generation,omitempty"`
+}
+
+func workflowTimerStatePayload(timer WorkflowTimerState) ([]byte, error) {
+	payload := map[string]any{
+		"started_by": strings.TrimSpace(timer.StartedBy),
+		"timer_id":   strings.TrimSpace(timer.TimerID),
+	}
+	if generation := timer.Generation.Normalize(); generation.Valid() {
+		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
+	}
+	return json.Marshal(payload)
+}
+
+func decodeWorkflowTimerStatePayload(raw any, timer *WorkflowTimerState) error {
+	if timer == nil {
+		return fmt.Errorf("workflow timer state is nil")
+	}
+	var encoded []byte
+	switch typed := raw.(type) {
+	case nil:
+	case []byte:
+		encoded = typed
+	case string:
+		encoded = []byte(typed)
+	default:
+		value, err := json.Marshal(typed)
+		if err != nil {
+			return err
+		}
+		encoded = value
+	}
+	payload := map[string]any{}
+	if len(encoded) > 0 {
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			return fmt.Errorf("decode workflow timer payload: %w", err)
+		}
+	}
+	timer.StartedBy = strings.TrimSpace(asString(payload["started_by"]))
+	timer.TimerID = strings.TrimSpace(asString(payload["timer_id"]))
+	if timer.TimerID == "" {
+		timer.TimerID = strings.TrimSpace(timer.TaskID)
+	}
+	if generation, ok := attemptgeneration.FromPayload(payload); ok {
+		timer.Generation = generation
+	}
+	return nil
+}
+
+func workflowTimerStateTaskID(timer WorkflowTimerState) string {
+	if taskID := strings.TrimSpace(timer.TaskID); taskID != "" {
+		return taskID
+	}
+	return strings.TrimSpace(timer.TimerID)
 }
 
 type workflowInstancePersistedProjection struct {
@@ -295,12 +352,22 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 }
 
 func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+	if fn == nil {
+		return nil
+	}
+	return s.MutateE(ctx, instanceID, func(instance *WorkflowInstance) error {
+		fn(instance)
+		return nil
+	})
+}
+
+func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
 	instanceID = strings.TrimSpace(instanceID)
 	if instanceID == "" || s == nil || s.db == nil || fn == nil {
 		return nil
 	}
 	if s.isSQLite() {
-		return s.mutateSQLite(ctx, instanceID, fn)
+		return s.mutateSQLiteE(ctx, instanceID, fn)
 	}
 	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
 	if err != nil {
@@ -325,7 +392,9 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 	if !ok {
 		instance = WorkflowInstance{InstanceID: instanceID}
 	}
-	fn(&instance)
+	if err := fn(&instance); err != nil {
+		return err
+	}
 	if err := s.Upsert(ctx, instance); err != nil {
 		return err
 	}
@@ -917,10 +986,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		return err
 	}
 	for _, timer := range instance.TimerState {
-		payloadJSON, err := json.Marshal(map[string]any{
-			"started_by": strings.TrimSpace(timer.StartedBy),
-			"timer_id":   strings.TrimSpace(timer.TimerID),
-		})
+		payloadJSON, err := workflowTimerStatePayload(timer)
 		if err != nil {
 			return err
 		}
@@ -939,7 +1005,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
 				$8, $9, $10, $11, $12, $13
 			)
-		`, workflowInstanceTimerRowID(runID, strings.TrimSpace(timer.TimerID), rowID), runID, strings.TrimSpace(timer.TimerID), rowID, storageRef,
+		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), rowID), runID, workflowTimerStateTaskID(timer), rowID, storageRef,
 			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
 			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
 		); err != nil {
@@ -1055,10 +1121,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		return err
 	}
 	for _, timer := range instance.TimerState {
-		payloadJSON, err := json.Marshal(map[string]any{
-			"started_by": strings.TrimSpace(timer.StartedBy),
-			"timer_id":   strings.TrimSpace(timer.TimerID),
-		})
+		payloadJSON, err := workflowTimerStatePayload(timer)
 		if err != nil {
 			return err
 		}
@@ -1075,7 +1138,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
 				$8, $9, $10, $11, $12, $13
 			)
-		`, workflowInstanceTimerRowID(runID, strings.TrimSpace(timer.TimerID), rowID), runID, strings.TrimSpace(timer.TimerID), rowID, storageRef,
+		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), rowID), runID, workflowTimerStateTaskID(timer), rowID, storageRef,
 			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
 			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
 		); err != nil {
@@ -1253,7 +1316,7 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runI
 			fire_event,
 			created_at,
 			fire_at,
-			COALESCE(fire_payload->>'started_by', ''),
+			fire_payload,
 			recurring,
 			status
 		FROM timers
@@ -1270,16 +1333,20 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runI
 	out := make([]WorkflowTimerState, 0, 4)
 	for rows.Next() {
 		var timer WorkflowTimerState
+		var payloadRaw any
 		var status string
 		if err := rows.Scan(
-			&timer.TimerID,
+			&timer.TaskID,
 			&timer.EventType,
 			&timer.CreatedAt,
 			&timer.FiresAt,
-			&timer.StartedBy,
+			&payloadRaw,
 			&timer.Recurring,
 			&status,
 		); err != nil {
+			return nil, err
+		}
+		if err := decodeWorkflowTimerStatePayload(payloadRaw, &timer); err != nil {
 			return nil, err
 		}
 		status = strings.TrimSpace(status)

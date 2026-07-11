@@ -64,6 +64,25 @@ func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract 
 func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return s.bundle.WorkflowJoins()
 }
+func (s bundleSource) WorkflowLoops() []runtimecontracts.WorkflowLoopPlan {
+	return s.bundle.WorkflowLoops()
+}
+
+func WorkflowLoops(source Source) []runtimecontracts.WorkflowLoopPlan {
+	if source == nil {
+		return nil
+	}
+	type provider interface {
+		WorkflowLoops() []runtimecontracts.WorkflowLoopPlan
+	}
+	if loops, ok := source.(provider); ok {
+		return loops.WorkflowLoops()
+	}
+	if bundle, ok := Bundle(source); ok {
+		return bundle.WorkflowLoops()
+	}
+	return nil
+}
 func (s bundleSource) WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool) {
 	return s.bundle.WorkflowTimerByID(id)
 }

@@ -80,6 +80,7 @@ type WorkflowSemanticView struct {
 	Transitions            []WorkflowTransitionContract
 	Timers                 []WorkflowTimerContract
 	Joins                  []WorkflowJoinPlan
+	Loops                  []WorkflowLoopPlan
 	Guards                 []GuardActionEntry
 	Actions                []GuardActionEntry
 	GuardByID              map[string]GuardActionEntry
@@ -290,7 +291,7 @@ type HandlerTransitionSemantic struct {
 	Emit                 EmitSpec
 	OnSuccess            HandlerOnSuccessSpec
 	Condition            string
-	CompletionRule       string
+	Loop                 *LoopOperationSpec
 	OnComplete           []HandlerRuleEntry
 	Rules                []HandlerRuleEntry
 	Accumulate           *AccumulateSpec
@@ -324,6 +325,27 @@ type WorkflowJoinPlan struct {
 	HandlerEvent string
 	Spec         JoinSpec
 	ResultType   CatalogTypeReference
+}
+
+type WorkflowLoopPlan struct {
+	FlowID        string
+	ID            string
+	RevisionField string
+	MaxAttempts   LoopAttemptLimit
+	Escape        LoopEscapeSpec
+	EntryStage    string
+	RegionStages  []string
+	Operations    []WorkflowLoopOperationPlan
+}
+
+type WorkflowLoopOperationPlan struct {
+	NodeID       string
+	HandlerEvent string
+	Kind         LoopOperationKind
+	LoopID       string
+	From         string
+	AdvancesTo   string
+	Emit         EmitSpec
 }
 
 type PolicySheetRowKind string
@@ -1217,6 +1239,7 @@ type FlowSchemaDocument struct {
 	States                 []string                        `yaml:"states"`
 	StatesDeclared         bool                            `yaml:"-"`
 	StageDeclarations      FlowStageDeclarations           `yaml:"stages"`
+	LoopDeclarations       FlowLoopDeclarations            `yaml:"loops"`
 	Pins                   FlowPins                        `yaml:"pins"`
 	ToolSurface            FlowToolSurfaceContract         `yaml:"tool_surface"`
 	RequiredAgents         []FlowRequiredAgent             `yaml:"required_agents"`
@@ -1696,9 +1719,8 @@ type SystemNodeEventHandler struct {
 	ClearGates           []string                  `yaml:"clear_gates"`
 	DataAccumulation     WorkflowDataAccumulation  `yaml:"data_accumulation"`
 	Condition            string                    `yaml:"condition"`
-	CompletionRule       string                    `yaml:"completion_rule"`
 	Logic                string                    `yaml:"logic"`
-	PolicyRef            string                    `yaml:"policy_ref"`
+	Loop                 *LoopOperationSpec        `yaml:"loop"`
 	OnComplete           []HandlerRuleEntry        `yaml:"on_complete"`
 	Rules                []HandlerRuleEntry        `yaml:"rules"`
 	Accumulate           *AccumulateSpec           `yaml:"accumulate"`

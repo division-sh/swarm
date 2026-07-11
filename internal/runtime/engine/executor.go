@@ -15,6 +15,7 @@ import (
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -34,6 +36,7 @@ import (
 type Step string
 
 const (
+	StepLoop       Step = "loop"
 	StepQuery      Step = "query"
 	StepClearGates Step = "clear_gates"
 	StepGuard      Step = "guard"
@@ -59,6 +62,7 @@ const (
 )
 
 var OrderedSteps = []Step{
+	StepLoop,
 	StepQuery,
 	StepClearGates,
 	StepGuard,
@@ -105,6 +109,8 @@ type executionFrame struct {
 	projectionApplied         bool
 	transitionApplied         bool
 	joinResultType            runtimecontracts.CatalogTypeReference
+	loopPlan                  *runtimecontracts.WorkflowLoopPlan
+	loopActivation            *loopruntime.Activation
 }
 
 type handlerRuleSource string
@@ -190,6 +196,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 		return fmt.Errorf("%w: handler declares both join and accumulate", ErrInvalidConfig)
 	}
 	if err := runtimecontracts.ValidateJoinHandlerIsolation(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	if err := validateHandlerLoopRuntime(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
@@ -677,6 +686,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 			Accumulated: map[string]any{},
 			FanOut:      map[string]any{},
 			Join:        map[string]any{},
+			Loop:        map[string]any{},
 			Transformed: map[string]any{},
 		},
 		result: ExecutionResult{
@@ -704,6 +714,8 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 
 func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	switch step {
+	case StepLoop:
+		return false, e.stepLoop(frame)
 	case StepQuery:
 		return false, e.stepQuery(frame)
 	case StepClearGates:
@@ -771,8 +783,10 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		})
 	}
 	window := ""
+	generation := attemptgeneration.Generation{}
 	if internal {
 		window = ref.Window
+		generation = ref.Generation
 	} else if spec.Window != nil {
 		value, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Window.ByPath, spec.Window.By)
 		if !ok || strings.TrimSpace(asString(value)) == "" {
@@ -782,7 +796,10 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		}
 		window = strings.TrimSpace(asString(value))
 	}
-	key := joinruntime.ActivationKey(spec.Stage, spec.EffectiveID(), window)
+	if !internal && frame.loopActivation != nil {
+		generation = frame.loopActivation.Generation()
+	}
+	key := joinruntime.ActivationKeyForGeneration(spec.Stage, spec.EffectiveID(), window, generation)
 	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.NodeID.String(), key)
 	if err != nil {
 		return false, fmt.Errorf("load join activation %s: %w", key, err)
@@ -1719,7 +1736,7 @@ func handlerTargetRequiresCanonicalWrite(target string) bool {
 
 func specialHandlerClearTarget(target string) bool {
 	switch strings.TrimSpace(target) {
-	case "accumulator_state", "cycle_counters", "pending_dedup":
+	case "accumulator_state", "pending_dedup":
 		return true
 	default:
 		return false
@@ -1943,6 +1960,9 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 			return err
 		}
 	}
+	if err := e.advanceAdmittedLoop(frame, next); err != nil {
+		return err
+	}
 	frame.result.NextState = next
 	frame.state.State.CurrentState = next
 	frame.result.StateMutation.NextState = next
@@ -2118,6 +2138,10 @@ func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runt
 	bucketRef, err := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, spec)
 	if err != nil {
 		return timeridentity.AccumulatorBucketRef{}, false, err
+	}
+	if frame.loopActivation != nil {
+		bucketRef.Generation = frame.loopActivation.Generation()
+		bucketRef = bucketRef.Normalize()
 	}
 	frame.accumulatorBucketRef = bucketRef
 	frame.hasAccumulatorBucketRef = true
@@ -2438,6 +2462,10 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		ChainDepth:       frame.req.ChainDepth,
 		Attempt:          1,
 	}.Normalized()
+	if frame.loopActivation != nil {
+		intent.Generation = frame.loopActivation.Generation()
+		intent.LoopStage = frame.loopActivation.CurrentStage
+	}
 	frame.result.ActivityIntents = append(frame.result.ActivityIntents, intent)
 	return nil
 }
@@ -2513,8 +2541,6 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 			delete(frame.state.State.StateCarrier.Metadata, "accumulated_count")
 			delete(frame.state.State.StateCarrier.Metadata, "accumulated_total")
 			delete(frame.state.State.StateCarrier.Metadata, "received_items")
-		case "cycle_counters":
-			delete(frame.state.State.StateCarrier.Metadata, "cycle_index")
 		case "pending_dedup":
 			delete(frame.state.State.StateCarrier.Metadata, "dedup_key")
 		default:
@@ -2766,6 +2792,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
 	ctx = WithJoin(ctx, frame.state.Join)
+	ctx = WithLoop(ctx, frame.state.Loop)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())

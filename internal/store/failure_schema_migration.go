@@ -1806,6 +1806,14 @@ func migrateSQLiteActivityAttempts(ctx context.Context, tx *sql.Tx, columns map[
 	if columns["reply_context_id"] {
 		replyContextSelect = "reply_context_id"
 	}
+	loopGenerationSelect := "'{}'"
+	if columns["loop_generation"] {
+		loopGenerationSelect = "loop_generation"
+	}
+	loopStageSelect := "NULL"
+	if columns["loop_stage"] {
+		loopStageSelect = "loop_stage"
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE activity_attempts__failure_new (
 			request_event_id TEXT PRIMARY KEY,
@@ -1829,6 +1837,8 @@ func migrateSQLiteActivityAttempts(ctx context.Context, tx *sql.Tx, columns map[
 			failure TEXT,
 			input_hash TEXT NOT NULL,
 			reply_context_id TEXT REFERENCES reply_contexts(reply_context_id),
+			loop_generation TEXT NOT NULL DEFAULT '{}',
+			loop_stage TEXT,
 			started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1836,14 +1846,14 @@ func migrateSQLiteActivityAttempts(ctx context.Context, tx *sql.Tx, columns map[
 			 OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL)
 			 OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL))
 		);
-		INSERT INTO activity_attempts__failure_new (request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, result_event_id, result_event_type, result_payload, failure, input_hash, reply_context_id, started_at, completed_at, updated_at)
-		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, result_event_id, result_event_type, result_payload, failure, input_hash, %s, started_at, completed_at, updated_at FROM activity_attempts;
+		INSERT INTO activity_attempts__failure_new (request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, result_event_id, result_event_type, result_payload, failure, input_hash, reply_context_id, loop_generation, loop_stage, started_at, completed_at, updated_at)
+		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, result_event_id, result_event_type, result_payload, failure, input_hash, %s, %s, %s, started_at, completed_at, updated_at FROM activity_attempts;
 		DROP TABLE activity_attempts;
 		ALTER TABLE activity_attempts__failure_new RENAME TO activity_attempts;
 		CREATE INDEX idx_activity_attempts_run ON activity_attempts (run_id, started_at);
 		CREATE INDEX idx_activity_attempts_activity ON activity_attempts (run_id, activity_id, tool);
 		CREATE INDEX idx_activity_attempts_result_event ON activity_attempts (result_event_id) WHERE result_event_id IS NOT NULL;
-	`, replyContextSelect)); err != nil {
+	`, replyContextSelect, loopGenerationSelect, loopStageSelect)); err != nil {
 		return fmt.Errorf("rebuild sqlite activity_attempts canonical failure schema: %w", err)
 	}
 	return nil

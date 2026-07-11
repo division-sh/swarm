@@ -44,6 +44,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Accumulated:    accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
 		Join:           cloneStringAnyMap(ctx.Join.Raw()),
+		Loop:           cloneStringAnyMap(ctx.Loop.Raw()),
 		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
@@ -198,9 +199,12 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			return err
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
-		if err := r.coordinator.workflowStore.Mutate(ctx, entityID.String(), func(instance *WorkflowInstance) {
-			applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
+		if err := r.coordinator.workflowStore.MutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
+			return applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		}); err != nil {
+			return err
+		}
+		if err := r.coordinator.reconcileSupersededLoopSchedules(ctx, entityID.String()); err != nil {
 			return err
 		}
 		if !hadState {
@@ -725,24 +729,6 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 			}
 		}
 		return true, true, nil
-	case "revision_count_below_limit", "inner_revision_count_below_limit":
-		limit := 3
-		for _, key := range []string{strings.TrimSpace(entry.PolicyRef), "max_revisions"} {
-			if key == "" {
-				continue
-			}
-			if value, ok := workflowExpressionLookupPath(execCtx.Base.Policy.Raw(), key); ok {
-				if parsed := asInt(value); parsed > 0 {
-					limit = parsed
-					break
-				}
-			}
-			if parsed := asInt(execCtx.Base.Policy.Raw()[key]); parsed > 0 {
-				limit = parsed
-				break
-			}
-		}
-		return asInt(state.Metadata["revision_count"]) < limit, true, nil
 	case "state_in_phase":
 		if pc.WorkflowDefinition() == nil {
 			return false, true, nil
@@ -918,10 +904,11 @@ func eventPayloadProperties(entry runtimecontracts.EventCatalogEntry) map[string
 	return allowed
 }
 
-func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine.StateMutation, allowedFields map[string]struct{}, source semanticview.Source, flowID string) {
+func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine.StateMutation, allowedFields map[string]struct{}, source semanticview.Source, flowID string) error {
 	if instance == nil {
-		return
+		return nil
 	}
+	previousBuckets := cloneStringAnyMap(instance.StateBuckets)
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
 	}
@@ -974,14 +961,17 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		restoreWorkflowRuntimeControlMetadata(instance.Metadata, controlMetadata)
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
+		if err := supersedePriorLoopGenerationArtifacts(instance, previousBuckets, &mutation.StateCarrier); err != nil {
+			return err
+		}
 		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()
 	}
 	if len(allowedFields) == 0 {
-		return
+		return nil
 	}
 	entityProjection := workflowMutableStateBucket(instance, workflowStateBucketEntityProjection)
 	if instance.Metadata == nil {
-		return
+		return nil
 	}
 	for targetField := range allowedFields {
 		targetField = strings.TrimSpace(targetField)
@@ -997,6 +987,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if len(entityProjection) > 0 {
 		workflowSetStateBucket(instance, workflowStateBucketEntityProjection, entityProjection)
 	}
+	return nil
 }
 
 var workflowRuntimeControlMetadataKeys = []string{

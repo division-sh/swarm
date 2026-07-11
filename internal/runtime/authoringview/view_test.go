@@ -361,6 +361,44 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+			{ID: "queued", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated", Terminal: true},
+		}}},
+		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued", Loops: []runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
+			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, RegionStages: []string{"drafting", "review"},
+			Operations: []runtimecontracts.WorkflowLoopOperationPlan{
+				{NodeID: "loop-node", HandlerEvent: "work.started", Kind: runtimecontracts.LoopOperationStart, From: "queued", AdvancesTo: "drafting"},
+				{NodeID: "loop-node", HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review", AdvancesTo: "drafting"},
+			},
+		}}},
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := view.StageGraphs[0]
+	var repeat, escape StageGraphEdgeView
+	for _, edge := range graph.Edges {
+		if edge.LoopID != "revision" || edge.LoopOperation != "repeat" {
+			continue
+		}
+		if edge.LoopEscape {
+			escape = edge
+		} else {
+			repeat = edge
+		}
+	}
+	if repeat.To != "drafting" || len(repeat.From) != 1 || repeat.From[0] != "review" || repeat.MaxAttempts != "3" {
+		t.Fatalf("repeat edge = %#v", repeat)
+	}
+	if escape.To != "escalated" || !escape.LoopEscape || escape.MaxAttempts != "3" {
+		t.Fatalf("escape edge = %#v", escape)
+	}
+}
+
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",

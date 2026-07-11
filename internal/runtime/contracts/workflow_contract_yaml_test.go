@@ -223,6 +223,59 @@ stages:
 	}
 }
 
+func TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax(t *testing.T) {
+	var schema FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+stages:
+  drafting: {initial: true}
+  review: {}
+  exhausted: {terminal: true}
+loops:
+  revision:
+    revision_field: revision_id
+    max_attempts: "{{policy.inner_revision_max}}"
+    escape:
+      advances_to: exhausted
+`), &schema); err != nil {
+		t.Fatalf("decode loop schema: %v", err)
+	}
+	if len(schema.LoopDeclarations.Entries) != 1 {
+		t.Fatalf("loops = %#v", schema.LoopDeclarations.Entries)
+	}
+	loop := schema.LoopDeclarations.Entries[0]
+	if loop.ID != "revision" || loop.RevisionField != "revision_id" || loop.MaxAttempts.PolicyRef != "inner_revision_max" || loop.Escape.AdvancesTo != "exhausted" {
+		t.Fatalf("loop = %#v", loop)
+	}
+}
+
+func TestSystemNodeEventHandlerDecodeLoopOperationRequiresExactOperationAndFrom(t *testing.T) {
+	for _, raw := range []string{
+		"loop: {repeat: revision}",
+		"loop: {repeat: revision, close: revision, from: review}",
+	} {
+		var handler SystemNodeEventHandler
+		if err := yaml.Unmarshal([]byte(raw), &handler); err == nil {
+			t.Fatalf("decode %q succeeded, want closed loop operation error", raw)
+		}
+	}
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte("loop: {repeat: revision, from: review}\nadvances_to: drafting\n"), &handler); err != nil {
+		t.Fatalf("decode canonical operation: %v", err)
+	}
+	if handler.Loop == nil || handler.Loop.Repeat != "revision" || handler.Loop.From != "review" {
+		t.Fatalf("handler loop = %#v", handler.Loop)
+	}
+}
+
+func TestSystemNodeEventHandlerRejectsRetiredTopLevelLoopShadowFields(t *testing.T) {
+	for _, field := range []string{"completion_rule", "policy_ref"} {
+		var handler SystemNodeEventHandler
+		if err := yaml.Unmarshal([]byte(field+": legacy\n"), &handler); err == nil {
+			t.Fatalf("decode retired handler field %s succeeded", field)
+		}
+	}
+}
+
 func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T) {
 	for _, field := range []string{"delay", "interrupting", "repeat"} {
 		t.Run(field, func(t *testing.T) {

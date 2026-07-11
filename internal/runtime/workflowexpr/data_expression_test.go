@@ -408,6 +408,16 @@ func TestExpressionReferencesEntity_IgnoresStringLiterals(t *testing.T) {
 	}
 }
 
+func TestEvalValueExpressionSupportsPublicLoopRootWithoutRewritingStrings(t *testing.T) {
+	value, err := EvalValueExpression(`loop.revision_id + ":loop.revision_id"`, ValueContext{Loop: map[string]any{"revision_id": "rev-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "rev-2:loop.revision_id" {
+		t.Fatalf("value = %#v", value)
+	}
+}
+
 func containsAll(value string, parts ...string) bool {
 	for _, part := range parts {
 		if !strings.Contains(value, part) {

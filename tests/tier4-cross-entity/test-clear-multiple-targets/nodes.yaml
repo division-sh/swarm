@@ -8,7 +8,6 @@ test-node:
       clear:
         targets:
           - accumulator_state
-          - cycle_counters
           - pending_dedup
       emit:
         event: state.reset_completed

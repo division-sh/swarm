@@ -321,7 +321,11 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	if err != nil {
 		return fmt.Errorf("encode fork gates for entity %s: %w", entityID, err)
 	}
-	accJSON, err := jsonMapArg(entity.Accumulator)
+	forkAccumulator, err := forkAttemptGenerationState(entity.Accumulator, forkRunID, entityID)
+	if err != nil {
+		return fmt.Errorf("fork loop state for entity %s: %w", entityID, err)
+	}
+	accJSON, err := jsonMapArg(forkAccumulator)
 	if err != nil {
 		return fmt.Errorf("encode fork accumulator for entity %s: %w", entityID, err)
 	}
@@ -344,7 +348,7 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 		CurrentState: currentState,
 		Fields:       entity.Fields,
 		Gates:        entity.Gates,
-		Accumulator:  entity.Accumulator,
+		Accumulator:  forkAccumulator,
 	}, mutationlog.Writer{
 		Type:        "platform",
 		ID:          "run_fork_materializer",
