@@ -8528,6 +8528,77 @@ flow_model:
       - agent mode or derived session_scope memory
       - parent connect to contained map/list items
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
+    standing_activation_model:
+      status: merge_bearing_contract_runtime_behavior
+      implementation_tracker: '#1951'
+      declaration_surface: 'package.yaml flows[].activation: standing plus optional flows[].ingress'
+      canonical_owners:
+        declaration: internal/runtime/contracts.ProjectFlowRef
+        verification: internal/runtime.ResolveStandingTargetDeclarations
+        lifecycle: internal/runtime.Runtime.EnsureStandingTargets
+        process_registry: internal/runtime.RuntimeContextManager
+        ingress_dispatch: internal/runtime.InboundGateway.HandleResolvedWebhook
+      authoring_shape:
+        example:
+          flows:
+          - id: telegram-chat
+            flow: telegram-chat
+            mode: singleton
+            activation: standing
+            ingress:
+              alias: chat
+              providers:
+              - provider: telegram
+                signing_secret: webhook_signing.telegram
+        rules:
+        - activation is explicit and is never inferred from ingress
+        - 'activation: standing is valid only for mode: singleton'
+        - standing activation without ingress is valid for timer-driven or connect-fed services
+        - ingress requires activation: standing and defaults alias to the package flow id
+        - ingress providers are a list so duplicate provider declarations remain visible to strict verification
+        - signing_secret is an explicit deployment credential reference; package data never carries the value
+        - every provider binding requires an exact compatible external input pin under the provider manifest event-name policy
+      lifecycle_authority: >
+        Before readiness, package activation atomically and idempotently creates or resumes one deterministic durable run,
+        one singleton flow instance, and that instance's primary entity. First activation consumes the full canonical
+        ActivateFlowInstance path, including routes, agents, initial timers, schedules, and creation effects. Same-source
+        restart rehydrates the persisted instance and runtime side effects without replaying creation effects. The canonical
+        bundle_hash, package flow identity, run_id, flow_instance, and entity_id form the standing semantic authority.
+      process_routing: >
+        One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, replacement, and
+        deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
+        Dispatch MUST use that selected context's source, provider registry, credential store, ingress controller, store,
+        EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden.
+      admission_order: >
+        The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
+        canonical event name MUST match an exact external input pin on the selected flow before marker persistence, dedupe,
+        event construction, delivery, acknowledgement, or response. The gateway stamps the standing run_id, flow_instance,
+        and entity_id before persistence and publish; root-ingress admission MUST preserve that run and MUST NOT mint a run
+        per webhook.
+      replacement_policy: >
+        Same-bundle-hash restart resumes the standing identity. Same-hash live replacement may publish new runtime objects
+        only after they are ready and then atomically replaces process visibility. If any active standing target exists, a
+        changed-hash live reload MUST fail before readiness changes, detach, shutdown, activation, registry mutation, or new
+        run/instance/entity/target creation. Cold changed-hash startup against persisted standing authority also fails closed.
+        The predecessor remains running and authoritative until a future explicit reset/migration operation defines quiesce,
+        terminal/preservation, side-effect transition, rollback, and restart behavior.
+      fail_closed:
+      - duplicate aliases within a bundle or across loaded runtime contexts
+      - duplicate providers within one alias
+      - ingress on a non-standing or non-singleton flow
+      - missing provider, signing-secret reference, provider manifest, or compatible external event pin
+      - unknown or unloaded alias/provider target
+      - unbound signing-secret value at request time
+      - standing run source or canonical bundle_hash mismatch
+      readback: >
+        Basic describe projects activation, alias, providers, and signing-secret references from package declarations. Serve
+        readiness projects the exact POST URL and BOUND/UNBOUND state from the loaded RuntimeContextManager plus deployment
+        credential store. Neither surface exposes secret values or creates a second target model.
+      legacy_paths_removed:
+      - scanning entity_state by route alias as ingress target authority
+      - reading webhook signing values from flow-instance config
+      - discarding a resolved run_id and publishing empty-run root ingress
+      - treating seeded entities or request-context run injection as supported served-path proof
     escape_hatches:
       static_multi_entity_flows:
         status: retired_unsupported

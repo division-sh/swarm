@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -792,6 +793,7 @@ func (pc *PipelineCoordinator) BackgroundNodesWithReceiptStore(bus systemNodeBus
 			}
 		}
 	}
+	out = append(out, newActivityBackgroundNode(pc, bus))
 	return out
 }
 
@@ -1223,7 +1225,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	}
 	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return targetPath == flowPath || targetPath == flowID
+		return targetPath == flowPath || targetPath == flowID || runtimeflowidentity.StandingInstanceMatchesFlow(source, flowID, targetPath)
 	}
 	return workflowNodeDeliveryTargetPathMatches(flowPath, targetPath)
 }
@@ -1238,7 +1240,7 @@ func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, f
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/")
+		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || runtimeflowidentity.StandingInstanceMatchesFlow(source, flowID, flowInstance)
 	}
 	return true
 }

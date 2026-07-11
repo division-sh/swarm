@@ -115,50 +115,8 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
-
-	vars := flowActivationVars(req)
-	localEvents := flowLocalEventSet(schema, scope)
-	agentKeys := make([]string, 0, len(scope.Agents))
-	for key := range scope.Agents {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			agentKeys = append(agentKeys, key)
-		}
-	}
-	sort.Strings(agentKeys)
-
-	for _, key := range agentKeys {
-		entry := scope.Agents[key]
-		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, flowEntityID, flowPath, key, entry, vars, localEvents, req.Config)
-		if err != nil {
-			return err
-		}
-		rec := PersistedAgent{
-			Config:          cfg,
-			Status:          "active",
-			HiredBy:         "flow-instance-activator",
-			TemplateVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-		}
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
-			return err
-		}
-	}
-	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
-		if err := installer.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity:            instance.Route(),
-			ActivationVariables: vars,
-		}); err != nil {
-			return err
-		}
-	} else if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
-		if err := installer.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity:            instance.Route(),
-			ActivationVariables: vars,
-		}); err != nil {
-			return err
-		}
-	} else {
-		return fmt.Errorf("event bus does not support derived flow-instance routing for %s", flowPath)
+	if err := am.installFlowInstanceRuntime(ctx, req, schema, scope); err != nil {
+		return err
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
 		autoEmitCtx := events.WithDeliveryContext(context.Background(), req.Context)
@@ -185,6 +143,77 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	return nil
+}
+
+func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, error) {
+	if am == nil || am.workflowInstances == nil {
+		return false, fmt.Errorf("workflow instance store is required")
+	}
+	instance := req.Instance
+	stored, exists, err := am.workflowInstances.Load(ctx, instance.InstancePath)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		if err := am.ActivateFlowInstance(ctx, req); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if strings.TrimSpace(stored.WorkflowName) != strings.TrimSpace(instance.TemplateID) ||
+		strings.TrimSpace(stored.WorkflowVersion) != strings.TrimSpace(req.ContractBundle.WorkflowVersion()) {
+		return false, fmt.Errorf("standing flow instance %s belongs to %s@%s, not %s@%s; explicit reset or migration is required",
+			instance.InstancePath, stored.WorkflowName, stored.WorkflowVersion, instance.TemplateID, req.ContractBundle.WorkflowVersion())
+	}
+	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, instance.TemplateID)
+	if !ok {
+		return false, fmt.Errorf("flow contract view not found: %s", instance.TemplateID)
+	}
+	schema, ok := req.ContractBundle.FlowSchemaByID(instance.TemplateID)
+	if !ok {
+		return false, fmt.Errorf("flow schema not found: %s", instance.TemplateID)
+	}
+	if err := am.installFlowInstanceRuntime(ctx, req, schema, scope); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (am *AgentManager) installFlowInstanceRuntime(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) error {
+	instance := req.Instance
+	vars := flowActivationVars(req)
+	localEvents := flowLocalEventSet(schema, scope)
+	agentKeys := make([]string, 0, len(scope.Agents))
+	for key := range scope.Agents {
+		if key = strings.TrimSpace(key); key != "" {
+			agentKeys = append(agentKeys, key)
+		}
+	}
+	sort.Strings(agentKeys)
+	for _, key := range agentKeys {
+		entry := scope.Agents[key]
+		cfg, err := buildFlowAgentConfig(req.ContractBundle, instance.TemplateID, instance.InstanceID, instance.EntityID, instance.InstancePath, key, entry, vars, localEvents, req.Config)
+		if err != nil {
+			return err
+		}
+		rec := PersistedAgent{
+			Config:          cfg,
+			Status:          "active",
+			HiredBy:         "flow-instance-activator",
+			TemplateVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+		}
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
+			return err
+		}
+	}
+	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instance.Route(), ActivationVariables: vars}
+	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
+		return installer.AddFlowInstanceRouteContext(ctx, request)
+	}
+	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
+		return installer.AddFlowInstanceRoute(request)
+	}
+	return fmt.Errorf("event bus does not support derived flow-instance routing for %s", instance.InstancePath)
 }
 
 func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowEntityID, instanceID, flowPath, parentEntityID string) map[string]any {

@@ -69,6 +69,33 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	}
 }
 
+func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
+	writer := pipelineActivityIntentWriter{coordinator: pc}
+	postCommit := []func(){}
+	ctx := WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx = WithPipelineSQLTxContext(ctx, &sql.Tx{})
+
+	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/source")}); err != nil {
+		t.Fatalf("WriteActivityIntents: %v", err)
+	}
+	if got := len(bus.runtimeLogEntries()); got != 0 {
+		t.Fatalf("runtime logs before commit = %d, want 0", got)
+	}
+	if got := len(postCommit); got != 1 {
+		t.Fatalf("post-commit actions = %d, want 1", got)
+	}
+	FlushPipelinePostCommitActions(postCommit)
+	logs := bus.runtimeLogEntries()
+	if len(logs) != 1 || logs[0].Action != "intent_persisted" {
+		t.Fatalf("runtime logs after commit = %#v, want one intent_persisted entry", logs)
+	}
+}
+
 func TestLoopActivityRequestResultAndForkCarryGeneration(t *testing.T) {
 	entityID := uuid.NewString()
 	activation, err := loopruntime.New("source-run", entityID, "validation", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())

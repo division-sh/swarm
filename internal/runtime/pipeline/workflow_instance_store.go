@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -475,6 +476,125 @@ func (s *WorkflowInstanceStore) RunPipelineMutation(ctx context.Context, fn func
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		return fn(txctx)
 	})
+}
+
+func (s *WorkflowInstanceStore) EnsureStandingRun(ctx context.Context, runID, packageKey, flowID string, source runtimecorrelation.BundleSourceFact) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
+	runID = strings.TrimSpace(runID)
+	packageKey = strings.TrimSpace(packageKey)
+	flowID = strings.TrimSpace(flowID)
+	source = source.Normalized()
+	if runID == "" || packageKey == "" || flowID == "" || source.BundleHash == "" || source.BundleSource == "" {
+		return fmt.Errorf("standing run requires run_id, package_key, flow_id, bundle_hash, and bundle_source")
+	}
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.rejectChangedStandingSource(txctx, tx, runID, packageKey, flowID, source); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if s.isSQLite() {
+			if _, err := tx.ExecContext(txctx, `
+				INSERT OR IGNORE INTO runs (
+					run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at
+				) VALUES (?, 'running', ?, ?, NULLIF(?, ''), ?)
+			`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint, now); err != nil {
+				return fmt.Errorf("ensure standing run: %w", err)
+			}
+			var status, bundleHash, bundleSource string
+			if err := tx.QueryRowContext(txctx, `
+				SELECT status, COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+				FROM runs WHERE run_id = ?
+			`, runID).Scan(&status, &bundleHash, &bundleSource); err != nil {
+				return fmt.Errorf("read standing run: %w", err)
+			}
+			return validateStandingRunSource(runID, status, bundleHash, bundleSource, source)
+		}
+		if _, err := tx.ExecContext(txctx, `
+			INSERT INTO runs (
+				run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at
+			) VALUES ($1::uuid, 'running', $2, $3, NULLIF($4, ''), now())
+			ON CONFLICT (run_id) DO NOTHING
+		`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint); err != nil {
+			return fmt.Errorf("ensure standing run: %w", err)
+		}
+		var status, bundleHash, bundleSource string
+		if err := tx.QueryRowContext(txctx, `
+			SELECT status, COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+			FROM runs WHERE run_id = $1::uuid
+		`, runID).Scan(&status, &bundleHash, &bundleSource); err != nil {
+			return fmt.Errorf("read standing run: %w", err)
+		}
+		return validateStandingRunSource(runID, status, bundleHash, bundleSource, source)
+	})
+}
+
+func (s *WorkflowInstanceStore) rejectChangedStandingSource(ctx context.Context, tx *sql.Tx, runID, packageKey, flowID string, source runtimecorrelation.BundleSourceFact) error {
+	query := `
+		SELECT es.run_id, COALESCE(r.bundle_hash, ''), COALESCE(r.bundle_source, '')
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN runs r ON r.run_id = es.run_id
+		WHERE fi.flow_template = $1
+		  AND es.fields->>'activation' = 'standing'
+		  AND es.fields->>'package_key' = $2
+		ORDER BY es.run_id
+	`
+	args := []any{flowID, packageKey}
+	if s.isSQLite() {
+		query = `
+			SELECT es.run_id, COALESCE(r.bundle_hash, ''), COALESCE(r.bundle_source, '')
+			FROM entity_state es
+			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			JOIN runs r ON r.run_id = es.run_id
+			WHERE fi.flow_template = ?
+			  AND json_extract(es.fields, '$.activation') = 'standing'
+			  AND json_extract(es.fields, '$.package_key') = ?
+			ORDER BY es.run_id
+		`
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("inspect standing source owner: %w", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+		var existingRunID, bundleHash, bundleSource string
+		if err := rows.Scan(&existingRunID, &bundleHash, &bundleSource); err != nil {
+			return fmt.Errorf("read standing source owner: %w", err)
+		}
+		existingRunID = strings.TrimSpace(existingRunID)
+		bundleHash = strings.TrimSpace(bundleHash)
+		bundleSource = strings.TrimSpace(bundleSource)
+		if existingRunID != runID || bundleHash != source.BundleHash || bundleSource != source.BundleSource {
+			return fmt.Errorf("standing service %s/%s is already admitted as run_id=%s bundle_hash=%s bundle_source=%s, not run_id=%s bundle_hash=%s bundle_source=%s; serve the admitted bundle or perform an explicit reset/migration",
+				packageKey, flowID, existingRunID, bundleHash, bundleSource, runID, source.BundleHash, source.BundleSource)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect standing source owners: %w", err)
+	}
+	if count > 1 {
+		return fmt.Errorf("standing service %s/%s has %d persisted owners; explicit reset or migration is required", packageKey, flowID, count)
+	}
+	return nil
+}
+
+func validateStandingRunSource(runID, status, bundleHash, bundleSource string, want runtimecorrelation.BundleSourceFact) error {
+	status = strings.TrimSpace(status)
+	bundleHash = strings.TrimSpace(bundleHash)
+	bundleSource = strings.TrimSpace(bundleSource)
+	if status != "running" {
+		return fmt.Errorf("standing run %s has status %q; explicit reset or migration is required", runID, status)
+	}
+	if bundleHash != want.BundleHash || bundleSource != want.BundleSource {
+		return fmt.Errorf("standing run %s belongs to bundle_hash=%s bundle_source=%s, not bundle_hash=%s bundle_source=%s; explicit reset or migration is required",
+			runID, bundleHash, bundleSource, want.BundleHash, want.BundleSource)
+	}
+	return nil
 }
 
 func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {

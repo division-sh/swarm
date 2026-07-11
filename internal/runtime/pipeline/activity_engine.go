@@ -63,7 +63,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			detail["loop_generation"] = intent.Generation.PayloadValue()
 			detail["loop_stage"] = intent.LoopStage
 		}
-		if err := w.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
+		entry := RuntimeLogEntry{
 			Level:     "info",
 			Component: "activity",
 			Action:    "intent_persisted",
@@ -71,7 +71,18 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			EventType: intent.SuccessEvent,
 			EntityID:  intent.EntityID.String(),
 			Detail:    detail,
-		}); err != nil {
+		}
+		logCtx := WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+		logIntent := func() {
+			_ = w.coordinator.bus.LogRuntime(logCtx, entry)
+		}
+		if _, txActive := PipelineSQLTxFromContext(ctx); txActive {
+			if !QueuePipelinePostCommitAction(ctx, logIntent) {
+				return fmt.Errorf("activity intent runtime log requires a post-commit action queue")
+			}
+			continue
+		}
+		if err := w.coordinator.bus.LogRuntime(logCtx, entry); err != nil {
 			return err
 		}
 	}

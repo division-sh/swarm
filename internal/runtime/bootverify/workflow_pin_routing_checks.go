@@ -108,6 +108,9 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 		if normalPrimaryEntityFlow(c.source, flowID, schema) {
 			continue
 		}
+		if standingActivatedFlow(c.source, flowID) {
+			continue
+		}
 		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))
 		if len(inputs) == 0 {
 			continue

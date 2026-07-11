@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -28,6 +29,7 @@ type WorkflowContractValidationOptions struct {
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
 	HarnessInjections              []runtimecontracts.FlowInputProducerInjection
+	ProviderTriggerRegistry        *providertriggers.Registry
 }
 
 type WorkflowContractValidationResult struct {
@@ -114,6 +116,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	connectorErrors := providerconnectors.ValidateSource(source)
 	if len(connectorErrors) > 0 {
 		return result, fmt.Errorf("provider connector validation failed:\n%s", formatValidationErrors(connectorErrors))
+	}
+	if _, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerRegistry); err != nil {
+		return result, fmt.Errorf("standing ingress validation failed: %w", err)
 	}
 
 	return result, nil

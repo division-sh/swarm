@@ -265,6 +265,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "runtime dependency struct carries the named Postgres-only RuntimeSQLDB exception and must not be used as SQLite capability authority",
 		},
+		"internal/runtime/standing_targets.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1951,
+			Reason:         "standing activation consumes the selected WorkflowInstanceStore RunPipelineMutation owner for atomic run, instance, entity, route, and timer creation",
+		},
 		"internal/runtime/sessions/postgres.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

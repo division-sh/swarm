@@ -37,6 +37,26 @@ var projectPackageDocumentFields = map[string]struct{}{
 	"handoffs":         {},
 }
 
+var projectFlowRefFields = map[string]struct{}{
+	"id":         {},
+	"flow":       {},
+	"namespace":  {},
+	"mode":       {},
+	"activation": {},
+	"ingress":    {},
+	"bind":       {},
+}
+
+var projectFlowIngressFields = map[string]struct{}{
+	"alias":     {},
+	"providers": {},
+}
+
+var projectFlowIngressProviderFields = map[string]struct{}{
+	"provider":       {},
+	"signing_secret": {},
+}
+
 func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
@@ -117,6 +137,73 @@ func validateProjectPackageDocumentFields(node *yaml.Node) error {
 		}
 		if _, ok := projectPackageDocumentFields[key]; !ok {
 			return NewUndefinedFieldDiagnostic("package.yaml", key, projectPackageDocumentFields)
+		}
+	}
+	return nil
+}
+
+func (f *ProjectFlowRef) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "ProjectFlowRef package flow entry", projectFlowRefFields); err != nil {
+		return err
+	}
+	type rawProjectFlowRef ProjectFlowRef
+	var out rawProjectFlowRef
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*f = ProjectFlowRef(out)
+	return nil
+}
+
+func (i *ProjectFlowIngress) UnmarshalYAML(node *yaml.Node) error {
+	if i == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress", projectFlowIngressFields); err != nil {
+		return err
+	}
+	type rawProjectFlowIngress ProjectFlowIngress
+	var out rawProjectFlowIngress
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*i = ProjectFlowIngress(out)
+	return nil
+}
+
+func (p *ProjectFlowIngressProvider) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress provider", projectFlowIngressProviderFields); err != nil {
+		return err
+	}
+	type rawProjectFlowIngressProvider ProjectFlowIngressProvider
+	var out rawProjectFlowIngressProvider
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*p = ProjectFlowIngressProvider(out)
+	return nil
+}
+
+func validateKnownMappingFields(node *yaml.Node, owner string, fields map[string]struct{}) error {
+	if node == nil || node.Kind == 0 {
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s must be a mapping", owner)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := fields[key]; !ok {
+			return NewUndefinedFieldDiagnostic(owner, key, fields)
 		}
 	}
 	return nil

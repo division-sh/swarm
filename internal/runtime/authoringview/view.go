@@ -52,6 +52,8 @@ type FlowView struct {
 	ID                   string                    `json:"id"`
 	Path                 string                    `json:"path,omitempty"`
 	Mode                 string                    `json:"mode,omitempty"`
+	Activation           string                    `json:"activation,omitempty"`
+	Ingress              *StandingIngressView      `json:"ingress,omitempty"`
 	SourceFiles          FlowSourceFiles           `json:"source_files"`
 	Agents               []AgentView               `json:"agents,omitempty"`
 	RequiredAgents       RequiredAgentsView        `json:"required_agents"`
@@ -64,6 +66,16 @@ type FlowView struct {
 	InputPins            []InputPinView            `json:"input_pins,omitempty"`
 	OutputPins           []OutputPinView           `json:"output_pins,omitempty"`
 	ContainedOperations  []ContainedOperationView  `json:"contained_operations,omitempty"`
+}
+
+type StandingIngressView struct {
+	Alias     string                        `json:"alias"`
+	Providers []StandingIngressProviderView `json:"providers"`
+}
+
+type StandingIngressProviderView struct {
+	Provider      string `json:"provider"`
+	SigningSecret string `json:"signing_secret"`
 }
 
 type FlowSourceFiles struct {
@@ -327,6 +339,7 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 
 func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []FlowView {
 	opsByFlow := containedOperationsByFlow(source, bundle)
+	refsByFlow := packageFlowRefsByID(bundle)
 	views := bundle.FlowViews()
 	out := make([]FlowView, 0, len(views))
 	for _, flow := range views {
@@ -346,6 +359,20 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			),
 			InputPins:  inputPinViews(source, flowID, schema.Pins.Inputs.EventPins),
 			OutputPins: outputPinViews(source, flowID, schema.Pins.Outputs.EventPins),
+		}
+		if ref, ok := refsByFlow[flowID]; ok {
+			item.Activation = strings.TrimSpace(ref.Activation)
+			if ref.Ingress != nil {
+				alias := strings.TrimSpace(ref.Ingress.Alias)
+				if alias == "" {
+					alias = flowID
+				}
+				ingress := &StandingIngressView{Alias: alias}
+				for _, provider := range ref.Ingress.Providers {
+					ingress.Providers = append(ingress.Providers, StandingIngressProviderView{Provider: strings.TrimSpace(provider.Provider), SigningSecret: strings.TrimSpace(provider.SigningSecret)})
+				}
+				item.Ingress = ingress
+			}
 		}
 		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
 			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
@@ -374,6 +401,21 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		}
 		item.ContainedOperations = opsByFlow[flowID]
 		out = append(out, item)
+	}
+	return out
+}
+
+func packageFlowRefsByID(bundle *runtimecontracts.WorkflowContractBundle) map[string]runtimecontracts.ProjectFlowRef {
+	out := map[string]runtimecontracts.ProjectFlowRef{}
+	if bundle == nil {
+		return out
+	}
+	for _, pkg := range bundle.PackageTree {
+		for _, ref := range pkg.Manifest.Flows {
+			if id := strings.TrimSpace(ref.ID); id != "" {
+				out[id] = ref
+			}
+		}
 	}
 	return out
 }

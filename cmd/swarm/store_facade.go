@@ -70,6 +70,7 @@ type selectedAPICapabilityRequest struct {
 	RunningPlatformSpecPath string
 	LoadedBundle            serveRuntimeBundle
 	RuntimeContexts         []serveRuntimeBundleContext
+	RuntimeContextManager   *runtime.RuntimeContextManager
 	Source                  semanticview.Source
 	ContractsRoot           string
 	Config                  *config.Config
@@ -176,6 +177,7 @@ func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityReq
 		Observability:      observability,
 		RunBundleContext:   f.apiRunBundleContextStore(),
 		TestSetup:          testSetup,
+		RuntimeContexts:    req.RuntimeContextManager,
 	}
 	if f.stores.APIOptionalCapabilityBuilder == nil {
 		return caps, nil

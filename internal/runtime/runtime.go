@@ -272,6 +272,7 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
+	validationOpts.ProviderTriggerRegistry = opts.ProviderTriggerRegistry
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return err
@@ -704,6 +705,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGatewayWithProviderRegistry(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, opts.ProviderTriggerRegistry, stores.InboundStore)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
+		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
 	}
 	if opts.EnableToolGateway {
 		toolGatewayToken := opts.ToolGatewayBinding.AuthToken()

@@ -28,6 +28,7 @@ type BundleContext struct {
 	PlatformSpecPath  string
 	Runtime           *Runtime
 	WorkspaceScopeKey string
+	StandingTargets   []StandingTarget
 }
 
 type RuntimeContextState string
@@ -50,6 +51,13 @@ func (c BundleContext) normalized() BundleContext {
 	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
+	if len(c.StandingTargets) > 0 {
+		targets := make([]StandingTarget, 0, len(c.StandingTargets))
+		for _, target := range c.StandingTargets {
+			targets = append(targets, target.normalized())
+		}
+		c.StandingTargets = targets
+	}
 	return c
 }
 
@@ -70,6 +78,19 @@ type RuntimeContextLookup struct {
 	State   RuntimeContextState
 	Cause   string
 	Found   bool
+}
+
+type RuntimeIngressContextLookup struct {
+	Context    *BundleContext
+	Target     StandingTarget
+	State      RuntimeContextState
+	Cause      string
+	Found      bool
+	AliasFound bool
+}
+
+func (l RuntimeIngressContextLookup) Loaded() bool {
+	return l.Found && l.State == RuntimeContextStateLoaded && l.Context != nil
 }
 
 func (l RuntimeContextLookup) Loaded() bool {
@@ -105,6 +126,13 @@ func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts
 	return manager, nil
 }
 
+// ValidateRuntimeContextSet applies the manager's process-global collision
+// rules without publishing any context as loaded.
+func ValidateRuntimeContextSet(contexts ...BundleContext) error {
+	_, err := NewRuntimeContextManager(nil, contexts...)
+	return err
+}
+
 func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
@@ -124,6 +152,9 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	}
 	if contextDef.Runtime.Bus == nil {
 		return fmt.Errorf("runtime context %s event bus is required", contextDef.BundleHash)
+	}
+	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+		return err
 	}
 	if contextDef.BundleSourceFact.BundleHash == "" {
 		contextDef.BundleSourceFact.BundleHash = contextDef.BundleHash
@@ -146,6 +177,9 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 			runtimeContextBundleLabel(collision.incoming),
 		)
 	}
+	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLocked(contextDef); ok {
+		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	}
 	copied := contextDef
 	m.contexts[contextDef.BundleHash] = &runtimeContextEntry{
 		context: &copied,
@@ -154,6 +188,45 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	m.order = append(m.order, contextDef.BundleHash)
 	sort.Strings(m.order)
 	return nil
+}
+
+func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
+	seen := map[string]string{}
+	for _, target := range contextDef.StandingTargets {
+		target = target.normalized()
+		if target.BundleHash != contextDef.BundleHash {
+			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", contextDef.BundleHash, target.Alias, target.Provider, target.BundleHash)
+		}
+		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || target.SigningSecret == "" {
+			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and signing_secret", contextDef.BundleHash)
+		}
+		key := target.Alias + "\x00" + target.Provider
+		if previous, ok := seen[key]; ok {
+			return fmt.Errorf("runtime context %s duplicate standing target %s and %s for alias %q provider %q", contextDef.BundleHash, previous, target.SourcePath, target.Alias, target.Provider)
+		}
+		seen[key] = target.SourcePath
+	}
+	return nil
+}
+
+func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming BundleContext) (BundleContext, BundleContext, string, bool) {
+	incomingAliases := map[string]struct{}{}
+	for _, target := range incoming.StandingTargets {
+		incomingAliases[target.normalized().Alias] = struct{}{}
+	}
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			alias := target.normalized().Alias
+			if _, ok := incomingAliases[alias]; ok {
+				return *entry.context, incoming, alias, true
+			}
+		}
+	}
+	return BundleContext{}, BundleContext{}, "", false
 }
 
 func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleContext) (runtimeContextAgentSlugCollision, bool) {
@@ -265,6 +338,23 @@ func (m *RuntimeContextManager) BundleHashes() []string {
 	return out
 }
 
+func (m *RuntimeContextManager) LoadedContexts() []BundleContext {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]BundleContext, 0, len(m.order))
+	for _, hash := range m.order {
+		entry := m.contexts[hash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		out = append(out, *entry.context)
+	}
+	return out
+}
+
 func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	if m == nil {
 		return nil, false
@@ -320,6 +410,121 @@ func (m *RuntimeContextManager) LookupBundleHashStatus(bundleHash string) Runtim
 		lookup.Context = entry.context
 	}
 	return lookup
+}
+
+func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIngressContextLookup {
+	if m == nil {
+		return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
+	}
+	alias = strings.Trim(strings.TrimSpace(alias), "/")
+	provider = strings.TrimSpace(provider)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	aliasFound := false
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.context == nil {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			target = target.normalized()
+			if target.Alias != alias {
+				continue
+			}
+			aliasFound = true
+			state := entry.state
+			if state == "" {
+				state = RuntimeContextStateLoaded
+			}
+			cause := strings.TrimSpace(entry.cause)
+			if state != RuntimeContextStateLoaded && cause == "" {
+				cause = RuntimeContextCauseUnavailable
+			}
+			out := RuntimeIngressContextLookup{State: state, Cause: cause, AliasFound: true}
+			if target.Provider != provider {
+				continue
+			}
+			out.Found = true
+			out.Target = target
+			if state == RuntimeContextStateLoaded {
+				out.Context = entry.context
+			}
+			return out
+		}
+	}
+	return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded, AliasFound: aliasFound}
+}
+
+func (m *RuntimeContextManager) ReplaceSameBundle(contextDef BundleContext) error {
+	if m == nil {
+		return fmt.Errorf("runtime context manager is required")
+	}
+	contextDef = contextDef.normalized()
+	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := m.contexts[contextDef.BundleHash]
+	if entry == nil || !runtimeContextEntryLoaded(entry) {
+		return fmt.Errorf("loaded runtime context %s is required for same-bundle replacement", contextDef.BundleHash)
+	}
+	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, contextDef.BundleHash); ok {
+		return fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
+	}
+	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, contextDef.BundleHash); ok {
+		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	}
+	copied := contextDef
+	entry.context = &copied
+	entry.state = RuntimeContextStateLoaded
+	entry.cause = ""
+	return nil
+}
+
+func (m *RuntimeContextManager) duplicateLoadedAgentSlugLockedExcluding(incoming BundleContext, excludedHash string) (runtimeContextAgentSlugCollision, bool) {
+	incomingSet := map[string]struct{}{}
+	for _, agentID := range runtimeContextAgentIDs(incoming.Source) {
+		incomingSet[agentID] = struct{}{}
+	}
+	for _, bundleHash := range m.order {
+		if bundleHash == excludedHash {
+			continue
+		}
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		for _, agentID := range runtimeContextAgentIDs(entry.context.Source) {
+			if _, ok := incomingSet[agentID]; ok {
+				return runtimeContextAgentSlugCollision{agentID: agentID, existing: *entry.context, incoming: incoming}, true
+			}
+		}
+	}
+	return runtimeContextAgentSlugCollision{}, false
+}
+
+func (m *RuntimeContextManager) duplicateLoadedIngressAliasLockedExcluding(incoming BundleContext, excludedHash string) (BundleContext, BundleContext, string, bool) {
+	incomingAliases := map[string]struct{}{}
+	for _, target := range incoming.StandingTargets {
+		incomingAliases[target.normalized().Alias] = struct{}{}
+	}
+	for _, bundleHash := range m.order {
+		if bundleHash == excludedHash {
+			continue
+		}
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			alias := target.normalized().Alias
+			if _, ok := incomingAliases[alias]; ok {
+				return *entry.context, incoming, alias, true
+			}
+		}
+	}
+	return BundleContext{}, BundleContext{}, "", false
 }
 
 func (m *RuntimeContextManager) LookupRun(ctx context.Context, runID string) (*BundleContext, runbundle.Availability, bool, error) {

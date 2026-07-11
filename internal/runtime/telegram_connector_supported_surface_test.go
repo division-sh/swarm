@@ -30,7 +30,9 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func TestTelegramConnectorSupportedSurfaceRoundTripThroughInboundGateway(t *testing.T) {
+// This direct-gateway fixture remains bounded connector integration proof.
+// The process-served standing-ingress tests own the supported E2E claim.
+func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -158,7 +160,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello from telegram"}}`)
 	validReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
 	validRec := httptest.NewRecorder()
-	gateway.Handler().ServeHTTP(validRec, validReq)
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, validRec, validReq, backend.runID, backend.entityID, "telegram", "telegram-secret")
 	if validRec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status = %d, want 202 body=%s", backend.name, validRec.Code, validRec.Body.String())
 	}
@@ -198,7 +200,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 
 	duplicateReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
 	duplicateRec := httptest.NewRecorder()
-	gateway.Handler().ServeHTTP(duplicateRec, duplicateReq)
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, duplicateRec, duplicateReq, backend.runID, backend.entityID, "telegram", "telegram-secret")
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("%s duplicate gateway status = %d, want 200 body=%s", backend.name, duplicateRec.Code, duplicateRec.Body.String())
 	}
@@ -246,7 +248,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	missingTokenBody := []byte(`{"update_id":123456790,"message":{"message_id":8,"chat":{"id":42},"text":"missing token"}}`)
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", missingTokenBody).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
-	gateway.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "telegram", "telegram-secret")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s missing-token gateway status = %d, want 202 body=%s", backend.name, rec.Code, rec.Body.String())
 	}

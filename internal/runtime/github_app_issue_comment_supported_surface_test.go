@@ -61,6 +61,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        false,
 		})
 	})
@@ -86,6 +87,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        true,
 		})
 	})
@@ -334,7 +336,7 @@ func publishGitHubIssueCommentFromSender(t *testing.T, backend slackManagedConne
 	req.Header.Set("X-GitHub-Delivery", deliveryID)
 	req.Header.Set("X-GitHub-Event", "issue_comment")
 	rec := httptest.NewRecorder()
-	gateway.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "github", "github-webhook-secret")
 	if rec.Code != wantStatus {
 		t.Fatalf("%s gateway status for delivery %s = %d, want %d body=%s", backend.name, deliveryID, rec.Code, wantStatus, rec.Body.String())
 	}

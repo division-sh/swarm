@@ -51,6 +51,34 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
+	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+		"--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe standing ingress code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var view authoringview.View
+	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
+		t.Fatalf("decode standing describe json: %v\n%s", err, stdout.String())
+	}
+	if len(view.Flows) != 1 {
+		t.Fatalf("standing describe flows = %#v", view.Flows)
+	}
+	flow := view.Flows[0]
+	if flow.Activation != "standing" || flow.Ingress == nil || flow.Ingress.Alias != "chat" || len(flow.Ingress.Providers) != 1 {
+		t.Fatalf("standing describe flow = %#v", flow)
+	}
+	provider := flow.Ingress.Providers[0]
+	if provider.Provider != "telegram" || provider.SigningSecret != "webhook_signing.telegram" {
+		t.Fatalf("standing describe provider = %#v", provider)
+	}
+}
+
 func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T) {
 	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var routeJSON, routeErr bytes.Buffer

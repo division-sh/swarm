@@ -729,6 +729,9 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 }
 
 func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Kind == primitiveRead && site.InPipelineTransactionCallback && site.UsesBoundaryCallbackTx {
+		return classConsumesCanonical, "WorkflowInstanceStore selected read executes through the callback transaction", true
+	}
 	if site.Kind != primitiveWrite && site.Kind != primitiveBegin {
 		return "", "", false
 	}

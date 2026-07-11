@@ -46,8 +46,19 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
-	return NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, registry, stores...)
+	gateway := NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, registry, stores...)
+	gateway.SetCredentialStore(identityInboundCredentialStore{})
+	return gateway
 }
+
+type identityInboundCredentialStore struct{}
+
+func (identityInboundCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	return key, strings.TrimSpace(key) != "", nil
+}
+func (identityInboundCredentialStore) Set(context.Context, string, string) error { return nil }
+func (identityInboundCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
+func (identityInboundCredentialStore) Delete(context.Context, string) error      { return nil }
 
 type failingInboundEventStore struct{}
 
@@ -78,6 +89,36 @@ func (*capturingInboundEventStore) InsertEventDeliveries(context.Context, string
 
 func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
+}
+
+func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{inserted: true}
+	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	body := []byte(`{"update_id":123,"message":{"chat":{"id":42},"text":"hello"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(string(body)))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	rec := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "chat-flow",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/@standing/a",
+		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
+		SigningSecret: "telegram-secret",
+	}, nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("persisted events = %d, want 1", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.RunID() != "41000000-0000-0000-0000-000000000001" || evt.FlowInstance() != "chat-flow/@standing/a" || evt.EntityID() != "41000000-0000-0000-0000-000000000002" {
+		t.Fatalf("event authority = run=%s flow_instance=%s entity=%s", evt.RunID(), evt.FlowInstance(), evt.EntityID())
+	}
 }
 
 type rollbackTrackingInboundStore struct {
@@ -189,7 +230,7 @@ func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) 
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "unknown entity") {
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no ingress target \"unknown\" is declared") {
 		t.Fatalf("response = %d %q, want target-gate 404", rec.Code, rec.Body.String())
 	}
 	if store.recorded {
@@ -248,7 +289,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "github-secret",
+			SigningSecret: "github-secret",
 		},
 		inserted: true,
 	}
@@ -284,7 +325,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "github-secret",
+			SigningSecret: "github-secret",
 		},
 		inserted: true,
 	}
@@ -336,7 +377,7 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "github-secret",
+			SigningSecret: "github-secret",
 		},
 		inserted: true,
 	}
@@ -371,7 +412,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "github-secret",
+			SigningSecret: "github-secret",
 		},
 		inserted: false,
 	}
@@ -406,7 +447,7 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -444,7 +485,7 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -527,7 +568,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "slack-secret",
+					SigningSecret: "slack-secret",
 				},
 				inserted: true,
 			}
@@ -562,7 +603,7 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -594,7 +635,7 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -663,7 +704,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -716,7 +757,7 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: true,
 	}
@@ -748,7 +789,7 @@ func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "slack-secret",
+			SigningSecret: "slack-secret",
 		},
 		inserted: false,
 	}
@@ -793,7 +834,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "stripe-secret",
+			SigningSecret: "stripe-secret",
 		},
 		inserted: true,
 	}
@@ -960,7 +1001,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "stripe-secret",
+					SigningSecret: "stripe-secret",
 				},
 				inserted: true,
 			}
@@ -994,7 +1035,7 @@ func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "stripe-secret",
+			SigningSecret: "stripe-secret",
 		},
 		inserted: false,
 	}
@@ -1028,7 +1069,7 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "twilio-secret",
+			SigningSecret: "twilio-secret",
 		},
 		inserted: true,
 	}
@@ -1155,7 +1196,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "twilio-secret",
+					SigningSecret: "twilio-secret",
 				},
 				inserted: true,
 			}
@@ -1188,7 +1229,7 @@ func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T)
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "twilio-secret",
+			SigningSecret: "twilio-secret",
 		},
 		inserted: false,
 	}
@@ -1221,7 +1262,7 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "shopify-secret",
+			SigningSecret: "shopify-secret",
 		},
 		inserted: true,
 	}
@@ -1334,7 +1375,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "shopify-secret",
+					SigningSecret: "shopify-secret",
 				},
 				inserted: true,
 			}
@@ -1369,7 +1410,7 @@ func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "shopify-secret",
+			SigningSecret: "shopify-secret",
 		},
 		inserted: false,
 	}
@@ -1441,7 +1482,7 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: tc.secret,
+					SigningSecret: tc.secret,
 				},
 				inserted: true,
 			}
@@ -1625,7 +1666,7 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 					target: InboundTarget{
 						EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 						EntitySlug:    "customer-a",
-						WebhookSecret: providerCase.secret,
+						SigningSecret: providerCase.secret,
 					},
 					inserted: true,
 				}
@@ -1683,7 +1724,7 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: tc.secret,
+					SigningSecret: tc.secret,
 				},
 				inserted: false,
 			}
@@ -1729,7 +1770,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "telegram-secret",
+			SigningSecret: "telegram-secret",
 		},
 		inserted: true,
 	}
@@ -1864,7 +1905,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 				target = InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "telegram-secret",
+					SigningSecret: "telegram-secret",
 				}
 			}
 			store := &recordingInboundStore{
@@ -1901,7 +1942,7 @@ func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "telegram-secret",
+			SigningSecret: "telegram-secret",
 		},
 		inserted: false,
 	}
@@ -1954,7 +1995,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(
 				target: InboundTarget{
 					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 					EntitySlug:    "customer-a",
-					WebhookSecret: "raw-secret",
+					SigningSecret: "raw-secret",
 				},
 				inserted: true,
 			}
@@ -1988,7 +2029,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTelegramSecretToken(t *testin
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "raw-secret",
+			SigningSecret: "raw-secret",
 		},
 		inserted: true,
 	}
@@ -2021,7 +2062,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretShopifySignature(t *testing.T
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "raw-secret",
+			SigningSecret: "raw-secret",
 		},
 		inserted: true,
 	}
@@ -2054,7 +2095,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T)
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "raw-secret",
+			SigningSecret: "raw-secret",
 		},
 		inserted: true,
 	}
@@ -2088,7 +2129,7 @@ func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T)
 		target: InboundTarget{
 			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
 			EntitySlug:    "customer-a",
-			WebhookSecret: "github-secret",
+			SigningSecret: "github-secret",
 		},
 		inserted: true,
 	}

@@ -52,6 +52,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        false,
 		})
 	})
@@ -77,6 +78,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        true,
 		})
 	})
