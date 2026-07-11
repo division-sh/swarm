@@ -3,7 +3,6 @@ package routingtopology
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -204,13 +203,14 @@ type Topology struct {
 
 func Build(source semanticview.Source) Topology {
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	relations := census.ResolveTypedPubSubRelations()
 	plans, planIssues := pinrouting.LowerCompositionConnectRoutePlans(source)
 	builder := topologyBuilder{
 		census:        census,
 		seenEdges:     map[string]struct{}{},
 		seenExposures: map[string]struct{}{},
 	}
-	builder.addTypedPubSubEdges()
+	builder.addTypedPubSubRelations(relations)
 	builder.addBoundaryExposures()
 	builder.addConnectEdges(plans)
 	return Topology{
@@ -237,22 +237,12 @@ type topologyBuilder struct {
 	relationIssues []semanticview.TypedPubSubConsumerIssue
 }
 
-func (b *topologyBuilder) addTypedPubSubEdges() {
-	for _, producer := range b.census.Producers() {
-		if !isExecutableEndpoint(producer) {
+func (b *topologyBuilder) addTypedPubSubRelations(relations semanticview.TypedPubSubRelations) {
+	b.relationIssues = append(b.relationIssues, relations.Issues...)
+	for _, match := range relations.Matches {
+		if match.Producer.Direction == semanticview.EventEndpointProducer && !isExecutableEndpoint(match.Producer) {
 			continue
 		}
-		b.addTypedPubSubMatches(producer)
-	}
-	for _, input := range b.census.InputPins() {
-		b.addTypedPubSubMatches(input)
-	}
-}
-
-func (b *topologyBuilder) addTypedPubSubMatches(producer semanticview.AuthoredEventEndpoint) {
-	matches, issues := b.census.ResolveTypedPubSubConsumerMatches(producer)
-	b.relationIssues = append(b.relationIssues, issues...)
-	for _, match := range matches {
 		if !isExecutableEndpoint(match.Consumer) {
 			continue
 		}
@@ -555,18 +545,14 @@ func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues
 		out = append(out, view)
 	}
 	for _, issue := range relationIssues {
-		details := make([]string, 0, len(issue.Authorizations))
-		for _, authorization := range issue.Authorizations {
-			details = append(details, authorization.Identity())
-		}
 		view := Issue{
 			Location:    strings.TrimSpace(issue.Event.EventKey()),
 			From:        strings.TrimSpace(issue.Producer.ID),
 			To:          strings.TrimSpace(issue.Consumer.ID),
 			Failure:     strings.TrimSpace(issue.Failure),
-			Detail:      strings.Join(details, ", "),
-			Message:     fmt.Sprintf("typed pub/sub relation %s -> %s for %s has multiple distinct import authorization proofs", issue.Producer.ID, issue.Consumer.ID, issue.Event.EventKey()),
-			Remediation: "Remove overlapping import grants so exactly one authorization proof owns this delivery relation.",
+			Detail:      strings.Join(issue.Evidence(), ", "),
+			Message:     issue.Message(),
+			Remediation: issue.Remediation(),
 		}
 		view.ID = issueID(view)
 		out = append(out, view)

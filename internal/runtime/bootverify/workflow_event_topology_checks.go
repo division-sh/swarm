@@ -13,6 +13,10 @@ func checkEventChainIntegrity(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_chain_integrity")
 }
 
+func checkTypedPubSubAuthorization(c *checkerContext) []Finding {
+	return c.eventWarningsByCheck(semanticview.TypedPubSubFailureAuthorizationAmbiguous)
+}
+
 func checkEventConsumerExists(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_consumer_exists")
 }
@@ -46,6 +50,24 @@ func (c *checkerContext) eventWarnings() []Finding {
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	topology := routingtopology.Build(c.source)
 	stagedBundle := bundleUsesAuthoredStages(c.source)
+	rejectedProducers := map[string]struct{}{}
+	for _, issue := range topology.Issues {
+		if strings.TrimSpace(issue.Failure) != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
+			continue
+		}
+		evidence := []string{fmt.Sprintf("rejected typed pub/sub relation %s -> %s", issue.From, issue.To)}
+		if detail := strings.TrimSpace(issue.Detail); detail != "" {
+			evidence = append(evidence, "authorization proofs: "+detail)
+		}
+		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding(
+			semanticview.TypedPubSubFailureAuthorizationAmbiguous,
+			issue.Location,
+			issue.Message,
+			issue.Remediation,
+			evidence...,
+		))
+		rejectedProducers[strings.TrimSpace(issue.From)] = struct{}{}
+	}
 	for _, subscription := range topology.LegacyQualifiedSubscriptions {
 		message := fmt.Sprintf("legacy qualified subscription '%s' at %s still delivers at runtime but is outside canonical same-flow pub/sub and pin/connect topology; migrate to pins/connect", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)
 		remediation := subscription.Migration
@@ -78,6 +100,9 @@ func (c *checkerContext) eventWarnings() []Finding {
 				Message:  fmt.Sprintf("'%s' emitted but no schema in events.yaml", ref.DisplayName()),
 				Location: ref.DisplayName(),
 			})
+			continue
+		}
+		if _, rejected := rejectedProducers[strings.TrimSpace(entry.ID)]; rejected {
 			continue
 		}
 		if topologyRoutesProducer(topology, entry.ID) || eventHasExternalConsumerLocal(ref.Entry) {

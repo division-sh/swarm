@@ -210,6 +210,7 @@ type checkerContext struct {
 var bootCheckRegistry = []Check{
 	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
+	{ID: semanticview.TypedPubSubFailureAuthorizationAmbiguous, Severity: SeverityHardInvalidity, Run: checkTypedPubSubAuthorization},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "legacy_qualified_subscription", Severity: "warning", Run: checkLegacyQualifiedSubscription},

@@ -139,6 +139,11 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		}
 	}
 	routeTable := opts.RouteTable
+	if routeTable != nil {
+		if err := validateTypedPubSubAuthorizations(semanticSource); err != nil {
+			return nil, err
+		}
+	}
 	if routeTable == nil {
 		derived, err := DeriveRouteTable(semanticSource)
 		if err != nil {

@@ -117,6 +117,33 @@ type TypedPubSubConsumerIssue struct {
 	Authorizations []TypedPubSubAuthorizationProof `json:"authorizations"`
 }
 
+type TypedPubSubRelations struct {
+	Matches []TypedPubSubConsumerMatch `json:"matches"`
+	Issues  []TypedPubSubConsumerIssue `json:"issues"`
+}
+
+func (i TypedPubSubConsumerIssue) Message() string {
+	return fmt.Sprintf(
+		"typed pub/sub relation %s -> %s for %s has multiple distinct import authorization proofs",
+		strings.TrimSpace(i.Producer.ID),
+		strings.TrimSpace(i.Consumer.ID),
+		strings.TrimSpace(i.Event.EventKey()),
+	)
+}
+
+func (i TypedPubSubConsumerIssue) Remediation() string {
+	return "Remove overlapping import grants so exactly one authorization proof owns this delivery relation."
+}
+
+func (i TypedPubSubConsumerIssue) Evidence() []string {
+	out := make([]string, 0, len(i.Authorizations))
+	for _, authorization := range i.Authorizations {
+		out = append(out, authorization.Identity())
+	}
+	sort.Strings(out)
+	return out
+}
+
 type LegacyQualifiedSubscription struct {
 	ID             string                `json:"id"`
 	Consumer       AuthoredEventEndpoint `json:"consumer"`
@@ -207,6 +234,32 @@ func (c AuthoredEventEndpointCensus) MatchingOutputPins(flowID, eventType string
 
 func (c AuthoredEventEndpointCensus) MatchingConsumers(flowID, eventType string) []AuthoredEventEndpoint {
 	return c.matchingEndpoints(c.consumers, flowID, eventType)
+}
+
+// ResolveTypedPubSubRelations returns the complete authored relation result.
+// Static projection, verification, and runtime admission consume this same
+// match/issue decision rather than interpreting wildcard grants independently.
+func (c AuthoredEventEndpointCensus) ResolveTypedPubSubRelations() TypedPubSubRelations {
+	producers := make([]AuthoredEventEndpoint, 0, len(c.producers)+len(c.inputPins))
+	producers = append(producers, c.producers...)
+	producers = append(producers, c.inputPins...)
+
+	result := TypedPubSubRelations{
+		Matches: []TypedPubSubConsumerMatch{},
+		Issues:  []TypedPubSubConsumerIssue{},
+	}
+	for _, producer := range producers {
+		matches, issues := c.ResolveTypedPubSubConsumerMatches(producer)
+		result.Matches = append(result.Matches, matches...)
+		result.Issues = append(result.Issues, issues...)
+	}
+	sort.SliceStable(result.Matches, func(i, j int) bool {
+		return typedPubSubConsumerMatchSortKey(result.Matches[i]) < typedPubSubConsumerMatchSortKey(result.Matches[j])
+	})
+	sort.SliceStable(result.Issues, func(i, j int) bool {
+		return typedPubSubConsumerIssueSortKey(result.Issues[i]) < typedPubSubConsumerIssueSortKey(result.Issues[j])
+	})
+	return result
 }
 
 // ResolveTypedPubSubConsumerMatches is the canonical static relation owner for

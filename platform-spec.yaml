@@ -8645,7 +8645,10 @@ flow_model:
             only pattern with boundary import_boundary and a stable normalized authorization proof naming the authorizing
             parent package, child package, import label/source, event pattern, and route source. Exact duplicate proofs
             collapse deterministically; distinct proofs for one relation are a typed ambiguity and produce an issue, not an
-            edge. Canonical name equality alone never authorizes a cross-flow edge.
+            edge. The complete ordered relation result is consumed by static topology projection, boot verification, and
+            runtime route admission. Typed authorization ambiguity is a hard invalidity: route-table and EventBus construction
+            fail closed without runtime delivery authority, including when a caller supplies a prebuilt route table. Canonical
+            name equality alone never authorizes a cross-flow edge.
           connect_source_rule: >
             Every inter_flow_connect edge and connect-lowering issue carries the exact authored package.yaml file:line
             captured by contract loading and propagated through normalization and lowering. Missing source file or positive
