@@ -11,6 +11,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -103,12 +104,39 @@ func (e *Executor) writeToolResultRelayFile(ctx context.Context, target *workspa
 		if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
 			return toolResultRelayFailure(err, "tool_result_relay_write_failed", "create_parent", map[string]any{"relay_path": resolved.LogicalPath})
 		}
-		if err := os.WriteFile(resolved.HostPath, payload, 0o644); err != nil {
-			return toolResultRelayFailure(err, "tool_result_relay_write_failed", "write_file", map[string]any{"relay_path": resolved.LogicalPath})
+		attempt, err := runtimeeffects.Begin(ctx, "tool_result_relay", append([]byte(resolved.LogicalPath+"\x00"), payload...), map[string]string{"logical_path": resolved.LogicalPath})
+		if err != nil {
+			return err
+		}
+		if err := attempt.MarkLaunched(ctx); err != nil {
+			return err
+		}
+		tmp, err := os.CreateTemp(filepath.Dir(resolved.HostPath), ".swarm-relay-*")
+		if err != nil {
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "create_temp", map[string]any{"relay_path": resolved.LogicalPath}, err)
+		}
+		tmpPath := tmp.Name()
+		defer os.Remove(tmpPath)
+		if _, err := tmp.Write(payload); err != nil {
+			_ = tmp.Close()
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "write_file", map[string]any{"relay_path": resolved.LogicalPath}, err)
+		}
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "sync_file", map[string]any{"relay_path": resolved.LogicalPath}, err)
+		}
+		if err := tmp.Close(); err != nil {
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "close_file", map[string]any{"relay_path": resolved.LogicalPath}, err)
+		}
+		if err := os.Rename(tmpPath, resolved.HostPath); err != nil {
+			return attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "tool_result_relay_outcome_unconfirmed", "tool-executor", "replace_file", map[string]any{"relay_path": resolved.LogicalPath}, err)
+		}
+		if err := attempt.Succeed(ctx, map[string]any{"relay_path": resolved.LogicalPath, "content_fingerprint": runtimeeffects.Fingerprint(payload)}); err != nil {
+			return err
 		}
 		return nil
 	default:
-		_, _, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, string(payload), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
+		_, _, exitCode, execErr := e.runWorkspaceCommand(ctx, target, "tool_result_relay", 30*time.Second, string(payload), "sh", "-lc", `dir="$(dirname -- "$1")" && mkdir -p -- "$dir" && tmp="$(mktemp "$dir/.swarm-relay.XXXXXX")" && trap 'rm -f -- "$tmp"' EXIT && cat > "$tmp" && sync "$tmp" && mv -f -- "$tmp" "$1"`, "swarm-tool-result-relay", relayPath)
 		if execErr != nil || exitCode != 0 {
 			cause := execErr
 			if cause == nil {

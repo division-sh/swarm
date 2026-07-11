@@ -24,7 +24,7 @@ type OperatorAgentConversationReadSource interface {
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
 	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error)
 	ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error)
+	ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error)
 }
 
 type OperatorConversationReadSource interface {
@@ -1205,7 +1205,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.source.ListAgentLifecycleFacts(ctx, agentIDs)
+	lifecycleByAgent, err := r.source.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
 	if err != nil {
 		return nil, err
 	}

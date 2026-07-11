@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -267,44 +267,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, err
 	}
 
-	maxRetries := r.cfg.LLM.ClaudeAPI.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 1
-	}
-	backoff := r.cfg.LLM.ClaudeAPI.RetryBackoff
-	if backoff <= 0 {
-		backoff = 2 * time.Second
-	}
-
 	start := time.Now()
-	var lastErr error
-	var rawResp []byte
-	var parsed anthropicResponse
-	var retryCount int
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		retryCount = attempt
-		rawResp, parsed, lastErr = r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
-		if lastErr == nil {
-			break
-		}
-		if !shouldRetryAnthropicError(lastErr) {
-			break
-		}
-		if attempt == maxRetries-1 {
-			break
-		}
-		sleep := backoff * time.Duration(1<<attempt)
-		select {
-		case <-ctx.Done():
-			lastErr = ctx.Err()
-			attempt = maxRetries - 1
-		case <-time.After(sleep):
-		}
-	}
+	rawResp, parsed, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 	latency := time.Since(start)
 
 	if lastErr != nil {
-		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
@@ -313,13 +280,20 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			ResponseRaw:    rawResp,
 			ParseOK:        false,
 			Latency:        latency,
-			RetryCount:     retryCount,
+			RetryCount:     0,
 			Failure:        agentTurnFailure(lastErr, "anthropic_turn"),
 		}, nil))
-		if !resolved.Stateless {
+		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
+		if projectionErr == nil {
+			s.ParseFailures++
+		}
+		if projectionErr == nil && !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
+		}
+		if projectionErr != nil {
+			return nil, projectionErr
 		}
 		return nil, lastErr
 	}
@@ -331,18 +305,19 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		var ok bool
 		usage, ok = extractUsageTokensFromJSON(rawResp)
 		if !ok {
-			return nil, fmt.Errorf("anthropic response missing usage")
+			usageErr := fmt.Errorf("anthropic response missing usage")
+			r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+				AgentID: s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
+				RequestPayload: reqJSON, ResponseRaw: rawResp, ParseOK: false, Latency: latency,
+				Failure: agentTurnFailure(usageErr, "anthropic_usage"),
+			}, nil))
+			if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
+				return nil, projectionErr
+			}
+			s.ParseFailures++
+			return nil, usageErr
 		}
 		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
-	}
-
-	s.Messages = append(s.Messages, message, resp.Message)
-	s.TurnCount++
-	s.ParseFailures = 0
-	if !resolved.Stateless {
-		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
-			return nil, err
-		}
 	}
 
 	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
@@ -353,9 +328,8 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		ResponseRaw:    rawResp,
 		ParseOK:        true,
 		Latency:        latency,
-		RetryCount:     retryCount,
+		RetryCount:     0,
 	}, &resp))
-	r.persistConversation(ctx, s)
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.
 	if r.budget != nil {
@@ -367,6 +341,19 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			logPublisherRuntime(ctx, r.events, "warn", "record_api_llm_usage_failed", "Recording API LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}
+
+	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
+		return nil, err
+	}
+	s.Messages = append(s.Messages, message, resp.Message)
+	s.TurnCount++
+	s.ParseFailures = 0
+	if !resolved.Stateless {
+		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
+			return nil, err
+		}
+	}
+	r.persistConversation(ctx, s)
 
 	if !resolved.Stateless {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
@@ -505,37 +492,40 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) (
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	attempt, err := runtimeeffects.Begin(ctx, "anthropic_api", payload, nil)
+	if err != nil {
+		return nil, anthropicResponse{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return nil, anthropicResponse{}, err
+	}
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassTimeout, "anthropic_request_timeout", "anthropic-adapter", "send_request", nil, err)
-		}
-		return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_transport_failure", "anthropic-adapter", "send_request", nil, err)
+		return nil, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"stage": "transport"}, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_response_read_failed", "anthropic-adapter", "read_response", nil, err)
+		return nil, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
 	}
 
 	var parsed anthropicResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_response_invalid", "anthropic-adapter", "decode_response", nil, err)
+		return body, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
 	}
 
 	if httpResp.StatusCode >= 300 {
-		return body, parsed, providerStatusFailure("anthropic", httpResp.StatusCode)
+		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("anthropic", httpResp.StatusCode))
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, runtimefailures.New(runtimefailures.ClassConnectorFailure, "anthropic_provider_error", "anthropic-adapter", "decode_response", nil)
+		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "anthropic-adapter", "decode_response", nil, nil)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}); err != nil {
+		return body, parsed, err
 	}
 	return body, parsed, nil
-}
-
-func shouldRetryAnthropicError(err error) bool {
-	return runtimeengine.FailureDispositionFor(err) == runtimeengine.FailureDispositionRetry
 }
 
 func convertAnthropicResponse(parsed anthropicResponse) Response {

@@ -7,8 +7,8 @@ import (
 )
 
 func TestRegistryIsClosedAndSelectorsArePositiveSets(t *testing.T) {
-	if got := len(Classes()); got != 21 {
-		t.Fatalf("class count = %d, want 21", got)
+	if got := len(Classes()); got != 23 {
+		t.Fatalf("class count = %d, want 23", got)
 	}
 	all, ok := SelectorMembers(SelectorAny)
 	if !ok || !reflect.DeepEqual(all, Classes()) {
@@ -29,8 +29,8 @@ func TestRegistryIsClosedAndSelectorsArePositiveSets(t *testing.T) {
 			t.Fatalf("platform.any_task_failure unexpectedly contains %s", class)
 		}
 	}
-	if len(task) != 16 {
-		t.Fatalf("platform.any_task_failure member count = %d, want 16", len(task))
+	if len(task) != 18 {
+		t.Fatalf("platform.any_task_failure member count = %d, want 18", len(task))
 	}
 	if _, ok := SelectorMembers("platform.anything"); ok {
 		t.Fatal("unknown platform selector was accepted")

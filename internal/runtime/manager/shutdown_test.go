@@ -316,9 +316,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 	}
 
 	am.Run(context.Background())
-	am.runMu.Lock()
-	initialRunCtx := am.runCtx
-	am.runMu.Unlock()
+	initialRunCtx, _, _ := am.lifecycle.runSnapshot()
 	if initialRunCtx == nil {
 		t.Fatal("expected initial run context")
 	}
@@ -350,11 +348,8 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 
 	am.Run(context.Background())
 
-	am.runMu.Lock()
-	currentRunCtx := am.runCtx
-	running := am.running
-	shuttingDown := am.shuttingDown
-	am.runMu.Unlock()
+	currentRunCtx, _, running := am.lifecycle.runSnapshot()
+	shuttingDown := am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown
 	if currentRunCtx != initialRunCtx {
 		t.Fatal("Run replaced the active run context during shutdown drain")
 	}

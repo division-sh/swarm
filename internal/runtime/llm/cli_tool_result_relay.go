@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -74,7 +75,7 @@ func sanitizeRelayPathComponent(raw string) string {
 }
 
 func (r *ClaudeCLIRuntime) writeWorkspaceRelayFile(ctx context.Context, target *workspace.Target, relayPath string, rawJSON []byte) error {
-	_, stderr, exitCode, err := r.runWorkspaceCommand(ctx, target, string(rawJSON), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
+	_, stderr, exitCode, err := r.runWorkspaceCommand(ctx, target, string(rawJSON), "sh", "-lc", `dir="$(dirname -- "$1")" && mkdir -p -- "$dir" && tmp="$(mktemp "$dir/.swarm-relay.XXXXXX")" && trap 'rm -f -- "$tmp"' EXIT && cat > "$tmp" && sync "$tmp" && mv -f -- "$tmp" "$1"`, "swarm-tool-result-relay", relayPath)
 	if err != nil || exitCode != 0 {
 		cause := err
 		if cause == nil {
@@ -106,8 +107,25 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if len(args) == 0 {
 		return nil, nil, 0, fmt.Errorf("workspace command args are required")
 	}
+	attempt, err := runtimeeffects.Begin(ctx, "claude_tool_result_relay", []byte(strings.Join(args, "\x00")+"\x00"+stdin), nil)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	if r != nil && r.execWorkspaceFn != nil {
-		return r.execWorkspaceFn(ctx, target, stdin, args...)
+		if err := attempt.MarkLaunched(ctx); err != nil {
+			return nil, nil, 0, err
+		}
+		stdout, stderr, exitCode, runErr := r.execWorkspaceFn(ctx, target, stdin, args...)
+		if runErr != nil || exitCode != 0 {
+			if runErr == nil {
+				runErr = fmt.Errorf("workspace command exited with code %d", exitCode)
+			}
+			return stdout, stderr, exitCode, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_tool_result_relay_outcome_unconfirmed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"exit_code": exitCode}, runErr)
+		}
+		if err := attempt.Succeed(ctx, map[string]any{"exit_code": exitCode}); err != nil {
+			return stdout, stderr, exitCode, err
+		}
+		return stdout, stderr, exitCode, nil
 	}
 	dockerBin := configuredWorkspaceDockerBin(r.cfg)
 	dockerArgs := []string{"exec", "-i"}
@@ -124,7 +142,14 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if strings.TrimSpace(stdin) != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_tool_result_relay_start_failed", "claude-cli-adapter", "write_tool_result_relay", nil, err)
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		_ = cmd.Process.Kill()
+		return stdout.Bytes(), stderr.Bytes(), -1, err
+	}
+	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -133,6 +158,10 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 		if exitCode == 0 {
 			exitCode = -1
 		}
+		return stdout.Bytes(), stderr.Bytes(), exitCode, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_tool_result_relay_outcome_unconfirmed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"exit_code": exitCode}, err)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"exit_code": exitCode}); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), exitCode, err
 	}
 	return stdout.Bytes(), stderr.Bytes(), exitCode, err
 }

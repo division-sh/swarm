@@ -366,9 +366,9 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("live session lineage count = %d, want 1", liveSessionCount)
 	}
 
-	facts, err := pg.ListAgentLifecycleFacts(ctx, []string{"agent-1"})
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
 	if err != nil {
-		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
 	if got := facts["agent-1"].CurrentState; got != "active" {
 		t.Fatalf("lifecycle current_state = %q, want active", got)
@@ -1055,6 +1055,16 @@ type conformanceManagerReplayStore struct {
 	agents   []runtimemanager.PersistedAgent
 	pending  map[string][]events.Event
 	receipts map[string]runtimemanager.EventReceipt
+}
+
+func (*conformanceManagerReplayStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return runtimemanager.AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: req.OperationID, AgentID: req.AgentID,
+		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
+		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+	}, nil
 }
 
 func (*conformanceManagerReplayStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {

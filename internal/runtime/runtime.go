@@ -664,7 +664,12 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if rt.Pipeline != nil {
 		workflowInstances = rt.Pipeline.WorkflowInstanceStore()
 	}
+	lifecycleStore, lifecycleStoreOK := stores.ManagerStore.(runtimemanager.AgentLifecyclePersistence)
+	if stores.SQLDB != nil && (!lifecycleStoreOK || lifecycleStore == nil) {
+		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
+	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
+		LifecycleStore:         lifecycleStore,
 		Workspaces:             rt.Workspace,
 		Sessions:               stores.SessionRegistry,
 		SemanticSource:         source,

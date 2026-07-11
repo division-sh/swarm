@@ -97,8 +97,6 @@ func testRuntimeConfig() *config.Config {
 			ClaudeAPI: config.ClaudeAPIConfig{
 				DefaultModel: "test-model",
 				HaikuModel:   "test-haiku",
-				MaxRetries:   1,
-				RetryBackoff: time.Millisecond,
 			},
 		},
 	}

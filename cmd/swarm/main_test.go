@@ -4343,6 +4343,11 @@ func TestServedParityHarnessLiveAgentReplayBacklogLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentReplayBacklogBackendProof)
 }
 
+func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle)
+	servedparity.Run(t, scenario, runServedAgentRestartBackendProof)
+}
+
 func TestServedParityHarnessAgentDirectiveOutcomeLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle)
 	servedparity.Run(t, scenario, runServedAgentDirectiveBackendProof)
@@ -4636,6 +4641,12 @@ func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedpar
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentReplayBacklogLifecycleProof(t, rt)
+}
+
+func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedLiveAgentProofRuntime(t, backend)
+	runServedAgentRestartLifecycleProof(t, rt)
 }
 
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -5904,6 +5915,82 @@ type servedAgentReplayProofResult struct {
 type servedAgentReplayBacklogProofResult struct {
 	OK            bool `json:"ok"`
 	ReplayedCount int  `json:"replayed_count"`
+}
+
+type servedAgentRestartProofResult struct {
+	OK bool `json:"ok"`
+}
+
+func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	const agentID = "load-agent"
+	beforeGeneration := servedAgentLifecycleGeneration(t, rt, agentID)
+	key := "issue-1927-" + rt.Backend + "-restart-" + uuid.NewString()
+	params := map[string]any{"agent_id": agentID, "idempotency_key": key}
+
+	var first servedAgentRestartProofResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &first)
+	if !first.OK {
+		t.Fatalf("%s agent.restart result = %#v", rt.Backend, first)
+	}
+	afterGeneration := servedAgentLifecycleGeneration(t, rt, agentID)
+	if afterGeneration != beforeGeneration+1 {
+		t.Fatalf("%s restart generation = %d, want adjacent %d", rt.Backend, afterGeneration, beforeGeneration+1)
+	}
+	requireServedAgentRestartEvidence(t, rt, agentID, afterGeneration, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
+
+	var replay servedAgentRestartProofResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &replay)
+	if replay != first {
+		t.Fatalf("%s restart replay = %#v, want %#v", rt.Backend, replay, first)
+	}
+	if got := servedAgentLifecycleGeneration(t, rt, agentID); got != afterGeneration {
+		t.Fatalf("%s replay generation = %d, want unchanged %d", rt.Backend, got, afterGeneration)
+	}
+	requireServedAgentRestartEvidence(t, rt, agentID, afterGeneration, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
+
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1927-restart-delivery-"+uuid.NewString())
+	postRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-restart")
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
+}
+
+func servedAgentLifecycleGeneration(t *testing.T, rt servedControlProofRuntime, agentID string) uint64 {
+	t.Helper()
+	query := `SELECT lifecycle_generation FROM agents WHERE agent_id = ?`
+	if rt.Backend == "postgres" {
+		query = `SELECT lifecycle_generation FROM agents WHERE agent_id = $1`
+	}
+	var generation int64
+	if err := rt.DB.QueryRow(query, agentID).Scan(&generation); err != nil {
+		t.Fatalf("%s load lifecycle generation for %s: %v", rt.Backend, agentID, err)
+	}
+	return uint64(generation)
+}
+
+func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntime, agentID string, generation uint64, want int) {
+	t.Helper()
+	placeholder := "?"
+	factGenerationPlaceholder := "?"
+	if rt.Backend == "postgres" {
+		placeholder = "$1"
+		factGenerationPlaceholder = "$2"
+	}
+	var operations, facts, outbox int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_operations WHERE agent_id = `+placeholder+` AND operation_kind = 'restart'`, agentID).Scan(&operations); err != nil {
+		t.Fatalf("%s count restart operations: %v", rt.Backend, err)
+	}
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_transition_facts WHERE agent_id = `+placeholder+` AND trigger = 'restart' AND next_generation = `+factGenerationPlaceholder, agentID, generation).Scan(&facts); err != nil {
+		t.Fatalf("%s count restart transition facts: %v", rt.Backend, err)
+	}
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE agent_id = `+placeholder+` AND operation_id IN (SELECT operation_id FROM agent_lifecycle_operations WHERE operation_kind = 'restart')`, agentID).Scan(&outbox); err != nil {
+		t.Fatalf("%s count restart diagnostic outbox rows: %v", rt.Backend, err)
+	}
+	if operations != want || facts != want || outbox != want {
+		t.Fatalf("%s restart evidence operations=%d facts=%d outbox=%d, want %d each", rt.Backend, operations, facts, outbox, want)
+	}
 }
 
 func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -11579,9 +11666,6 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateAfterTurns != 40 || cfg.LLM.Session.RotateOnParseFailures != 3 {
 		t.Fatalf("session defaults = %#v, want built-ins", cfg.LLM.Session)
 	}
-	if cfg.LLM.ClaudeAPI.MaxRetries != 1 || cfg.LLM.ClaudeAPI.RetryBackoff != 2*time.Second {
-		t.Fatalf("claude_api defaults = %#v, want built-ins", cfg.LLM.ClaudeAPI)
-	}
 	if cfg.LLM.ClaudeCLI.Command != "claude" ||
 		cfg.LLM.ClaudeCLI.Timeout != time.Hour ||
 		cfg.LLM.ClaudeCLI.OutputFormat != "stream-json" ||
@@ -11609,8 +11693,6 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
 		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
 		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
-		"SWARM_CLAUDE_API_MAX_RETRIES":               "1",
-		"SWARM_CLAUDE_API_RETRY_BACKOFF":             "1s",
 		"SWARM_CLAUDE_CLI_COMMAND":                   "false",
 		"SWARM_CLAUDE_CLI_TIMEOUT":                   "1s",
 		"SWARM_CLAUDE_CLI_OUTPUT_FORMAT":             "stream-json",
@@ -11630,9 +11712,6 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 		"    lock_ttl: 22s",
 		"    rotate_after_turns: 55",
 		"    rotate_on_parse_failures: 9",
-		"  claude_api:",
-		"    max_retries: 8",
-		"    retry_backoff: 11s",
 		"  claude_cli:",
 		"    command: echo",
 		"    timeout: 44s",
@@ -11649,9 +11728,6 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 	}
 	if cfg.LLM.Session.LockTTL != 22*time.Second || cfg.LLM.Session.RotateAfterTurns != 55 || cfg.LLM.Session.RotateOnParseFailures != 9 {
 		t.Fatalf("session config = %#v, want typed config values", cfg.LLM.Session)
-	}
-	if cfg.LLM.ClaudeAPI.MaxRetries != 8 || cfg.LLM.ClaudeAPI.RetryBackoff != 11*time.Second {
-		t.Fatalf("claude_api config = %#v, want typed config values", cfg.LLM.ClaudeAPI)
 	}
 	if cfg.LLM.ClaudeCLI.Command != "echo" || cfg.LLM.ClaudeCLI.Timeout != 44*time.Second || cfg.LLM.ClaudeCLI.OutputFormat != "json" {
 		t.Fatalf("claude_cli config = %#v, want typed config values", cfg.LLM.ClaudeCLI)

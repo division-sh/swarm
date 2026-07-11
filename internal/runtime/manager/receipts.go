@@ -323,8 +323,8 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 		return
 	}
 	am.authBreakerTripped = true
-	running := am.running
 	am.runMu.Unlock()
+	_, _, running := am.lifecycle.runSnapshot()
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
 	if am.runtimeIngressSafetyPause != nil {

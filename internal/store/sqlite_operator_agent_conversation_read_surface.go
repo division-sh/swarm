@@ -59,7 +59,7 @@ func (s *SQLiteRuntimeStore) LoadCurrentOperatorConversationForAgent(ctx context
 	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadCurrentOperatorConversationForAgent(ctx, agentID)
 }
 
-func (s *SQLiteRuntimeStore) ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error) {
+func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -68,9 +68,9 @@ func (s *SQLiteRuntimeStore) ListAgentLifecycleFacts(ctx context.Context, agentI
 		return nil, err
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)
-	out := make(map[string]AgentLifecycleFacts, len(normalized))
+	out := make(map[string]AgentDeliveryLifecycleFacts, len(normalized))
 	for _, agentID := range normalized {
-		out[agentID] = AgentLifecycleFacts{}
+		out[agentID] = AgentDeliveryLifecycleFacts{}
 	}
 	if len(normalized) == 0 {
 		return out, nil
@@ -84,7 +84,7 @@ func (s *SQLiteRuntimeStore) ListAgentLifecycleFacts(ctx context.Context, agentI
 		grouped[record.AgentID] = append(grouped[record.AgentID], record)
 	}
 	for _, agentID := range normalized {
-		out[agentID] = canonicalAgentLifecycleFactsFromRecords(grouped[agentID])
+		out[agentID] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[agentID])
 	}
 	return out, nil
 }
@@ -692,7 +692,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.store.ListAgentLifecycleFacts(ctx, agentIDs)
+	lifecycleByAgent, err := r.store.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
 	if err != nil {
 		return nil, err
 	}

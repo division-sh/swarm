@@ -385,7 +385,6 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	latency := time.Since(start)
 	if err != nil {
-		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:     s.AgentID,
 			RuntimeMode: resolved.RuntimeMode.String(),
@@ -401,10 +400,17 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			Latency: latency,
 			Failure: agentTurnFailure(err, "claude_cli_turn"),
 		}, nil))
-		if !resolved.Stateless {
+		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
+		if projectionErr == nil {
+			s.ParseFailures++
+		}
+		if projectionErr == nil && !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
+		}
+		if projectionErr != nil {
+			return nil, projectionErr
 		}
 		return nil, err
 	}
@@ -425,9 +431,43 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			Latency:     latency,
 			Failure:     agentTurnFailure(err, "claude_cli_tool_validation"),
 		}, resp))
+		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
+			return nil, projectionErr
+		}
 		return nil, err
 	}
 
+	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+		AgentID:     s.AgentID,
+		RuntimeMode: resolved.RuntimeMode.String(),
+		SessionID:   s.ID,
+		RequestPayload: jsonBytes(map[string]any{
+			"args":                          args,
+			"message":                       message,
+			"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
+			"prompt_arg_fallback_attempted": transportFallback.Attempted,
+			"prompt_arg_fallback_used":      transportFallback.Used,
+		}),
+		ResponseRaw: resp.Raw,
+		ParseOK:     true,
+		Latency:     latency,
+	}, resp))
+
+	// Spend is immutable evidence of the launched provider attempt and remains
+	// attributable even when this generation was superseded before projection.
+	if r.budget != nil {
+		usage := estimateCLIUsageTokens(message, resp, actor)
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+		meta := usageMetadataForContext(ctx, profile, usage.Model)
+		meta["session_id"] = s.ID
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, false, meta); err != nil {
+			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", "Recording CLI LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
+		}
+	}
+
+	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
+		return nil, err
+	}
 	s.Messages = append(s.Messages, message, resp.Message)
 	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ProviderSessionID {
 		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
@@ -454,33 +494,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-		AgentID:     s.AgentID,
-		RuntimeMode: resolved.RuntimeMode.String(),
-		SessionID:   s.ID,
-		RequestPayload: jsonBytes(map[string]any{
-			"args":                          args,
-			"message":                       message,
-			"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
-			"prompt_arg_fallback_attempted": transportFallback.Attempted,
-			"prompt_arg_fallback_used":      transportFallback.Used,
-		}),
-		ResponseRaw: resp.Raw,
-		ParseOK:     true,
-		Latency:     latency,
-	}, resp))
 	r.persistConversation(ctx, s)
-
-	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.
-	if r.budget != nil {
-		usage := estimateCLIUsageTokens(message, resp, actor)
-		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-		meta := usageMetadataForContext(ctx, profile, usage.Model)
-		meta["session_id"] = s.ID
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, false, meta); err != nil {
-			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", "Recording CLI LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
-		}
-	}
 
 	if !resolved.Stateless {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {

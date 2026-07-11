@@ -200,15 +200,17 @@ mutating_api_parity_ledger:
       conflict before effects, terminal settlement/API projection, keyless fresh
       operations, and standard quiescence postconditions.
   - method: agent.restart
-    classification: split_with_issue_ref
-    split_issue: 1927
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_restart_lifecycle
     proof_refs:
-      - {kind: tracker, issue: 1927, watchlist: runtime_operations.shutdown_and_runtime_lifecycle}
+      - {kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle}
     notes: >
-      Split to #1927 because honest served proof requires canonical per-agent
-      loop lifecycle ownership, persistence, partial-failure, and idempotency
-      semantics. Method reachability or post-call delivery is not sufficient
-      dual-backend proof.
+      Shared served harness proves real /v1/rpc agent.restart on default SQLite
+      and explicit Postgres through the canonical lifecycle coordinator and
+      durable selected-store transition owner. It proves adjacent generation,
+      one operation/fact/outbox outcome, same-key replay without another
+      transition, post-restart delivery, and standard quiescence postconditions.
   - method: agent.replay_backlog
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

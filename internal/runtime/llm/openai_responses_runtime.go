@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -276,7 +277,6 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	rawResp, parsed, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 	latency := time.Since(start)
 	if err != nil {
-		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
@@ -287,10 +287,17 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_turn"),
 		}, nil))
-		if !resolved.Stateless {
+		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
+		if projectionErr == nil {
+			s.ParseFailures++
+		}
+		if projectionErr == nil && !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
+		}
+		if projectionErr != nil {
+			return nil, projectionErr
 		}
 		return nil, err
 	}
@@ -298,7 +305,6 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	usage, ok := openAIResponsesUsage(parsed)
 	if !ok {
 		err := errors.New("openai-responses response missing usage")
-		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
@@ -309,12 +315,15 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_usage"),
 		}, nil))
+		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
+			return nil, projectionErr
+		}
+		s.ParseFailures++
 		return nil, err
 	}
 
 	resp, err := convertOpenAIResponsesResponse(parsed)
 	if err != nil {
-		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
@@ -325,18 +334,13 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_decode"),
 		}, nil))
+		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
+			return nil, projectionErr
+		}
+		s.ParseFailures++
 		return nil, err
 	}
 	resp.Raw = rawResp
-
-	s.Messages = append(s.Messages, message, resp.Message)
-	s.TurnCount++
-	s.ParseFailures = 0
-	if !resolved.Stateless {
-		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
-			return nil, err
-		}
-	}
 
 	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
@@ -347,7 +351,6 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 		ParseOK:        true,
 		Latency:        latency,
 	}, &resp))
-	r.persistConversation(ctx, s)
 
 	if r.budget != nil {
 		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
@@ -358,6 +361,19 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			logPublisherRuntime(ctx, r.events, "warn", "record_openai_responses_llm_usage_failed", "Recording OpenAI Responses LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}
+
+	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
+		return nil, err
+	}
+	s.Messages = append(s.Messages, message, resp.Message)
+	s.TurnCount++
+	s.ParseFailures = 0
+	if !resolved.Stateless {
+		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
+			return nil, err
+		}
+	}
+	r.persistConversation(ctx, s)
 
 	if !resolved.Stateless {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
@@ -474,30 +490,37 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.apiKey)
+	attempt, err := runtimeeffects.Begin(ctx, "openai_responses", payload, nil)
+	if err != nil {
+		return nil, openAIResponsesResponse{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return nil, openAIResponsesResponse{}, err
+	}
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassTimeout, "openai_responses_request_timeout", "openai-responses-adapter", "send_request", nil, err)
-		}
-		return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_transport_failure", "openai-responses-adapter", "send_request", nil, err)
+		return nil, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"stage": "transport"}, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_response_read_failed", "openai-responses-adapter", "read_response", nil, err)
+		return nil, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
 	}
 
 	var parsed openAIResponsesResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, openAIResponsesResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "openai_responses_response_invalid", "openai-responses-adapter", "decode_response", nil, err)
+		return body, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		return body, parsed, providerStatusFailure("openai_responses", httpResp.StatusCode)
+		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_responses", httpResp.StatusCode))
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, runtimefailures.New(runtimefailures.ClassConnectorFailure, "openai_responses_provider_error", "openai-responses-adapter", "decode_response", nil)
+		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "openai-responses-adapter", "decode_response", nil, nil)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}); err != nil {
+		return body, parsed, err
 	}
 	return body, parsed, nil
 }

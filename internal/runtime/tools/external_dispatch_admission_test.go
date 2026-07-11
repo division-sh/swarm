@@ -111,7 +111,7 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 
 	bus := &telemetryBusStub{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
-		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/40ms", "500ms", 0),
+		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/40ms", "500ms"),
 	})
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
 	for i := 0; i < 2; i++ {
@@ -133,31 +133,6 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 	if wait := int64FromAny(detail["rate_limit_wait_ms"]); wait <= 0 {
 		t.Fatalf("rate_limit_wait_ms = %#v, want positive", detail["rate_limit_wait_ms"])
 	}
-}
-
-func TestExecutor_HTTPRetryAttemptsTraverseSameRateLimitBucket(t *testing.T) {
-	var recorder dispatchTimeRecorder
-	var attempts int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		recorder.record()
-		attempts++
-		if attempts == 1 {
-			http.Error(w, "upstream unavailable", http.StatusTooManyRequests)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/1100ms", "500ms", 1),
-	})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
-	if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	recorder.requireGapAtLeast(t, 1050*time.Millisecond)
 }
 
 func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
@@ -199,7 +174,7 @@ func TestExecutor_HTTPRateLimitTimeoutDoesNotRetry(t *testing.T) {
 	defer server.Close()
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s", 1),
+		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
@@ -328,7 +303,7 @@ func TestGatewayToolPathProjectsHTTPRateLimitTimeout(t *testing.T) {
 	defer server.Close()
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s", 0),
+		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
 	actor := models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}}
 	ctx := models.WithActor(context.Background(), actor)
@@ -563,7 +538,7 @@ func (r *dispatchTimeRecorder) requireGapAtLeast(t *testing.T, min time.Duration
 	}
 }
 
-func rateLimitedHTTPToolSource(serverURL, rateLimit, maxWait string, maxRetries int) semanticview.Source {
+func rateLimitedHTTPToolSource(serverURL, rateLimit, maxWait string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"check_domain": {
@@ -578,7 +553,6 @@ func rateLimitedHTTPToolSource(serverURL, rateLimit, maxWait string, maxRetries 
 				HTTP: &runtimecontracts.HTTPToolSpec{
 					Method: "GET",
 					URL:    serverURL,
-					Retry:  runtimecontracts.HTTPToolRetrySpec{MaxRetries: maxRetries},
 				},
 			},
 		},

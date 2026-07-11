@@ -86,7 +86,7 @@ type pendingAgentDeliveryDetailSource interface {
 }
 
 type agentLifecycleFactSource interface {
-	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error)
+	ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error)
 }
 
 func (s *dashboardAgentReadSource) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -121,10 +121,10 @@ func (s *dashboardAgentReadSource) ListPendingAgentDeliveryDetails(ctx context.C
 	return source.ListPendingAgentDeliveryDetails(ctx, opts)
 }
 
-func (s *dashboardAgentReadSource) ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error) {
+func (s *dashboardAgentReadSource) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error) {
 	source, ok := s.source.(agentLifecycleFactSource)
 	if !ok || source == nil {
 		return nil, errors.New("missing agent lifecycle fact source")
 	}
-	return source.ListAgentLifecycleFacts(ctx, agentIDs)
+	return source.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
 }

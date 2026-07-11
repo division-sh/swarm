@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 const (
@@ -43,6 +44,7 @@ type RPCResponse struct {
 	ID      any       `json:"id,omitempty"`
 	Result  any       `json:"result,omitempty"`
 	Error   *RPCError `json:"error,omitempty"`
+	effect  *runtimeeffects.Handle
 }
 
 type RPCError struct {

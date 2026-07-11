@@ -214,11 +214,14 @@ func ValidateBoardDirective(d BoardDirective) error {
 }
 
 type RestartRequest struct {
-	AgentID string
+	AgentID    string
+	OperationID string
 }
 
 type RestartResult struct {
-	AgentID string
+	AgentID    string `json:"agent_id"`
+	OperationID string `json:"operation_id,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
 }
 
 type ReplayBacklogRequest struct {

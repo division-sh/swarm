@@ -27,7 +27,7 @@ func TestAgentLifecycleBlockingLayerCoversEveryCurrentProducerState(t *testing.T
 	}
 }
 
-func TestPostgresStore_ListAgentLifecycleFacts_CoversEveryCurrentStateLayerPair(t *testing.T) {
+func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLayerPair(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -84,9 +84,9 @@ func TestPostgresStore_ListAgentLifecycleFacts_CoversEveryCurrentStateLayerPair(
 		agentIDs = append(agentIDs, tc.agentID)
 	}
 
-	facts, err := pg.ListAgentLifecycleFacts(ctx, agentIDs)
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
 	if err != nil {
-		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
 	for _, tc := range cases {
 		got := facts[tc.agentID]
@@ -96,7 +96,7 @@ func TestPostgresStore_ListAgentLifecycleFacts_CoversEveryCurrentStateLayerPair(
 	}
 }
 
-func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalLiveLifecycle(t *testing.T) {
+func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycle(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -137,9 +137,9 @@ func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalLiveLifecycle(t *tes
 		t.Fatalf("seed deliveries: %v", err)
 	}
 
-	facts, err := pg.ListAgentLifecycleFacts(ctx, []string{"agent-1"})
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
 	if err != nil {
-		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
 	if got := facts["agent-1"].CurrentState; got != "active" {
 		t.Fatalf("current_state = %q, want active", got)
@@ -149,7 +149,7 @@ func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalLiveLifecycle(t *tes
 	}
 }
 
-func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalTerminalLifecycleWhenNoLiveWorkRemains(t *testing.T) {
+func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLifecycleWhenNoLiveWorkRemains(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -184,9 +184,9 @@ func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalTerminalLifecycleWhe
 		t.Fatalf("seed delivery: %v", err)
 	}
 
-	facts, err := pg.ListAgentLifecycleFacts(ctx, []string{"agent-1"})
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
 	if err != nil {
-		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
 	if got := facts["agent-1"].CurrentState; got != "exhausted" {
 		t.Fatalf("current_state = %q, want exhausted", got)

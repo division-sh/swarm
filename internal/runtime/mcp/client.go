@@ -17,6 +17,7 @@ import (
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -187,9 +188,17 @@ func (c *Client) CallWithCredentialKeyResolver(ctx context.Context, prefixedName
 		return nil, err
 	}
 	if resp.Error != nil {
-		return nil, externalMCPRPCExecutionFailure(resp.Error, server.cfg, req)
+		err := externalMCPRPCExecutionFailure(resp.Error, server.cfg, req)
+		return nil, resp.effect.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_jsonrpc_error_effect_outcome_unconfirmed", "mcp-client", "tools/call", map[string]any{"server": server.cfg.Name, "method": req.Method, "tool": tool.RemoteName, "rpc_code": resp.Error.Code}, err)
 	}
-	return projectExternalToolCallResult(resp, server.cfg, req)
+	result, err := projectExternalToolCallResult(resp, server.cfg, req)
+	if err != nil {
+		return nil, resp.effect.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_tool_result_effect_outcome_unconfirmed", "mcp-client", "tools/call", map[string]any{"server": server.cfg.Name, "method": req.Method, "tool": tool.RemoteName}, err)
+	}
+	if err := resp.effect.Succeed(ctx, map[string]any{"server": server.cfg.Name, "method": req.Method, "tool": tool.RemoteName}); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (c *Client) discoverServerTools(ctx context.Context, source semanticview.Source, server *registeredServer) ([]DiscoveredTool, error) {
@@ -316,25 +325,38 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 		}
 		httpReq.Header.Set("authorization", "Bearer "+strings.TrimSpace(token))
 	}
+	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_http", body, map[string]string{"server": cfg.Name, "method": req.Method})
+	if err != nil {
+		return RPCResponse{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return RPCResponse{}, err
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
+		cause := externalMCPTransportFailure(err, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "transport"}, cause)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return RPCResponse{}, externalMCPHTTPStatusFailure(resp.StatusCode, cfg, req)
+		cause := externalMCPHTTPStatusFailure(resp.StatusCode, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_status_effect_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "status": resp.StatusCode}, cause)
 	}
 	raw, actual, err := readBoundedMCPWire(resp.Body)
 	if err != nil {
-		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
+		cause := externalMCPTransportFailure(err, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "read"}, cause)
 	}
 	if actual > MaxWireResponseBytes {
-		return RPCResponse{}, externalMCPWireLimitFailure(actual, cfg, req)
+		cause := externalMCPWireLimitFailure(actual, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wire_limit"}, cause)
 	}
 	decoded, err := DecodeRPCResponse(raw, req.ID)
 	if err != nil {
-		return RPCResponse{}, externalMCPRPCInvalidFailure(err, cfg, req)
+		cause := externalMCPRPCInvalidFailure(err, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_http_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "decode"}, cause)
 	}
+	decoded.effect = attempt
 	return decoded, nil
 }
 
@@ -419,10 +441,21 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	raw = append(raw, '\n')
+	attempt, err := runtimeeffects.Begin(ctx, "mcp_tools_call_stdio", raw, map[string]string{"server": cfg.Name, "method": req.Method})
+	if err != nil {
+		return RPCResponse{}, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return RPCResponse{}, err
+	}
 	if _, err := c.stdin.Write(raw); err != nil {
-		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
+		cause := externalMCPTransportFailure(err, cfg, req)
+		return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "write"}, cause)
 	}
 	if req.ID == nil {
+		if err := attempt.Succeed(ctx, map[string]any{"server": cfg.Name, "method": req.Method}); err != nil {
+			return RPCResponse{}, err
+		}
 		return RPCResponse{}, nil
 	}
 	for {
@@ -440,15 +473,18 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		select {
 		case <-ctx.Done():
 			_ = c.Close()
-			return RPCResponse{}, externalMCPTransportFailure(ctx.Err(), cfg, req)
+			cause := externalMCPTransportFailure(ctx.Err(), cfg, req)
+			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wait"}, cause)
 		case read = <-frameCh:
 		}
 		if read.err != nil {
-			return RPCResponse{}, externalMCPTransportFailure(read.err, cfg, req)
+			cause := externalMCPTransportFailure(read.err, cfg, req)
+			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "read"}, cause)
 		}
 		if read.actual > MaxWireResponseBytes {
 			_ = c.Close()
-			return RPCResponse{}, externalMCPWireLimitFailure(read.actual, cfg, req)
+			cause := externalMCPWireLimitFailure(read.actual, cfg, req)
+			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "wire_limit"}, cause)
 		}
 		line := bytes.TrimSpace(read.frame)
 		if len(line) == 0 {
@@ -456,8 +492,10 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 		}
 		resp, err := DecodeRPCResponse(line, req.ID)
 		if err != nil {
-			return RPCResponse{}, externalMCPRPCInvalidFailure(err, cfg, req)
+			cause := externalMCPRPCInvalidFailure(err, cfg, req)
+			return RPCResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "mcp_stdio_attempt_outcome_unconfirmed", "mcp-client", req.Method, map[string]any{"server": cfg.Name, "method": req.Method, "stage": "decode"}, cause)
 		}
+		resp.effect = attempt
 		return resp, nil
 	}
 }

@@ -999,17 +999,12 @@ type ToolAdditionalProperties struct {
 	Allowed *bool            `yaml:"allowed,omitempty"`
 	Schema  *ToolInputSchema `yaml:"schema,omitempty"`
 }
-type HTTPToolRetrySpec struct {
-	MaxRetries int    `yaml:"max_retries,omitempty"`
-	Backoff    string `yaml:"backoff,omitempty"`
-}
 type HTTPToolSpec struct {
 	Method         string            `yaml:"method"`
 	URL            string            `yaml:"url"`
 	Headers        map[string]string `yaml:"headers,omitempty"`
 	Body           any               `yaml:"body,omitempty"`
 	TimeoutSeconds int               `yaml:"timeout_seconds,omitempty"`
-	Retry          HTTPToolRetrySpec `yaml:"retry,omitempty"`
 }
 type ManagedCredentialRef struct {
 	Key                 string                                     `yaml:"key"`

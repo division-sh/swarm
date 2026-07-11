@@ -35,6 +35,8 @@ const (
 	ClassUnexpectedArrival     Class = "platform.unexpected_arrival"
 	ClassConflictingDuplicate  Class = "platform.conflicting_duplicate"
 	ClassReplyAlreadyTerminal  Class = "platform.reply_already_terminal"
+	ClassSupersededGeneration  Class = "platform.superseded_generation"
+	ClassLifecycleConflict     Class = "platform.lifecycle_conflict"
 	ClassSchemaInvalid         Class = "platform.schema_invalid"
 	ClassDependencyUnavailable Class = "platform.dependency_unavailable"
 	ClassInternalFailure       Class = "platform.internal_failure"
@@ -118,6 +120,8 @@ var classOrder = []Class{
 	ClassUnexpectedArrival,
 	ClassConflictingDuplicate,
 	ClassReplyAlreadyTerminal,
+	ClassSupersededGeneration,
+	ClassLifecycleConflict,
 	ClassSchemaInvalid,
 	ClassDependencyUnavailable,
 	ClassInternalFailure,
@@ -142,6 +146,8 @@ var definitions = map[Class]Definition{
 	ClassUnexpectedArrival:     definition(ClassUnexpectedArrival, false, false, true, "Event is not admitted by the active contract", "Send an event admitted by the active request or join"),
 	ClassConflictingDuplicate:  definition(ClassConflictingDuplicate, false, false, true, "Duplicate identity carries conflicting content", "Reuse the original content or mint a new identity"),
 	ClassReplyAlreadyTerminal:  definition(ClassReplyAlreadyTerminal, false, false, true, "Request already has a terminal reply", "Do not send a second distinct terminal reply"),
+	ClassSupersededGeneration:  definition(ClassSupersededGeneration, true, false, true, "Agent generation was superseded", "Start new work under the current lifecycle generation"),
+	ClassLifecycleConflict:     definition(ClassLifecycleConflict, true, false, true, "Agent lifecycle authority conflicts with the requested transition", "Reload the canonical lifecycle cell before retrying"),
 	ClassSchemaInvalid:         definition(ClassSchemaInvalid, true, false, true, "Runtime input violates its schema", "Correct the runtime input to match the declared schema"),
 	ClassDependencyUnavailable: definition(ClassDependencyUnavailable, true, true, false, "Required runtime dependency is unavailable", "Restore the dependency and retry the execution"),
 	ClassInternalFailure:       definition(ClassInternalFailure, true, false, false, "The platform encountered an internal failure", "Inspect the typed detail and runtime diagnostics"),
@@ -165,6 +171,9 @@ var detailClasses = map[string]Class{
 	"typed_read_result_marshal_failed":    ClassInternalFailure,
 	"typed_read_result_too_large":         ClassDataLimitExceeded,
 	"write_failed":                        ClassDependencyUnavailable,
+	"lifecycle_token_missing":             ClassLifecycleConflict,
+	"lifecycle_transition_conflict":       ClassLifecycleConflict,
+	"superseded_generation":               ClassSupersededGeneration,
 }
 
 var targetDetailClasses = map[string]Class{

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -116,51 +117,11 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 		timeout = time.Duration(tool.HTTP.TimeoutSeconds) * time.Second
 	}
 
-	maxRetries := 0
-	if tool.HTTP.Retry.MaxRetries > 0 {
-		maxRetries = tool.HTTP.Retry.MaxRetries
+	result, err := e.execHTTPRequestOnce(ctx, method, url, headers, bodyReader, timeout, tool, authSecrets)
+	if err != nil {
+		return nil, classifyHTTPToolFailure(err, tool.Name)
 	}
-	backoff := strings.ToLower(strings.TrimSpace(tool.HTTP.Retry.Backoff))
-	var lastErr error
-	refreshedAfterUnauthorized := false
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		result, err := e.execHTTPRequestOnce(ctx, method, url, headers, bodyReader, timeout, tool, authSecrets)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		var statusErr httpToolStatusError
-		if managedAuth != nil && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusUnauthorized && !refreshedAfterUnauthorized {
-			refreshedAfterUnauthorized = true
-			token, record, refreshErr := e.managedTokenSource().Refresh(ctx, managedAuth.StoreKey)
-			if refreshErr != nil {
-				redacted := fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(authSecrets, record.SecretValues()...)...))
-				return nil, httpToolAuthenticationFailure(redacted, tool.Name, "refresh_managed_credential")
-			}
-			managedAuth.Token = token
-			managedAuth.Record = record
-			authSecrets = append(authSecrets, managedAuth.SecretValues()...)
-			if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), true); err != nil {
-				return nil, httpToolAuthenticationFailure(err, tool.Name, "apply_refreshed_managed_credential")
-			}
-			rewindBodyReader(bodyReader)
-			attempt--
-			continue
-		}
-		if isExternalDispatchRateLimited(err) {
-			break
-		}
-		if attempt == maxRetries {
-			break
-		}
-		sleep := time.Second
-		if backoff == "exponential" {
-			sleep = time.Duration(1<<attempt) * time.Second
-		}
-		time.Sleep(sleep)
-		rewindBodyReader(bodyReader)
-	}
-	return nil, classifyHTTPToolFailure(lastErr, tool.Name)
+	return result, nil
 }
 
 func httpToolAuthenticationFailure(err error, toolName, operation string) error {
@@ -299,19 +260,27 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 			req.Header.Add(key, value)
 		}
 	}
-	resp, err := e.httpClient.Do(req)
+	attempt, err := runtimeeffects.Begin(ctx, "authored_http_tool", []byte(method+"\x00"+url), map[string]string{"tool": strings.TrimSpace(tool.Name)})
 	if err != nil {
 		return nil, err
+	}
+	if err := attempt.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_attempt_outcome_unconfirmed", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(tool.Name), "stage": "transport"}, err)
 	}
 	defer resp.Body.Close()
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_attempt_outcome_unconfirmed", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(tool.Name), "stage": "read_response"}, err)
 	}
 	parsedBody := parseHTTPResponseBody(resp, rawBody)
 	parsedBody = runtimemanagedcredentials.RedactValue(parsedBody, secrets...)
 	if resp.StatusCode >= 400 {
-		return nil, httpToolStatusError{ToolName: tool.Name, StatusCode: resp.StatusCode, Body: parsedBody, Secrets: secrets}
+		statusErr := httpToolStatusError{ToolName: tool.Name, StatusCode: resp.StatusCode, Body: parsedBody, Secrets: secrets}
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_status_effect_outcome_unconfirmed", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, statusErr)
 	}
 	responseEnv := map[string]any{
 		"response": map[string]any{
@@ -321,12 +290,23 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 		},
 	}
 	if err := httpresponsesuccess.Evaluate("http tool "+strings.TrimSpace(tool.Name), tool.ResponseSuccess, responseEnv, secrets); err != nil {
-		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "tool-executor", "validate_http_response", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, err)
+		cause := runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "tool-executor", "validate_http_response", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, err)
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "validate_http_response", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, cause)
 	}
 	if len(tool.ResponseMapping) == 0 {
+		if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(rawBody)}); err != nil {
+			return nil, err
+		}
 		return parsedBody, nil
 	}
-	return resolveTemplateTree(tool.ResponseMapping, responseEnv)
+	mapped, err := resolveTemplateTree(tool.ResponseMapping, responseEnv)
+	if err != nil {
+		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "map_response", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, err)
+	}
+	if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(rawBody)}); err != nil {
+		return nil, err
+	}
+	return mapped, nil
 }
 
 func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {

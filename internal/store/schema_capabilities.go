@@ -164,7 +164,9 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		[]string{
 			"agent_id", "flow_instance", "role", "model", "llm_backend", "conversation_mode",
 			"parent_agent_id", "entity_id", "config", "subscriptions", "emit_events", "tools",
-			"permissions", "runtime_descriptor", "status", "turn_count", "last_active_at", "created_at",
+			"permissions", "runtime_descriptor", "lifecycle_phase", "lifecycle_generation",
+			"lifecycle_runtime_epoch", "lifecycle_config_revision", "lifecycle_run_mode",
+			"lifecycle_last_transition_id", "status", "turn_count", "last_active_at", "created_at",
 		},
 		[]string{
 			"id", "type", "role", "mode", "entity_id", "parent_agent_id", "status",

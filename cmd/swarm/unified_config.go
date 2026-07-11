@@ -748,8 +748,6 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"llm.claude_api":                        section,
 		"llm.claude_api.default_model":          {Split: "retired model-selection input; use llm.models"},
 		"llm.claude_api.haiku_model":            {Split: "retired model-selection input; use llm.models"},
-		"llm.claude_api.max_retries":            {},
-		"llm.claude_api.retry_backoff":          {},
 		"llm.claude_cli":                        section,
 		"llm.claude_cli.command":                {Elevated: true},
 		"llm.claude_cli.timeout":                {},
