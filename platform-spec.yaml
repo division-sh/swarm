@@ -4792,7 +4792,14 @@ engine:
       postgres_owner: internal/store.PostgresStore advisory-lock startup ownership
       scope: >
         SQLite startup ownership prevents competing runtimes inside the local process boundary. It is not a production
-        multi-writer lock substitute.
+        multi-writer lock substitute. Exactly one runtime may execute shared-store consumers under the lease: pipeline
+        maintenance, system nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included.
+        Live replacement MUST quiesce and join the predecessor consumer set while the predecessor retains the lease; only
+        then may lease authority transfer and candidate activation begin. Candidate preparation before quiescence is limited
+        to local construction and strict validation and MUST NOT start shared-store loops or publish runtime events. A
+        pre-visibility candidate failure quiesces the candidate, transfers lease authority back, and starts a fresh runtime
+        from the predecessor's admitted source before restoring manager visibility. Aliasing one lease into two active
+        runtimes is prohibited.
     - name: event_delivery_receipt_and_replay_rows
       owner: runtimebus.EventStore, runtimebus.EventMutationRunner/EventMutation, backend store implementations, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
       sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
@@ -8573,8 +8580,9 @@ flow_model:
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, provider registry, credential store, ingress controller, store,
         EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden. Replacement and
-        deactivation close predecessor admission while manager visibility is serialized: admitted requests drain before
-        withdrawal, and requests that resolved the predecessor but have not entered its gateway fail closed afterward.
+        deactivation atomically reject new predecessor admission while manager visibility is serialized. Already-admitted
+        requests drain only within the configured shutdown grace; expiry cancels their request contexts and returns within
+        the configured bound. Requests that resolved the predecessor but have not entered its gateway fail closed afterward.
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
         canonical event name MUST match an exact external input pin on the selected flow before marker persistence, dedupe,
@@ -8583,16 +8591,18 @@ flow_model:
         per webhook.
       replacement_policy: >
         Same-bundle-hash restart resumes the standing identity. Same-hash live replacement may publish new runtime objects
-        only after they are ready and then atomically replaces process visibility. The candidate starts through an explicit
-        startup-ownership handoff under the predecessor's one exclusive store lease; it MUST NOT reacquire, release, or bypass
-        that lease. Failed candidate start or pre-commit validation rolls back to predecessor ownership and admission. Commit
-        transfers lease authority exactly once before predecessor shutdown. A predecessor shutdown failure after commit is a
-        post-commit diagnostic and MUST NOT report replacement failure or roll visibility back. If any active standing target
+        only after they are ready and then atomically replaces process visibility. Replacement first rejects new predecessor
+        admission and quiesces all predecessor shared-store/background consumers under the configured grace while retaining
+        the one exclusive store lease. Only after quiescence may lease authority transfer and candidate activation begin.
+        Failed candidate activation before visibility commit MUST be fully quiesced before lease authority returns and a fresh
+        predecessor runtime is restored from the admitted source; predecessor and candidate consumers MUST never overlap.
+        If any active standing target
         exists, a changed-hash live reload MUST fail before readiness changes, detach, shutdown, activation, registry mutation,
         or new run/instance/entity/target creation. Cold changed-hash startup against persisted standing authority also fails
-        closed. The predecessor remains running and authoritative until a future explicit reset/migration operation defines
-        quiesce, terminal/preservation, side-effect transition, rollback, and restart behavior. Manager-backed deactivation
-        propagates the caller's configured shutdown grace rather than silently substituting runtime defaults.
+        closed. For a rejected changed-hash replacement, the predecessor remains running and authoritative until a future
+        explicit reset/migration operation defines quiesce, terminal/preservation, side-effect transition, rollback, and
+        restart behavior. Manager-backed deactivation propagates the caller's configured shutdown grace rather than silently
+        substituting runtime defaults.
       fail_closed:
       - duplicate aliases within a bundle or across loaded runtime contexts
       - duplicate providers within one alias
