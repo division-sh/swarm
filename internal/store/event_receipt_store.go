@@ -221,6 +221,9 @@ func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.Recei
 		retryCount++
 	}
 	finalStatus := status
+	if status == runtimemanager.ReceiptStatusTerminal {
+		finalStatus = runtimemanager.ReceiptStatusDeadLetter
+	}
 	if status == runtimemanager.ReceiptStatusError && retryCount >= 2 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
@@ -236,12 +239,15 @@ func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.Recei
 	}
 	state.finalStatus = finalStatus
 	state.retryCount = retryCount
-	state.reasonCode = managerReceiptReasonCode(finalStatus)
+	state.reasonCode = managerReceiptReasonCode(status)
+	if status == runtimemanager.ReceiptStatusError && finalStatus == runtimemanager.ReceiptStatusDeadLetter {
+		state.reasonCode = "retry_exhausted"
+	}
 	state.deliveryCode = "delivered"
 	switch status {
 	case runtimemanager.ReceiptStatusError:
 		state.deliveryCode = "failed"
-	case runtimemanager.ReceiptStatusDeadLetter:
+	case runtimemanager.ReceiptStatusDeadLetter, runtimemanager.ReceiptStatusTerminal:
 		state.deliveryCode = "dead_letter"
 	}
 	if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
@@ -678,6 +684,8 @@ func terminalManagerReceiptStatusFromDelivery(status string) (runtimemanager.Rec
 
 func managerReceiptReasonCode(status runtimemanager.ReceiptStatus) string {
 	switch status {
+	case runtimemanager.ReceiptStatusTerminal:
+		return "terminal_failure"
 	case runtimemanager.ReceiptStatusDeadLetter:
 		return "retry_exhausted"
 	case runtimemanager.ReceiptStatusError:

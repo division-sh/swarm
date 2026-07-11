@@ -84,6 +84,10 @@ func (h *Harness) SettleExternalAttempt(_ context.Context, settlement runtimeeff
 	return nil
 }
 
+func (h *Harness) SettleExternalAttemptAndPromoteProviderHead(ctx context.Context, settlement runtimeeffects.ProviderHeadSettlement) error {
+	return h.SettleExternalAttempt(ctx, settlement.Settlement)
+}
+
 func (h *Harness) StateForAdapter(adapter string) (runtimeeffects.State, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

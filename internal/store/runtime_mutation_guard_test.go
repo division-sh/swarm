@@ -874,7 +874,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
 		{
 			name:           "managed external effect attempt admission",
-			path:           rx(`^internal/runtime/(llm/(api_runtime|openai_compatible_runtime|openai_responses_runtime|cli_runtime_process|cli_tool_result_relay)|managedcredentials/store|mcp/client|tools/(executor_http|executor_native|tool_result_relay))\.go$`),
+			path:           rx(`^internal/runtime/(llm/(api_runtime|openai_compatible_runtime|openai_responses_runtime|cli_runtime|cli_runtime_process|cli_tool_result_relay)|managedcredentials/store|mcp/client|tools/(executor_http|executor_native|tool_result_relay))\.go$`),
 			function:       rx(`.*`),
 			kinds:          kinds(primitiveBegin),
 			classification: classDifferentConcept,

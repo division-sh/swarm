@@ -166,7 +166,7 @@ var registrations = []Registration{
 	registration(KindProviderTurn, EffectWriteOrUnknown, "anthropic_api", "http", "internal/runtime/llm/api_runtime.go", []string{"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/anthropic_api"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go", []string{"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_compatible"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go", []string{"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_responses"),
-	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreaming:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
+	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
 	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes/authored_http_tool"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes/native_web_search"),
@@ -184,7 +184,7 @@ func registration(kind Kind, class EffectClass, adapter, transport, launchSite s
 	if class == EffectReadOnly {
 		postlaunch = StateTerminalFailure
 	}
-	return Registration{
+	registration := Registration{
 		Kind: kind, Class: class, Adapter: adapter, Transport: transport, LaunchSite: launchSite,
 		LaunchObserved:     "state=launched must commit before: " + strings.Join(primitiveKeys, ","),
 		OutcomeMapping:     fmt.Sprintf("success=%s; proven_launch_rejection=%s; postlaunch_failure=%s", StateSettled, StateTerminalFailure, postlaunch),
@@ -195,6 +195,10 @@ func registration(kind Kind, class EffectClass, adapter, transport, launchSite s
 		PrelaunchFailure:   StateTerminalFailure,
 		PostlaunchFailure:  postlaunch,
 	}
+	if adapter == "claude_cli" {
+		registration.SettlementRecovery = fmt.Sprintf("authorized=%s; exact zero-process-launch terminal failure may authorize next ordinal; launched/response_observed=%s; postlaunch replay=no_redispatch", StateTerminalFailure, StateOutcomeUncertain)
+	}
+	return registration
 }
 
 func Registrations() []Registration {
@@ -244,6 +248,17 @@ type Settlement struct {
 	Now         time.Time
 }
 
+type ProviderHeadSettlement struct {
+	Settlement
+	AgentID              string
+	RuntimeMode          string
+	SessionID            string
+	ScopeKey             string
+	LockOwner            string
+	ExpectedProviderHead string
+	NewProviderHead      string
+}
+
 type Store interface {
 	IsLifecycleTokenCurrent(context.Context, LifecycleToken) (bool, error)
 	AuthorizeExternalAttempt(context.Context, LifecycleToken, AuthorizeRequest) (Attempt, error)
@@ -258,6 +273,10 @@ type RecoverySummary struct {
 
 type RecoveryStore interface {
 	ReconcileExternalEffectAttempts(context.Context, time.Time) (RecoverySummary, error)
+}
+
+type ProviderHeadStore interface {
+	SettleExternalAttemptAndPromoteProviderHead(context.Context, ProviderHeadSettlement) error
 }
 
 type Controller struct {
@@ -419,6 +438,23 @@ func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
 	return h.Settle(ctx, StateSettled, nil, evidence)
 }
 
+func (h *Handle) SucceedAndPromoteProviderHead(ctx context.Context, settlement ProviderHeadSettlement) error {
+	if h == nil || h.controller == nil || h.controller.store == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_provider_head", nil)
+	}
+	store, ok := h.controller.store.(ProviderHeadStore)
+	if !ok {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "provider_head_settlement_store_missing", "external-effects", "settle_provider_head", nil)
+	}
+	settlement.OperationID = h.attempt.OperationID
+	settlement.AttemptID = h.attempt.AttemptID
+	settlement.State = StateSettled
+	if settlement.Now.IsZero() {
+		settlement.Now = time.Now().UTC()
+	}
+	return store.SettleExternalAttemptAndPromoteProviderHead(context.WithoutCancel(ctx), settlement)
+}
+
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {
 	if h == nil {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_attempt", nil)
@@ -474,16 +510,27 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		return Attempt{}, fmt.Errorf("external effect logical operation id is required")
 	}
 	if req.AttemptID == "" {
-		operationUUID, err := uuid.Parse(req.OperationID)
+		var err error
+		req.AttemptID, err = AttemptID(req.OperationID, 1)
 		if err != nil {
-			return Attempt{}, fmt.Errorf("parse external effect logical operation id: %w", err)
+			return Attempt{}, err
 		}
-		req.AttemptID = uuid.NewSHA1(operationUUID, []byte("attempt:1")).String()
 	}
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
 	return c.store.AuthorizeExternalAttempt(ctx, token, req)
+}
+
+func AttemptID(operationID string, ordinal int) (string, error) {
+	if ordinal <= 0 {
+		return "", fmt.Errorf("external effect attempt ordinal must be positive")
+	}
+	operationUUID, err := uuid.Parse(operationID)
+	if err != nil {
+		return "", fmt.Errorf("parse external effect logical operation id: %w", err)
+	}
+	return uuid.NewSHA1(operationUUID, []byte(fmt.Sprintf("attempt:%d", ordinal))).String(), nil
 }
 
 func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) error {

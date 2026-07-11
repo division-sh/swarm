@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -172,5 +173,10 @@ func shouldUseMCPBridge() bool {
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
 	resp, err := r.runWithInput(ctx, args, target, prompt, meta)
+	return resp, promptTransportFallback{}, err
+}
+
+func (r *ClaudeCLIRuntime) runWithPreparedPrompt(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle) (*Response, promptTransportFallback, error) {
+	resp, err := r.runWithPreparedInput(ctx, args, target, prompt, meta, attempt)
 	return resp, promptTransportFallback{}, err
 }

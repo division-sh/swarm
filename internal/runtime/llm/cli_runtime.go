@@ -11,11 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 type ClaudeCLIRuntime struct {
@@ -315,16 +317,48 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 
-	var args []string
+	confirmedHead := strings.TrimSpace(s.ProviderSessionID)
+	if s.TurnCount > 0 && confirmedHead == "" {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_head_missing", "claude-cli-adapter", "continue_session", map[string]any{"session_id": s.ID})
+	}
 	transportFallback := promptTransportFallback{}
 	mcpConfig, _, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
 	if err != nil {
 		return nil, err
 	}
+	requestFingerprintInput := jsonBytes(map[string]any{
+		"allowed_tools":           allowedToolsArg,
+		"confirmed_provider_head": confirmedHead,
+		"conversation_mode":       resolved.RuntimeMode.String(),
+		"disallowed_tools":        disallowedBuiltinTools,
+		"mcp_enabled":             mcpEnabled,
+		"output_format":           configuredCLIOutputFormat(r.cfg),
+		"permission_mode_args":    permissionModeArgs(),
+		"prompt":                  prompt,
+		"scope_key":               resolved.ScopeKey,
+		"session_scope":           resolved.Scope.String(),
+		"system_prompt":           strings.TrimSpace(s.SystemPrompt),
+		"tools":                   s.Tools,
+		"turn_count":              s.TurnCount,
+	})
+	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", requestFingerprintInput, nil)
+	if err != nil {
+		return nil, err
+	}
+	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
+	_, differentOwner := runtimeeffects.DifferentOwnerFromContext(ctx)
+	if childSessionID == "" && differentOwner {
+		childSessionID = uuid.NewString()
+	}
+	if childSessionID == "" {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
+	}
+
+	var args []string
 	if s.TurnCount == 0 {
 		args = []string{
 			"-p",
-			"--session-id", sessionToken(s),
+			"--session-id", childSessionID,
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
@@ -344,7 +378,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	} else {
 		args = []string{
 			"-p",
-			"-r", sessionToken(s),
+			"--resume", confirmedHead,
+			"--fork-session",
+			"--session-id", childSessionID,
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
@@ -380,7 +416,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			return target.Container
 		}(),
 	}
-	resp, fallback, err := r.runWithPromptTransportFallback(ctx, args, target, prompt, monitorMeta)
+	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, attempt)
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	latency := time.Since(start)
@@ -415,6 +451,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 	if err := validateCLIResponseToolCallsForTurn(actor, s.Tools, resp); err != nil {
+		failure := runtimefailures.FromError(err, "claude-cli-adapter", "validate_tool_calls")
+		if settleErr := attempt.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure.Failure, map[string]any{"provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
+			return nil, settleErr
+		}
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:     s.AgentID,
 			RuntimeMode: resolved.RuntimeMode.String(),
@@ -433,6 +473,14 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}, resp))
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
 			return nil, projectionErr
+		}
+		return nil, err
+	}
+	if returnedSessionID := strings.TrimSpace(resp.SessionID); returnedSessionID != childSessionID {
+		err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_provider_child_identity_mismatch", "claude-cli-adapter", "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
+		failure := runtimefailures.FromError(err, "claude-cli-adapter", "validate_response")
+		if settleErr := attempt.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure.Failure, map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
+			return nil, settleErr
 		}
 		return nil, err
 	}
@@ -468,23 +516,34 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
 		return nil, err
 	}
-	s.Messages = append(s.Messages, message, resp.Message)
-	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ProviderSessionID {
-		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
-		if !resolved.Stateless {
-			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, resolved.Scope, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
-				logPublisherRuntime(ctx, r.events, "warn", "adopt_cli_provider_session_failed", "Adopting the CLI provider session failed", s.AgentID, s.ID, entityID, map[string]any{
-					"old_provider_session_id": oldSessionID,
-					"new_provider_session_id": sid,
-				}, err)
-			} else {
-				s.ProviderSessionID = sid
-				LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), oldSessionID, sid, resolved.ScopeKey)
-			}
-		} else {
-			s.ProviderSessionID = sid
+	settlementEvidence := map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw), "provider_session_id": childSessionID}
+	if resolved.Stateless {
+		if err := attempt.Succeed(ctx, settlementEvidence); err != nil {
+			return nil, err
+		}
+	} else if differentOwner {
+		if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, resolved.Scope, lease.LockOwner, childSessionID, resolved.ScopeKey); err != nil {
+			return nil, err
+		}
+		if err := attempt.Succeed(ctx, settlementEvidence); err != nil {
+			return nil, err
+		}
+	} else {
+		if lease == nil {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
+		}
+		if err := attempt.SucceedAndPromoteProviderHead(ctx, runtimeeffects.ProviderHeadSettlement{
+			Settlement: runtimeeffects.Settlement{Evidence: settlementEvidence},
+			AgentID:    s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
+			ScopeKey: resolved.ScopeKey, LockOwner: lease.LockOwner,
+			ExpectedProviderHead: confirmedHead, NewProviderHead: childSessionID,
+		}); err != nil {
+			return nil, err
 		}
 	}
+	s.Messages = append(s.Messages, message, resp.Message)
+	s.ProviderSessionID = childSessionID
+	LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), confirmedHead, childSessionID, resolved.ScopeKey)
 	s.TurnCount++
 	s.ParseFailures = 0
 

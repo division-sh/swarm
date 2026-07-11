@@ -1393,6 +1393,41 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	now := time.Now().UTC()
+	eventID := uuid.NewString()
+	evt := eventtest.PersistedProjection(eventID, events.EventType("test.terminal_delivery"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, now)
+	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("persist terminal delivery: %v", err)
+	}
+	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", ""); err != nil {
+		t.Fatalf("mark terminal delivery active: %v", err)
+	}
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil), "claude-cli-adapter", "wait")
+	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusTerminal, &failure); err != nil {
+		t.Fatalf("write immediate terminal receipt: %v", err)
+	}
+	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
+	if err != nil || !ok {
+		t.Fatalf("load terminal receipt: ok=%v err=%v", ok, err)
+	}
+	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != failure.Detail.Code {
+		t.Fatalf("terminal receipt = %#v, want dead letter with original failure and zero retries", receipt)
+	}
+	var status, reason string
+	var retryCount int
+	if err := store.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count FROM event_deliveries WHERE event_id=? AND subscriber_id='agent-1'`, eventID).Scan(&status, &reason, &retryCount); err != nil {
+		t.Fatalf("load terminal delivery: %v", err)
+	}
+	if status != "dead_letter" || reason != "terminal_failure" || retryCount != 0 {
+		t.Fatalf("terminal delivery status=%s reason=%s retries=%d", status, reason, retryCount)
+	}
+}
+
 func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

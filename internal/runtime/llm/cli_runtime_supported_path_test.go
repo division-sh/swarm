@@ -212,6 +212,41 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	if len(content) != len(huge) {
 		t.Fatalf("read result content len = %d, want %d", len(content), len(huge))
 	}
+	firstArgs := mustReadCapturedArgs(t, captureDir, 1)
+	secondArgs := mustReadCapturedArgs(t, captureDir, 2)
+	firstChild := argValue(firstArgs, "--session-id")
+	secondChild := argValue(secondArgs, "--session-id")
+	if firstChild == "" || secondChild == "" || firstChild == secondChild {
+		t.Fatalf("provider children first=%q second=%q, want distinct attempt identities", firstChild, secondChild)
+	}
+	if argValue(firstArgs, "--resume") != "" || slices.Contains(firstArgs, "--fork-session") {
+		t.Fatalf("first args = %#v, want fresh session", firstArgs)
+	}
+	if argValue(secondArgs, "--resume") != firstChild || !slices.Contains(secondArgs, "--fork-session") {
+		t.Fatalf("second args = %#v, want resume %q with fork", secondArgs, firstChild)
+	}
+}
+
+func mustReadCapturedArgs(t *testing.T, dir string, invocation int) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, strconv.Itoa(invocation)+".args"))
+	if err != nil {
+		t.Fatalf("read invocation %d args: %v", invocation, err)
+	}
+	var args []string
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("decode invocation %d args: %v", invocation, err)
+	}
+	return args
+}
+
+func argValue(args []string, name string) string {
+	for i, arg := range args {
+		if arg == name && i+1 < len(args) {
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
 }
 
 func TestClaudeCLIFirstTurnFakeDockerHelper(t *testing.T) {
@@ -250,13 +285,28 @@ func runFirstTurnFakeDockerHelper() int {
 		fmt.Fprintf(os.Stderr, "write captured stdin: %v\n", err)
 		return 2
 	}
+	argsRaw, _ := json.Marshal(os.Args)
+	if err := os.WriteFile(filepath.Join(captureDir, strconv.Itoa(count)+".args"), argsRaw, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write captured args: %v\n", err)
+		return 2
+	}
+	providerSessionID := ""
+	for i, arg := range os.Args {
+		if arg == "--session-id" && i+1 < len(os.Args) {
+			providerSessionID = strings.TrimSpace(os.Args[i+1])
+		}
+	}
+	if providerSessionID == "" {
+		fmt.Fprintln(os.Stderr, "--session-id is required")
+		return 2
+	}
 	if isReadFileToolResultPayload(input) {
-		fmt.Fprintln(os.Stdout, `{"type":"result","result":"done"}`)
+		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"done\",\"session_id\":%q}\n", providerSessionID)
 		return 0
 	}
-	fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}`)
-	fmt.Fprintln(os.Stdout, `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}`)
-	fmt.Fprintln(os.Stdout, `{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}`)
+	fmt.Fprintf(os.Stdout, "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":%q,\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"mcp__runtime-tools__emit_category_assessed\",\"Read\",\"Write\",\"Edit\"]}\n", providerSessionID)
+	fmt.Fprintf(os.Stdout, "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool-read-1\",\"name\":\"Read\",\"input\":{\"path\":\"/workspace/corpus.json\"}}},\"session_id\":%q}\n", providerSessionID)
+	fmt.Fprintf(os.Stdout, "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0},\"session_id\":%q}\n", providerSessionID)
 	return 0
 }
 

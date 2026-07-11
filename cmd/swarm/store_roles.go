@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -44,6 +45,7 @@ type selectedConcreteRuntimeStore interface {
 	runtimeingress.Store
 	runtimellm.TurnPersistence
 	runtimestartupownership.Store
+	runtimeeffects.ProviderHeadStore
 
 	apiv1.MailboxAPIStore
 	apiv1.ObservabilityReadStore
