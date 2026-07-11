@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -144,8 +146,11 @@ type Runtime struct {
 	ownershipLeaseBorrowed  bool
 	pendingOwnershipLease   runtimestartupownership.Lease
 	ownershipHandoffPending bool
+	replacementQuiesced     bool
 	ownerID                 string
 	shutdownGate            shutdownAdmission
+	backgroundActive        atomic.Int64
+	payloadValidator        runtimebus.PayloadValidator
 
 	Config             *config.Config
 	Stores             Stores
@@ -207,9 +212,8 @@ type StartupOwnershipHandoff struct {
 	committed   bool
 }
 
-// PrepareStartupOwnershipHandoff authorizes a replacement runtime to start
-// under the predecessor's exclusive process lease. Durable ownership remains
-// with the predecessor until Commit, so candidate failure is rollback-safe.
+// PrepareStartupOwnershipHandoff authorizes a candidate only after the
+// predecessor's shared-store consumers have quiesced under its retained lease.
 func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*StartupOwnershipHandoff, error) {
 	if rt == nil || predecessor == nil || rt == predecessor {
 		return nil, nil
@@ -220,6 +224,9 @@ func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*Startu
 	defer rt.lifecycleMu.Unlock()
 	if predecessor.ownershipHandoffPending {
 		return nil, fmt.Errorf("runtime startup ownership handoff is already pending")
+	}
+	if !predecessor.replacementQuiesced {
+		return nil, fmt.Errorf("replacement predecessor must quiesce before startup ownership handoff")
 	}
 	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
 		return nil, fmt.Errorf("replacement runtime already started or has pending ownership")
@@ -267,15 +274,18 @@ func (h *StartupOwnershipHandoff) Finalize() {
 	h.active = false
 }
 
-func (h *StartupOwnershipHandoff) Rollback() {
+func (h *StartupOwnershipHandoff) Rollback() error {
 	if h == nil || !h.active {
-		return
+		return nil
 	}
 	h.predecessor.lifecycleMu.Lock()
 	defer h.predecessor.lifecycleMu.Unlock()
 	h.candidate.lifecycleMu.Lock()
 	defer h.candidate.lifecycleMu.Unlock()
 	if h.committed {
+		if !h.candidate.replacementQuiesced {
+			return fmt.Errorf("replacement candidate must quiesce before committed ownership rollback")
+		}
 		if h.candidate.ownershipLease == h.lease {
 			h.candidate.ownershipLease = nil
 			h.candidate.ownershipLeaseBorrowed = false
@@ -285,7 +295,7 @@ func (h *StartupOwnershipHandoff) Rollback() {
 		h.candidate.pendingOwnershipLease = nil
 		h.committed = false
 		h.active = false
-		return
+		return nil
 	}
 	if h.candidate.cancelStart == nil && h.candidate.ownershipLeaseBorrowed && h.candidate.ownershipLease == h.lease {
 		h.candidate.ownershipLease = nil
@@ -296,6 +306,7 @@ func (h *StartupOwnershipHandoff) Rollback() {
 	}
 	h.predecessor.ownershipHandoffPending = false
 	h.active = false
+	return nil
 }
 
 const runtimeQuiescenceStableChecks = 3
@@ -518,14 +529,14 @@ func (deps validatedRuntimeDeps) payloadValidator(logger *RuntimeLogger) runtime
 	return newRuntimePayloadValidator(logger, deps.EmitRegistry.EventSchemaSnapshot())
 }
 
-func (deps validatedRuntimeDeps) bindPayloadValidator(payloadValidator runtimebus.PayloadValidator) {
+func bindRuntimeStorePayloadValidator(stores Stores, payloadValidator runtimebus.PayloadValidator) {
 	type eventPayloadValidationBinder interface {
 		SetEventPayloadValidator(func(eventType string, payload []byte) error)
 	}
-	if binder, ok := deps.Stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
+	if binder, ok := stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
 		binder.SetEventPayloadValidator(payloadValidator)
 	}
-	if binder, ok := deps.Stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
+	if binder, ok := stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
 		binder.SetEventPayloadValidator(payloadValidator)
 	}
 }
@@ -558,7 +569,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.Logger = NewRuntimeLogger(stores.RuntimeLogStore)
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
-	boot.bindPayloadValidator(payloadValidator)
+	rt.payloadValidator = payloadValidator
 	var managerRef *runtimemanager.AgentManager
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
@@ -577,9 +588,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	rt.Bus = bus
 	rt.RuntimeIngress = runtimeingress.NewController(stores.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
-	if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
-		return nil, fmt.Errorf("sync runtime ingress state: %w", err)
-	}
 	if runControlStore, ok := stores.EventStore.(runtimeruncontrol.Store); ok && runControlStore != nil {
 		rt.RunControl = runtimeruncontrol.NewController(runControlStore, rt.Bus, runtimeruncontrol.Options{})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
@@ -812,7 +820,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGatewayWithProviderRegistry(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, opts.ProviderTriggerRegistry, stores.InboundStore)
-		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.Begin)
+		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
 	}
@@ -936,8 +944,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.cancelStart = cancelStart
 	rt.ownershipLease = lease
 	rt.ownershipLeaseBorrowed = borrowedLease
+	rt.replacementQuiesced = false
 	rt.lifecycleMu.Unlock()
-
 	started := false
 	defer func() {
 		if started {
@@ -945,6 +953,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		rt.cleanupStartFailure()
 	}()
+	bindRuntimeStorePayloadValidator(rt.Stores, rt.payloadValidator)
+	if rt.RuntimeIngress != nil {
+		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
+			return fmt.Errorf("sync runtime ingress state: %w", err)
+		}
+	}
 
 	if rt.Manager != nil {
 		if err := rt.Manager.ReconcileDirectiveOperations(ctx); err != nil {
@@ -995,7 +1009,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(8, "entity_type_contract_repair", "FAILED", err.Error())
 			return fmt.Errorf("repair contract entity types: %w", err)
 		}
-		go rt.Pipeline.RunMaintenance(startCtx)
+		rt.backgroundActive.Add(1)
+		go func() {
+			defer rt.backgroundActive.Add(-1)
+			rt.Pipeline.RunMaintenance(startCtx)
+		}()
 		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
 	} else {
 		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
@@ -1241,7 +1259,11 @@ func (rt *Runtime) startSystemNodesAndWaitForSubscriptions(ctx context.Context, 
 		nodes = append(nodes, node)
 	}
 	for _, node := range nodes {
-		go node.Run(startCtx)
+		rt.backgroundActive.Add(1)
+		go func(node runtimepipeline.BackgroundNode) {
+			defer rt.backgroundActive.Add(-1)
+			node.Run(startCtx)
+		}(node)
 	}
 	for subscribed := 0; subscribed < len(nodes); subscribed++ {
 		select {
@@ -1272,6 +1294,14 @@ func (rt *Runtime) Shutdown() error {
 }
 
 func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
+	return rt.stopWithOptions(opts, true)
+}
+
+func (rt *Runtime) QuiesceForReplacement(opts ShutdownOptions) error {
+	return rt.stopWithOptions(opts, false)
+}
+
+func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) error {
 	if rt == nil {
 		return nil
 	}
@@ -1286,22 +1316,23 @@ func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	}
 	rt.lifecycleMu.Unlock()
 	rt.shutdownGate.Close()
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	defer cancelDrain()
 	var shutdownErr error
+	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
+	}
 	if rt.Manager != nil {
-		managerOpts := runtimemanager.ShutdownOptions{Grace: grace}
-		if err := rt.Manager.ShutdownWithOptions(managerOpts); err != nil && shutdownErr == nil {
-			shutdownErr = err
+		deadline, _ := drainCtx.Deadline()
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			remaining = time.Nanosecond
 		}
-	}
-	if rt.Scheduler != nil {
-		rt.Scheduler.Stop()
-	}
-	if rt.Stores.ScheduleStore != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(releaseCtx); err != nil && shutdownErr == nil {
-			shutdownErr = err
+		if err := runRuntimeStopStep(drainCtx, func() error {
+			return rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining})
+		}); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", err))
 		}
-		cancel()
 	}
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
@@ -1309,54 +1340,87 @@ func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	borrowedLease := rt.ownershipLeaseBorrowed
 	rt.cancelStart = nil
 	rt.startCtx = nil
-	rt.ownershipLease = nil
-	rt.ownershipLeaseBorrowed = false
+	if releaseOwnership && borrowedLease {
+		rt.ownershipLease = nil
+		rt.ownershipLeaseBorrowed = false
+	}
 	rt.lifecycleMu.Unlock()
 	if cancelStart != nil {
 		cancelStart()
 	}
-	if lease != nil && !borrowedLease {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := lease.Release(releaseCtx); err != nil && shutdownErr == nil {
-			shutdownErr = err
+	if rt.Scheduler != nil {
+		rt.Scheduler.Stop()
+		if err := rt.Scheduler.Wait(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("scheduler shutdown: %w", err))
 		}
-		cancel()
+	}
+	if rt.Bus != nil {
+		if err := rt.Bus.WaitForOutboxSweeper(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("outbox sweeper shutdown: %w", err))
+		}
+	}
+	if err := waitRuntimeBackground(drainCtx, &rt.backgroundActive); err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime background shutdown: %w", err))
+	}
+	if rt.Stores.ScheduleStore != nil {
+		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("release schedule claims: %w", err))
+		}
+	}
+	if releaseOwnership && shutdownErr == nil && lease != nil && !borrowedLease {
+		if err := lease.Release(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+		} else {
+			rt.lifecycleMu.Lock()
+			if rt.ownershipLease == lease {
+				rt.ownershipLease = nil
+				rt.ownershipLeaseBorrowed = false
+			}
+			rt.lifecycleMu.Unlock()
+		}
+	}
+	if shutdownErr == nil {
+		rt.lifecycleMu.Lock()
+		rt.replacementQuiesced = true
+		rt.lifecycleMu.Unlock()
 	}
 	return shutdownErr
 }
 
+func runRuntimeStopStep(ctx context.Context, fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		select {
+		case err := <-done:
+			return err
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+func waitRuntimeBackground(ctx context.Context, active *atomic.Int64) error {
+	if active == nil {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for active.Load() != 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
 func (rt *Runtime) cleanupStartFailure() {
-	if rt == nil {
-		return
-	}
-	if rt.Manager != nil {
-		_ = rt.Manager.Shutdown()
-	}
-	if rt.Scheduler != nil {
-		rt.Scheduler.Stop()
-	}
-	if rt.Stores.ScheduleStore != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = rt.Stores.ScheduleStore.ReleaseScheduleClaims(releaseCtx)
-		cancel()
-	}
-	rt.lifecycleMu.Lock()
-	cancelStart := rt.cancelStart
-	lease := rt.ownershipLease
-	borrowedLease := rt.ownershipLeaseBorrowed
-	rt.cancelStart = nil
-	rt.startCtx = nil
-	rt.ownershipLease = nil
-	rt.ownershipLeaseBorrowed = false
-	rt.lifecycleMu.Unlock()
-	if cancelStart != nil {
-		cancelStart()
-	}
-	if lease != nil && !borrowedLease {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = lease.Release(releaseCtx)
-		cancel()
-	}
+	_ = rt.stopWithOptions(DefaultShutdownOptions(), true)
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {

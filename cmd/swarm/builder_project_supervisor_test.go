@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,9 +27,9 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -349,7 +350,7 @@ func TestRuntimeProjectSupervisorRejectsChangedStandingBundleWithoutIngress(t *t
 	}
 }
 
-func TestRuntimeProjectSupervisorFailedSameHashReplacementPreservesOldContext(t *testing.T) {
+func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	oldBus, err := runtimebus.NewEventBus(nil)
 	if err != nil {
@@ -361,14 +362,10 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementPreservesOldContext(t 
 	}
 	oldRT := &runtimepkg.Runtime{Bus: oldBus}
 	newRT := &runtimepkg.Runtime{Bus: newBus}
+	restoredRT := &runtimepkg.Runtime{Bus: oldBus}
 	hash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
-	target := runtimepkg.StandingTarget{
-		BundleHash: hash, FlowID: "service", Alias: "chat", Provider: "telegram",
-		RunID: "43000000-0000-0000-0000-000000000001", FlowInstance: "service/@standing/c",
-		EntityID: "43000000-0000-0000-0000-000000000002", SigningSecret: "webhook_signing.telegram",
-	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleHash: hash, Source: source, Runtime: oldRT, StandingTargets: []runtimepkg.StandingTarget{target},
+		BundleHash: hash, Source: source, Runtime: oldRT,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -377,18 +374,28 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementPreservesOldContext(t 
 	ready.Store(true)
 	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourcePersisted}
 	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
+	restoredRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
 	supervisor := &runtimeProjectSupervisor{
 		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
 		currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: oldRT,
 		currentBundleSourceFact: fact, runtimeContexts: manager,
 	}
-	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return errors.New("candidate start failed") }
+	supervisor.quiesceRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
+		return rt.QuiesceForReplacement(opts)
+	}
+	supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, error) { return restoredRT, nil }
+	supervisor.startRuntime = func(_ context.Context, rt *runtimepkg.Runtime) error {
+		if rt == newRT {
+			return errors.New("candidate start failed")
+		}
+		return nil
+	}
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	if _, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/tmp/candidate", source, &runtimecontracts.WorkflowContractBundle{}, fact, runtimecontracts.BundleIdentity{BundleHash: hash}, newRT); err == nil || !strings.Contains(err.Error(), "candidate start failed") {
 		t.Fatalf("same-hash replacement error = %v", err)
 	}
-	lookup := manager.LookupIngress("chat", "telegram")
-	if !ready.Load() || supervisor.CurrentRuntime() != oldRT || !lookup.Loaded() || lookup.Context.Runtime != oldRT {
+	lookup := manager.LookupBundleHashStatus(hash)
+	if !ready.Load() || supervisor.CurrentRuntime() != restoredRT || !lookup.Loaded() || lookup.Context.Runtime != restoredRT {
 		t.Fatalf("failed same-hash replacement mutated old authority: ready=%v runtime=%p lookup=%#v", ready.Load(), supervisor.CurrentRuntime(), lookup)
 	}
 }
@@ -427,14 +434,14 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 		currentBundle: oldBundle, currentRT: oldRT, currentBundleSourceFact: oldFact,
 		runtimeContexts: manager,
 	}
-	var started, stopped []*runtimepkg.Runtime
+	var started, quiesced []*runtimepkg.Runtime
 	supervisor.startRuntime = func(_ context.Context, rt *runtimepkg.Runtime) error {
 		started = append(started, rt)
 		return nil
 	}
-	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime, _ runtimepkg.ShutdownOptions) error {
-		stopped = append(stopped, rt)
-		return errors.New("predecessor drain timed out")
+	supervisor.quiesceRuntime = func(_ context.Context, rt *runtimepkg.Runtime, _ runtimepkg.ShutdownOptions) error {
+		quiesced = append(quiesced, rt)
+		return rt.QuiesceForReplacement(runtimepkg.DefaultShutdownOptions())
 	}
 	status, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/tmp/candidate", newSource, newBundle, newFact, newIdentity, newRT)
 	if err != nil {
@@ -443,8 +450,8 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	if status.ProjectDir != "/tmp/candidate" || !ready.Load() || supervisor.CurrentRuntime() != newRT {
 		t.Fatalf("replacement status = %#v ready=%v runtime=%p", status, ready.Load(), supervisor.CurrentRuntime())
 	}
-	if len(started) != 1 || started[0] != newRT || len(stopped) != 1 || stopped[0] != oldRT {
-		t.Fatalf("replacement lifecycle started=%v stopped=%v", started, stopped)
+	if len(started) != 1 || started[0] != newRT || len(quiesced) != 1 || quiesced[0] != oldRT {
+		t.Fatalf("replacement lifecycle started=%v quiesced=%v", started, quiesced)
 	}
 	if lookup := manager.LookupBundleHashStatus(oldHash); lookup.Loaded() {
 		t.Fatalf("old bundle context remained loaded: %#v", lookup)
@@ -458,23 +465,23 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) runtimestartupownership.Store
+		open func(*testing.T) storeBundle
 	}
 	backends := []backend{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) runtimestartupownership.Store {
-				store, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.sqlite"))
+			open: func(t *testing.T) storeBundle {
+				stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
 				if err != nil {
-					t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+					t.Fatalf("build SQLite stores: %v", err)
 				}
-				t.Cleanup(func() { _ = store.DB.Close() })
-				return store
+				t.Cleanup(func() { _ = stores.SQLDB.Close() })
+				return stores
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) runtimestartupownership.Store {
+			open: func(t *testing.T) storeBundle {
 				dsn, _, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				store, err := store.NewPostgresStore(dsn)
@@ -482,7 +489,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
 				t.Cleanup(func() { _ = store.DB.Close() })
-				return store
+				return selectedPostgresStoreBundle(store, &config.Config{})
 			},
 		},
 	}
@@ -496,10 +503,15 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					name = "changed_nonstanding_hash"
 				}
 				t.Run(name, func(t *testing.T) {
-					ownership := backend.open(t)
-					bundle := testWorkflowValidationBundle()
+					stores := backend.open(t)
+					var active, maxActive atomic.Int32
+					bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
+					if _, err := initializeStateStores(context.Background(), stores, bundle, false); err != nil {
+						t.Fatalf("initializeStateStores: %v", err)
+					}
 					source := semanticview.Wrap(bundle)
 					module := stubWorkflowModule{source: source}
+					providerRegistry := testProviderTriggerRegistry(t)
 					oldHash := runtimeContextTestHash("a")
 					newHash := oldHash
 					if changedHash {
@@ -508,15 +520,16 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					newRuntime := func(hash string) *runtimepkg.Runtime {
 						rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
 							Config: &config.Config{},
-							Stores: runtimepkg.Stores{StartupOwnership: ownership},
+							Stores: stores.runtimeStores(),
 							Options: runtimepkg.RuntimeOptions{
 								SelfCheck:                        false,
 								WorkflowModule:                   module,
 								LLMRuntime:                       runtimellm.NoopRuntime{},
 								DisablePersistentStartupRecovery: true,
+								ProviderTriggerRegistry:          providerRegistry,
 								BundleSourceFact: runtimecorrelation.BundleSourceFact{
 									BundleHash:   hash,
-									BundleSource: storerunlifecycle.BundleSourcePersisted,
+									BundleSource: storerunlifecycle.BundleSourceEphemeral,
 								},
 							},
 						})
@@ -526,16 +539,25 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						return rt
 					}
 					predecessor := newRuntime(oldHash)
+					predecessor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
 					if err := predecessor.Start(context.Background()); err != nil {
 						t.Fatalf("start predecessor: %v", err)
+					}
+					if predecessor.Manager == nil || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() {
+						t.Fatal("full-store predecessor manager/outbox consumers did not start")
+					}
+					if err := predecessor.Scheduler.Register(runtimepipeline.Schedule{
+						AgentID: "replacement-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
+					}); err != nil {
+						t.Fatalf("register pending predecessor schedule: %v", err)
 					}
 					probe := newRuntime(newHash)
 					if err := probe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already owned") {
 						t.Fatalf("ordinary competing start error = %v, want exclusive ownership denial", err)
 					}
 
-					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
-					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
 					manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 						BundleHash: oldHash, BundleSourceFact: oldFact, Source: source, Runtime: predecessor,
 					})
@@ -543,6 +565,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatalf("NewRuntimeContextManager: %v", err)
 					}
 					candidate := newRuntime(newHash)
+					candidate.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
 					supervisor := &runtimeProjectSupervisor{
 						ready:                   new(atomic.Bool),
 						currentRoot:             "/old",
@@ -551,6 +574,14 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						currentRT:               predecessor,
 						currentBundleSourceFact: oldFact,
 						runtimeContexts:         manager,
+					}
+					supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
+						if rt == candidate {
+							if active.Load() != 0 || predecessor.Manager.IsRunning() || predecessor.Bus.OutboxSweeperActive() {
+								t.Fatalf("candidate activation began before predecessor consumers quiesced: node=%d manager=%v outbox=%v", active.Load(), predecessor.Manager.IsRunning(), predecessor.Bus.OutboxSweeperActive())
+							}
+						}
+						return rt.Start(ctx)
 					}
 					supervisor.ready.Store(true)
 					status, err := supervisor.replaceCurrentRuntimeWithSource(
@@ -566,13 +597,117 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if _, ok := manager.LookupBundleHash(newHash); !ok {
 						t.Fatalf("manager does not expose replacement hash %s", newHash)
 					}
+					if got := maxActive.Load(); got != 1 {
+						t.Fatalf("simultaneous predecessor/candidate system consumers = %d, want one", got)
+					}
 					if err := candidate.Shutdown(); err != nil {
 						t.Fatalf("shutdown replacement: %v", err)
+					}
+
+					rollbackPredecessor := newRuntime(newHash)
+					rollbackPredecessor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+					if err := rollbackPredecessor.Start(context.Background()); err != nil {
+						t.Fatalf("start rollback predecessor: %v", err)
+					}
+					if err := rollbackPredecessor.Scheduler.Register(runtimepipeline.Schedule{
+						AgentID: "rollback-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
+					}); err != nil {
+						t.Fatalf("register pending rollback schedule: %v", err)
+					}
+					rollbackFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					rollbackManager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+						BundleHash: newHash, BundleSourceFact: rollbackFact, Source: source, Runtime: rollbackPredecessor,
+					})
+					if err != nil {
+						t.Fatalf("NewRuntimeContextManager rollback: %v", err)
+					}
+					failingCandidate := newRuntime(newHash)
+					failingCandidate.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+					restored := newRuntime(newHash)
+					restored.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+					rollbackSupervisor := &runtimeProjectSupervisor{
+						ready:                   new(atomic.Bool),
+						currentRoot:             "/rollback-old",
+						currentSource:           source,
+						currentBundle:           bundle,
+						currentRT:               rollbackPredecessor,
+						currentBundleSourceFact: rollbackFact,
+						runtimeContexts:         rollbackManager,
+					}
+					rollbackSupervisor.ready.Store(true)
+					rollbackSupervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, error) {
+						return restored, nil
+					}
+					rollbackSupervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
+						if rt == failingCandidate && (active.Load() != 0 || rollbackPredecessor.Manager.IsRunning() || rollbackPredecessor.Bus.OutboxSweeperActive()) {
+							t.Fatalf("failing candidate activation overlapped predecessor consumers")
+						}
+						if err := rt.Start(ctx); err != nil {
+							return err
+						}
+						if rt == failingCandidate {
+							return errors.New("injected post-start precommit failure")
+						}
+						return nil
+					}
+					_, err = rollbackSupervisor.replaceCurrentRuntimeWithSource(
+						context.Background(), "/rollback-candidate", source, bundle, rollbackFact,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, failingCandidate,
+					)
+					if err == nil || !strings.Contains(err.Error(), "injected post-start precommit failure") {
+						t.Fatalf("precommit replacement error = %v", err)
+					}
+					lookup := rollbackManager.LookupBundleHashStatus(newHash)
+					if !lookup.Loaded() || lookup.Context.Runtime != restored || rollbackSupervisor.CurrentRuntime() != restored {
+						t.Fatalf("precommit rollback authority = %#v/%p, want restored runtime %p", lookup, rollbackSupervisor.CurrentRuntime(), restored)
+					}
+					if got := maxActive.Load(); got != 1 {
+						t.Fatalf("rollback overlapped shared-store consumers: max=%d", got)
+					}
+					if err := restored.Shutdown(); err != nil {
+						t.Fatalf("shutdown restored predecessor: %v", err)
 					}
 				})
 			}
 		})
 	}
+}
+
+type replacementOverlapProbeNode struct {
+	active    *atomic.Int32
+	maxActive *atomic.Int32
+	mu        sync.Mutex
+	hooks     []func()
+}
+
+func newReplacementOverlapProbeNode(active, maxActive *atomic.Int32) *replacementOverlapProbeNode {
+	return &replacementOverlapProbeNode{active: active, maxActive: maxActive}
+}
+
+func (n *replacementOverlapProbeNode) String() string { return "replacement-overlap-probe" }
+
+func (n *replacementOverlapProbeNode) AddSubscriptionReadyHook(hook func()) {
+	n.mu.Lock()
+	n.hooks = append(n.hooks, hook)
+	n.mu.Unlock()
+}
+
+func (n *replacementOverlapProbeNode) Run(ctx context.Context) {
+	current := n.active.Add(1)
+	for {
+		maximum := n.maxActive.Load()
+		if current <= maximum || n.maxActive.CompareAndSwap(maximum, current) {
+			break
+		}
+	}
+	n.mu.Lock()
+	hooks := append([]func(){}, n.hooks...)
+	n.mu.Unlock()
+	for _, hook := range hooks {
+		hook()
+	}
+	<-ctx.Done()
+	n.active.Add(-1)
 }
 
 func runtimeContextTestHash(fill string) string {

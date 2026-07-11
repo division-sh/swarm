@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -71,6 +73,7 @@ type Scheduler struct {
 	onFire  func(Schedule)
 	tasks   map[string]*scheduledTask
 	stopped bool
+	active  atomic.Int64
 }
 
 type scheduledTask struct {
@@ -104,6 +107,21 @@ func (s *Scheduler) Register(sc Schedule) error {
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
+	var spec cronSpec
+	switch sc.Mode {
+	case "once":
+		if sc.At.IsZero() {
+			return errors.New("schedule.at is required for mode=once")
+		}
+	case "cron":
+		var err error
+		spec, err = parseCronSpec(sc.Cron)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
+	}
 
 	s.mu.Lock()
 	if s.stopped {
@@ -117,25 +135,40 @@ func (s *Scheduler) Register(sc Schedule) error {
 	}
 	task := &scheduledTask{stop: make(chan struct{})}
 	s.tasks[key] = task
+	s.active.Add(1)
 	s.mu.Unlock()
 
 	switch sc.Mode {
 	case "once":
-		if sc.At.IsZero() {
-			return errors.New("schedule.at is required for mode=once")
-		}
-		go s.runOnce(task, key, sc)
+		go func() {
+			defer s.active.Add(-1)
+			s.runOnce(task, key, sc)
+		}()
 		return nil
 	case "cron":
-		spec, err := parseCronSpec(sc.Cron)
-		if err != nil {
-			return err
-		}
-		go s.runCron(task, key, sc, spec)
+		go func() {
+			defer s.active.Add(-1)
+			s.runCron(task, key, sc, spec)
+		}()
 		return nil
-	default:
-		return fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
 	}
+	panic("validated schedule mode became unreachable")
+}
+
+func (s *Scheduler) Wait(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for s.active.Load() != 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) Cancel(agentID string, eventType string) error {

@@ -1162,6 +1162,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Registry, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")

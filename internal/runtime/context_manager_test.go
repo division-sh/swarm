@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -256,6 +257,37 @@ func TestRuntimeContextManagerResolvedRequestCannotAdmitAfterDeactivation(t *tes
 	if release, admitted := resolved.Context.Runtime.shutdownGate.Begin(); admitted {
 		release()
 		t.Fatal("request resolved before deactivation admitted after visibility withdrawal")
+	}
+}
+
+func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	admissionCtx, release, admitted := contextDef.Runtime.shutdownGate.BeginContext(context.Background())
+	if !admitted {
+		t.Fatal("runtime admission unexpectedly closed")
+	}
+	defer release()
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	grace := 20 * time.Millisecond
+	started := time.Now()
+	result := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: grace})
+	elapsed := time.Since(started)
+	if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "runtime ingress admission drain timed out after 20ms") {
+		t.Fatalf("bounded deactivation error = %v", result.ShutdownErr)
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Fatalf("deactivation elapsed = %s, want configured %s bound", elapsed, grace)
+	}
+	select {
+	case <-admissionCtx.Done():
+	default:
+		t.Fatal("stuck admitted request context was not canceled at grace expiry")
+	}
+	if _, admitted := contextDef.Runtime.shutdownGate.Begin(); admitted {
+		t.Fatal("new admission succeeded after bounded deactivation")
 	}
 }
 

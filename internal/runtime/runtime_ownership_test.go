@@ -180,6 +180,12 @@ func TestRuntimeReplacementBorrowsAndCommitsStartupOwnershipWithoutReacquire(t *
 		t.Fatalf("start predecessor: %v", err)
 	}
 	candidate := newRuntime()
+	if _, err := candidate.PrepareStartupOwnershipHandoff(predecessor); err == nil || !strings.Contains(err.Error(), "must quiesce") {
+		t.Fatalf("handoff before predecessor quiescence error = %v", err)
+	}
+	if err := predecessor.QuiesceForReplacement(DefaultShutdownOptions()); err != nil {
+		t.Fatalf("quiesce predecessor: %v", err)
+	}
 	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
 	if err != nil {
 		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
@@ -229,6 +235,9 @@ func TestRuntimeReplacementStartupRollbackPreservesPredecessorOwnership(t *testi
 		t.Fatalf("start predecessor: %v", err)
 	}
 	candidate := newRuntime()
+	if err := predecessor.QuiesceForReplacement(DefaultShutdownOptions()); err != nil {
+		t.Fatalf("quiesce predecessor: %v", err)
+	}
 	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
 	if err != nil {
 		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
@@ -239,12 +248,11 @@ func TestRuntimeReplacementStartupRollbackPreservesPredecessorOwnership(t *testi
 	if err := candidate.Shutdown(); err != nil {
 		t.Fatalf("shutdown rejected candidate: %v", err)
 	}
-	handoff.Rollback()
+	if err := handoff.Rollback(); err != nil {
+		t.Fatalf("rollback startup ownership: %v", err)
+	}
 	if got := lease.released.Load(); got != 0 {
 		t.Fatalf("rejected candidate released predecessor lease %d time(s)", got)
-	}
-	if predecessor.shutdownAdmissionClosed() {
-		t.Fatal("rollback closed predecessor admission")
 	}
 	if err := predecessor.Shutdown(); err != nil {
 		t.Fatalf("shutdown predecessor: %v", err)
@@ -272,6 +280,9 @@ func TestRuntimeReplacementPostCommitRollbackRestoresPredecessorOwnership(t *tes
 		t.Fatalf("start predecessor: %v", err)
 	}
 	candidate := newRuntime()
+	if err := predecessor.QuiesceForReplacement(DefaultShutdownOptions()); err != nil {
+		t.Fatalf("quiesce predecessor: %v", err)
+	}
 	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
 	if err != nil {
 		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
@@ -282,9 +293,11 @@ func TestRuntimeReplacementPostCommitRollbackRestoresPredecessorOwnership(t *tes
 	if err := handoff.Commit(); err != nil {
 		t.Fatalf("commit handoff: %v", err)
 	}
-	handoff.Rollback()
-	if err := candidate.Shutdown(); err != nil {
-		t.Fatalf("shutdown rolled-back candidate: %v", err)
+	if err := candidate.QuiesceForReplacement(DefaultShutdownOptions()); err != nil {
+		t.Fatalf("quiesce committed candidate: %v", err)
+	}
+	if err := handoff.Rollback(); err != nil {
+		t.Fatalf("rollback committed ownership: %v", err)
 	}
 	if got := lease.released.Load(); got != 0 {
 		t.Fatalf("rolled-back candidate released predecessor lease %d time(s)", got)

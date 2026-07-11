@@ -73,6 +73,36 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	}()
 }
 
+func (eb *EventBus) WaitForOutboxSweeper(ctx context.Context) error {
+	if eb == nil {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		eb.mu.RLock()
+		active := eb.outboxSweeperActive
+		eb.mu.RUnlock()
+		if !active {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (eb *EventBus) OutboxSweeperActive() bool {
+	if eb == nil {
+		return false
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.outboxSweeperActive
+}
+
 func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duration, limit int) (int, error) {
 	if eb == nil || eb.store == nil {
 		return 0, nil

@@ -69,6 +69,23 @@ type runtimeShutdownInboundStore struct {
 	recorded bool
 }
 
+type cancellationBlockingInboundStore struct {
+	entered chan struct{}
+}
+
+func (s *cancellationBlockingInboundStore) RecordInboundEvent(ctx context.Context, _, _, _ string) (bool, error) {
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+func (*cancellationBlockingInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
+	return 0, nil
+}
+
 func (s *runtimeShutdownInboundStore) RecordInboundEvent(context.Context, string, string, string) (bool, error) {
 	s.recorded = true
 	return true, nil
@@ -230,11 +247,69 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	}
 
 	grace := 25 * time.Millisecond
+	startedAt := time.Now()
 	err = rt.ShutdownWithOptions(ShutdownOptions{Grace: grace})
-	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
+	elapsed := time.Since(startedAt)
+	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown:") {
 		t.Fatalf("ShutdownWithOptions err = %v, want configured grace manager timeout", err)
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Fatalf("ShutdownWithOptions elapsed = %s, want configured %s bound", elapsed, grace)
 	}
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed")
+	}
+}
+
+func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &cancellationBlockingInboundStore{entered: make(chan struct{}, 1)}
+	rt := &Runtime{Bus: bus}
+	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, store)
+	gateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
+	rt.InboundGateway = gateway.InboundGateway
+	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
+	contextDef := testBundleContext(t, hash, "inbound.telegram")
+	contextDef.Runtime = rt
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	body := `{"update_id":901,"message":{"chat":{"id":42},"text":"blocked"}}`
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(body))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "webhook_signing.telegram")
+	response := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
+			BundleHash: hash, FlowID: "chat", RunID: "41000000-0000-0000-0000-000000000001",
+			FlowInstance: "chat/@standing/a", EntityID: "41000000-0000-0000-0000-000000000002",
+			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
+		}, nil)
+		response <- rec
+	}()
+	select {
+	case <-store.entered:
+	case <-time.After(time.Second):
+		t.Fatal("webhook did not enter blocking persistence")
+	}
+	result := manager.DeactivateBundleHashWithOptions(hash, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: 20 * time.Millisecond})
+	if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "runtime ingress admission drain timed out") {
+		t.Fatalf("deactivation error = %v", result.ShutdownErr)
+	}
+	select {
+	case rec := <-response:
+		if rec.Code < 400 {
+			t.Fatalf("canceled webhook status = %d, want failure", rec.Code)
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("canceled webhook did not return within configured shutdown bound")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("canceled webhook published %d event(s)", len(eventStore.events))
 	}
 }

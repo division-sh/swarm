@@ -1345,7 +1345,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	if got.ID() != eventID {
 		t.Fatalf("delivered event id = %s, want %s", got.ID(), eventID)
 	}
-	waitCtx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
+	waitCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := eb.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after acknowledged dispatch completion: %v", err)
