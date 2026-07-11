@@ -1775,8 +1775,11 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 }
 
 func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
+	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: stubSource(), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", ResultType: resultType}},
+		}}), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1829,6 +1832,70 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	results := closed.Results()
 	if len(results) != 2 || results[0].(map[string]any)["score"] != float64(1) || results[1].(map[string]any)["score"] != float64(2) {
 		t.Fatalf("results = %#v, want membership order a,b", results)
+	}
+}
+
+func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		expression string
+		wantErr    bool
+	}{
+		{name: "named field", expression: `join.results[0].score > 0`},
+		{name: "named value is not scalar", expression: `join.results[0] > 1`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := runtimecontracts.JoinSpec{
+				ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
+				Members:      runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
+				CompleteWhen: tc.expression,
+				Remaining:    runtimecontracts.JoinRemainingIgnore,
+				OnComplete:   runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
+				Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+			}
+			resultType := runtimecontracts.CatalogTypeReference{
+				Type: "JoinResult",
+				Catalog: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+					"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+				}},
+			}
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+				Name:  "orders",
+				Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+			}})
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+			activation, err := joinruntime.NewActivation(spec.ID, spec.Stage, "join-node", "item.completed", "", []string{"a"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			buckets := map[string]map[string]any{}
+			if err := joinruntime.Store(buckets, activation); err != nil {
+				t.Fatal(err)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
+				Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+				State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
+			})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "no matching overload") {
+					t.Fatalf("Execute error = %v, want catalog-backed typed rejection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Execute error = %v", err)
+			}
+			if result.StateMutation.NextState != "ready" {
+				t.Fatalf("next state = %q, want ready", result.StateMutation.NextState)
+			}
+		})
 	}
 }
 

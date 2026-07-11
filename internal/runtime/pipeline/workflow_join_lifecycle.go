@@ -11,6 +11,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const (
@@ -61,6 +62,10 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 		}
 
 		for _, plan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {
+			if plan.ResultType.Empty() {
+				lifecycleErr = fmt.Errorf("join %s has no resolved output type in the semantic plan", plan.Spec.EffectiveID())
+				return
+			}
 			members, ok := joinMemberSnapshot(instance.Metadata, plan.Spec.Members.From)
 			if !ok {
 				lifecycleErr = fmt.Errorf("join %s members source %s is not a unique list of non-empty text", plan.Spec.EffectiveID(), plan.Spec.Members.From)
@@ -99,10 +104,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			}
 			kind := timeridentity.TimerHandleJoinTimeout
 			complete, err := joinruntime.CompletionSatisfied(activation, plan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
-				return pc.expressionEval.EvalBool(expression, workflowExpressionContext{
-					Join:         joinContext,
-					WorkflowName: instance.WorkflowName,
-				})
+				return workflowexpr.EvalJoinBool(expression, joinContext, plan.ResultType)
 			})
 			if err != nil {
 				lifecycleErr = fmt.Errorf("evaluate join %s completion at arm: %w", plan.Spec.EffectiveID(), err)

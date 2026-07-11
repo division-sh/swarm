@@ -323,6 +323,7 @@ type WorkflowJoinPlan struct {
 	NodeID       string
 	HandlerEvent string
 	Spec         JoinSpec
+	ResultType   CatalogTypeReference
 }
 
 type PolicySheetRowKind string

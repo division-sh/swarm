@@ -3,6 +3,8 @@ package workflowexpr
 import (
 	"strings"
 	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
@@ -78,7 +80,7 @@ func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
 }
 
 func TestJoinExpressionTypeCheckingMatchesRuntimeContext(t *testing.T) {
-	opts := ValueExpressionOptions{AllowJoin: true, RequireBool: true, JoinResultType: "text"}
+	opts := ValueExpressionOptions{AllowJoin: true, RequireBool: true, JoinResultType: runtimecontracts.CatalogTypeReference{Type: "text"}}
 	for _, expression := range []string{
 		`join.completed <= join.expected`,
 		`join.missing.size() > 0`,
@@ -106,6 +108,49 @@ func TestJoinExpressionTypeCheckingMatchesRuntimeContext(t *testing.T) {
 			}}, opts)
 			if evalErr == nil || !strings.Contains(evalErr.Error(), "no matching overload") {
 				t.Fatalf("EvalValueExpressionWithOptions(%q) error = %v, want the same typed rejection before evaluation", expression, evalErr)
+			}
+		})
+	}
+}
+
+func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
+	catalog := runtimecontracts.TypeCatalogDocument{
+		Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}},
+		Enums:   map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}},
+		Types: map[string]runtimecontracts.NamedTypeDecl{
+			"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"value": {Type: "text"},
+				"score": {Type: "Score"},
+			}},
+		},
+	}
+	for _, tc := range []struct {
+		name       string
+		resultType string
+		expression string
+		wantErr    bool
+	}{
+		{name: "named object field", resultType: "JoinResult", expression: `join.results[0].value == "ok"`},
+		{name: "named object operator", resultType: "JoinResult", expression: `join.results[0] > 1`, wantErr: true},
+		{name: "named object unknown field", resultType: "JoinResult", expression: `join.results[0].missing == "x"`, wantErr: true},
+		{name: "nested scalar alias field", resultType: "JoinResult", expression: `join.results[0].score > 1`},
+		{name: "enum equality", resultType: "Decision", expression: `join.results[0] == "accept"`},
+		{name: "enum numeric operator", resultType: "Decision", expression: `join.results[0] > 1`, wantErr: true},
+		{name: "scalar alias", resultType: "Score", expression: `join.results[0] > 1`},
+		{name: "scalar alias mismatch", resultType: "Score", expression: `join.results[0].startsWith("1")`, wantErr: true},
+		{name: "list", resultType: "list<Score>", expression: `join.results[0][0] > 1`},
+		{name: "map", resultType: "map[text]Score", expression: `join.results[0]["a"] > 1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(tc.expression, ValueExpressionOptions{
+				AllowJoin: true, RequireBool: true,
+				JoinResultType: runtimecontracts.CatalogTypeReference{Type: tc.resultType, Catalog: catalog},
+			})
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) succeeded, want typed rejection", tc.expression)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", tc.expression, err)
 			}
 		})
 	}
