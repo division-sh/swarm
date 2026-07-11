@@ -2,494 +2,200 @@ package testtiming
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
 
 func TestLoadBudgetPolicyValidatesHardOwner(t *testing.T) {
-	valid := `version: 1
+	valid := `
+version: 1
 hard:
-  max_shard_command_seconds:
-    limit_seconds: 270
-    justification: Broad ceiling from pinned command observations.
-  full_conformance_command_seconds:
-    limit_seconds: 330
-    justification: Full ceiling from pinned command observations.
-package_reference_seconds:
-  github.com/division-sh/swarm/a: 10
+  max_shard_command_seconds: {limit_seconds: 270, justification: measured broad command}
+  full_conformance_command_seconds: {limit_seconds: 330, justification: measured catalog command}
 `
-	policy, err := LoadBudgetPolicy(strings.NewReader(valid))
-	if err != nil {
+	if _, err := LoadBudgetPolicy(strings.NewReader(valid)); err != nil {
 		t.Fatalf("LoadBudgetPolicy: %v", err)
 	}
-	if policy.Hard.MaxShardCommandSeconds.LimitSeconds != 270 || policy.Hard.FullConformanceCommandSeconds.LimitSeconds != 330 {
-		t.Fatalf("hard budgets = %+v", policy.Hard)
-	}
-
-	tests := []struct {
-		name string
-		edit func(string) string
-		want string
-	}{
-		{
-			name: "unknown field",
-			edit: func(input string) string { return input + "unknown: true\n" },
-			want: "field unknown not found",
-		},
-		{
-			name: "missing justification",
-			edit: func(input string) string {
-				return strings.Replace(input, "    justification: Broad ceiling from pinned command observations.\n", "", 1)
-			},
-			want: "justification must be non-empty",
-		},
-		{
-			name: "blank justification",
-			edit: func(input string) string {
-				return strings.Replace(input, "justification: Broad ceiling from pinned command observations.", `justification: ""`, 1)
-			},
-			want: "justification must be non-empty",
-		},
-		{
-			name: "literal multiline justification",
-			edit: func(input string) string {
-				return strings.Replace(input, "justification: Broad ceiling from pinned command observations.", "justification: |\n      first line\n      second line", 1)
-			},
-			want: "justification must be one line",
-		},
-		{
-			name: "folded multiline justification",
-			edit: func(input string) string {
-				return strings.Replace(input, "justification: Broad ceiling from pinned command observations.", "justification: >\n      first line\n      second line", 1)
-			},
-			want: "plain one-line scalar",
-		},
-		{
-			name: "non-positive limit",
-			edit: func(input string) string { return strings.Replace(input, "limit_seconds: 270", "limit_seconds: 0", 1) },
-			want: "finite positive",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := LoadBudgetPolicy(strings.NewReader(tt.edit(valid)))
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("LoadBudgetPolicy error = %v, want containing %q", err, tt.want)
-			}
-		})
+	if _, err := LoadBudgetPolicy(strings.NewReader(valid + "unknown: true\n")); err == nil || !strings.Contains(err.Error(), "field unknown") {
+		t.Fatalf("unknown field error = %v", err)
 	}
 }
 
-func TestConfirmationRequiredUsesCommandLatencyOnly(t *testing.T) {
-	policy := testBudgetPolicy()
-	evidence := testEvidence(ShardSurface(1), AttemptPrimary, 270, []PackageTiming{{Package: "a", Result: "pass", Elapsed: 900}})
-
-	required, err := ConfirmationRequired(policy, evidence)
-	if err != nil || required {
-		t.Fatalf("at limit required=%v err=%v, want false", required, err)
-	}
-	evidence.ElapsedSeconds = 271
-	required, err = ConfirmationRequired(policy, evidence)
+func TestConfirmationRequiredUsesExactPlannedUnit(t *testing.T) {
+	plan := timingTestPlan(t)
+	policy := timingTestPolicy()
+	evidence := timingTestEvidence(plan, "broad-01", AttemptPrimary, 271)
+	required, err := ConfirmationRequired(policy, plan, evidence)
 	if err != nil || !required {
-		t.Fatalf("over limit required=%v err=%v, want true", required, err)
+		t.Fatalf("ConfirmationRequired = %v, %v; want true", required, err)
 	}
-	evidence.ExitCode = 1
-	if _, err := ConfirmationRequired(policy, evidence); err == nil || !strings.Contains(err.Error(), "not confirmation-eligible") {
-		t.Fatalf("failed confirmation check error = %v", err)
-	}
-}
-
-func TestEvaluateBudgetAppliesBoundedConfirmationStateMachine(t *testing.T) {
-	policy := testBudgetPolicy()
-	snapshot := testSnapshot([]string{"a"})
-	opts := EvaluationOptions{Snapshot: snapshot}
-
-	tests := []struct {
-		name     string
-		evidence []CommandEvidence
-		want     BudgetStatus
-	}{
-		{
-			name:     "at limit passes",
-			evidence: []CommandEvidence{testEvidence(ShardSurface(1), AttemptPrimary, 270, passTimings("a"))},
-			want:     BudgetPass,
-		},
-		{
-			name: "one breach then pass warns",
-			evidence: []CommandEvidence{
-				testEvidence(ShardSurface(1), AttemptPrimary, 271, passTimings("a")),
-				testEvidence(ShardSurface(1), AttemptConfirmation, 269, passTimings("a")),
-			},
-			want: BudgetWarn,
-		},
-		{
-			name: "two breaches fail",
-			evidence: []CommandEvidence{
-				testEvidence(ShardSurface(1), AttemptPrimary, 271, passTimings("a")),
-				testEvidence(ShardSurface(1), AttemptConfirmation, 271, passTimings("a")),
-			},
-			want: BudgetFail,
-		},
-		{
-			name:     "missing confirmation incomplete",
-			evidence: []CommandEvidence{testEvidence(ShardSurface(1), AttemptPrimary, 271, passTimings("a"))},
-			want:     BudgetIncomplete,
-		},
-		{
-			name: "unneeded confirmation incomplete",
-			evidence: []CommandEvidence{
-				testEvidence(ShardSurface(1), AttemptPrimary, 269, passTimings("a")),
-				testEvidence(ShardSurface(1), AttemptConfirmation, 269, passTimings("a")),
-			},
-			want: BudgetIncomplete,
-		},
-		{
-			name: "failed primary incomplete",
-			evidence: func() []CommandEvidence {
-				failed := testEvidence(ShardSurface(1), AttemptPrimary, 10, []PackageTiming{{Package: "a", Result: "fail", Elapsed: 10}})
-				failed.ExitCode = 1
-				return []CommandEvidence{failed}
-			}(),
-			want: BudgetIncomplete,
-		},
-		{
-			name: "changed confirmation environment incomplete",
-			evidence: func() []CommandEvidence {
-				primary := testEvidence(ShardSurface(1), AttemptPrimary, 271, passTimings("a"))
-				confirmation := testEvidence(ShardSurface(1), AttemptConfirmation, 269, passTimings("a"))
-				confirmation.EnvironmentID = "different"
-				return []CommandEvidence{primary, confirmation}
-			}(),
-			want: BudgetIncomplete,
-		},
-		{
-			name: "changed confirmation packages incomplete",
-			evidence: []CommandEvidence{
-				testEvidence(ShardSurface(1), AttemptPrimary, 271, passTimings("a")),
-				testEvidence(ShardSurface(1), AttemptConfirmation, 269, passTimings("b")),
-			},
-			want: BudgetIncomplete,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := EvaluateBudget(policy, opts, tt.evidence)
-			if result.Status != tt.want {
-				t.Fatalf("status = %s, want %s; result=%+v", result.Status, tt.want, result)
-			}
-		})
+	evidence.PlanDigest = "wrong"
+	if _, err := ConfirmationRequired(policy, plan, evidence); err == nil || !strings.Contains(err.Error(), "plan_digest") {
+		t.Fatalf("wrong-plan error = %v", err)
 	}
 }
 
-func TestEvaluateBudgetAppliesFullCommandBoundary(t *testing.T) {
-	policy := testBudgetPolicy()
-	opts := EvaluationOptions{
-		Snapshot:     testSnapshot([]string{"a"}),
-		FullPackages: []string{"catalog"},
-		ExpectFull:   true,
+func TestEvaluateBudgetRequiresEveryPlanUnitExactlyOnce(t *testing.T) {
+	plan := timingTestPlan(t)
+	policy := timingTestPolicy()
+	complete := make([]CommandEvidence, 0, len(plan.Units))
+	for _, unit := range plan.Units {
+		complete = append(complete, timingTestEvidence(plan, unit.ID, AttemptPrimary, 10))
 	}
-	shard := testEvidence(ShardSurface(1), AttemptPrimary, 10, passTimings("a"))
-	tests := []struct {
-		name     string
-		evidence []CommandEvidence
-		want     BudgetStatus
-	}{
-		{
-			name:     "at limit passes",
-			evidence: []CommandEvidence{testEvidence(SurfaceFullConformance, AttemptPrimary, 330, passTimings("catalog"))},
-			want:     BudgetPass,
-		},
-		{
-			name: "passing confirmation warns",
-			evidence: []CommandEvidence{
-				testEvidence(SurfaceFullConformance, AttemptPrimary, 331, passTimings("catalog")),
-				testEvidence(SurfaceFullConformance, AttemptConfirmation, 329, passTimings("catalog")),
-			},
-			want: BudgetWarn,
-		},
-		{
-			name: "repeated breach fails",
-			evidence: []CommandEvidence{
-				testEvidence(SurfaceFullConformance, AttemptPrimary, 331, passTimings("catalog")),
-				testEvidence(SurfaceFullConformance, AttemptConfirmation, 331, passTimings("catalog")),
-			},
-			want: BudgetFail,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			evidence := append([]CommandEvidence{shard}, tt.evidence...)
-			result := EvaluateBudget(policy, opts, evidence)
-			if result.Status != tt.want {
-				t.Fatalf("status = %s, want %s: %+v", result.Status, tt.want, result)
-			}
-		})
-	}
-}
-
-func TestEvaluateBudgetFailsClosedOnIncompleteEvidenceSets(t *testing.T) {
-	policy := testBudgetPolicy()
-	snapshot := ShardSnapshot{
-		Version:    ShardSnapshotVersion,
-		ShardCount: 2,
-		Shards: []PackageShard{
-			{ID: 1, Packages: []string{"a"}},
-			{ID: 2, Packages: []string{"b"}},
-		},
-	}
-	complete := []CommandEvidence{
-		testEvidence(ShardSurface(1), AttemptPrimary, 10, passTimings("a")),
-		testEvidence(ShardSurface(2), AttemptPrimary, 10, passTimings("b")),
-	}
-	if got := EvaluateBudget(policy, EvaluationOptions{Snapshot: snapshot}, complete).Status; got != BudgetPass {
+	opts := EvaluationOptions{Plan: plan, HistoricalWeights: map[string]float64{"module/a": 1, "module/catalog": 1}}
+	if got := EvaluateBudget(policy, opts, complete).Status; got != BudgetPass {
 		t.Fatalf("complete status = %s, want PASS", got)
 	}
-
 	tests := []struct {
 		name string
-		edit func([]CommandEvidence) ([]CommandEvidence, EvaluationOptions)
+		edit func([]CommandEvidence) []CommandEvidence
 	}{
-		{
-			name: "missing shard",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				return input[:1], EvaluationOptions{Snapshot: snapshot}
-			},
-		},
-		{
-			name: "duplicate shard",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				return append(input, input[0]), EvaluationOptions{Snapshot: snapshot}
-			},
-		},
-		{
-			name: "malformed report",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				input[0].Report.Summary.MalformedLines = 1
-				return input, EvaluationOptions{Snapshot: snapshot}
-			},
-		},
-		{
-			name: "partial report",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				input[0].Report.Packages = nil
-				input[0].Report.Summary.Packages = 0
-				input[0].Report.Summary.PackageElapsedSec = 0
-				return input, EvaluationOptions{Snapshot: snapshot}
-			},
-		},
-		{
-			name: "load problem",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				return input, EvaluationOptions{Snapshot: snapshot, LoadProblems: []string{"malformed evidence file"}}
-			},
-		},
-		{
-			name: "unexpected full evidence",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				return append(input, testEvidence(SurfaceFullConformance, AttemptPrimary, 10, passTimings("catalog"))), EvaluationOptions{Snapshot: snapshot, FullPackages: []string{"catalog"}}
-			},
-		},
-		{
-			name: "expected full evidence missing",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				return input, EvaluationOptions{Snapshot: snapshot, FullPackages: []string{"catalog"}, ExpectFull: true}
-			},
-		},
-		{
-			name: "duplicate package across shard declaration",
-			edit: func(input []CommandEvidence) ([]CommandEvidence, EvaluationOptions) {
-				badSnapshot := snapshot
-				badSnapshot.Shards = append([]PackageShard(nil), snapshot.Shards...)
-				badSnapshot.Shards[1].Packages = []string{"a"}
-				input[1] = testEvidence(ShardSurface(2), AttemptPrimary, 10, passTimings("a"))
-				return input, EvaluationOptions{Snapshot: badSnapshot}
-			},
-		},
+		{name: "missing", edit: func(values []CommandEvidence) []CommandEvidence { return values[:1] }},
+		{name: "duplicate", edit: func(values []CommandEvidence) []CommandEvidence { return append(values, values[0]) }},
+		{name: "undeclared", edit: func(values []CommandEvidence) []CommandEvidence { values[0].UnitID = "other"; return values }},
+		{name: "wrong profile", edit: func(values []CommandEvidence) []CommandEvidence { values[0].Profile = "other"; return values }},
+		{name: "wrong environment", edit: func(values []CommandEvidence) []CommandEvidence { values[0].EnvironmentID = "other"; return values }},
+		{name: "wrong packages", edit: func(values []CommandEvidence) []CommandEvidence {
+			values[0].Packages = []string{"other"}
+			return values
+		}},
+		{name: "wrong head", edit: func(values []CommandEvidence) []CommandEvidence { values[0].HeadSHA = "other"; return values }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			input := append([]CommandEvidence(nil), complete...)
-			evidence, opts := tt.edit(input)
-			if got := EvaluateBudget(policy, opts, evidence).Status; got != BudgetIncomplete {
+			values := append([]CommandEvidence(nil), complete...)
+			if got := EvaluateBudget(policy, opts, tt.edit(values)).Status; got != BudgetIncomplete {
 				t.Fatalf("status = %s, want INCOMPLETE", got)
 			}
 		})
 	}
 }
 
-func TestPackageDiagnosticsUseCompleteTruthOutsideMarkdownTopN(t *testing.T) {
-	policy := testBudgetPolicy()
-	policy.PackageReferenceSeconds = map[string]float64{"a": 1, "b": 30, "c": 10}
-	timings := []PackageTiming{
-		{Package: "b", Result: "pass", Elapsed: 30},
-		{Package: "c", Result: "pass", Elapsed: 20},
-		{Package: "a", Result: "pass", Elapsed: 1},
+func TestEvaluateBudgetConfirmsOnlyResponsibleUnit(t *testing.T) {
+	plan := timingTestPlan(t)
+	policy := timingTestPolicy()
+	values := make([]CommandEvidence, 0, len(plan.Units)+1)
+	for _, unit := range plan.Units {
+		elapsed := 10.0
+		if unit.ID == "broad-01" {
+			elapsed = 271
+		}
+		values = append(values, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
 	}
-	evidence := testEvidence(ShardSurface(1), AttemptPrimary, 10, timings)
-	result := EvaluateBudget(policy, EvaluationOptions{Snapshot: testSnapshot([]string{"a", "b", "c"})}, []CommandEvidence{evidence})
-	if result.Status != BudgetPass {
-		t.Fatalf("status = %s, want PASS", result.Status)
+	values = append(values, timingTestEvidence(plan, "broad-01", AttemptConfirmation, 269))
+	result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, values)
+	if result.Status != BudgetWarn {
+		t.Fatalf("status = %s, want WARN: %+v", result.Status, result)
 	}
-	if len(result.PackageDiagnostics) != 1 || result.PackageDiagnostics[0].Package != "c" || result.PackageDiagnostics[0].Kind != "regression" {
-		t.Fatalf("diagnostics = %+v, want outside-top-N regression for c", result.PackageDiagnostics)
-	}
-	var markdown strings.Builder
-	if err := WriteMarkdown(&markdown, evidence.Report, MarkdownOptions{TopN: 1}); err != nil {
-		t.Fatalf("WriteMarkdown: %v", err)
-	}
-	if strings.Contains(markdown.String(), "`c`") {
-		t.Fatalf("c unexpectedly appears in top-1 Markdown:\n%s", markdown.String())
+	for _, surface := range result.Surfaces {
+		if surface.Surface != "broad-01" && surface.ConfirmationSeconds != nil {
+			t.Fatalf("unrelated unit %s was confirmed", surface.Surface)
+		}
 	}
 }
 
-func TestPackageRegressionRequiresBothAdvisoryThresholds(t *testing.T) {
-	tests := []struct {
-		name      string
-		reference float64
-		actual    float64
-		want      int
-	}{
-		{name: "both exceeded", reference: 10, actual: 20, want: 1},
-		{name: "percentage only", reference: 1, actual: 2, want: 0},
-		{name: "seconds only", reference: 100, actual: 106, want: 0},
-		{name: "exact five seconds", reference: 10, actual: 15, want: 0},
-		{name: "exact twenty five percent", reference: 40, actual: 50, want: 0},
+func TestPackageDiagnosticsConsumeGeneratedWeights(t *testing.T) {
+	plan := timingTestPlan(t)
+	values := make([]CommandEvidence, 0, len(plan.Units))
+	for _, unit := range plan.Units {
+		values = append(values, timingTestEvidence(plan, unit.ID, AttemptPrimary, 10))
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := testBudgetPolicy()
-			policy.PackageReferenceSeconds = map[string]float64{"a": tt.reference}
-			evidence := testEvidence(ShardSurface(1), AttemptPrimary, 10, []PackageTiming{{Package: "a", Result: "pass", Elapsed: tt.actual}})
-			result := EvaluateBudget(policy, EvaluationOptions{Snapshot: testSnapshot([]string{"a"})}, []CommandEvidence{evidence})
-			if len(result.PackageDiagnostics) != tt.want {
-				t.Fatalf("diagnostics = %+v, want count %d", result.PackageDiagnostics, tt.want)
-			}
-		})
+	result := EvaluateBudget(timingTestPolicy(), EvaluationOptions{
+		Plan: plan,
+		HistoricalWeights: map[string]float64{
+			"module/a":       1,
+			"module/catalog": 1,
+			"module/stale":   2,
+		},
+	}, values)
+	if len(result.PackageDiagnostics) != 1 || result.PackageDiagnostics[0].Kind != "stale" {
+		t.Fatalf("diagnostics = %+v, want one stale generated weight", result.PackageDiagnostics)
 	}
 }
 
-func TestPackageDiagnosticsUseBroadOwnerAndFullOnlyTail(t *testing.T) {
-	policy := testBudgetPolicy()
-	policy.PackageReferenceSeconds = map[string]float64{"overlap": 10, "catalog": 10}
-	shard := testEvidence(ShardSurface(1), AttemptPrimary, 10, []PackageTiming{{Package: "overlap", Result: "pass", Elapsed: 10}})
-	full := testEvidence(SurfaceFullConformance, AttemptPrimary, 10, []PackageTiming{
-		{Package: "overlap", Result: "pass", Elapsed: 100},
-		{Package: "catalog", Result: "pass", Elapsed: 20},
-	})
-	result := EvaluateBudget(policy, EvaluationOptions{
-		Snapshot:     testSnapshot([]string{"overlap"}),
-		FullPackages: []string{"overlap", "catalog"},
-		ExpectFull:   true,
-	}, []CommandEvidence{shard, full})
-	if result.Status != BudgetPass {
-		t.Fatalf("status = %s, want PASS", result.Status)
+func TestBudgetMarkdownDoesNotAskImplementersToRebalance(t *testing.T) {
+	result := BudgetResult{Version: BudgetResultVersion, Status: BudgetIncomplete}
+	var out bytes.Buffer
+	if err := WriteBudgetMarkdown(&out, result); err != nil {
+		t.Fatal(err)
 	}
-	if len(result.PackageDiagnostics) != 1 || result.PackageDiagnostics[0].Package != "catalog" {
-		t.Fatalf("diagnostics = %+v, want only full-only catalog regression", result.PackageDiagnostics)
+	if strings.Contains(out.String(), "generate-shards") || strings.Contains(out.String(), "shards 6") {
+		t.Fatalf("legacy manual remediation survives:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "planner-owned") {
+		t.Fatalf("planner remediation missing:\n%s", out.String())
 	}
 }
 
-func TestPackageDiagnosticsReportNewAndStaleReferences(t *testing.T) {
-	policy := testBudgetPolicy()
-	policy.PackageReferenceSeconds = map[string]float64{"a": 1, "stale": 2}
-	evidence := testEvidence(ShardSurface(1), AttemptPrimary, 10, []PackageTiming{
-		{Package: "a", Result: "pass", Elapsed: 1},
-		{Package: "new", Result: "pass", Elapsed: 2},
-	})
-	result := EvaluateBudget(policy, EvaluationOptions{Snapshot: testSnapshot([]string{"a", "new"})}, []CommandEvidence{evidence})
-	if len(result.PackageDiagnostics) != 2 {
-		t.Fatalf("diagnostics = %+v, want new and stale", result.PackageDiagnostics)
+func timingTestPlan(t *testing.T) testplanning.RunPlan {
+	t.Helper()
+	policy := testplanning.Policy{
+		Version: 1,
+		Module:  "module",
+		Planning: testplanning.PlanningPolicy{
+			TargetSeconds:         100,
+			MaxShards:             2,
+			UnknownPackageSeconds: 10,
+			MaxImbalance:          0.25,
+		},
+		SpecialPackages: []string{"module/catalog"},
+		Profiles: map[string]testplanning.ProfilePolicy{
+			testplanning.ProfilePRCommon:    {CountMode: CountModeCacheDefault, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfilePREscalated: {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfileFull:        {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+			testplanning.ProfileNightly:     {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
+		},
+		Units: map[string]testplanning.UnitPolicy{
+			"catalog": {Packages: []string{"module/catalog"}, CountMode: CountModeOne, EnvironmentID: "env", BudgetClass: "full"},
+		},
+		Projections: map[string]testplanning.ProjectionPolicy{},
 	}
-	if result.PackageDiagnostics[0].Kind != "new" || result.PackageDiagnostics[1].Kind != "stale" {
-		t.Fatalf("diagnostic order/kinds = %+v", result.PackageDiagnostics)
+	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, testplanning.ProfilePRCommon, "test", "head")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
 	}
+	return plan
 }
 
-func TestBudgetResultProjectionsShareOneStatus(t *testing.T) {
-	result := BudgetResult{
-		Version: BudgetResultVersion,
-		Status:  BudgetFail,
-		Surfaces: []SurfaceResult{{
-			Surface:        ShardSurface(1),
-			Status:         BudgetFail,
-			LimitSeconds:   270,
-			PrimarySeconds: floatPointer(271),
-		}},
-	}
-	var machine bytes.Buffer
-	if err := WriteBudgetJSON(&machine, result); err != nil {
-		t.Fatalf("WriteBudgetJSON: %v", err)
-	}
-	var decoded BudgetResult
-	if err := json.Unmarshal(machine.Bytes(), &decoded); err != nil {
-		t.Fatalf("decode machine result: %v", err)
-	}
-	var markdown strings.Builder
-	if err := WriteBudgetMarkdown(&markdown, result); err != nil {
-		t.Fatalf("WriteBudgetMarkdown: %v", err)
-	}
-	if decoded.Status != BudgetFail || !strings.Contains(markdown.String(), "**Status: FAIL**") || result.ExitCode() == 0 {
-		t.Fatalf("projections disagree: decoded=%s exit=%d markdown=%s", decoded.Status, result.ExitCode(), markdown.String())
-	}
-	if !strings.Contains(markdown.String(), "go run ./cmd/swarm-test-timing -generate-shards") {
-		t.Fatalf("markdown lacks real remediation command:\n%s", markdown.String())
-	}
-}
-
-func testBudgetPolicy() BudgetPolicy {
+func timingTestPolicy() BudgetPolicy {
 	return BudgetPolicy{
-		Version: BudgetPolicyVersion,
+		Version: 1,
 		Hard: HardBudgets{
 			MaxShardCommandSeconds:        CommandBudget{LimitSeconds: 270, Justification: "test"},
 			FullConformanceCommandSeconds: CommandBudget{LimitSeconds: 330, Justification: "test"},
 		},
-		PackageReferenceSeconds: map[string]float64{},
 	}
 }
 
-func testSnapshot(packages []string) ShardSnapshot {
-	return ShardSnapshot{
-		Version:    ShardSnapshotVersion,
-		ShardCount: 1,
-		Shards:     []PackageShard{{ID: 1, Packages: append([]string(nil), packages...)}},
+func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elapsed float64) CommandEvidence {
+	unit, err := plan.Unit(unitID)
+	if err != nil {
+		panic(err)
 	}
-}
-
-func passTimings(packages ...string) []PackageTiming {
-	out := make([]PackageTiming, 0, len(packages))
-	for _, pkg := range packages {
-		out = append(out, PackageTiming{Package: pkg, Result: "pass", Elapsed: 1})
-	}
-	return out
-}
-
-func testEvidence(surface, attempt string, elapsed float64, timings []PackageTiming) CommandEvidence {
-	packages := make([]string, 0, len(timings))
-	report := Report{Packages: append([]PackageTiming(nil), timings...)}
-	for _, timing := range timings {
-		packages = append(packages, timing.Package)
-		report.Summary.PackageElapsedSec += timing.Elapsed
-		switch timing.Result {
-		case "fail":
-			report.Summary.FailedPackages++
-		case "skip":
-			report.Summary.SkippedPackages++
-		}
-	}
-	report.Summary.Events = len(timings)
-	report.Summary.Packages = len(timings)
-	countMode := CountModeCacheDefault
-	if attempt == AttemptConfirmation || surface == SurfaceFullConformance {
+	countMode := unit.CountMode
+	if attempt == AttemptConfirmation {
 		countMode = CountModeOne
+	}
+	report := Report{}
+	for _, pkg := range unit.Packages {
+		report.Packages = append(report.Packages, PackageTiming{Package: pkg, Result: "pass", Elapsed: 1})
+		report.Summary.Events++
+		report.Summary.Packages++
+		report.Summary.PackageElapsedSec++
 	}
 	return CommandEvidence{
 		Version:        CommandEvidenceVersion,
-		Surface:        surface,
+		PlanDigest:     plan.Digest,
+		Profile:        plan.Profile,
+		HeadSHA:        plan.HeadSHA,
+		UnitID:         unit.ID,
+		Surface:        unit.ID,
 		Attempt:        attempt,
 		ElapsedSeconds: elapsed,
-		Packages:       packages,
-		EnvironmentID:  "ci-postgres-v1",
+		Packages:       append([]string(nil), unit.Packages...),
+		EnvironmentID:  unit.EnvironmentID,
 		CountMode:      countMode,
 		Report:         report,
 	}

@@ -26,11 +26,11 @@ type selectedStoreAbstractionGuardMatrix struct {
 }
 
 type selectedStoreAbstractionGuardMatrixPolicy struct {
-	ClosureLevel                string `yaml:"closure_level"`
-	ClaimsParentClosure         bool   `yaml:"claims_parent_closure"`
-	RequiredSmokePolicy         string `yaml:"required_smoke_policy"`
-	NamedFastCommand            string `yaml:"named_fast_command"`
-	NamedFullConformanceCommand string `yaml:"named_full_conformance_command"`
+	ClosureLevel        string `yaml:"closure_level"`
+	ClaimsParentClosure bool   `yaml:"claims_parent_closure"`
+	RequiredSmokePolicy string `yaml:"required_smoke_policy"`
+	FastProofProjection string `yaml:"fast_proof_projection"`
+	FullProofProjection string `yaml:"full_proof_projection"`
 }
 
 type selectedStoreAbstractionGuardMatrixRow struct {
@@ -231,11 +231,11 @@ func validateSelectedStoreAbstractionPolicy(policy selectedStoreAbstractionGuard
 	if strings.TrimSpace(policy.RequiredSmokePolicy) == "" {
 		problems = append(problems, "policy required_smoke_policy missing")
 	}
-	if !strings.Contains(policy.NamedFastCommand, "TestSelectedStoreAbstractionGuardMatrix") {
-		problems = append(problems, "policy named_fast_command missing selected store abstraction matrix proof")
+	if policy.FastProofProjection != "selected-store-fast" {
+		problems = append(problems, fmt.Sprintf("policy fast_proof_projection = %q, want selected-store-fast", policy.FastProofProjection))
 	}
-	if !strings.HasPrefix(strings.TrimSpace(policy.NamedFullConformanceCommand), "go test ./internal/runtime/cataloge2e") {
-		problems = append(problems, fmt.Sprintf("policy named_full_conformance_command = %q, want cataloge2e go test command", policy.NamedFullConformanceCommand))
+	if policy.FullProofProjection != "catalog-full" {
+		problems = append(problems, fmt.Sprintf("policy full_proof_projection = %q, want catalog-full", policy.FullProofProjection))
 	}
 	return problems
 }

@@ -2,17 +2,10 @@
 
 This package owns the catalog E2E proof boundary for runtime fixture behavior.
 
-Required PR smoke:
-
-```sh
-go test ./internal/runtime/cataloge2e -run '^TestCatalogRequiredSmoke$' -count=1
-```
-
-Full catalog conformance:
-
-```sh
-go test ./internal/runtime/cataloge2e -count=1
-```
+Required PR smoke is proof unit `catalog-required-smoke` in
+`.github/test-proof-plan.yaml`. Full catalog conformance is proof unit
+`catalog-full`. CI profiles select these units; this document does not own a
+second executable command.
 
 Manual diagnostic probe:
 

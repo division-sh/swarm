@@ -39,7 +39,7 @@ type forkReplayResumePolicy struct {
 	ClaimsRuntimeBehaviorChange  bool   `yaml:"claims_runtime_behavior_change"`
 	ClaimsFullHistoricalResume   bool   `yaml:"claims_full_historical_resume"`
 	RuntimeBehaviorChangeAllowed bool   `yaml:"runtime_behavior_change_allowed"`
-	RequiredFullTestCommand      string `yaml:"required_full_test_command"`
+	RequiredProofProjection      string `yaml:"required_proof_projection"`
 }
 
 type forkReplayResumeWatchlist struct {
@@ -263,8 +263,8 @@ func validateForkReplayResumePolicy(policy forkReplayResumePolicy) []string {
 	if policy.RuntimeBehaviorChangeAllowed {
 		problems = append(problems, "policy runtime_behavior_change_allowed = true, want false")
 	}
-	if strings.TrimSpace(policy.RequiredFullTestCommand) != "go test ./..." {
-		problems = append(problems, fmt.Sprintf("policy required_full_test_command = %q, want go test ./...", policy.RequiredFullTestCommand))
+	if strings.TrimSpace(policy.RequiredProofProjection) != "required-full" {
+		problems = append(problems, fmt.Sprintf("policy required_proof_projection = %q, want required-full", policy.RequiredProofProjection))
 	}
 	return problems
 }

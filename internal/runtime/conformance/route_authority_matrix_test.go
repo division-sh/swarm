@@ -33,10 +33,10 @@ type routeAuthorityMatrixSource struct {
 }
 
 type routeAuthorityMatrixPolicy struct {
-	ClosureLevel                string `yaml:"closure_level"`
-	ClaimsParentClosure         bool   `yaml:"claims_parent_closure"`
-	NamedFullConformanceCommand string `yaml:"named_full_conformance_command"`
-	RequiredSmokePolicy         string `yaml:"required_smoke_policy"`
+	ClosureLevel        string `yaml:"closure_level"`
+	ClaimsParentClosure bool   `yaml:"claims_parent_closure"`
+	FullProofProjection string `yaml:"full_proof_projection"`
+	RequiredSmokePolicy string `yaml:"required_smoke_policy"`
 }
 
 type routeAuthorityActiveTracker struct {
@@ -60,15 +60,16 @@ type routeAuthorityMatrixRow struct {
 }
 
 type routeAuthorityProofRef struct {
-	Kind      string `yaml:"kind"`
-	Name      string `yaml:"name,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	Ref       string `yaml:"ref,omitempty"`
-	Method    string `yaml:"method,omitempty"`
-	Issue     int    `yaml:"issue,omitempty"`
-	PR        int    `yaml:"pr,omitempty"`
-	Watchlist string `yaml:"watchlist,omitempty"`
-	Command   string `yaml:"command,omitempty"`
+	Kind       string `yaml:"kind"`
+	Name       string `yaml:"name,omitempty"`
+	Path       string `yaml:"path,omitempty"`
+	Ref        string `yaml:"ref,omitempty"`
+	Method     string `yaml:"method,omitempty"`
+	Issue      int    `yaml:"issue,omitempty"`
+	PR         int    `yaml:"pr,omitempty"`
+	Watchlist  string `yaml:"watchlist,omitempty"`
+	Command    string `yaml:"command,omitempty"`
+	Projection string `yaml:"projection,omitempty"`
 }
 
 type routeAuthorityValidationContext struct {
@@ -298,20 +299,8 @@ func validateRouteAuthorityPolicy(policy routeAuthorityMatrixPolicy) []string {
 	if policy.ClaimsParentClosure {
 		problems = append(problems, "policy claims_parent_closure = true, want false")
 	}
-	command := strings.TrimSpace(policy.NamedFullConformanceCommand)
-	for _, fragment := range []string{
-		"go test",
-		"./internal/runtime/bus",
-		"./internal/runtime/pipeline",
-		"./internal/apiv1",
-		"./cmd/swarm",
-		"./internal/dashboard/server",
-		"./internal/runtime/cataloge2e",
-		"-count=1",
-	} {
-		if !strings.Contains(command, fragment) {
-			problems = append(problems, fmt.Sprintf("policy named_full_conformance_command missing %q", fragment))
-		}
+	if strings.TrimSpace(policy.FullProofProjection) != "required-full" {
+		problems = append(problems, fmt.Sprintf("policy full_proof_projection = %q, want required-full", policy.FullProofProjection))
 	}
 	if strings.TrimSpace(policy.RequiredSmokePolicy) == "" {
 		problems = append(problems, "policy required_smoke_policy missing")
@@ -450,8 +439,12 @@ func validateRouteAuthorityProofRef(root, rowID string, ref routeAuthorityProofR
 		if command == "" {
 			problems = append(problems, fmt.Sprintf("%s command proof_ref missing command", rowID))
 		}
-		if command != "" && !strings.Contains(command, "go test ") && !strings.HasPrefix(command, "go run ") {
-			problems = append(problems, fmt.Sprintf("%s command proof_ref command = %q, want go test or go run command", rowID, command))
+		if command != "" && !strings.HasPrefix(command, "go run ") {
+			problems = append(problems, fmt.Sprintf("%s command proof_ref command = %q, want non-test go run command", rowID, command))
+		}
+	case "proof_projection":
+		if ref.Projection != "required-full" && ref.Projection != "catalog-full" {
+			problems = append(problems, fmt.Sprintf("%s proof_projection %q is not canonical", rowID, ref.Projection))
 		}
 	default:
 		problems = append(problems, fmt.Sprintf("%s proof_ref kind %q is not allowed", rowID, ref.Kind))

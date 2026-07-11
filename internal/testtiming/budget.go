@@ -7,28 +7,26 @@ import (
 	"io"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	BudgetPolicyVersion    = 1
-	CommandEvidenceVersion = 1
+	CommandEvidenceVersion = 2
 	BudgetResultVersion    = 1
 
-	SurfaceFullConformance = "full-conformance"
-	AttemptPrimary         = "primary"
-	AttemptConfirmation    = "confirmation"
-	CountModeCacheDefault  = "cache-default"
-	CountModeOne           = "count-1"
+	AttemptPrimary        = "primary"
+	AttemptConfirmation   = "confirmation"
+	CountModeCacheDefault = "cache-default"
+	CountModeOne          = "count-1"
 )
 
 type BudgetPolicy struct {
-	Version                 int                `yaml:"version"`
-	Hard                    HardBudgets        `yaml:"hard"`
-	PackageReferenceSeconds map[string]float64 `yaml:"package_reference_seconds"`
+	Version int         `yaml:"version"`
+	Hard    HardBudgets `yaml:"hard"`
 }
 
 type HardBudgets struct {
@@ -43,6 +41,10 @@ type CommandBudget struct {
 
 type CommandEvidence struct {
 	Version        int      `json:"version"`
+	PlanDigest     string   `json:"plan_digest"`
+	Profile        string   `json:"profile"`
+	HeadSHA        string   `json:"head_sha"`
+	UnitID         string   `json:"unit_id"`
 	Surface        string   `json:"surface"`
 	Attempt        string   `json:"attempt"`
 	ElapsedSeconds float64  `json:"elapsed_seconds"`
@@ -89,19 +91,14 @@ type BudgetResult struct {
 }
 
 type EvaluationOptions struct {
-	Snapshot     ShardSnapshot
-	FullPackages []string
-	ExpectFull   bool
-	LoadProblems []string
+	Plan              testplanning.RunPlan
+	HistoricalWeights map[string]float64
+	LoadProblems      []string
 }
 
 type evidenceAttempts struct {
 	primary      *CommandEvidence
 	confirmation *CommandEvidence
-}
-
-func ShardSurface(id int) string {
-	return fmt.Sprintf("shard-%d", id)
 }
 
 func LoadBudgetPolicy(r io.Reader) (BudgetPolicy, error) {
@@ -163,14 +160,6 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 			return fmt.Errorf("%s.justification must be a plain one-line scalar", item.name)
 		}
 	}
-	for pkg, seconds := range policy.PackageReferenceSeconds {
-		if strings.TrimSpace(pkg) == "" {
-			return fmt.Errorf("package_reference_seconds contains an empty package")
-		}
-		if !finiteNonNegative(seconds) {
-			return fmt.Errorf("package_reference_seconds[%s] must be finite and non-negative", pkg)
-		}
-	}
 	return nil
 }
 
@@ -198,8 +187,8 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 	return node
 }
 
-func ConfirmationRequired(policy BudgetPolicy, evidence CommandEvidence) (bool, error) {
-	problems := ValidateCommandEvidence(evidence)
+func ConfirmationRequired(policy BudgetPolicy, plan testplanning.RunPlan, evidence CommandEvidence) (bool, error) {
+	problems := ValidateCommandEvidence(evidence, plan)
 	if len(problems) > 0 {
 		return false, fmt.Errorf("primary evidence is incomplete: %s", strings.Join(problems, "; "))
 	}
@@ -209,20 +198,44 @@ func ConfirmationRequired(policy BudgetPolicy, evidence CommandEvidence) (bool, 
 	if evidence.ExitCode != 0 || evidence.Report.Summary.FailedPackages > 0 || evidence.Report.Summary.FailedTests > 0 {
 		return false, fmt.Errorf("failed primary evidence is not confirmation-eligible")
 	}
-	budget, err := policy.budgetForSurface(evidence.Surface)
+	unit, err := plan.Unit(evidence.UnitID)
+	if err != nil {
+		return false, err
+	}
+	budget, err := policy.budgetForClass(unit.BudgetClass)
 	if err != nil {
 		return false, err
 	}
 	return evidence.ElapsedSeconds > budget.LimitSeconds, nil
 }
 
-func ValidateCommandEvidence(evidence CommandEvidence) []string {
+func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	var problems []string
 	if evidence.Version != CommandEvidenceVersion {
 		problems = append(problems, fmt.Sprintf("version %d is unsupported", evidence.Version))
 	}
-	if _, _, err := parseSurface(evidence.Surface); err != nil {
+	if evidence.PlanDigest != plan.Digest {
+		problems = append(problems, fmt.Sprintf("plan_digest %q does not match plan %q", evidence.PlanDigest, plan.Digest))
+	}
+	if evidence.Profile != plan.Profile {
+		problems = append(problems, fmt.Sprintf("profile %q does not match plan %q", evidence.Profile, plan.Profile))
+	}
+	if evidence.HeadSHA != plan.HeadSHA {
+		problems = append(problems, fmt.Sprintf("head_sha %q does not match plan %q", evidence.HeadSHA, plan.HeadSHA))
+	}
+	unit, err := plan.Unit(evidence.UnitID)
+	if err != nil {
 		problems = append(problems, err.Error())
+	} else {
+		if evidence.Surface != unit.ID {
+			problems = append(problems, fmt.Sprintf("surface %q does not match unit %q", evidence.Surface, unit.ID))
+		}
+		if evidence.EnvironmentID != unit.EnvironmentID {
+			problems = append(problems, fmt.Sprintf("environment_id %q does not match unit %q", evidence.EnvironmentID, unit.EnvironmentID))
+		}
+		if evidence.Attempt == AttemptPrimary && evidence.CountMode != unit.CountMode {
+			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
+		}
 	}
 	if evidence.Attempt != AttemptPrimary && evidence.Attempt != AttemptConfirmation {
 		problems = append(problems, fmt.Sprintf("attempt %q is unsupported", evidence.Attempt))
@@ -351,61 +364,57 @@ func reportPackageList(report Report) ([]string, []string) {
 func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []CommandEvidence) BudgetResult {
 	result := BudgetResult{Version: BudgetResultVersion, Status: BudgetPass}
 	result.Problems = append(result.Problems, opts.LoadProblems...)
-	if err := validateShardIDs(opts.Snapshot); err != nil {
-		result.Problems = append(result.Problems, fmt.Sprintf("invalid shard snapshot: %v", err))
+	if err := opts.Plan.Validate(); err != nil {
+		result.Problems = append(result.Problems, fmt.Sprintf("invalid run plan: %v", err))
 	}
-	result.Problems = append(result.Problems, validateSnapshotPackageDeclarations(opts.Snapshot)...)
-
-	expected := make(map[string][]string, opts.Snapshot.ShardCount+1)
-	for _, shard := range opts.Snapshot.Shards {
-		expected[ShardSurface(shard.ID)] = append([]string(nil), shard.Packages...)
-	}
-	if opts.ExpectFull {
-		expected[SurfaceFullConformance] = append([]string(nil), opts.FullPackages...)
+	expected := make(map[string]testplanning.ProofUnit, len(opts.Plan.Units))
+	for _, unit := range opts.Plan.Units {
+		expected[unit.ID] = unit
 	}
 
 	grouped := map[string]*evidenceAttempts{}
 	for i := range evidence {
 		item := &evidence[i]
-		if _, ok := expected[item.Surface]; !ok {
-			result.Problems = append(result.Problems, fmt.Sprintf("unexpected evidence surface %s", item.Surface))
+		if _, ok := expected[item.UnitID]; !ok {
+			result.Problems = append(result.Problems, fmt.Sprintf("unexpected evidence unit %s", item.UnitID))
 			continue
 		}
-		group := grouped[item.Surface]
+		group := grouped[item.UnitID]
 		if group == nil {
 			group = &evidenceAttempts{}
-			grouped[item.Surface] = group
+			grouped[item.UnitID] = group
 		}
 		switch item.Attempt {
 		case AttemptPrimary:
 			if group.primary != nil {
-				result.Problems = append(result.Problems, fmt.Sprintf("duplicate primary evidence for %s", item.Surface))
+				result.Problems = append(result.Problems, fmt.Sprintf("duplicate primary evidence for %s", item.UnitID))
 			} else {
 				group.primary = item
 			}
 		case AttemptConfirmation:
 			if group.confirmation != nil {
-				result.Problems = append(result.Problems, fmt.Sprintf("duplicate confirmation evidence for %s", item.Surface))
+				result.Problems = append(result.Problems, fmt.Sprintf("duplicate confirmation evidence for %s", item.UnitID))
 			} else {
 				group.confirmation = item
 			}
 		default:
-			result.Problems = append(result.Problems, fmt.Sprintf("unsupported attempt %q for %s", item.Attempt, item.Surface))
+			result.Problems = append(result.Problems, fmt.Sprintf("unsupported attempt %q for %s", item.Attempt, item.UnitID))
 		}
 	}
 
-	surfaces := make([]string, 0, len(expected))
-	for surface := range expected {
-		surfaces = append(surfaces, surface)
+	unitIDs := make([]string, 0, len(expected))
+	for unitID := range expected {
+		unitIDs = append(unitIDs, unitID)
 	}
-	sort.Slice(surfaces, func(i, j int) bool { return surfaceLess(surfaces[i], surfaces[j]) })
-	for _, surface := range surfaces {
-		budget, err := policy.budgetForSurface(surface)
+	sort.Strings(unitIDs)
+	for _, unitID := range unitIDs {
+		unit := expected[unitID]
+		budget, err := policy.budgetForClass(unit.BudgetClass)
 		if err != nil {
 			result.Problems = append(result.Problems, err.Error())
 			continue
 		}
-		surfaceResult := evaluateSurface(surface, budget, expected[surface], grouped[surface])
+		surfaceResult := evaluateSurface(opts.Plan, unit, budget, grouped[unitID])
 		result.Surfaces = append(result.Surfaces, surfaceResult)
 		result.Status = mergeStatus(result.Status, surfaceResult.Status)
 	}
@@ -413,32 +422,13 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 		result.Status = BudgetIncomplete
 	}
 	if result.Status != BudgetIncomplete {
-		result.PackageDiagnostics = packageDiagnostics(policy, opts, grouped)
+		result.PackageDiagnostics = packageDiagnostics(opts, grouped)
 	}
 	return result
 }
 
-func validateSnapshotPackageDeclarations(snapshot ShardSnapshot) []string {
-	var problems []string
-	seen := map[string]int{}
-	for _, shard := range snapshot.Shards {
-		packages, packageProblems := canonicalPackageList(shard.Packages)
-		for _, problem := range packageProblems {
-			problems = append(problems, fmt.Sprintf("shard %d: %s", shard.ID, problem))
-		}
-		for _, pkg := range packages {
-			if previous, exists := seen[pkg]; exists {
-				problems = append(problems, fmt.Sprintf("package %s appears in shards %d and %d", pkg, previous, shard.ID))
-				continue
-			}
-			seen[pkg] = shard.ID
-		}
-	}
-	return problems
-}
-
-func evaluateSurface(surface string, budget CommandBudget, expectedPackages []string, group *evidenceAttempts) SurfaceResult {
-	result := SurfaceResult{Surface: surface, Status: BudgetPass, LimitSeconds: budget.LimitSeconds}
+func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, budget CommandBudget, group *evidenceAttempts) SurfaceResult {
+	result := SurfaceResult{Surface: unit.ID, Status: BudgetPass, LimitSeconds: budget.LimitSeconds}
 	if group == nil || group.primary == nil {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, "primary evidence is missing")
@@ -447,8 +437,8 @@ func evaluateSurface(surface string, budget CommandBudget, expectedPackages []st
 	primary := group.primary
 	result.PrimarySeconds = floatPointer(primary.ElapsedSeconds)
 	result.PrimaryPackageElapsedSec = floatPointer(primary.Report.Summary.PackageElapsedSec)
-	result.Problems = append(result.Problems, ValidateCommandEvidence(*primary)...)
-	wantPackages, packageProblems := canonicalPackageList(expectedPackages)
+	result.Problems = append(result.Problems, ValidateCommandEvidence(*primary, plan)...)
+	wantPackages, packageProblems := canonicalPackageList(unit.Packages)
 	result.Problems = append(result.Problems, packageProblems...)
 	gotPackages, _ := canonicalPackageList(primary.Packages)
 	if !equalStrings(wantPackages, gotPackages) {
@@ -477,7 +467,10 @@ func evaluateSurface(surface string, budget CommandBudget, expectedPackages []st
 	}
 	confirmation := group.confirmation
 	result.ConfirmationSeconds = floatPointer(confirmation.ElapsedSeconds)
-	result.Problems = append(result.Problems, ValidateCommandEvidence(*confirmation)...)
+	result.Problems = append(result.Problems, ValidateCommandEvidence(*confirmation, plan)...)
+	if confirmation.PlanDigest != primary.PlanDigest || confirmation.Profile != primary.Profile || confirmation.HeadSHA != primary.HeadSHA || confirmation.UnitID != primary.UnitID {
+		result.Problems = append(result.Problems, "confirmation plan/profile/head/unit identity differs from primary")
+	}
 	if confirmation.Surface != primary.Surface {
 		result.Problems = append(result.Problems, "confirmation surface differs from primary")
 	}
@@ -505,14 +498,14 @@ func evaluateSurface(surface string, budget CommandBudget, expectedPackages []st
 	return result
 }
 
-func packageDiagnostics(policy BudgetPolicy, opts EvaluationOptions, grouped map[string]*evidenceAttempts) []PackageDiagnostic {
+func packageDiagnostics(opts EvaluationOptions, grouped map[string]*evidenceAttempts) []PackageDiagnostic {
 	observed := map[string]PackageTiming{}
 	declared := map[string]bool{}
-	for _, shard := range opts.Snapshot.Shards {
-		for _, pkg := range shard.Packages {
+	for _, unit := range opts.Plan.Units {
+		for _, pkg := range unit.Packages {
 			declared[pkg] = true
 		}
-		group := grouped[ShardSurface(shard.ID)]
+		group := grouped[unit.ID]
 		if group == nil || group.primary == nil {
 			continue
 		}
@@ -520,23 +513,10 @@ func packageDiagnostics(policy BudgetPolicy, opts EvaluationOptions, grouped map
 			observed[timing.Package] = timing
 		}
 	}
-	for _, pkg := range opts.FullPackages {
-		declared[pkg] = true
-	}
-	if opts.ExpectFull {
-		group := grouped[SurfaceFullConformance]
-		if group != nil && group.primary != nil {
-			for _, timing := range group.primary.Report.Packages {
-				if _, broad := observed[timing.Package]; !broad {
-					observed[timing.Package] = timing
-				}
-			}
-		}
-	}
 
 	var diagnostics []PackageDiagnostic
 	for pkg, timing := range observed {
-		reference, ok := policy.PackageReferenceSeconds[pkg]
+		reference, ok := opts.HistoricalWeights[pkg]
 		if !ok {
 			diagnostics = append(diagnostics, PackageDiagnostic{
 				Kind:          "new",
@@ -556,7 +536,7 @@ func packageDiagnostics(policy BudgetPolicy, opts EvaluationOptions, grouped map
 			})
 		}
 	}
-	for pkg, reference := range policy.PackageReferenceSeconds {
+	for pkg, reference := range opts.HistoricalWeights {
 		if !declared[pkg] {
 			diagnostics = append(diagnostics, PackageDiagnostic{
 				Kind:             "stale",
@@ -643,7 +623,7 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 		if _, err := fmt.Fprintln(w, "\n## Remediation"); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(w, "1. Regenerate/rebalance the committed shard snapshot with `go run ./cmd/swarm-test-timing -generate-shards -packages <go-packages-required.txt> -weights <go-test.json> -snapshot .github/test-shards/go-test-shards.json -shards 6`."); err != nil {
+		if _, err := fmt.Fprintln(w, "1. Inspect the emitted proof plan and responsible unit; shard count and placement are planner-owned and require no manual rebalance."); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w, "2. Retier an appropriately heavy proof family, or optimize the regressed package without weakening coverage."); err != nil {
@@ -663,29 +643,14 @@ func (result BudgetResult) ExitCode() int {
 	return 1
 }
 
-func (policy BudgetPolicy) budgetForSurface(surface string) (CommandBudget, error) {
-	kind, _, err := parseSurface(surface)
-	if err != nil {
-		return CommandBudget{}, err
-	}
-	if kind == "shard" {
+func (policy BudgetPolicy) budgetForClass(class string) (CommandBudget, error) {
+	if class == "broad" {
 		return policy.Hard.MaxShardCommandSeconds, nil
 	}
-	return policy.Hard.FullConformanceCommandSeconds, nil
-}
-
-func parseSurface(surface string) (string, int, error) {
-	if surface == SurfaceFullConformance {
-		return "full", 0, nil
+	if class == "full" {
+		return policy.Hard.FullConformanceCommandSeconds, nil
 	}
-	if !strings.HasPrefix(surface, "shard-") {
-		return "", 0, fmt.Errorf("surface %q is unsupported", surface)
-	}
-	id, err := strconv.Atoi(strings.TrimPrefix(surface, "shard-"))
-	if err != nil || id <= 0 {
-		return "", 0, fmt.Errorf("surface %q has an invalid shard id", surface)
-	}
-	return "shard", id, nil
+	return CommandBudget{}, fmt.Errorf("budget class %q is unsupported", class)
 }
 
 func canonicalPackageList(packages []string) ([]string, []string) {
@@ -710,15 +675,6 @@ func canonicalPackageList(packages []string) ([]string, []string) {
 		problems = append(problems, "package list is empty")
 	}
 	return out, problems
-}
-
-func surfaceLess(left, right string) bool {
-	leftKind, leftID, _ := parseSurface(left)
-	rightKind, rightID, _ := parseSurface(right)
-	if leftKind != rightKind {
-		return leftKind == "shard"
-	}
-	return leftID < rightID
 }
 
 func mergeStatus(current, next BudgetStatus) BudgetStatus {

@@ -12,7 +12,7 @@ policy:
   claims_runtime_behavior_change: false
   claims_full_historical_resume: false
   runtime_behavior_change_allowed: false
-  required_full_test_command: go test ./...
+  required_proof_projection: required-full
 watchlist:
   node: timestamp_fork_replay_resume_ownership
   private_repo: swarm-docs

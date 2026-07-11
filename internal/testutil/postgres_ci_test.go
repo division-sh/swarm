@@ -33,7 +33,7 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		t.Fatalf("parse ci.yml: %v", err)
 	}
 
-	for _, jobName := range []string{"full-conformance", "nightly-extras", "semantic-smoke", "test-shard"} {
+	for _, jobName := range []string{"proof-unit", "semantic-smoke"} {
 		job, ok := workflow.Jobs[jobName]
 		if !ok {
 			t.Fatalf("missing Postgres-consuming CI job %s", jobName)
