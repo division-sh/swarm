@@ -224,22 +224,43 @@ func TestCLIRootInputDiagnosticRequiresCompleteServerOwnedDomains(t *testing.T) 
 }
 
 func TestCLIRootInputDiagnosticDoesNotCaptureOtherEventNotDeclaredReasons(t *testing.T) {
-	data, err := json.Marshal(map[string]any{
-		"code": "EVENT_NOT_DECLARED",
-		"details": map[string]any{
-			"event_name": "missing.event",
-			"reason":     "unknown_event",
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal diagnostic: %v", err)
+	reasons := []string{
+		"",
+		"unknown_event",
+		"unknown_flow_scoped_event",
+		"ambiguous_event_name",
+		"selected_run_entity_not_found",
+		"selected_target_entity_not_found",
+		"selected_target_flow_instance_mismatch",
+		"selected_run_target_not_routable",
+		"declared_event_has_no_selected_run_recipient",
+		"event_not_admitted_by_publisher",
 	}
-	got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
-	if strings.Contains(got, "A root input is") {
-		t.Fatalf("event-catalog rejection entered root-input renderer: %q", got)
-	}
-	if !strings.Contains(got, "EVENT_NOT_DECLARED") || !strings.Contains(got, "reason=unknown_event") {
-		t.Fatalf("generic event-catalog diagnostic lost context: %q", got)
+	for _, reason := range reasons {
+		t.Run(reason, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{
+				"code": "EVENT_NOT_DECLARED",
+				"details": map[string]any{
+					"event_name":      "missing.event",
+					"reason":          reason,
+					"declared_events": []string{"declared.event"},
+					"routable_events": []string{"declared.event"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal diagnostic: %v", err)
+			}
+			got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
+			if strings.Contains(got, "A root input is") {
+				t.Fatalf("non-root rejection %q entered root-input renderer: %q", reason, got)
+			}
+			if !strings.Contains(got, "EVENT_NOT_DECLARED") {
+				t.Fatalf("generic event diagnostic lost code for reason %q: %q", reason, got)
+			}
+			if reason != "" && !strings.Contains(got, "reason="+reason) {
+				t.Fatalf("generic event diagnostic lost reason %q: %q", reason, got)
+			}
+		})
 	}
 }
 
