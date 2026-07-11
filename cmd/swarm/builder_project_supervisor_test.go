@@ -352,6 +352,7 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementPreservesOldContext(t 
 	var ready atomic.Bool
 	ready.Store(true)
 	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
 	supervisor := &runtimeProjectSupervisor{
 		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
 		currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: oldRT,
@@ -365,6 +366,68 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementPreservesOldContext(t 
 	lookup := manager.LookupIngress("chat", "telegram")
 	if !ready.Load() || supervisor.CurrentRuntime() != oldRT || !lookup.Loaded() || lookup.Context.Runtime != oldRT {
 		t.Fatalf("failed same-hash replacement mutated old authority: ready=%v runtime=%p lookup=%#v", ready.Load(), supervisor.CurrentRuntime(), lookup)
+	}
+}
+
+func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(t *testing.T) {
+	oldBundle := &runtimecontracts.WorkflowContractBundle{}
+	newBundle := &runtimecontracts.WorkflowContractBundle{}
+	oldSource := semanticview.Wrap(oldBundle)
+	newSource := semanticview.Wrap(newBundle)
+	oldBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(old): %v", err)
+	}
+	newBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(new): %v", err)
+	}
+	oldRT := &runtimepkg.Runtime{Bus: oldBus}
+	newRT := &runtimepkg.Runtime{Bus: newBus}
+	oldHash := "bundle-v1:sha256:" + strings.Repeat("1", 64)
+	newHash := "bundle-v1:sha256:" + strings.Repeat("2", 64)
+	oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	newIdentity := runtimecontracts.BundleIdentity{BundleHash: newHash}
+	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: newSource}, BundleSourceFact: newFact}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+		BundleHash: oldHash, BundleSourceFact: oldFact, Source: oldSource, Runtime: oldRT,
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+	supervisor := &runtimeProjectSupervisor{
+		ready: &ready, currentRoot: "/tmp/current", currentSource: oldSource,
+		currentBundle: oldBundle, currentRT: oldRT, currentBundleSourceFact: oldFact,
+		runtimeContexts: manager,
+	}
+	var started, stopped []*runtimepkg.Runtime
+	supervisor.startRuntime = func(_ context.Context, rt *runtimepkg.Runtime) error {
+		started = append(started, rt)
+		return nil
+	}
+	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime, _ runtimepkg.ShutdownOptions) error {
+		stopped = append(stopped, rt)
+		return nil
+	}
+	status, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/tmp/candidate", newSource, newBundle, newFact, newIdentity, newRT)
+	if err != nil {
+		t.Fatalf("replaceCurrentRuntimeWithSource: %v", err)
+	}
+	if status.ProjectDir != "/tmp/candidate" || !ready.Load() || supervisor.CurrentRuntime() != newRT {
+		t.Fatalf("replacement status = %#v ready=%v runtime=%p", status, ready.Load(), supervisor.CurrentRuntime())
+	}
+	if len(started) != 1 || started[0] != newRT || len(stopped) != 1 || stopped[0] != oldRT {
+		t.Fatalf("replacement lifecycle started=%v stopped=%v", started, stopped)
+	}
+	if lookup := manager.LookupBundleHashStatus(oldHash); lookup.Loaded() {
+		t.Fatalf("old bundle context remained loaded: %#v", lookup)
+	}
+	lookup := manager.LookupBundleHashStatus(newHash)
+	if !lookup.Loaded() || lookup.Context.Runtime != newRT || lookup.Context.BundleIdentity.BundleHash != newHash {
+		t.Fatalf("new bundle context = %#v", lookup)
 	}
 }
 
