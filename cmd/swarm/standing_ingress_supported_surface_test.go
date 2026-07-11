@@ -92,8 +92,28 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	defer sqliteStore.Close()
 	var runs, instances, entities int
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'running' AND bundle_hash IS NOT NULL`).Scan(&runs); err != nil {
-		t.Fatalf("count standing runs: %v", err)
+	var standingRunID string
+	if err := sqliteStore.DB.QueryRow(`
+		SELECT es.run_id
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN runs r ON r.run_id = es.run_id
+		WHERE es.entity_id = ?
+		  AND fi.flow_template = 'telegram-chat'
+		  AND json_extract(es.fields, '$.activation') = 'standing'
+		  AND r.status = 'running'
+		  AND r.bundle_hash IS NOT NULL
+	`, firstEntity).Scan(&standingRunID); err != nil {
+		t.Fatalf("resolve standing run authority: %v", err)
+	}
+	if err := sqliteStore.DB.QueryRow(`
+		SELECT COUNT(DISTINCT es.run_id)
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE fi.flow_template = 'telegram-chat'
+		  AND json_extract(es.fields, '$.activation') = 'standing'
+	`).Scan(&runs); err != nil {
+		t.Fatalf("count standing run authorities: %v", err)
 	}
 	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
@@ -103,6 +123,17 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	}
+	var entityEvents, wrongRunEvents int
+	if err := sqliteStore.DB.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
+		FROM events
+		WHERE entity_id = ?
+	`, standingRunID, firstEntity).Scan(&entityEvents, &wrongRunEvents); err != nil {
+		t.Fatalf("inspect standing event lineage: %v", err)
+	}
+	if entityEvents == 0 || wrongRunEvents != 0 {
+		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
 }
 
@@ -193,8 +224,28 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	defer db.Close()
 	var runs, instances, entities int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'running' AND bundle_hash IS NOT NULL`).Scan(&runs); err != nil {
-		t.Fatalf("count standing runs: %v", err)
+	var standingRunID string
+	if err := db.QueryRow(`
+		SELECT es.run_id::text
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN runs r ON r.run_id = es.run_id
+		WHERE es.entity_id = $1::uuid
+		  AND fi.flow_template = 'telegram-chat'
+		  AND es.fields->>'activation' = 'standing'
+		  AND r.status = 'running'
+		  AND r.bundle_hash IS NOT NULL
+	`, entity).Scan(&standingRunID); err != nil {
+		t.Fatalf("resolve standing run authority: %v", err)
+	}
+	if err := db.QueryRow(`
+		SELECT COUNT(DISTINCT es.run_id)
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE fi.flow_template = 'telegram-chat'
+		  AND es.fields->>'activation' = 'standing'
+	`).Scan(&runs); err != nil {
+		t.Fatalf("count standing run authorities: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
@@ -204,6 +255,17 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	}
+	var entityEvents, wrongRunEvents int
+	if err := db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0)
+		FROM events
+		WHERE entity_id = $2::uuid
+	`, standingRunID, entity).Scan(&entityEvents, &wrongRunEvents); err != nil {
+		t.Fatalf("inspect standing event lineage: %v", err)
+	}
+	if entityEvents == 0 || wrongRunEvents != 0 {
+		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
 }
 
