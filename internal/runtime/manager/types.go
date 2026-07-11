@@ -156,6 +156,20 @@ type AgentLifecyclePersistence interface {
 	CommitAgentLifecycleTransition(context.Context, AgentLifecycleTransition) (AgentLifecycleTransitionResult, error)
 }
 
+type AgentLifecycleDiagnostic struct {
+	OutboxID    string
+	OperationID string
+	AgentID     string
+	EventName   string
+	Payload     map[string]any
+	CreatedAt   time.Time
+}
+
+type AgentLifecycleDiagnosticPersistence interface {
+	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]AgentLifecycleDiagnostic, error)
+	MarkAgentLifecycleDiagnosticProjected(context.Context, string, time.Time) error
+}
+
 type EntitySchemaPersistence interface {
 	EnsureEntitySchema(ctx context.Context, entityID string) error
 }

@@ -91,6 +91,40 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if current, err := runtimeeffects.ProjectionCurrent(activeCtx); err != nil || !current {
 		t.Fatalf("current generation projection authorization = %v, err=%v", current, err)
 	}
+	prelaunch, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("recover-prelaunch"), nil)
+	if err != nil {
+		t.Fatalf("authorize recoverable prelaunch effect: %v", err)
+	}
+	launched, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("recover-launched"), nil)
+	if err != nil {
+		t.Fatalf("authorize recoverable launched effect: %v", err)
+	}
+	if err := launched.MarkLaunched(activeCtx); err != nil {
+		t.Fatalf("mark recoverable effect launched: %v", err)
+	}
+	recoveryStore := store.(runtimeeffects.RecoveryStore)
+	summary, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("reconcile external effects: %v", err)
+	}
+	if summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 1 {
+		t.Fatalf("recovery summary = %#v, want one prelaunch terminal and one uncertain", summary)
+	}
+	requireExternalAttemptState(t, db, sqlite, prelaunch.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
+	requireExternalAttemptState(t, db, sqlite, launched.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+
+	diagnosticsStore := store.(runtimemanager.AgentLifecycleDiagnosticPersistence)
+	diagnostics, err := diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
+	if err != nil || len(diagnostics) != 2 {
+		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn and start", diagnostics, err)
+	}
+	if err := diagnosticsStore.MarkAgentLifecycleDiagnosticProjected(ctx, diagnostics[0].OutboxID, now.Add(3*time.Second)); err != nil {
+		t.Fatalf("mark lifecycle diagnostic projected: %v", err)
+	}
+	diagnostics, err = diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
+	if err != nil || len(diagnostics) != 1 {
+		t.Fatalf("remaining lifecycle diagnostics = %#v err=%v, want one", diagnostics, err)
+	}
 
 	staleCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
 		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1,
@@ -120,5 +154,20 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	if operationState != string(runtimeeffects.StateOutcomeUncertain) || attemptState != string(runtimeeffects.StateOutcomeUncertain) {
 		t.Fatalf("settled states operation=%s attempt=%s", operationState, attemptState)
+	}
+}
+
+func requireExternalAttemptState(t *testing.T, db *sql.DB, sqlite bool, attemptID string, want runtimeeffects.State) {
+	t.Helper()
+	placeholder := "?"
+	if !sqlite {
+		placeholder = "$1"
+	}
+	var state string
+	if err := db.QueryRow("SELECT state FROM agent_external_effect_attempts WHERE attempt_id = "+placeholder, attemptID).Scan(&state); err != nil {
+		t.Fatalf("load external attempt state: %v", err)
+	}
+	if state != string(want) {
+		t.Fatalf("external attempt state = %q, want %q", state, want)
 	}
 }

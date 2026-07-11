@@ -173,6 +173,8 @@ var detailClasses = map[string]Class{
 	"write_failed":                        ClassDependencyUnavailable,
 	"lifecycle_token_missing":             ClassLifecycleConflict,
 	"lifecycle_transition_conflict":       ClassLifecycleConflict,
+	"effect_recovery_prelaunch_abandoned": ClassLifecycleConflict,
+	"effect_recovery_outcome_unconfirmed": ClassOutcomeUncertain,
 	"superseded_generation":               ClassSupersededGeneration,
 }
 

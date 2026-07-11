@@ -168,6 +168,15 @@ type Store interface {
 	SettleExternalAttempt(context.Context, Settlement) error
 }
 
+type RecoverySummary struct {
+	PrelaunchTerminal int
+	OutcomeUncertain  int
+}
+
+type RecoveryStore interface {
+	ReconcileExternalEffectAttempts(context.Context, time.Time) (RecoverySummary, error)
+}
+
 type Controller struct {
 	store Store
 }
