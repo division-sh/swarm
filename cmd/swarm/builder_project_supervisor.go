@@ -345,7 +345,21 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 	oldHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
 	s.mu.RUnlock()
 	newHash := strings.TrimSpace(fact.BundleHash)
-	if manager != nil && oldHash != "" && oldHash == newHash {
+	if manager != nil && oldHash != "" {
+		if err := s.rejectChangedStandingBundle(newHash); err != nil {
+			return s.CurrentProject(), err
+		}
+		plannedTargets, err := newRT.PlanStandingTargets()
+		if err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
+		contextDef := runtime.BundleContext{
+			BundleHash: newHash, BundleSourceFact: fact, BundleIdentity: identity, Source: source,
+			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, StandingTargets: plannedTargets,
+		}
+		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
 		if err := s.startCurrentRuntime(ctx, newRT); err != nil {
 			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 			return builderpkg.ProjectStatus{}, err
@@ -355,7 +369,8 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 			return builderpkg.ProjectStatus{}, err
 		}
-		if err := manager.ReplaceSameBundle(runtime.BundleContext{BundleHash: newHash, BundleSourceFact: fact, BundleIdentity: identity, Source: source, ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, StandingTargets: targets}); err != nil {
+		contextDef.StandingTargets = targets
+		if err := manager.ReplaceBundleHash(oldHash, contextDef); err != nil {
 			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 			return builderpkg.ProjectStatus{}, err
 		}

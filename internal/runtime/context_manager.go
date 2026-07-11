@@ -137,29 +137,10 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
-	contextDef = contextDef.normalized()
-	if err := runtimecontracts.ValidateBundleHash(contextDef.BundleHash); err != nil {
-		return fmt.Errorf("runtime context bundle_hash: %w", err)
-	}
-	if contextDef.BundleSourceFact.BundleHash != "" && contextDef.BundleSourceFact.BundleHash != contextDef.BundleHash {
-		return fmt.Errorf("runtime context source fact hash %q does not match bundle_hash %q", contextDef.BundleSourceFact.BundleHash, contextDef.BundleHash)
-	}
-	if contextDef.Source == nil {
-		return fmt.Errorf("runtime context %s source is required", contextDef.BundleHash)
-	}
-	if contextDef.Runtime == nil {
-		return fmt.Errorf("runtime context %s runtime is required", contextDef.BundleHash)
-	}
-	if contextDef.Runtime.Bus == nil {
-		return fmt.Errorf("runtime context %s event bus is required", contextDef.BundleHash)
-	}
-	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	if err != nil {
 		return err
 	}
-	if contextDef.BundleSourceFact.BundleHash == "" {
-		contextDef.BundleSourceFact.BundleHash = contextDef.BundleHash
-	}
-	contextDef.BundleSourceFact = contextDef.BundleSourceFact.Normalized()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -188,6 +169,33 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	m.order = append(m.order, contextDef.BundleHash)
 	sort.Strings(m.order)
 	return nil
+}
+
+func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
+	contextDef = contextDef.normalized()
+	if err := runtimecontracts.ValidateBundleHash(contextDef.BundleHash); err != nil {
+		return BundleContext{}, fmt.Errorf("runtime context bundle_hash: %w", err)
+	}
+	if contextDef.BundleSourceFact.BundleHash != "" && contextDef.BundleSourceFact.BundleHash != contextDef.BundleHash {
+		return BundleContext{}, fmt.Errorf("runtime context source fact hash %q does not match bundle_hash %q", contextDef.BundleSourceFact.BundleHash, contextDef.BundleHash)
+	}
+	if contextDef.Source == nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s source is required", contextDef.BundleHash)
+	}
+	if contextDef.Runtime == nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s runtime is required", contextDef.BundleHash)
+	}
+	if contextDef.Runtime.Bus == nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", contextDef.BundleHash)
+	}
+	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+		return BundleContext{}, err
+	}
+	if contextDef.BundleSourceFact.BundleHash == "" {
+		contextDef.BundleSourceFact.BundleHash = contextDef.BundleHash
+	}
+	contextDef.BundleSourceFact = contextDef.BundleSourceFact.Normalized()
+	return contextDef, nil
 }
 
 func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
@@ -456,29 +464,73 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 }
 
 func (m *RuntimeContextManager) ReplaceSameBundle(contextDef BundleContext) error {
+	return m.ReplaceBundleHash(contextDef.BundleHash, contextDef)
+}
+
+func (m *RuntimeContextManager) ValidateReplacement(existingHash string, contextDef BundleContext) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
-	contextDef = contextDef.normalized()
-	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	entry := m.contexts[contextDef.BundleHash]
-	if entry == nil || !runtimeContextEntryLoaded(entry) {
-		return fmt.Errorf("loaded runtime context %s is required for same-bundle replacement", contextDef.BundleHash)
+	return m.validateReplacementLocked(strings.TrimSpace(existingHash), contextDef)
+}
+
+func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDef BundleContext) error {
+	if m == nil {
+		return fmt.Errorf("runtime context manager is required")
 	}
-	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, contextDef.BundleHash); ok {
-		return fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
+	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	if err != nil {
+		return err
 	}
-	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, contextDef.BundleHash); ok {
-		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	existingHash = strings.TrimSpace(existingHash)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.validateReplacementLocked(existingHash, contextDef); err != nil {
+		return err
+	}
+	entry := m.contexts[existingHash]
+	if existingHash != contextDef.BundleHash {
+		delete(m.contexts, existingHash)
+		for i, bundleHash := range m.order {
+			if bundleHash == existingHash {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+		entry = &runtimeContextEntry{}
+		m.contexts[contextDef.BundleHash] = entry
+		m.order = append(m.order, contextDef.BundleHash)
+		sort.Strings(m.order)
 	}
 	copied := contextDef
 	entry.context = &copied
 	entry.state = RuntimeContextStateLoaded
 	entry.cause = ""
+	return nil
+}
+
+func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, contextDef BundleContext) error {
+	entry := m.contexts[existingHash]
+	if entry == nil || !runtimeContextEntryLoaded(entry) {
+		return fmt.Errorf("loaded runtime context %s is required for replacement", existingHash)
+	}
+	if existingHash != contextDef.BundleHash {
+		if _, exists := m.contexts[contextDef.BundleHash]; exists {
+			return fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash)
+		}
+	}
+	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {
+		return fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
+	}
+	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, existingHash); ok {
+		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	}
 	return nil
 }
 
