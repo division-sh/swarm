@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -89,7 +90,7 @@ func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	spec, raw, err := loadPlatformSpec()
+	spec, err := loadPlatformSpec()
 	if err != nil {
 		return nil, err
 	}
@@ -101,15 +102,10 @@ func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
 	if err := db.QueryRowContext(ctx, `SHOW server_version_num`).Scan(&serverVersion); err != nil {
 		return nil, fmt.Errorf("read postgres server version: %w", err)
 	}
-	hash := sha256.New()
-	_, _ = hash.Write(raw)
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(role))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(serverID))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(serverVersion))
-	digest := hex.EncodeToString(hash.Sum(nil))[:24]
+	digest, err := templateDigest(plans, spec.Platform.Version, role, serverID, serverVersion)
+	if err != nil {
+		return nil, err
+	}
 	keyDigest := sha256.Sum256([]byte("swarm-test-postgres:v1:ownership\x00" + serverID + "\x00" + role))
 	m := &Manager{
 		admin: admin, role: role, ownershipKey: keyDigest[:], templateID: digest,
@@ -194,17 +190,16 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 		})
 	}
 	if err != nil {
-		_ = m.deleteIntent(context.Background(), name)
-		return nil, fmt.Errorf("create postgres sandbox %q: %w", name, err)
+		cleanupErr := m.retireIntentIfDatabaseAbsent(context.Background(), adminDB, name)
+		return nil, errors.Join(fmt.Errorf("create postgres sandbox %q: %w", name, err), cleanupErr)
 	}
 	metadata := resourceMetadata{Version: 1, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}
 	if withTemplate {
 		metadata.Template = m.templateName
 	}
 	if err := setDatabaseMetadata(ctx, adminDB, name, metadata); err != nil {
-		_ = m.dropSandbox(context.Background(), adminDB, name)
-		_ = m.deleteIntent(context.Background(), name)
-		return nil, err
+		cleanupErr := m.dropIntendedDatabase(context.Background(), adminDB, name)
+		return nil, errors.Join(err, cleanupErr)
 	}
 	if err := m.deleteIntent(ctx, name); err != nil {
 		_ = m.dropSandbox(context.Background(), adminDB, name)
@@ -389,6 +384,27 @@ func (m *Manager) deleteIntent(ctx context.Context, name string) error {
 	return err
 }
 
+func (m *Manager) retireIntentIfDatabaseAbsent(ctx context.Context, db databaseRowQueryer, name string) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, name).Scan(&exists); err != nil {
+		return fmt.Errorf("verify exact absence before retiring postgres test resource intent %q: %w", name, err)
+	}
+	if exists {
+		return fmt.Errorf("postgres test resource intent %q retained because the database exists", name)
+	}
+	if err := m.deleteIntent(ctx, name); err != nil {
+		return fmt.Errorf("retire absent postgres test resource intent %q: %w", name, err)
+	}
+	return nil
+}
+
+func (m *Manager) dropIntendedDatabase(ctx context.Context, db *sql.DB, name string) error {
+	if err := m.dropSandbox(ctx, db, name); err != nil {
+		return fmt.Errorf("drop intended postgres test database %q: %w", name, err)
+	}
+	return m.retireIntentIfDatabaseAbsent(ctx, db, name)
+}
+
 func (m *Manager) intentMatchesName(intent resourceIntent) bool {
 	if intent.Name == "" || intent.Identity == "" {
 		return false
@@ -467,7 +483,14 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if !acquired {
 			continue
 		}
-		err = m.deleteIntent(ctx, intent.Name)
+		candidate, exists, refreshErr := databaseCandidateByName(ctx, db, intent.Name)
+		if refreshErr != nil {
+			err = refreshErr
+		} else if exists {
+			err = m.reconcileDatabaseCandidateLocked(ctx, db, candidate)
+		} else {
+			err = m.deleteIntent(ctx, intent.Name)
+		}
 		releaseAdvisoryLock(lockConn, lockKey)
 		if err != nil {
 			return err
@@ -477,9 +500,6 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 }
 
 func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, candidate databaseCandidate) error {
-	if candidate.owner != m.role {
-		return fmt.Errorf("unprovable postgres test resource %q left untouched: owner %q does not match authenticated role %q", candidate.name, candidate.owner, m.role)
-	}
 	kind, prefix := "sandbox", sandboxNamePrefix
 	if strings.HasPrefix(candidate.name, templateNamePrefix) {
 		kind, prefix = "template", templateNamePrefix
@@ -498,14 +518,39 @@ func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, ca
 	}
 	defer releaseAdvisoryLock(lockConn, lockKey)
 
-	// Refresh the comment only after fencing the creator. The original namespace
-	// scan may have observed CREATE before COMMENT while the durable intent was
-	// subsequently retired after a successful stamp.
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname=$1`, candidate.name).Scan(&candidate.comment); err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
+	refreshed, exists, err := databaseCandidateByName(ctx, db, candidate.name)
+	if err != nil || !exists {
 		return err
+	}
+	return m.reconcileDatabaseCandidateLocked(ctx, db, refreshed)
+}
+
+func databaseCandidateByName(ctx context.Context, db databaseRowQueryer, name string) (databaseCandidate, bool, error) {
+	var candidate databaseCandidate
+	err := db.QueryRowContext(ctx, `
+		SELECT d.datname, COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
+		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
+		WHERE d.datname=$1`, name).Scan(&candidate.name, &candidate.comment, &candidate.owner)
+	if err == sql.ErrNoRows {
+		return databaseCandidate{}, false, nil
+	}
+	if err != nil {
+		return databaseCandidate{}, false, err
+	}
+	return candidate, true, nil
+}
+
+func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.DB, candidate databaseCandidate) error {
+	if candidate.owner != m.role {
+		return fmt.Errorf("unprovable postgres test resource %q left untouched: owner %q does not match authenticated role %q", candidate.name, candidate.owner, m.role)
+	}
+	kind, prefix := "sandbox", sandboxNamePrefix
+	if strings.HasPrefix(candidate.name, templateNamePrefix) {
+		kind, prefix = "template", templateNamePrefix
+	}
+	identity, signed := m.verifyResourceName(candidate.name, prefix, kind)
+	if !signed {
+		return fmt.Errorf("unprovable postgres test %s %q left untouched: invalid ownership signature", kind, candidate.name)
 	}
 	metadata, metadataErr := parseResourceMetadata(candidate.comment)
 	intent, hasIntent, err := m.intent(ctx, candidate.name)
@@ -612,8 +657,8 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 	if err := m.withExclusiveDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
 		return createDatabase(ctx, conn, m.templateName)
 	}); err != nil {
-		_ = m.deleteIntent(context.Background(), m.templateName)
-		return fmt.Errorf("create postgres template %q: %w", m.templateName, err)
+		cleanupErr := m.retireIntentIfDatabaseAbsent(context.Background(), adminDB, m.templateName)
+		return errors.Join(fmt.Errorf("create postgres template %q: %w", m.templateName, err), cleanupErr)
 	}
 	projected, err := m.admin.WithDatabase(m.templateName)
 	if err != nil {
@@ -636,9 +681,8 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 	}
 	metadata := resourceMetadata{Version: 1, Kind: "template", Identity: m.templateID}
 	if err := setDatabaseMetadata(ctx, adminDB, m.templateName, metadata); err != nil {
-		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
-		_ = m.deleteIntent(context.Background(), m.templateName)
-		return err
+		cleanupErr := m.dropIntendedDatabase(context.Background(), adminDB, m.templateName)
+		return errors.Join(err, cleanupErr)
 	}
 	return m.deleteIntent(ctx, m.templateName)
 }
@@ -870,19 +914,35 @@ func waitForDatabase(ctx context.Context, db *sql.DB, timeout time.Duration) err
 	}
 }
 
-func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, []byte, error) {
+func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 	path := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return runtimecontracts.PlatformSpecDocument{}, nil, fmt.Errorf("read platform spec: %w", err)
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
 	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		return runtimecontracts.PlatformSpecDocument{}, nil, fmt.Errorf("unmarshal platform spec: %w", err)
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
 	}
-	return spec, raw, nil
+	return spec, nil
+}
+
+func templateDigest(plans []platformschema.TableDDL, platformVersion, role, serverID, serverVersion string) (string, error) {
+	canonical, err := json.Marshal(plans)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical platform schema: %w", err)
+	}
+	hash := sha256.New()
+	for _, value := range [][]byte{
+		[]byte(resourceMetadataPrefix), canonical, []byte(platformVersion),
+		[]byte(role), []byte(serverID), []byte(serverVersion),
+	} {
+		_, _ = hash.Write(value)
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:24], nil
 }
 
 func advisoryKey(value string) int64 {

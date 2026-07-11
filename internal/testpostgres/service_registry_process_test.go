@@ -85,6 +85,147 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	}
 }
 
+func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
+	docker, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("Docker is required for the concurrent supported-path proof")
+	}
+	probe := exec.Command(docker, "info")
+	if output, err := probe.CombinedOutput(); err != nil {
+		t.Skipf("Docker daemon is unavailable: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+	root := t.TempDir()
+	runner := filepath.Join(root, "swarm-test-postgres")
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test-postgres")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build runner: %v\n%s", err, output)
+	}
+	blocker := filepath.Join(root, "block-child")
+	if err := os.WriteFile(blocker, []byte("#!/bin/sh\nset -eu\ntouch \"$1.started\"\nwhile [ ! -f \"$1.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stateHome := filepath.Join(root, "state-home")
+	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
+	registry := NewServiceRegistry(stateRoot, docker)
+	prefixes := []string{filepath.Join(root, "first"), filepath.Join(root, "second")}
+	commands := make([]*exec.Cmd, 0, len(prefixes))
+	done := make([]chan error, 0, len(prefixes))
+	finished := make([]bool, len(prefixes))
+	for index, prefix := range prefixes {
+		command := exec.Command(runner, "--", blocker, prefix)
+		command.Env = append(os.Environ(), "XDG_STATE_HOME="+stateHome)
+		logFile, err := os.Create(filepath.Join(root, fmt.Sprintf("runner-%d.log", index)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer logFile.Close()
+		command.Stdout, command.Stderr = logFile, logFile
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands = append(commands, command)
+		result := make(chan error, 1)
+		done = append(done, result)
+		go func() { result <- command.Wait() }()
+	}
+	defer func() {
+		for _, prefix := range prefixes {
+			_ = os.WriteFile(prefix+".release", []byte("release\n"), 0o600)
+		}
+		for index, command := range commands {
+			if !finished[index] {
+				select {
+				case <-done[index]:
+				case <-time.After(5 * time.Second):
+					_ = command.Process.Kill()
+				}
+			}
+		}
+		_ = registry.Reconcile(context.Background())
+	}()
+	for _, prefix := range prefixes {
+		waitForPath(t, prefix+".started", 2*time.Minute)
+	}
+	records := waitForServiceRecords(t, registry, 2, ServiceChildRunning, 2*time.Minute)
+	for _, record := range records {
+		if _, err := registry.inspectExact(context.Background(), record); err != nil {
+			t.Fatalf("live runner %s lacks exact container identity: %v", record.LeaseID, err)
+		}
+	}
+
+	if err := os.WriteFile(prefixes[0]+".release", []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForProcess(t, done[0], time.Minute); err != nil {
+		t.Fatalf("first runner: %v", err)
+	}
+	finished[0] = true
+	remaining := waitForServiceRecords(t, registry, 1, ServiceChildRunning, time.Minute)
+	for _, record := range remaining {
+		if _, err := registry.inspectExact(context.Background(), record); err != nil {
+			t.Fatalf("second runner was disturbed by first teardown: %v", err)
+		}
+	}
+
+	if err := os.WriteFile(prefixes[1]+".release", []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForProcess(t, done[1], time.Minute); err != nil {
+		t.Fatalf("second runner: %v", err)
+	}
+	finished[1] = true
+	waitForServiceRecords(t, registry, 0, "", time.Minute)
+	for _, dir := range []string{"leases", "creators", "handoff"} {
+		entries, err := os.ReadDir(filepath.Join(stateRoot, dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("terminal authority remains in %s: %v", dir, entries)
+		}
+	}
+}
+
+func waitForServiceRecords(t *testing.T, registry *ServiceRegistry, count int, state ServiceState, timeout time.Duration) map[string]ServiceRecord {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last registryDocument
+	var lastErr error
+	for time.Now().Before(deadline) {
+		last, lastErr = registry.loadRegistry()
+		if lastErr == nil && len(last.Services) == count {
+			matching := true
+			for _, record := range last.Services {
+				if state != "" && record.State != state {
+					matching = false
+					break
+				}
+			}
+			if matching {
+				return last.Services
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	encoded, _ := json.Marshal(last)
+	t.Fatalf("timed out waiting for %d services in state %q: registry=%s error=%v", count, state, encoded, lastErr)
+	return nil
+}
+
+func waitForProcess(t *testing.T, result <-chan error, timeout time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for runner process")
+		return nil
+	}
+}
+
 func waitForCreatorFenceRelease(t *testing.T, registry *ServiceRegistry, leaseID string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

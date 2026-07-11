@@ -265,6 +265,7 @@ func (s *Service) Close(ctx context.Context) error {
 	}
 	s.closed = true
 	var errs []error
+	retired := false
 	if err := s.registry.initialize(); err != nil {
 		errs = append(errs, err)
 	}
@@ -289,15 +290,23 @@ func (s *Service) Close(ctx context.Context) error {
 			}
 		}
 		if len(errs) == 0 {
-			if err := s.registry.deleteRecord(s.record.LeaseID); err != nil {
+			if err := s.registry.retireRecordAuthority(s.record); err != nil {
 				errs = append(errs, err)
+			} else {
+				retired = true
 			}
-			_ = os.Remove(s.record.CIDFile)
-			_ = os.Remove(s.registry.creatorPath(s.record.LeaseID))
 		}
 	}
+	leaseClosed := s.lease == nil
 	if s.lease != nil {
 		if err := s.lease.Close(); err != nil {
+			errs = append(errs, err)
+		} else {
+			leaseClosed = true
+		}
+	}
+	if retired && leaseClosed {
+		if err := removeAuthorityFile(s.registry.leasePath(s.record.LeaseID), "service lease"); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -416,8 +425,9 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 			_ = lease.Close()
 			continue
 		}
+		retired := false
 		if err == nil {
-			err = r.reconcileRecord(ctx, record, candidates[leaseID])
+			retired, err = r.reconcileRecord(ctx, record, candidates[leaseID])
 		}
 		closeErr := lease.Close()
 		if err != nil {
@@ -425,6 +435,11 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 		}
 		if closeErr != nil {
 			return closeErr
+		}
+		if retired {
+			if err := removeAuthorityFile(r.leasePath(leaseID), "service lease"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -443,74 +458,95 @@ func (r *ServiceRegistry) registrySnapshot() (registryDocument, error) {
 	return snapshot, err
 }
 
-func (r *ServiceRegistry) reconcileRecord(ctx context.Context, record ServiceRecord, candidates []dockerInspect) error {
+func (r *ServiceRegistry) reconcileRecord(ctx context.Context, record ServiceRecord, candidates []dockerInspect) (bool, error) {
 	leaseID := record.LeaseID
 	if record.State == ServiceCreateSucceeded || record.State == ServiceCreateFailed {
 		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !free {
-			return fmt.Errorf("Postgres service creator %s published %q but still owns terminal handoff", leaseID, record.State)
+			return false, fmt.Errorf("Postgres service creator %s published %q but still owns terminal handoff", leaseID, record.State)
 		}
-		_ = creator.Close()
+		if err := creator.Close(); err != nil {
+			return false, err
+		}
 	}
 	switch record.State {
 	case ServicePrepared:
-		return r.deleteRecord(leaseID)
+		return true, r.retireRecordAuthority(record)
 	case ServiceCreatorStarting:
 		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !free {
-			return fmt.Errorf("Postgres service creator %s is still starting", leaseID)
+			return false, fmt.Errorf("Postgres service creator %s is still starting", leaseID)
 		}
-		_ = creator.Close()
-		return r.deleteRecord(leaseID)
+		if err := creator.Close(); err != nil {
+			return false, err
+		}
+		return true, r.retireRecordAuthority(record)
 	case ServiceCreating:
 		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !free {
-			return fmt.Errorf("Postgres service creator %s is still in flight", leaseID)
+			return false, fmt.Errorf("Postgres service creator %s is still in flight", leaseID)
 		}
-		_ = creator.Close()
-		return fmt.Errorf("Postgres service creator %s died without a terminal result; state retained and resources left untouched", leaseID)
+		if err := creator.Close(); err != nil {
+			return false, err
+		}
+		return false, fmt.Errorf("Postgres service creator %s died without a terminal result; state retained and resources left untouched", leaseID)
 	case ServiceCreateFailed:
 		if record.ContainerID != "" || fileExists(record.CIDFile) || len(candidates) != 0 {
-			return fmt.Errorf("failed Postgres creator %s has ambiguous container evidence; left untouched", leaseID)
+			return false, fmt.Errorf("failed Postgres creator %s has ambiguous container evidence; left untouched", leaseID)
 		}
-		return r.deleteRecord(leaseID)
+		return true, r.retireRecordAuthority(record)
 	default:
 		if record.ContainerID == "" {
-			return fmt.Errorf("Postgres service %s state %q has no container ID", leaseID, record.State)
+			return false, fmt.Errorf("Postgres service %s state %q has no container ID", leaseID, record.State)
 		}
 		if record.State != ServiceTearingDown {
 			if err := r.transition(leaseID, ServiceTearingDown); err != nil {
-				return err
+				return false, err
 			}
 		}
 		_, exists, err := r.inspectExactMaybe(ctx, record)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if exists {
 			if out, err := r.runDocker(ctx, "rm", "--force", record.ContainerID); err != nil {
-				return fmt.Errorf("reconcile Postgres service %s: %v output=%s", record.ContainerID, err, strings.TrimSpace(string(out)))
+				return false, fmt.Errorf("reconcile Postgres service %s: %v output=%s", record.ContainerID, err, strings.TrimSpace(string(out)))
 			}
 		}
 		if err := r.verifyContainerAbsent(ctx, record.ContainerID); err != nil {
-			return err
+			return false, err
 		}
-		if err := r.deleteRecord(leaseID); err != nil {
-			return err
-		}
-		_ = os.Remove(record.CIDFile)
-		_ = os.Remove(r.creatorPath(leaseID))
-		return nil
+		return true, r.retireRecordAuthority(record)
 	}
+}
+
+func (r *ServiceRegistry) retireRecordAuthority(record ServiceRecord) error {
+	if err := errors.Join(
+		removeAuthorityFile(record.CIDFile, "container ID handoff"),
+		removeAuthorityFile(r.creatorPath(record.LeaseID), "creator fence"),
+	); err != nil {
+		return err
+	}
+	if err := r.deleteRecord(record.LeaseID); err != nil {
+		return fmt.Errorf("retire Postgres service registry record %s: %w", record.LeaseID, err)
+	}
+	return nil
+}
+
+func removeAuthorityFile(path, kind string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove Postgres %s authority %q: %w", kind, path, err)
+	}
+	return nil
 }
 
 func (r *ServiceRegistry) inspectExact(ctx context.Context, record ServiceRecord) (dockerInspect, error) {
