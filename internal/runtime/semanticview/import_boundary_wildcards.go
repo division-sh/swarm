@@ -50,7 +50,12 @@ type importBoundaryWildcardGrantPattern struct {
 	Source           string
 	EventPattern     string
 	LocalizedEvent   string
-	DeclaredEvents   []string
+	DeclaredEvents   []importBoundaryDeclaredEventWitness
+}
+
+type importBoundaryDeclaredEventWitness struct {
+	Local     string
+	Canonical string
 }
 
 func ResolveImportBoundaryWildcardSubscription(source Source, packageKey, flowID, basePath string, localEvents map[string]struct{}, raw string) ImportBoundaryWildcardSubscriptionResolution {
@@ -701,24 +706,30 @@ func importBoundaryGrantPatternMatchesKnownEvent(scopes []importBoundaryWildcard
 	return false
 }
 
-func importBoundaryGrantPatternDeclaredEvents(scope importBoundaryWildcardScope, pattern string) []string {
+func importBoundaryGrantPatternDeclaredEvents(scope importBoundaryWildcardScope, pattern string) []importBoundaryDeclaredEventWitness {
 	pattern = eventidentity.Normalize(pattern)
 	if pattern == "" {
 		return nil
 	}
-	seen := map[string]struct{}{}
+	byCanonical := map[string]importBoundaryDeclaredEventWitness{}
 	for eventType := range scope.LocalEvents {
 		local := eventidentity.Normalize(eventType)
-		concrete := importBoundaryResolveEventInScope(scope, eventType)
-		if concrete == "" || !eventidentity.MatchPattern(pattern, concrete) {
+		canonical := importBoundaryResolveEventInScope(scope, eventType)
+		if canonical == "" || !eventidentity.MatchPattern(pattern, canonical) {
 			continue
 		}
-		seen[concrete] = struct{}{}
-		if local != "" {
-			seen[local] = struct{}{}
-		}
+		byCanonical[canonical] = importBoundaryDeclaredEventWitness{Local: local, Canonical: canonical}
 	}
-	return sortedStringSet(seen)
+	canonicalEvents := make([]string, 0, len(byCanonical))
+	for canonical := range byCanonical {
+		canonicalEvents = append(canonicalEvents, canonical)
+	}
+	sort.Strings(canonicalEvents)
+	out := make([]importBoundaryDeclaredEventWitness, 0, len(canonicalEvents))
+	for _, canonical := range canonicalEvents {
+		out = append(out, byCanonical[canonical])
+	}
+	return out
 }
 
 func importBoundaryResolvePatternInScope(scope importBoundaryWildcardScope, raw string) string {
@@ -753,17 +764,20 @@ func rawWildcardScope(basePath string, localEvents map[string]struct{}) eventide
 	}
 }
 
-func importBoundaryWildcardGrantIntersection(raw, grantPattern string, declaredEvents []string) []string {
+func importBoundaryWildcardGrantIntersection(raw, grantPattern string, declaredEvents []importBoundaryDeclaredEventWitness) []string {
 	raw = eventidentity.Normalize(raw)
 	grantPattern = eventidentity.Normalize(grantPattern)
 	if raw == "" || grantPattern == "" {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	for _, eventType := range declaredEvents {
-		eventType = eventidentity.Normalize(eventType)
-		if eventType != "" && eventidentity.MatchPattern(raw, eventType) && eventidentity.MatchPattern(grantPattern, eventType) {
-			seen[eventType] = struct{}{}
+	for _, witness := range declaredEvents {
+		local := eventidentity.Normalize(witness.Local)
+		canonical := eventidentity.Normalize(witness.Canonical)
+		consumerMatches := (local != "" && eventidentity.MatchPattern(raw, local)) ||
+			(canonical != "" && eventidentity.MatchPattern(raw, canonical))
+		if consumerMatches && canonical != "" && eventidentity.MatchPattern(grantPattern, canonical) {
+			seen[canonical] = struct{}{}
 		}
 	}
 	return sortedStringSet(seen)

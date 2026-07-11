@@ -8647,9 +8647,11 @@ flow_model:
             flow identity may return exact or pattern with boundary same_flow. Different canonical flow identity may return
             only pattern with boundary import_boundary and a stable normalized authorization proof naming the authorizing
             parent package, child package, import label/source, event pattern, and route source. Bounded observe-grant patterns
-            intersect imported wildcard subscriptions over the declared typed event catalog: a grant is retained exactly when
-            at least one declared event identity matches both normalized patterns. That declared-event witness drives semantic
-            relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
+            intersect imported wildcard subscriptions over the declared typed event catalog. Each finite witness retains one
+            source-relative local identity paired with its source-qualified canonical identity; these identities must not be
+            flattened into independent candidates. The authored consumer pattern may match either identity according to its
+            namespace, while the normalized grant pattern and runtime route match the canonical identity. That paired witness
+            drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
             distinct proofs for one relation are a typed ambiguity and produce an issue, not an edge. Authorization-conflict
             enumeration also evaluates every declared materializable event independently of current producer-census membership,
             because low-level event.publish can publish a declared event without an authored static producer endpoint. The

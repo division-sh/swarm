@@ -937,7 +937,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 					}
 					out = append(out, routeResolvedPattern{
 						EventPattern:   eventPattern,
-						MatchPattern:   pattern.MatchPattern,
+						MatchPattern:   eventPattern,
 						RouteSource:    pattern.RouteSource,
 						LocalizedEvent: pattern.LocalizedEvent,
 						RoutePath:      routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
