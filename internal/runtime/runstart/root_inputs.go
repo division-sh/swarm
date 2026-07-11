@@ -1,6 +1,7 @@
 package runstart
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,13 +16,57 @@ type RootInputSet struct {
 	Routable []string
 }
 
+type RootInputValidationReason string
+
+const (
+	RootInputNotDeclared RootInputValidationReason = "not_declared_root_input"
+	RootInputNotRoutable RootInputValidationReason = "declared_root_input_not_routable"
+)
+
+type RootInputValidationError struct {
+	EventName string
+	Reason    RootInputValidationReason
+	Inputs    RootInputSet
+}
+
+func (e *RootInputValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	switch e.Reason {
+	case RootInputNotDeclared:
+		return fmt.Sprintf("run.start input %q is not declared in root input pins; declared root inputs: %s", e.EventName, formatRootInputDomain(e.Inputs.Declared))
+	case RootInputNotRoutable:
+		return fmt.Sprintf("run.start input %q is declared but has no runtime route; routable root inputs: %s", e.EventName, formatRootInputDomain(e.Inputs.Routable))
+	default:
+		return fmt.Sprintf("run.start input %q is invalid", e.EventName)
+	}
+}
+
+func AsRootInputValidationError(err error) (*RootInputValidationError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var validationErr *RootInputValidationError
+	if !errors.As(err, &validationErr) || validationErr == nil {
+		return nil, false
+	}
+	out := *validationErr
+	out.EventName = strings.TrimSpace(out.EventName)
+	out.Inputs = normalizeRootInputSet(out.Inputs)
+	return &out, true
+}
+
 func DeriveRootInputSet(source semanticview.Source) (RootInputSet, error) {
 	if source == nil {
 		return RootInputSet{}, fmt.Errorf("semantic source is required")
 	}
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil || bundle.RootSchema == nil {
-		return RootInputSet{}, fmt.Errorf("root schema is required")
+	if !ok || bundle == nil {
+		return RootInputSet{}, fmt.Errorf("workflow contract bundle is required")
+	}
+	if bundle.RootSchema == nil {
+		return RootInputSet{Declared: []string{}, Routable: []string{}}, nil
 	}
 	declared := normalizeUnique(bundle.RootSchema.Pins.Inputs.Events)
 	routeTable, err := runtimebus.DeriveRouteTable(source)
@@ -51,13 +96,36 @@ func ValidateInputEvents(source semanticview.Source, inputEvents []string) (Root
 	routable := stringSet(set.Routable)
 	for _, eventType := range inputEvents {
 		if _, ok := declared[eventType]; !ok {
-			return set, fmt.Errorf("run.start input %q is not declared in root input pins; declared root inputs: %s", eventType, strings.Join(set.Declared, ", "))
+			return set, newRootInputValidationError(eventType, RootInputNotDeclared, set)
 		}
 		if _, ok := routable[eventType]; !ok {
-			return set, fmt.Errorf("run.start input %q is declared but has no runtime route; routable root inputs: %s", eventType, strings.Join(set.Routable, ", "))
+			return set, newRootInputValidationError(eventType, RootInputNotRoutable, set)
 		}
 	}
 	return set, nil
+}
+
+func newRootInputValidationError(eventName string, reason RootInputValidationReason, inputs RootInputSet) *RootInputValidationError {
+	return &RootInputValidationError{
+		EventName: strings.TrimSpace(eventName),
+		Reason:    reason,
+		Inputs:    normalizeRootInputSet(inputs),
+	}
+}
+
+func normalizeRootInputSet(inputs RootInputSet) RootInputSet {
+	return RootInputSet{
+		Declared: normalizeUnique(inputs.Declared),
+		Routable: normalizeUnique(inputs.Routable),
+	}
+}
+
+func formatRootInputDomain(values []string) string {
+	values = normalizeUnique(values)
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ", ")
 }
 
 func normalizeUnique(values []string) []string {

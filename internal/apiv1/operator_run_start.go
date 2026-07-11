@@ -61,7 +61,7 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
 		injectRunIDEntityIDWhenMissing: true,
-		publishError:                   eventPublishPublishError,
+		publishError:                   runStartEventPublishError,
 		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return runStartResult{RunID: params.RunID, Status: "running"}, params.RunID, nil
 		},
@@ -151,7 +151,7 @@ func runStartIdempotencyError(err error) error {
 	return err
 }
 
-func runStartPublishError(eventName string, err error) error {
+func publicationApplicationError(eventName string, err error) error {
 	var bundleUnavailable *storerunlifecycle.PersistedBundleUnavailableError
 	if errors.As(err, &bundleUnavailable) || errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		details := map[string]any{"event_name": eventName}
@@ -171,8 +171,20 @@ func runStartPublishError(eventName string, err error) error {
 			}},
 		})
 	}
-	if errors.Is(err, runtimebus.ErrInvalidEventType) {
-		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{"event_name": eventName})
-	}
 	return err
+}
+
+func eventCatalogPublishError(eventName string, err error) error {
+	mapped := publicationApplicationError(eventName, err)
+	var appErr *ApplicationError
+	if errors.As(mapped, &appErr) {
+		return mapped
+	}
+	if errors.Is(err, runtimebus.ErrInvalidEventType) {
+		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name": eventName,
+			"reason":     "event_not_admitted_by_publisher",
+		})
+	}
+	return mapped
 }

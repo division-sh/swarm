@@ -3793,8 +3793,10 @@
               },
               "details": {
                 "additionalProperties": false,
+                "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
                 "properties": {
                   "declared_events": {
+                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
                     "items": {
                       "type": "string"
                     },
@@ -3804,9 +3806,11 @@
                     "type": "string"
                   },
                   "reason": {
+                    "description": "Named server rejection branch. Root-input values are not_declared_root_input and declared_root_input_not_routable.",
                     "type": "string"
                   },
                   "routable_events": {
+                    "description": "Deterministically sorted root inputs with a derived runtime route. Present for root-input reasons, including an empty array when none are routable.",
                     "items": {
                       "type": "string"
                     },
@@ -6715,8 +6719,10 @@
               },
               "details": {
                 "additionalProperties": false,
+                "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
                 "properties": {
                   "declared_events": {
+                    "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
                     "items": {
                       "type": "string"
                     },
@@ -6726,9 +6732,11 @@
                     "type": "string"
                   },
                   "reason": {
+                    "description": "Named server rejection branch. Root-input values are not_declared_root_input and declared_root_input_not_routable.",
                     "type": "string"
                   },
                   "routable_events": {
+                    "description": "Deterministically sorted root inputs with a derived runtime route. Present for root-input reasons, including an empty array when none are routable.",
                     "items": {
                       "type": "string"
                     },
@@ -12892,8 +12900,10 @@
             },
             "details": {
               "additionalProperties": false,
+              "description": "The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.",
               "properties": {
                 "declared_events": {
+                  "description": "Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.",
                   "items": {
                     "type": "string"
                   },
@@ -12903,9 +12913,11 @@
                   "type": "string"
                 },
                 "reason": {
+                  "description": "Named server rejection branch. Root-input values are not_declared_root_input and declared_root_input_not_routable.",
                   "type": "string"
                 },
                 "routable_events": {
+                  "description": "Deterministically sorted root inputs with a derived runtime route. Present for root-input reasons, including an empty array when none are routable.",
                   "items": {
                     "type": "string"
                   },

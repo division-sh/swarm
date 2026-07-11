@@ -98,6 +98,18 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 				}
 			}
 			if _, err := runtimerunstart.ValidateInputEvents(source, inputEvents); err != nil {
+				if diagnostic, ok := runtimerunstart.AsRootInputValidationError(err); ok {
+					return nil, &RPCError{
+						Code:    -32602,
+						Message: "run.start input is not accepted by the root input contract",
+						Data: map[string]any{
+							"event_name":      diagnostic.EventName,
+							"reason":          string(diagnostic.Reason),
+							"declared_events": append([]string{}, diagnostic.Inputs.Declared...),
+							"routable_events": append([]string{}, diagnostic.Inputs.Routable...),
+						},
+					}
+				}
 				return nil, &RPCError{Code: -32602, Message: err.Error()}
 			}
 		}

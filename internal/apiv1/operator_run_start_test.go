@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -510,6 +511,66 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
+
+	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
+		if resp.Error == nil {
+			t.Fatal("run.start post-validation invalid event error = nil")
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] != EventPublishFailedCode {
+			t.Fatalf("post-validation data = %#v, want %s", data, EventPublishFailedCode)
+		}
+		if data["retryable"] != false {
+			t.Fatalf("post-validation data = %#v, want non-retryable contradiction", data)
+		}
+		details := asMap(t, data["details"])
+		if details["event_name"] != "scan.requested" || details["run_id"] != runID || details["phase"] != "publish" {
+			t.Fatalf("post-validation details = %#v", details)
+		}
+		if details["reason"] != runtimebus.ErrInvalidEventType.Error() {
+			t.Fatalf("post-validation reason = %#v", details["reason"])
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
+}
+
+func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.T) {
+	params := eventPublicationParams{EventName: "scan.requested", EventID: "event-1", RunID: "run-1"}
+
+	runStartErr := runStartEventPublishError(params, runtimebus.ErrInvalidEventType)
+	var runStartAppErr *ApplicationError
+	if !errors.As(runStartErr, &runStartAppErr) || runStartAppErr.Code != EventPublishFailedCode {
+		t.Fatalf("run.start mapping = %#v, want %s", runStartErr, EventPublishFailedCode)
+	}
+	if runStartAppErr.Retryable {
+		t.Fatalf("run.start invalid-event contradiction = %#v, want non-retryable", runStartAppErr)
+	}
+
+	for name, mapped := range map[string]error{
+		"event publish": eventPublishPublishError(params, runtimebus.ErrInvalidEventType),
+		"event replay":  eventReplayPublishError(params.EventName, runtimebus.ErrInvalidEventType),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var appErr *ApplicationError
+			if !errors.As(mapped, &appErr) || appErr.Code != EventNotDeclaredCode {
+				t.Fatalf("mapping = %#v, want %s", mapped, EventNotDeclaredCode)
+			}
+			details, ok := appErr.Details.(map[string]any)
+			if !ok || details["reason"] != "event_not_admitted_by_publisher" {
+				t.Fatalf("details = %#v", appErr.Details)
+			}
+			if details["reason"] == string(runtimerunstart.RootInputNotDeclared) || details["reason"] == string(runtimerunstart.RootInputNotRoutable) {
+				t.Fatalf("catalog failure entered root-input reason: %#v", details)
+			}
+		})
+	}
 }
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {

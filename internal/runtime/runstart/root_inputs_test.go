@@ -1,6 +1,8 @@
 package runstart
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,8 +22,17 @@ func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 	if got, want := set.Routable, []string{"scan.corpus_file_requested"}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("routable = %#v, want %#v", got, want)
 	}
-	if _, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{"scan.requested"}); err == nil {
+	_, err = ValidateInputEvents(semanticview.Wrap(bundle), []string{"scan.requested"})
+	diagnostic, ok := AsRootInputValidationError(err)
+	if !ok {
 		t.Fatal("expected retired undeclared root input to fail")
+	}
+	if diagnostic.EventName != "scan.requested" || diagnostic.Reason != RootInputNotDeclared {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !reflect.DeepEqual(diagnostic.Inputs.Declared, []string{"scan.corpus_file_requested"}) ||
+		!reflect.DeepEqual(diagnostic.Inputs.Routable, []string{"scan.corpus_file_requested"}) {
+		t.Fatalf("diagnostic inputs = %#v", diagnostic.Inputs)
 	}
 }
 
@@ -34,8 +45,63 @@ func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	}
 	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
 
-	if _, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{eventName}); err == nil {
+	_, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{eventName})
+	diagnostic, ok := AsRootInputValidationError(err)
+	if !ok {
 		t.Fatal("expected declared but unroutable root input to fail")
+	}
+	if diagnostic.EventName != eventName || diagnostic.Reason != RootInputNotRoutable {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if !reflect.DeepEqual(diagnostic.Inputs.Declared, []string{eventName}) || len(diagnostic.Inputs.Routable) != 0 {
+		t.Fatalf("diagnostic inputs = %#v", diagnostic.Inputs)
+	}
+	if !strings.Contains(diagnostic.Error(), "routable root inputs: none") {
+		t.Fatalf("diagnostic error = %q", diagnostic.Error())
+	}
+}
+
+func TestRootInputValidationErrorOwnsNormalizedSnapshot(t *testing.T) {
+	inputs := RootInputSet{
+		Declared: []string{"z.event", "a.event", "z.event"},
+		Routable: []string{"z.event"},
+	}
+	diagnostic := newRootInputValidationError(" missing.event ", RootInputNotDeclared, inputs)
+	inputs.Declared[0] = "changed.event"
+	inputs.Routable[0] = "changed.event"
+
+	if diagnostic.EventName != "missing.event" {
+		t.Fatalf("event name = %q", diagnostic.EventName)
+	}
+	if !reflect.DeepEqual(diagnostic.Inputs.Declared, []string{"a.event", "z.event"}) ||
+		!reflect.DeepEqual(diagnostic.Inputs.Routable, []string{"z.event"}) {
+		t.Fatalf("diagnostic inputs = %#v", diagnostic.Inputs)
+	}
+	copy, ok := AsRootInputValidationError(diagnostic)
+	if !ok {
+		t.Fatal("AsRootInputValidationError did not recognize typed error")
+	}
+	copy.Inputs.Declared[0] = "copy.changed"
+	if diagnostic.Inputs.Declared[0] != "a.event" {
+		t.Fatalf("typed extraction aliased original inputs: %#v", diagnostic.Inputs)
+	}
+}
+
+func TestValidateInputEventsTreatsAbsentRootSchemaAsEmptyDomain(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	set, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{"flow/local.event"})
+	diagnostic, ok := AsRootInputValidationError(err)
+	if !ok {
+		t.Fatalf("ValidateInputEvents error = %v, want typed root-input rejection", err)
+	}
+	if diagnostic.EventName != "flow/local.event" || diagnostic.Reason != RootInputNotDeclared {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if set.Declared == nil || set.Routable == nil || len(set.Declared) != 0 || len(set.Routable) != 0 {
+		t.Fatalf("root-input set = %#v, want explicit empty domains", set)
+	}
+	if diagnostic.Inputs.Declared == nil || diagnostic.Inputs.Routable == nil {
+		t.Fatalf("diagnostic inputs = %#v, want explicit empty domains", diagnostic.Inputs)
 	}
 }
 

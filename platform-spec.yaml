@@ -16626,6 +16626,12 @@ cli_specification:
           evidence: >
             Evidence is optional and should appear only when it helps the user understand what was checked or why the
             diagnostic fired. Evidence must remain concise, stable, and user-facing.
+          root_input_rejections: >
+            A `run.start` EVENT_NOT_DECLARED rejection with reason `not_declared_root_input` or
+            `declared_root_input_not_routable` MUST consume the server-owned root-input facts. Human output defines a
+            root input as an event declared in the root flow's `pins.inputs.events`, renders the declared and routable
+            domains with `none` for an empty domain, and gives a contract-field remediation. CLI and Builder consumers
+            MUST NOT reload contracts, infer the domains independently, or flatten the structured facts to raw error text.
         exit_code_taxonomy:
           success: 0
           unexpected_or_internal_failure: 1
@@ -24530,6 +24536,24 @@ api_specification:
         correlation_id}) is constant; this section types `data.details`.
 
         '
+      root_input_rejection_contract:
+        canonical_owner: internal/runtime/runstart.RootInputSet, DeriveRootInputSet, ValidateInputEvents, and RootInputValidationError
+        reasons:
+          not_declared_root_input: The requested run-start event is absent from the root flow pins.inputs.events declaration.
+          declared_root_input_not_routable: The requested event is declared as a root input but has no derived runtime route.
+        absent_root_schema_rule: A workflow with no root schema has an empty declared and routable root-input domain; absence is not a validator failure.
+        lossless_consumers:
+        - internal/apiv1 run.start application-error adapter
+        - internal/builder run.start RPC adapter while that in-process consumer remains live
+        - swarm run start human diagnostic renderer
+        rule: >
+          Every consumer preserves the rejected event plus the deterministically sorted declared_events and
+          routable_events domains from the typed owner. Consumers do not select the reason again from string content.
+        post_validation_rule: >
+          If the publisher rejects an event type after run-start root-input validation succeeded, the failure is a
+          non-retryable publish contradiction and MUST use EVENT_PUBLISH_FAILED rather than emitting incomplete
+          root-input EVENT_NOT_DECLARED facts. Event-publish and replay invalid-event mapping remains a separate
+          event-catalog concept.
     errors:
       IDEMPOTENCY_CONFLICT:
         type: object
@@ -24774,6 +24798,7 @@ api_specification:
           reason:
             type: string
       EVENT_NOT_DECLARED:
+        description: The requested event is not admitted by the selected event catalog, root-input contract, target, or recipient plan. Root-input reasons preserve the canonical declared and routable domains.
         type: object
         additionalProperties: false
         required:
@@ -24782,14 +24807,17 @@ api_specification:
           event_name:
             type: string
           declared_events:
+            description: Deterministically sorted event domain from the owning server validator. For root-input reasons this is the root flow pins.inputs.events declaration.
             type: array
             items:
               type: string
           routable_events:
+            description: Deterministically sorted root inputs with a derived runtime route. Present for root-input reasons, including an empty array when none are routable.
             type: array
             items:
               type: string
           reason:
+            description: Named server rejection branch. Root-input values are not_declared_root_input and declared_root_input_not_routable.
             type: string
       EVENT_PUBLISH_FAILED:
         type: object
