@@ -462,6 +462,90 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	}
 }
 
+func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurfaces(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	source := semanticview.Wrap(bundle)
+	oldBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(old): %v", err)
+	}
+	newBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(new): %v", err)
+	}
+	hash := runtimeContextTestHash("d")
+	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+	oldRT := &runtimepkg.Runtime{Bus: oldBus}
+	newRT := &runtimepkg.Runtime{Bus: newBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: oldRT})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+	supervisor := &runtimeProjectSupervisor{
+		ready: &ready, currentRoot: "/old", currentSource: source, currentBundle: bundle,
+		currentRT: oldRT, currentBundleSourceFact: fact, runtimeContexts: manager,
+	}
+	candidateStart := make(chan struct{})
+	releaseCandidate := make(chan struct{})
+	supervisor.startRuntime = func(_ context.Context, rt *runtimepkg.Runtime) error {
+		if rt == newRT {
+			close(candidateStart)
+			<-releaseCandidate
+		}
+		return nil
+	}
+
+	var apiCalls, ingressCalls atomic.Int32
+	server := newAPIServer(&ready,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { apiCalls.Add(1); w.WriteHeader(http.StatusNoContent) }),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { ingressCalls.Add(1); w.WriteHeader(http.StatusAccepted) }),
+	)
+	replacementDone := make(chan error, 1)
+	go func() {
+		_, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/new", source, bundle, fact, runtimecontracts.BundleIdentity{BundleHash: hash}, newRT)
+		replacementDone <- err
+	}()
+	select {
+	case <-candidateStart:
+	case <-time.After(time.Second):
+		t.Fatal("candidate start was not reached")
+	}
+
+	assertReplacementHTTPStatus(t, server.Handler, "/readyz", http.StatusServiceUnavailable)
+	assertReplacementHTTPStatus(t, server.Handler, "/v1/rpc", http.StatusServiceUnavailable)
+	assertReplacementHTTPStatus(t, server.Handler, "/webhooks/chat/telegram", http.StatusServiceUnavailable)
+	if apiCalls.Load() != 0 || ingressCalls.Load() != 0 {
+		t.Fatalf("unready request reached API/ingress handlers: api=%d ingress=%d", apiCalls.Load(), ingressCalls.Load())
+	}
+	lookup := manager.LookupBundleHashStatus(hash)
+	if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
+		t.Fatalf("manager lookup during replacement = %#v", lookup)
+	}
+
+	close(releaseCandidate)
+	if err := <-replacementDone; err != nil {
+		t.Fatalf("replaceCurrentRuntimeWithSource: %v", err)
+	}
+	assertReplacementHTTPStatus(t, server.Handler, "/readyz", http.StatusOK)
+	assertReplacementHTTPStatus(t, server.Handler, "/v1/rpc", http.StatusNoContent)
+	assertReplacementHTTPStatus(t, server.Handler, "/webhooks/chat/telegram", http.StatusAccepted)
+	lookup = manager.LookupBundleHashStatus(hash)
+	if !ready.Load() || !lookup.Loaded() || lookup.Context.Runtime != newRT || apiCalls.Load() != 1 || ingressCalls.Load() != 1 {
+		t.Fatalf("replacement visibility = ready:%v lookup:%#v api:%d ingress:%d", ready.Load(), lookup, apiCalls.Load(), ingressCalls.Load())
+	}
+}
+
+func assertReplacementHTTPStatus(t *testing.T, handler http.Handler, path string, want int) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+	if rec.Code != want {
+		t.Fatalf("%s status/body = %d/%q, want %d", path, rec.Code, rec.Body.String(), want)
+	}
+}
+
 func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *testing.T) {
 	type backend struct {
 		name string
@@ -673,11 +757,200 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 	}
 }
 
+func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *testing.T) {
+	type backend struct {
+		name string
+		open func(*testing.T) storeBundle
+	}
+	backends := []backend{
+		{name: "sqlite", open: func(t *testing.T) storeBundle {
+			stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
+			if err != nil {
+				t.Fatalf("build SQLite stores: %v", err)
+			}
+			t.Cleanup(func() { _ = stores.SQLDB.Close() })
+			return stores
+		}},
+		{name: "postgres", open: func(t *testing.T) storeBundle {
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			pg, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			t.Cleanup(func() { _ = pg.DB.Close() })
+			return selectedPostgresStoreBundle(pg, &config.Config{})
+		}},
+	}
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			stores := backend.open(t)
+			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
+			if _, err := initializeStateStores(context.Background(), stores, bundle, false); err != nil {
+				t.Fatalf("initializeStateStores: %v", err)
+			}
+			source := semanticview.Wrap(bundle)
+			providerRegistry := testProviderTriggerRegistry(t)
+			hash := runtimeContextTestHash("f")
+			fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+			newRuntime := func() *runtimepkg.Runtime {
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
+					Config: &config.Config{}, Stores: stores.runtimeStores(),
+					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerRegistry: providerRegistry, BundleSourceFact: fact},
+				})
+				if err != nil {
+					t.Fatalf("NewRuntime: %v", err)
+				}
+				return rt
+			}
+			var active, maxActive atomic.Int32
+			blocker := newReplacementQuiesceBlockNode(&active, &maxActive)
+			predecessor := newRuntime()
+			predecessor.SystemNodes = []runtimepipeline.BackgroundNode{blocker}
+			if err := predecessor.Start(context.Background()); err != nil {
+				t.Fatalf("start predecessor: %v", err)
+			}
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: predecessor})
+			if err != nil {
+				t.Fatalf("NewRuntimeContextManager: %v", err)
+			}
+			candidate := newRuntime()
+			restored := newRuntime()
+			restored.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+			var ready atomic.Bool
+			ready.Store(true)
+			supervisor := &runtimeProjectSupervisor{
+				ready: &ready, currentRoot: "/old", currentSource: source, currentBundle: bundle,
+				currentRT: predecessor, currentBundleSourceFact: fact, runtimeContexts: manager,
+				replacementShutdown: runtimepkg.ShutdownOptions{Grace: 20 * time.Millisecond},
+			}
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, error) { return restored, nil }
+			firstQuiesce := make(chan error, 1)
+			continueRecovery := make(chan struct{})
+			var predecessorQuiesceCalls atomic.Int32
+			supervisor.quiesceRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
+				err := rt.QuiesceForReplacement(opts)
+				if rt == predecessor && predecessorQuiesceCalls.Add(1) == 1 {
+					firstQuiesce <- err
+					<-continueRecovery
+				}
+				return err
+			}
+			var candidateStarts atomic.Int32
+			supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
+				if rt == candidate {
+					candidateStarts.Add(1)
+				}
+				return rt.Start(ctx)
+			}
+			server := newAPIServer(&ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), runtimeProcessInboundHandler{contexts: manager})
+			replacementDone := make(chan error, 1)
+			go func() {
+				_, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/new", source, bundle, fact, runtimecontracts.BundleIdentity{BundleHash: hash}, candidate)
+				replacementDone <- err
+			}()
+			select {
+			case err := <-firstQuiesce:
+				if err == nil || !strings.Contains(err.Error(), "runtime background shutdown") {
+					t.Fatalf("first quiesce error = %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for predecessor quiesce failure")
+			}
+			lookup := manager.LookupBundleHashStatus(hash)
+			if ready.Load() || lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
+				t.Fatalf("timeout visibility = ready:%v lookup:%#v", ready.Load(), lookup)
+			}
+			if predecessor.Manager.IsRunning() || predecessor.Bus.OutboxSweeperActive() || active.Load() != 1 {
+				t.Fatalf("partially quiesced consumers = manager:%v outbox:%v system:%d", predecessor.Manager.IsRunning(), predecessor.Bus.OutboxSweeperActive(), active.Load())
+			}
+			assertReplacementHTTPStatus(t, server.Handler, "/readyz", http.StatusServiceUnavailable)
+			assertReplacementHTTPStatus(t, server.Handler, "/v1/rpc", http.StatusServiceUnavailable)
+			assertReplacementHTTPStatus(t, server.Handler, "/webhooks/missing/telegram", http.StatusServiceUnavailable)
+			probe := newRuntime()
+			if err := probe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already owned") {
+				t.Fatalf("competing start during failed quiesce = %v", err)
+			}
+
+			close(blocker.release)
+			close(continueRecovery)
+			select {
+			case err := <-replacementDone:
+				if err == nil || !strings.Contains(err.Error(), "quiesce predecessor runtime before replacement") {
+					t.Fatalf("replacement error = %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timed out waiting for predecessor restoration")
+			}
+			lookup = manager.LookupBundleHashStatus(hash)
+			if !ready.Load() || !lookup.Loaded() || lookup.Context.Runtime != restored || supervisor.CurrentRuntime() != restored {
+				t.Fatalf("restored visibility = ready:%v lookup:%#v runtime:%p", ready.Load(), lookup, supervisor.CurrentRuntime())
+			}
+			if !restored.Manager.IsRunning() || !restored.Bus.OutboxSweeperActive() || active.Load() != 1 || maxActive.Load() != 1 {
+				t.Fatalf("restored consumers = manager:%v outbox:%v active:%d max:%d", restored.Manager.IsRunning(), restored.Bus.OutboxSweeperActive(), active.Load(), maxActive.Load())
+			}
+			assertReplacementHTTPStatus(t, server.Handler, "/readyz", http.StatusOK)
+			assertReplacementHTTPStatus(t, server.Handler, "/v1/rpc", http.StatusNoContent)
+			assertReplacementHTTPStatus(t, server.Handler, "/webhooks/missing/telegram", http.StatusNotFound)
+			if candidateStarts.Load() != 0 {
+				t.Fatalf("candidate started %d time(s) after predecessor quiesce failure", candidateStarts.Load())
+			}
+			secondProbe := newRuntime()
+			if err := secondProbe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already owned") {
+				t.Fatalf("competing start after restoration = %v", err)
+			}
+			if err := restored.Shutdown(); err != nil {
+				t.Fatalf("shutdown restored runtime: %v", err)
+			}
+		})
+	}
+}
+
 type replacementOverlapProbeNode struct {
 	active    *atomic.Int32
 	maxActive *atomic.Int32
 	mu        sync.Mutex
 	hooks     []func()
+}
+
+type replacementQuiesceBlockNode struct {
+	active    *atomic.Int32
+	maxActive *atomic.Int32
+	release   chan struct{}
+	mu        sync.Mutex
+	hooks     []func()
+}
+
+func newReplacementQuiesceBlockNode(active, maxActive *atomic.Int32) *replacementQuiesceBlockNode {
+	return &replacementQuiesceBlockNode{active: active, maxActive: maxActive, release: make(chan struct{})}
+}
+
+func (n *replacementQuiesceBlockNode) String() string { return "replacement-quiesce-block" }
+
+func (n *replacementQuiesceBlockNode) AddSubscriptionReadyHook(hook func()) {
+	n.mu.Lock()
+	n.hooks = append(n.hooks, hook)
+	n.mu.Unlock()
+}
+
+func (n *replacementQuiesceBlockNode) Run(ctx context.Context) {
+	current := n.active.Add(1)
+	for {
+		maximum := n.maxActive.Load()
+		if current <= maximum || n.maxActive.CompareAndSwap(maximum, current) {
+			break
+		}
+	}
+	n.mu.Lock()
+	hooks := append([]func(){}, n.hooks...)
+	n.mu.Unlock()
+	for _, hook := range hooks {
+		hook()
+	}
+	<-ctx.Done()
+	<-n.release
+	n.active.Add(-1)
 }
 
 func newReplacementOverlapProbeNode(active, maxActive *atomic.Int32) *replacementOverlapProbeNode {

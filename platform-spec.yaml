@@ -4799,7 +4799,8 @@ engine:
         to local construction and strict validation and MUST NOT start shared-store loops or publish runtime events. A
         pre-visibility candidate failure quiesces the candidate, transfers lease authority back, and starts a fresh runtime
         from the predecessor's admitted source before restoring manager visibility. Aliasing one lease into two active
-        runtimes is prohibited.
+        runtimes is prohibited. Candidate and restored runtime loops inherit the serve-process lifetime context; bounded
+        replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner.
     - name: event_delivery_receipt_and_replay_rows
       owner: runtimebus.EventStore, runtimebus.EventMutationRunner/EventMutation, backend store implementations, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
       sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
@@ -8580,9 +8581,12 @@ flow_model:
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, provider registry, credential store, ingress controller, store,
         EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden. Replacement and
-        deactivation atomically reject new predecessor admission while manager visibility is serialized. Already-admitted
-        requests drain only within the configured shutdown grace; expiry cancels their request contexts and returns within
-        the configured bound. Requests that resolved the predecessor but have not entered its gateway fail closed afterward.
+        deactivation atomically reject new predecessor admission while manager visibility is serialized. Before replacement
+        quiescence begins, the RuntimeContextManager marks the predecessor unavailable and process readiness becomes false;
+        `/readyz`, `/v1/rpc`, `/v1/ws`, and `/webhooks/...` fail with service-unavailable semantics until one loaded runtime
+        is published and readiness becomes true again. Already-admitted requests drain only within the configured shutdown
+        grace; expiry cancels their request contexts and returns within the configured bound. Requests that resolved the
+        predecessor but have not entered its gateway fail closed afterward.
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
         canonical event name MUST match an exact external input pin on the selected flow before marker persistence, dedupe,
@@ -8594,6 +8598,12 @@ flow_model:
         only after they are ready and then atomically replaces process visibility. Replacement first rejects new predecessor
         admission and quiesces all predecessor shared-store/background consumers under the configured grace while retaining
         the one exclusive store lease. Only after quiescence may lease authority transfer and candidate activation begin.
+        Predecessor withdrawal, candidate publication, and restored-predecessor publication consume one RuntimeContextManager
+        replacement transaction; supervisor-local readiness or runtime pointers are not alternate visibility owners. A
+        predecessor quiesce timeout is a mutating failure: recovery MUST finish quiescing under the retained lease and publish
+        a fresh predecessor before restoring readiness. If bounded recovery cannot safely restore, the context remains
+        unavailable, readiness remains false, and the lease remains retained fail closed rather than publishing the partially
+        stopped object.
         Failed candidate activation before visibility commit MUST be fully quiesced before lease authority returns and a fresh
         predecessor runtime is restored from the admitted source; predecessor and candidate consumers MUST never overlap.
         If any active standing target

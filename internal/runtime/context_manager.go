@@ -40,6 +40,7 @@ const (
 	RuntimeContextCauseNotLoaded   = "runtime_context_not_loaded"
 	RuntimeContextCauseUnavailable = "runtime_context_unavailable"
 	RuntimeContextCauseUnloaded    = "runtime_context_unloaded"
+	RuntimeContextCauseReplacing   = "runtime_context_replacing"
 )
 
 func (c BundleContext) normalized() BundleContext {
@@ -478,6 +479,82 @@ func (m *RuntimeContextManager) ValidateReplacement(existingHash string, context
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.validateReplacementLocked(strings.TrimSpace(existingHash), contextDef)
+}
+
+// BeginBundleHashReplacement atomically withdraws the predecessor context
+// after validating the candidate. The caller must publish either a started
+// candidate or a freshly restored predecessor before the context is loaded
+// again.
+func (m *RuntimeContextManager) BeginBundleHashReplacement(existingHash string, contextDef BundleContext) (BundleContext, error) {
+	if m == nil {
+		return BundleContext{}, fmt.Errorf("runtime context manager is required")
+	}
+	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	if err != nil {
+		return BundleContext{}, err
+	}
+	existingHash = strings.TrimSpace(existingHash)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.validateReplacementLocked(existingHash, contextDef); err != nil {
+		return BundleContext{}, err
+	}
+	entry := m.contexts[existingHash]
+	predecessor := *entry.context
+	if predecessor.Runtime != nil {
+		predecessor.Runtime.CloseAdmission()
+	}
+	entry.state = RuntimeContextStateUnloaded
+	entry.cause = RuntimeContextCauseReplacing
+	return predecessor, nil
+}
+
+// PublishBundleHashReplacement is the only transition from replacement
+// unavailability back to loaded process authority.
+func (m *RuntimeContextManager) PublishBundleHashReplacement(existingHash string, contextDef BundleContext) error {
+	if m == nil {
+		return fmt.Errorf("runtime context manager is required")
+	}
+	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	if err != nil {
+		return err
+	}
+	existingHash = strings.TrimSpace(existingHash)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := m.contexts[existingHash]
+	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
+		return fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
+	}
+	if existingHash != contextDef.BundleHash {
+		if _, exists := m.contexts[contextDef.BundleHash]; exists {
+			return fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash)
+		}
+	}
+	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {
+		return fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
+	}
+	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, existingHash); ok {
+		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	}
+	if existingHash != contextDef.BundleHash {
+		delete(m.contexts, existingHash)
+		for i, bundleHash := range m.order {
+			if bundleHash == existingHash {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+		entry = &runtimeContextEntry{}
+		m.contexts[contextDef.BundleHash] = entry
+		m.order = append(m.order, contextDef.BundleHash)
+		sort.Strings(m.order)
+	}
+	copied := contextDef
+	entry.context = &copied
+	entry.state = RuntimeContextStateLoaded
+	entry.cause = ""
+	return nil
 }
 
 func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDef BundleContext) error {
