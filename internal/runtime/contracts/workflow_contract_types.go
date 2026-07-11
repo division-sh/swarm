@@ -1197,11 +1197,29 @@ type ProjectPackageRef struct {
 	Bind    FlowPackageBind `yaml:"bind"`
 }
 type ProjectFlowRef struct {
-	ID        string          `yaml:"id"`
-	Flow      string          `yaml:"flow"`
-	Namespace string          `yaml:"namespace"`
-	Mode      string          `yaml:"mode"`
-	Bind      FlowPackageBind `yaml:"bind"`
+	ID         string              `yaml:"id"`
+	Flow       string              `yaml:"flow"`
+	Namespace  string              `yaml:"namespace"`
+	Mode       string              `yaml:"mode"`
+	Activation string              `yaml:"activation"`
+	Ingress    *ProjectFlowIngress `yaml:"ingress"`
+	Bind       FlowPackageBind     `yaml:"bind"`
+}
+
+const ProjectFlowActivationStanding = "standing"
+
+func (r ProjectFlowRef) HasStandingActivation() bool {
+	return strings.EqualFold(strings.TrimSpace(r.Activation), ProjectFlowActivationStanding)
+}
+
+type ProjectFlowIngress struct {
+	Alias     string                       `yaml:"alias"`
+	Providers []ProjectFlowIngressProvider `yaml:"providers"`
+}
+
+type ProjectFlowIngressProvider struct {
+	Provider      string `yaml:"provider"`
+	SigningSecret string `yaml:"signing_secret"`
 }
 type FlowPackageRequires struct {
 	Inputs          []string               `yaml:"inputs"`

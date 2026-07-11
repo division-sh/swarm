@@ -239,6 +239,15 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 				label += " (" + flow.Mode + ")"
 			}
 			fmt.Fprintf(out, "  - %s\n", label)
+			if flow.Activation != "" {
+				fmt.Fprintf(out, "    activation: %s\n", flow.Activation)
+			}
+			if flow.Ingress != nil {
+				fmt.Fprintf(out, "    ingress: alias=%s\n", flow.Ingress.Alias)
+				for _, provider := range flow.Ingress.Providers {
+					fmt.Fprintf(out, "      - provider=%s signing_secret=%s\n", provider.Provider, provider.SigningSecret)
+				}
+			}
 			if flow.PrimaryEntity != nil {
 				fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
 			}

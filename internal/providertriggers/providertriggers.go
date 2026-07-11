@@ -461,6 +461,21 @@ func (r *Registry) Accept(req Request) (Delivery, error) {
 	return acceptRaw(req.withProvider(provider))
 }
 
+func (r *Registry) Manifest(provider string) (Manifest, bool) {
+	if r == nil {
+		return Manifest{}, false
+	}
+	manifest, ok := r.manifests[NormalizeProviderName(provider)]
+	return manifest, ok
+}
+
+func (r *Registry) Source(provider string) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.sources[NormalizeProviderName(provider)])
+}
+
 func (req Request) withProvider(provider string) Request {
 	req.Provider = provider
 	return req

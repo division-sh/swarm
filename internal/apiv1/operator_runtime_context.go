@@ -10,6 +10,7 @@ import (
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func runtimeContextManager(opts OperatorReadOptions) *swruntime.RuntimeContextManager {
@@ -119,7 +120,8 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if availability.ErrorCode == BundleDataIntegrityErrorCode {
 		return ctx, opts, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(availability))
 	}
-	if !availability.Available() {
+	loadedEphemeral := lookup.Loaded() && availability.BundleSource == storerunlifecycle.BundleSourceEphemeral && strings.TrimSpace(availability.BundleHash) != ""
+	if !availability.Available() && !loadedEphemeral {
 		return ctx, opts, availability, NewApplicationError(BundleUnavailableCode, false, bundleAvailabilityDetails(availability))
 	}
 	if !lookup.Loaded() {

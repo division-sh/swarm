@@ -4788,7 +4788,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
-	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt.DB, rt.Backend)
+	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
@@ -6692,8 +6692,10 @@ func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (run
 	return strings.TrimSpace(runStatus), strings.TrimSpace(controlStatus), strings.TrimSpace(reason), strings.TrimSpace(controlledBy)
 }
 
-func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, backend string) (string, string) {
+func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedControlProofRuntime) (string, string) {
 	t.Helper()
+	db := rt.DB
+	backend := rt.Backend
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -6712,9 +6714,9 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 	switch backend {
 	case "postgres":
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', 'legacy', $2)
-		`, runID, now); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES ($1::uuid, 'running', $2, 'persisted', $3)
+		`, runID, rt.BundleHash, now); err != nil {
 			t.Fatalf("seed postgres run-control pending run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -6734,9 +6736,9 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 		}
 	case "sqlite":
 		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO runs (run_id, status, bundle_source, started_at)
-				VALUES (?, 'running', 'legacy', ?)
-			`, runID, now); err != nil {
+				INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+				VALUES (?, 'running', ?, 'ephemeral', ?)
+			`, runID, rt.BundleHash, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `

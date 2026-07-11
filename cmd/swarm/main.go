@@ -203,10 +203,6 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Store:            pg,
 			}
 		}
-		apiRuntimeContexts, err := serveRuntimeContextManager(pg, req.RuntimeContexts)
-		if err != nil {
-			return selectedAPICapabilities{}, err
-		}
 		return selectedAPICapabilities{
 			BundleCatalog: pg,
 			BundleDelete: &runtimebundledelete.Coordinator{
@@ -239,7 +235,7 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 					ProviderCredentials: req.ProviderCredentials,
 				},
 			},
-			RuntimeContexts:  apiRuntimeContexts,
+			RuntimeContexts:  req.RuntimeContextManager,
 			ResetCoordinator: &runtimedestructivereset.Coordinator{Planner: resetPlanner, Locks: pg},
 			ResetQuiescer:    runtimedestructivereset.Quiescer{Store: pg},
 			ResetCleaner:     runtimedestructivereset.Cleaner{Store: pg},
@@ -251,9 +247,10 @@ func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntime
 	if sqliteStore == nil {
 		return nil
 	}
-	return func(selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+	return func(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 		return selectedAPICapabilities{
-			BundleCatalog: sqliteStore,
+			BundleCatalog:   sqliteStore,
+			RuntimeContexts: req.RuntimeContextManager,
 		}, nil
 	}
 }
@@ -680,7 +677,24 @@ func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loa
 		}
 		return fact, nil
 	}
-	return prepareServeBundleSource(ctx, stores, loaded.bundle, loaded.bootIdentity.Fingerprint, dev)
+	if prepared := loaded.bundleSourceFact.Normalized(); strings.TrimSpace(prepared.BundleHash) != "" {
+		return prepared, nil
+	}
+	return prepareServeBundleSource(ctx, stores, loaded.bundle, loaded.bootIdentity.Fingerprint, dev && !bundleHasStandingActivation(loaded.bundle))
+}
+
+func bundleHasStandingActivation(bundle *runtimecontracts.WorkflowContractBundle) bool {
+	if bundle == nil {
+		return false
+	}
+	for _, pkg := range bundle.PackageTree {
+		for _, ref := range pkg.Manifest.Flows {
+			if ref.HasStandingActivation() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
@@ -724,6 +738,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
+	validationOpts.ProviderTriggerRegistry = req.ProviderTriggerRegistry
 	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
@@ -968,6 +983,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		stateStoreSummaries = summaries
 	}
+	for i := range loadedBundles {
+		fact, err := prepareLoadedServeBundleSource(ctx, stores, loadedBundles[i], opts.Dev)
+		if err != nil {
+			slog.Error("prepare bundle source before startup recovery", "error", err)
+			return 1
+		}
+		loadedBundles[i].bundleSourceFact = fact
+	}
+	loadedBundle = loadedBundles[0]
 	if opts.AbandonActiveRuns {
 		if stores.RunQuiescenceStore == nil {
 			slog.Error("abandon active runs failed", "error", "selected store active-run quiescence owner is required")
@@ -1112,6 +1136,23 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	rt := primaryContext.runtime
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
+	preflightContexts, err := plannedServeRuntimeContexts(runtimeContexts)
+	if err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("plan runtime contexts: %v", err)
+		return 1
+	}
+	if err := runtime.ValidateRuntimeContextSet(preflightContexts...); err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("validate runtime contexts: %v", err)
+		return 1
+	}
+	runtimeContextManager, err := runtime.NewRuntimeContextManager(runtimeContextAvailabilityReader(stores))
+	if err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("init runtime context manager: %v", err)
+		return 1
+	}
 
 	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore)
 	if err != nil {
@@ -1121,11 +1162,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Registry, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
 	defer func() {
-		if err := closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], opts); err != nil {
+		if err := closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts); err != nil {
 			log.Printf("additional runtime context shutdown failed: %v", err)
 		}
 		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
@@ -1150,6 +1192,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
+		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
@@ -1211,7 +1254,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	var inboundHandler http.Handler
 	if rt.InboundGateway != nil {
-		inboundHandler = runtimeProjectInboundHandler{supervisor: supervisor}
+		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
 	apiServer := newAPIServer(&ready, apiV1Handler, inboundHandler)
 	mcpServer := newMCPServer(rt.ToolGateway)
@@ -1226,7 +1269,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	defer shutdownHTTPServer("mcp", mcpServer)
 	defer shutdownHTTPServer("api", apiServer)
 	logBootWarnings(bootReport)
-	if err := startServeRuntimeContexts(ctx, runtimeContexts); err != nil {
+	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
 		return 1
@@ -1245,10 +1288,62 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, apiListener.Addr(), mcpListener.Addr())
+	logReadyStandingIngress(ctx, runtimeContextManager, providerCredentialStore, apiListener.Addr())
 
 	<-ctx.Done()
 	ready.Store(false)
 	return 0
+}
+
+func runtimeContextAvailabilityReader(stores storeBundle) runtime.RunBundleAvailabilityReader {
+	if stores.RunBundleAvailabilityStore != nil {
+		return stores.RunBundleAvailabilityStore
+	}
+	if reader, ok := stores.RunBundleContextStore.(runtime.RunBundleAvailabilityReader); ok {
+		return reader
+	}
+	return nil
+}
+
+func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtime.BundleContext, error) {
+	planned := make([]runtime.BundleContext, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		targets, err := contextDef.runtime.PlanStandingTargets()
+		if err != nil {
+			return nil, err
+		}
+		planned = append(planned, runtime.BundleContext{
+			BundleHash:       contextDef.bundleSourceFact.BundleHash,
+			BundleSourceFact: contextDef.bundleSourceFact,
+			BundleIdentity:   contextDef.bootIdentity,
+			Source:           contextDef.loaded.source,
+			ContractsRoot:    contextDef.loaded.contractsRoot,
+			PlatformSpecPath: contextDef.loaded.platformSpecPath,
+			Runtime:          contextDef.runtime,
+			StandingTargets:  targets,
+		})
+	}
+	return planned, nil
+}
+
+func logReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeContextManager, credentials runtimecredentials.Store, apiAddr net.Addr) {
+	if manager == nil || apiAddr == nil {
+		return
+	}
+	for _, contextDef := range manager.LoadedContexts() {
+		for _, target := range contextDef.StandingTargets {
+			state := "UNBOUND"
+			if credentials != nil {
+				if value, ok, err := credentials.Get(ctx, target.SigningSecret); err == nil && ok && strings.TrimSpace(value) != "" {
+					state = "BOUND"
+				}
+			}
+			log.Printf("standing ingress ready: provider=%s url=http://%s/webhooks/%s/%s signing_secret=%s %s bundle_hash=%s", target.Provider, apiAddr.String(), target.Alias, target.Provider, target.SigningSecret, state, target.BundleHash)
+		}
+	}
 }
 
 func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts serveOptions, workspaces serveWorkspaceLifecycle) error {
@@ -1281,51 +1376,77 @@ func logWorkspaceBackendDecision(out io.Writer, decision workspaceBackendSelecti
 	}
 }
 
-func serveRuntimeContextManager(reader runtime.RunBundleAvailabilityReader, contexts []serveRuntimeBundleContext) (*runtime.RuntimeContextManager, error) {
-	hasDBLoaded := false
-	managerContexts := make([]runtime.BundleContext, 0, len(contexts))
-	for _, contextDef := range contexts {
-		if !contextDef.loaded.dbLoaded {
-			continue
-		}
-		hasDBLoaded = true
-		managerContexts = append(managerContexts, runtime.BundleContext{
-			BundleHash:       contextDef.bundleSourceFact.BundleHash,
-			BundleSourceFact: contextDef.bundleSourceFact,
-			BundleIdentity:   contextDef.bootIdentity,
-			Source:           contextDef.loaded.source,
-			ContractsRoot:    contextDef.loaded.contractsRoot,
-			PlatformSpecPath: contextDef.loaded.platformSpecPath,
-			Runtime:          contextDef.runtime,
-		})
-	}
-	if !hasDBLoaded {
-		return nil, nil
-	}
-	return runtime.NewRuntimeContextManager(reader, managerContexts...)
-}
-
-func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext) error {
+func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
 	started := make([]*runtime.Runtime, 0, len(contexts))
+	registered := make([]string, 0, len(contexts))
+	rollback := func() {
+		registeredSet := make(map[string]struct{}, len(registered))
+		for i := len(registered) - 1; i >= 0; i-- {
+			hash := registered[i]
+			registeredSet[hash] = struct{}{}
+			if manager != nil {
+				manager.DeactivateBundleHash(hash, runtime.RuntimeContextCauseUnavailable)
+			}
+		}
+		for i := len(started) - 1; i >= 0; i-- {
+			rt := started[i]
+			registeredRuntime := false
+			for _, contextDef := range contexts {
+				if contextDef.runtime != rt {
+					continue
+				}
+				_, registeredRuntime = registeredSet[strings.TrimSpace(contextDef.bundleSourceFact.BundleHash)]
+				break
+			}
+			if !registeredRuntime {
+				_ = rt.Shutdown()
+			}
+		}
+	}
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
 		if err := contextDef.runtime.Start(ctx); err != nil {
-			for i := len(started) - 1; i >= 0; i-- {
-				_ = started[i].Shutdown()
-			}
+			_ = contextDef.runtime.Shutdown()
+			rollback()
 			return err
 		}
 		started = append(started, contextDef.runtime)
+		targets, _, err := contextDef.runtime.EnsureStandingTargets(ctx)
+		if err != nil {
+			rollback()
+			return err
+		}
+		if manager != nil {
+			if err := manager.Register(runtime.BundleContext{
+				BundleHash:       contextDef.bundleSourceFact.BundleHash,
+				BundleSourceFact: contextDef.bundleSourceFact,
+				BundleIdentity:   contextDef.bootIdentity,
+				Source:           contextDef.loaded.source,
+				ContractsRoot:    contextDef.loaded.contractsRoot,
+				PlatformSpecPath: contextDef.loaded.platformSpecPath,
+				Runtime:          contextDef.runtime,
+				StandingTargets:  targets,
+			}); err != nil {
+				rollback()
+				return err
+			}
+			registered = append(registered, strings.TrimSpace(contextDef.bundleSourceFact.BundleHash))
+		}
 	}
 	return nil
 }
 
-func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, opts serveOptions) error {
+func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts serveOptions) error {
 	var shutdownErr error
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
+			continue
+		}
+		if manager != nil {
+			result := manager.DeactivateBundleHash(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded)
+			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 			continue
 		}
 		if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: opts.ShutdownGrace}); err != nil {
@@ -1402,18 +1523,18 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		writeCLIAPIError(errOut, err)
 		return cliExitValidation
 	}
-	validationOpts, err := verifyWorkflowContractValidationOptions(repo)
-	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: configure validation: %v\n", err)
-		}
-		return 1
-	}
 	if _, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath); err != nil {
 		writeCLIAPIError(errOut, err)
 		return cliExitValidation
 	} else {
 		source := semanticview.Wrap(bundle)
+		validationOpts, err := verifyWorkflowContractValidationOptions(repo, source)
+		if err != nil {
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: configure validation: %v\n", err)
+			}
+			return 1
+		}
 		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
 		if err != nil {
 			if errOut != nil {
@@ -2057,7 +2178,7 @@ func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Sour
 	return runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 }
 
-func verifyWorkflowContractValidationOptions(repo string) (runtime.WorkflowContractValidationOptions, error) {
+func verifyWorkflowContractValidationOptions(repo string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
@@ -2079,7 +2200,25 @@ func verifyWorkflowContractValidationOptions(repo string) (runtime.WorkflowContr
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
 	opts.ModelAliases = configResult.Config.LLM.Models
+	if sourceHasStandingIngress(source) {
+		providerPacks, err := loadConfiguredProviderTriggerPacks(repo, configResult)
+		if err != nil {
+			return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
+		}
+		opts.ProviderTriggerRegistry = providerPacks.Registry
+	}
 	return opts, nil
+}
+
+func sourceHasStandingIngress(source semanticview.Source) bool {
+	for _, scope := range semanticview.ProjectScopes(source) {
+		for _, ref := range scope.Manifest.Flows {
+			if ref.HasStandingActivation() && ref.Ingress != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeVerifyFindings(out io.Writer, findings []runtimebootverify.Finding, blocking bool) {

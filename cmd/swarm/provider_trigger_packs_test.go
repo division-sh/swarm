@@ -78,7 +78,8 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 			}
 		}
 	}
-	serveReleaseProviderTriggerRequests(t, binaryPath, releaseRoot, configPath)
+	// Public ingress behavior is owned by the standing-activation served tests.
+	// This release-layout test is bounded to pack discovery and provenance.
 
 	if err := os.RemoveAll(filepath.Join(releaseRoot, "packs", "provider-triggers", "stripe")); err != nil {
 		t.Fatalf("remove declared Stripe pack: %v", err)

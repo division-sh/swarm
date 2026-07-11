@@ -584,6 +584,9 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if validationScope.normalPrimary {
 					continue
 				}
+				if standingActivatedFlow(c.source, validationScope.semanticFlowID) {
+					continue
+				}
 				if handler.CreateEntity {
 					continue
 				}

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -48,7 +49,21 @@ type runtimeProjectSupervisor struct {
 	currentSource                   semanticview.Source
 	currentBundle                   *runtimecontracts.WorkflowContractBundle
 	currentRT                       *runtime.Runtime
+	currentBundleSourceFact         runtimecorrelation.BundleSourceFact
+	currentBundleIdentity           runtimecontracts.BundleIdentity
+	runtimeContexts                 *runtime.RuntimeContextManager
 	sourceReplacementDisabledReason string
+}
+
+func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.RuntimeContextManager, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runtimeContexts = manager
+	s.currentBundleSourceFact = fact.Normalized()
+	s.currentBundleIdentity = identity
 }
 
 func newRuntimeProjectSupervisor(
@@ -94,7 +109,14 @@ func newRuntimeProjectSupervisor(
 			return newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath)
 		},
 		validateSource: func(ctx context.Context, source semanticview.Source) error {
-			return verifyBundle(ctx, source)
+			credentialStore, err := buildCredentialStore()
+			if err != nil {
+				return err
+			}
+			opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+			opts.ProviderTriggerRegistry = providerTriggers
+			_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
+			return err
 		},
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 			return initializeStateStores(ctx, stores, bundle, false)
@@ -166,6 +188,15 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 }
 
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
+	s.mu.RLock()
+	manager := s.runtimeContexts
+	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	s.mu.RUnlock()
+	if manager != nil && bundleHash != "" {
+		result := manager.DeactivateBundleHash(bundleHash, runtime.RuntimeContextCauseUnloaded)
+		_ = s.detachCurrentRuntime()
+		return builderpkg.ProjectStatus{}, result.ShutdownErr
+	}
 	oldRT := s.detachCurrentRuntime()
 
 	if oldRT != nil {
@@ -193,6 +224,13 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err := s.validateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	candidateHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle hash: %w", err)
+	}
+	if err := s.rejectChangedStandingBundle(candidateHash); err != nil {
+		return s.CurrentProject(), err
+	}
 	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -203,6 +241,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	bundleSourceFact, err := prepareServeBundleSource(ctx, s.stores, bundle, bundleIdentity.Fingerprint, s.dev)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
+	}
+	managedCredentialStore, err := buildManagedCredentialStore()
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
 	workspaces, workspaceBackend, err := s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
 	if err != nil {
@@ -234,6 +276,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 			BundleFingerprint:       bundleIdentity.Fingerprint,
 			BundleSourceFact:        bundleSourceFact,
 			Credentials:             s.credentials,
+			ManagedCredentials:      managedCredentialStore,
 			ProviderCredentials:     s.providerCredentials,
 			ProviderTriggerRegistry: s.providerTriggers,
 		},
@@ -242,12 +285,28 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	status, err := s.replaceCurrentRuntime(ctx, resolvedRoot, source, bundle, newRT)
+	status, err := s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
 	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
 	return status, nil
+}
+
+func (s *runtimeProjectSupervisor) rejectChangedStandingBundle(candidateHash string) error {
+	s.mu.RLock()
+	manager := s.runtimeContexts
+	currentHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	currentBundle := s.currentBundle
+	currentRuntime := s.currentRT
+	s.mu.RUnlock()
+	if manager == nil || currentHash == "" || currentHash == strings.TrimSpace(candidateHash) {
+		return nil
+	}
+	if currentRuntime == nil || !bundleHasStandingActivation(currentBundle) {
+		return nil
+	}
+	return fmt.Errorf("standing service bundle change rejected before replacement: admitted bundle_hash=%s candidate bundle_hash=%s; serve the admitted bundle or perform an explicit future reset/migration", currentHash, strings.TrimSpace(candidateHash))
 }
 
 func (s *runtimeProjectSupervisor) sourceReplacementDisabled() string {
@@ -263,6 +322,51 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
 	bundle *runtimecontracts.WorkflowContractBundle,
 	newRT *runtime.Runtime,
 ) (builderpkg.ProjectStatus, error) {
+	fact := runtimecorrelation.BundleSourceFact{}
+	identity := runtimecontracts.BundleIdentity{}
+	if newRT != nil {
+		fact = newRT.Options.BundleSourceFact.Normalized()
+		identity.BundleHash = fact.BundleHash
+	}
+	return s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, fact, identity, newRT)
+}
+
+func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
+	ctx context.Context,
+	resolvedRoot string,
+	source semanticview.Source,
+	bundle *runtimecontracts.WorkflowContractBundle,
+	fact runtimecorrelation.BundleSourceFact,
+	identity runtimecontracts.BundleIdentity,
+	newRT *runtime.Runtime,
+) (builderpkg.ProjectStatus, error) {
+	s.mu.RLock()
+	manager := s.runtimeContexts
+	oldHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	s.mu.RUnlock()
+	newHash := strings.TrimSpace(fact.BundleHash)
+	if manager != nil && oldHash != "" && oldHash == newHash {
+		if err := s.startCurrentRuntime(ctx, newRT); err != nil {
+			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+			return builderpkg.ProjectStatus{}, err
+		}
+		targets, _, err := newRT.EnsureStandingTargets(ctx)
+		if err != nil {
+			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+			return builderpkg.ProjectStatus{}, err
+		}
+		if err := manager.ReplaceSameBundle(runtime.BundleContext{BundleHash: newHash, BundleSourceFact: fact, BundleIdentity: identity, Source: source, ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, StandingTargets: targets}); err != nil {
+			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+			return builderpkg.ProjectStatus{}, err
+		}
+		oldRT := s.swapCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT)
+		if oldRT != nil {
+			if err := s.shutdownCurrentRuntime(ctx, oldRT); err != nil {
+				return builderpkg.ProjectStatus{}, err
+			}
+		}
+		return s.CurrentProject(), nil
+	}
 	oldRT := s.detachCurrentRuntime()
 	if oldRT != nil {
 		if err := s.shutdownCurrentRuntime(ctx, oldRT); err != nil {
@@ -273,7 +377,19 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
 		_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 		return builderpkg.ProjectStatus{}, err
 	}
-	return s.attachCurrentRuntime(resolvedRoot, source, bundle, newRT), nil
+	return s.attachCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT), nil
+}
+
+func (s *runtimeProjectSupervisor) swapCurrentRuntime(resolvedRoot string, source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity, newRT *runtime.Runtime) *runtime.Runtime {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.currentRT
+	s.currentRoot, s.currentSource, s.currentBundle, s.currentRT = strings.TrimSpace(resolvedRoot), source, bundle, newRT
+	s.currentBundleSourceFact, s.currentBundleIdentity = fact.Normalized(), identity
+	if s.ready != nil {
+		s.ready.Store(true)
+	}
+	return old
 }
 
 func (s *runtimeProjectSupervisor) detachCurrentRuntime() *runtime.Runtime {
@@ -284,6 +400,8 @@ func (s *runtimeProjectSupervisor) detachCurrentRuntime() *runtime.Runtime {
 	s.currentSource = nil
 	s.currentBundle = nil
 	s.currentRT = nil
+	s.currentBundleSourceFact = runtimecorrelation.BundleSourceFact{}
+	s.currentBundleIdentity = runtimecontracts.BundleIdentity{}
 	if s.ready != nil {
 		s.ready.Store(false)
 	}
@@ -294,6 +412,8 @@ func (s *runtimeProjectSupervisor) attachCurrentRuntime(
 	resolvedRoot string,
 	source semanticview.Source,
 	bundle *runtimecontracts.WorkflowContractBundle,
+	fact runtimecorrelation.BundleSourceFact,
+	identity runtimecontracts.BundleIdentity,
 	newRT *runtime.Runtime,
 ) builderpkg.ProjectStatus {
 	s.mu.Lock()
@@ -302,6 +422,8 @@ func (s *runtimeProjectSupervisor) attachCurrentRuntime(
 	s.currentSource = source
 	s.currentBundle = bundle
 	s.currentRT = newRT
+	s.currentBundleSourceFact = fact.Normalized()
+	s.currentBundleIdentity = identity
 	if s.ready != nil {
 		s.ready.Store(true)
 	}
@@ -348,21 +470,45 @@ type dashboardDynamicRuntimeControl struct {
 	supervisor *runtimeProjectSupervisor
 }
 
-type runtimeProjectInboundHandler struct {
-	supervisor *runtimeProjectSupervisor
+type runtimeProcessInboundHandler struct {
+	contexts *runtime.RuntimeContextManager
 }
 
-func (h runtimeProjectInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.supervisor == nil {
-		http.Error(w, "runtime unavailable", http.StatusServiceUnavailable)
+func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	alias, provider, ok := parseProcessWebhookPath(r.URL.Path)
+	if !ok {
+		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
 		return
 	}
-	rt := h.supervisor.CurrentRuntime()
-	if rt == nil || rt.InboundGateway == nil {
-		http.Error(w, "runtime ingress unavailable", http.StatusServiceUnavailable)
+	lookup := h.contexts.LookupIngress(alias, providertriggers.NormalizeProviderName(provider))
+	if !lookup.Found {
+		if lookup.AliasFound {
+			http.Error(w, fmt.Sprintf("ingress target %q does not declare provider %q; add that provider binding to the standing singleton flow", alias, provider), http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
 		return
 	}
-	rt.InboundGateway.Handler().ServeHTTP(w, r)
+	if !lookup.Loaded() || lookup.Context.Runtime == nil || lookup.Context.Runtime.InboundGateway == nil {
+		http.Error(w, fmt.Sprintf("ingress target %q provider %q is unavailable: %s", alias, provider, lookup.Cause), http.StatusServiceUnavailable)
+		return
+	}
+	target := lookup.Target
+	lookup.Context.Runtime.InboundGateway.HandleResolvedWebhook(w, r, runtime.InboundTarget{
+		BundleHash: target.BundleHash, FlowID: target.FlowID, RunID: target.RunID,
+		FlowInstance: target.FlowInstance, EntityID: target.EntityID, EntitySlug: target.Alias,
+		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret,
+	}, lookup.Context.Source)
+}
+
+func parseProcessWebhookPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "webhooks" {
+		return "", "", false
+	}
+	alias := strings.TrimSpace(parts[1])
+	provider := strings.TrimSpace(parts[2])
+	return alias, provider, alias != "" && provider != ""
 }
 
 func (c dashboardDynamicRuntimeControl) PauseIngress() error {

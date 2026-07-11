@@ -2,16 +2,13 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
@@ -35,105 +32,6 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 		return false, fmt.Errorf("store: inbound event recording requires canonical events.idempotency_key support")
 	}
 	return s.recordInboundEventSpec(ctx, providerEventID, entityID, provider)
-}
-
-func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return runtime.InboundTarget{}, err
-	}
-	entityKey = strings.TrimSpace(entityKey)
-	provider = normalizeInboundProviderKey(provider)
-	if entityKey == "" {
-		return runtime.InboundTarget{}, fmt.Errorf("entity key is required")
-	}
-	if provider == "" {
-		return runtime.InboundTarget{}, fmt.Errorf("provider is required")
-	}
-	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
-	if err != nil {
-		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
-	}
-	if ok {
-		return s.resolveInboundTargetForRun(ctx, entityKey, provider, runID)
-	}
-	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
-		if caps.EntityState != SchemaFlavorCanonical {
-			return runtime.InboundTarget{}, unsupportedSchemaCapability("entity_state", caps.EntityState)
-		}
-		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: entity_state.run_id schema capability is required")
-	}
-
-	return s.resolveInboundTargetUnambiguous(ctx, entityKey, provider)
-}
-
-func (s *PostgresStore) resolveInboundTargetForRun(ctx context.Context, entityKey, provider, runID string) (runtime.InboundTarget, error) {
-	var target runtime.InboundTarget
-	const q = `
-		SELECT
-			es.entity_id::text,
-			COALESCE(NULLIF(es.slug, ''), ''),
-			COALESCE((fi.config->'secrets'->'webhook_signing')->>$3, '')
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.run_id = $2::uuid
-		  AND (es.slug = $1 OR es.entity_id::text = $1)
-		ORDER BY CASE WHEN es.slug = $1 THEN 0 ELSE 1 END, es.created_at DESC, es.updated_at DESC
-		LIMIT 1
-	`
-	if err := s.DB.QueryRowContext(ctx, q, entityKey, runID, provider).Scan(&target.EntityID, &target.EntitySlug, &target.WebhookSecret); err != nil {
-		if err == sql.ErrNoRows {
-			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
-		}
-		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
-	}
-	if target.EntitySlug == "" {
-		target.EntitySlug = entityKey
-	}
-	return target, nil
-}
-
-func (s *PostgresStore) resolveInboundTargetUnambiguous(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			es.entity_id::text,
-			COALESCE(NULLIF(es.slug, ''), ''),
-			COALESCE((fi.config->'secrets'->'webhook_signing')->>$2, ''),
-			es.run_id::text
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.slug = $1 OR es.entity_id::text = $1
-		ORDER BY CASE WHEN es.slug = $1 THEN 0 ELSE 1 END, es.created_at DESC, es.updated_at DESC
-		LIMIT 2
-	`, entityKey, provider)
-	if err != nil {
-		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
-	}
-	defer rows.Close()
-
-	var matches []runtime.InboundTarget
-	for rows.Next() {
-		var target runtime.InboundTarget
-		var runID string
-		if err := rows.Scan(&target.EntityID, &target.EntitySlug, &target.WebhookSecret, &runID); err != nil {
-			return runtime.InboundTarget{}, fmt.Errorf("scan inbound target: %w", err)
-		}
-		if target.EntitySlug == "" {
-			target.EntitySlug = entityKey
-		}
-		matches = append(matches, target)
-	}
-	if err := rows.Err(); err != nil {
-		return runtime.InboundTarget{}, fmt.Errorf("iterate inbound targets: %w", err)
-	}
-	switch len(matches) {
-	case 0:
-		return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
-	case 1:
-		return matches[0], nil
-	default:
-		return runtime.InboundTarget{}, fmt.Errorf("entity key %s is ambiguous across runs; run_id is required", entityKey)
-	}
 }
 
 func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error) {
@@ -181,14 +79,6 @@ func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID,
 		return fmt.Errorf("delete inbound event marker: %w", err)
 	}
 	return nil
-}
-
-func normalizeInboundProviderKey(raw string) string {
-	key := strings.TrimSpace(strings.ToLower(raw))
-	key = strings.ReplaceAll(key, ".", "_")
-	key = strings.ReplaceAll(key, "-", "_")
-	key = strings.ReplaceAll(key, " ", "_")
-	return key
 }
 
 func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {

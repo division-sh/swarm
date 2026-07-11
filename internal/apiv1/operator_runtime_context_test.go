@@ -116,14 +116,6 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 		wantCause     string
 	}{
 		{
-			name:         "ephemeral",
-			bundleHash:   runtimeContextTestBundleHashB,
-			bundleSource: storerunlifecycle.BundleSourceEphemeral,
-			fingerprint:  runStartTestFingerprint,
-			wantCode:     BundleUnavailableCode,
-			wantCause:    storerunlifecycle.BundleSourceEphemeral,
-		},
-		{
 			name:         "deleted",
 			bundleHash:   runtimeContextTestBundleHashB,
 			bundleSource: storerunlifecycle.BundleSourceDeleted,

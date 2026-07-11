@@ -131,6 +131,10 @@ func (pc *PipelineCoordinator) armWorkflowCurrentStageTimers(ctx context.Context
 	return pc.applyWorkflowTimerIntents(ctx, entityID, "", stage, sourceEvent)
 }
 
+func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageTimers(ctx context.Context, entityID string) error {
+	return pc.armWorkflowCurrentStageTimers(ctx, strings.TrimSpace(entityID), "")
+}
+
 func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{

@@ -1,15 +1,33 @@
 package runtime_test
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
+
+type boundedProviderCredentialStore struct{}
+
+func (boundedProviderCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	return key, key != "", nil
+}
+func (boundedProviderCredentialStore) Set(context.Context, string, string) error { return nil }
+func (boundedProviderCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
+func (boundedProviderCredentialStore) Delete(context.Context, string) error      { return nil }
 
 func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
 	t.Helper()
@@ -34,5 +52,80 @@ func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runtimepkg.RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {
 	t.Helper()
-	return runtimepkg.NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, testProviderTriggerRegistry(t), stores...)
+	gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, testProviderTriggerRegistry(t), stores...)
+	gateway.SetCredentialStore(boundedProviderCredentialStore{})
+	return gateway
+}
+
+func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, store runtimepkg.InboundPersistence, w http.ResponseWriter, r *http.Request, runID, entityID, provider, signingSecret string) {
+	t.Helper()
+	_ = gateway
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		payload = map[string]any{"raw": string(body)}
+	}
+	query := r.URL.Query()
+	form := make(url.Values)
+	formParsed := false
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "application/x-www-form-urlencoded") {
+		parsed, parseErr := url.ParseQuery(string(body))
+		if parseErr == nil {
+			form = parsed
+			formParsed = true
+		}
+	}
+	delivery, err := testProviderTriggerRegistry(t).Accept(providertriggers.Request{
+		Provider: provider,
+		Target:   providertriggers.Target{EntityID: entityID, EntitySlug: entityID, WebhookSecret: signingSecret},
+		Method:   r.Method, URL: r.URL.String(), Body: body, Headers: r.Header, Payload: payload,
+		ContentType: r.Header.Get("Content-Type"), Query: query, Form: form, FormParsed: formParsed,
+		Received: time.Now().UTC(), UserAgent: r.UserAgent(),
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if providerErr, ok := err.(providertriggers.Error); ok {
+			status = providerErr.Status
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if delivery.Response != nil {
+		w.WriteHeader(delivery.Response.Status)
+		_, _ = w.Write(delivery.Response.Body)
+		return
+	}
+	if store != nil {
+		inserted, err := store.RecordInboundEvent(r.Context(), delivery.ProviderEventID, entityID, provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !inserted {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+	event := eventtest.RootIngress(
+		"", delivery.EventName, "bounded-provider-integration", "",
+		mustBoundedJSON(t, delivery.Payload), 0, runID, "", events.EventEnvelope{EntityID: entityID}, time.Now().UTC(),
+	)
+	if err := bus.Publish(r.Context(), event); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func mustBoundedJSON(t testing.TB, value any) []byte {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal bounded provider delivery: %v", err)
+	}
+	return body
 }

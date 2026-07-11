@@ -135,7 +135,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowPath := routeFlowPath(source, scope.ID)
 		localEvents := routeFlowLocalEventSet(source, scope)
-		if strings.EqualFold(scope.Mode, "template") {
+		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
 			rt.templates[flowPath] = routeFlowTemplate{
 				PackageKey:  scope.PackageKey,
 				FlowID:      scope.ID,
@@ -157,6 +157,21 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
+}
+
+func routeFlowStanding(source semanticview.Source, flowID string) bool {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return false
+	}
+	for _, project := range source.ProjectScopes() {
+		for _, ref := range project.Manifest.Flows {
+			if strings.TrimSpace(ref.ID) == flowID && ref.HasStandingActivation() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func routeProjectScopeImportedFlowID(source semanticview.Source, scope semanticview.ProjectScope) string {

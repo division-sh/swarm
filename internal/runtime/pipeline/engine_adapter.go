@@ -1150,6 +1150,9 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	if flowID == "" {
 		return true
 	}
+	if runtimeflowidentity.StandingInstanceMatchesFlow(source, flowID, workflowInstancePath(source, instance)) {
+		return true
+	}
 	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
 	targetScope := workflowInstanceScopeKey(source, instance)
 	if ownerScope == "" || targetScope == "" {

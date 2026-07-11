@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -13,7 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -21,8 +25,11 @@ const inboundWebhookMaxBodyBytes = 1 << 20
 
 type InboundPersistence interface {
 	RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error)
-	ResolveInboundTarget(ctx context.Context, entityKey, provider string) (InboundTarget, error)
 	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
+type InboundTargetResolver interface {
+	ResolveInboundTarget(ctx context.Context, alias, provider string) (InboundTarget, error)
 }
 
 type InboundFailureRollback interface {
@@ -30,9 +37,15 @@ type InboundFailureRollback interface {
 }
 
 type InboundTarget struct {
+	BundleHash    string
+	FlowID        string
+	RunID         string
+	FlowInstance  string
 	EntityID      string
 	EntitySlug    string
-	WebhookSecret string
+	Alias         string
+	Provider      string
+	SigningSecret string
 }
 
 func (t InboundTarget) EffectiveEntityID() string {
@@ -61,6 +74,8 @@ type InboundGateway struct {
 	shutdownAdmissionClosed func() bool
 	runtimeIngress          *runtimeingress.Controller
 	providers               *providertriggers.Registry
+	credentials             runtimecredentials.Store
+	targetResolver          InboundTargetResolver
 }
 
 func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
@@ -79,8 +94,17 @@ func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *Run
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
 		providers:               providers,
 	}
+	if resolver, ok := any(store).(InboundTargetResolver); ok {
+		g.targetResolver = resolver
+	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
+}
+
+func (g *InboundGateway) SetCredentialStore(store runtimecredentials.Store) {
+	if g != nil {
+		g.credentials = store
+	}
 }
 
 func (g *InboundGateway) Handler() http.Handler {
@@ -95,6 +119,32 @@ func (g *InboundGateway) SetRuntimeIngress(controller *runtimeingress.Controller
 }
 
 func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	alias, provider, ok := parseWebhookPath(r.URL.Path)
+	if !ok {
+		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
+		return
+	}
+	if g.targetResolver == nil {
+		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
+		return
+	}
+	target, err := g.targetResolver.ResolveInboundTarget(r.Context(), alias, provider)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
+		return
+	}
+	g.handleResolvedWebhook(w, r, target, nil)
+}
+
+func (g *InboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
+	if g == nil {
+		http.Error(w, "runtime ingress unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	g.handleResolvedWebhook(w, r, target, source)
+}
+
+func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
 	if g.shutdownAdmissionClosed != nil && g.shutdownAdmissionClosed() {
 		http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
 		return
@@ -109,9 +159,12 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	entityKey, provider, ok := parseWebhookPath(r.URL.Path)
-	if !ok {
-		http.Error(w, "expected /webhooks/{entity}/{provider}", http.StatusBadRequest)
+	provider := providertriggers.NormalizeProviderName(target.Provider)
+	if provider == "" {
+		_, provider, _ = parseWebhookPath(r.URL.Path)
+	}
+	if provider == "" {
+		http.Error(w, "provider is required", http.StatusBadRequest)
 		return
 	}
 
@@ -131,17 +184,22 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	queryValues, queryParseError := inboundQueryValues(r)
 	formValues, formParsed, formParseError := inboundFormValues(r.Header.Get("Content-Type"), body)
 
-	target := InboundTarget{
-		EntityID:   entityKey,
-		EntitySlug: entityKey,
-	}
-	if g.store != nil {
-		resolved, err := g.store.ResolveInboundTarget(r.Context(), entityKey, provider)
-		if err != nil {
-			http.Error(w, "unknown entity", http.StatusNotFound)
+	signingValue := ""
+	if target.SigningSecret != "" {
+		if g.credentials == nil {
+			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
 			return
 		}
-		target = resolved
+		resolved, ok, err := g.credentials.Get(r.Context(), target.SigningSecret)
+		if err != nil {
+			http.Error(w, "read signing secret failed", http.StatusServiceUnavailable)
+			return
+		}
+		if !ok || strings.TrimSpace(resolved) == "" {
+			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
+			return
+		}
+		signingValue = resolved
 	}
 	target.NormalizeEntity()
 	var payload any
@@ -156,7 +214,7 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		Target: providertriggers.Target{
 			EntityID:      target.EntityID,
 			EntitySlug:    target.EntitySlug,
-			WebhookSecret: target.WebhookSecret,
+			WebhookSecret: signingValue,
 		},
 		Method:          r.Method,
 		URL:             requestURL,
@@ -194,10 +252,18 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(delivery.Response.Body)
 		return
 	}
+	if source != nil && !standingInputPinAdmitted(source, target.FlowID, string(delivery.EventName)) {
+		http.Error(w, fmt.Sprintf("ingress target %q provider %q resolved event %q, but flow %q in bundle %s has no exact external input pin; add that pin", target.Alias, provider, delivery.EventName, target.FlowID, target.BundleHash), http.StatusUnprocessableEntity)
+		return
+	}
 	providerEventID := delivery.ProviderEventID
+	requestCtx := r.Context()
+	if strings.TrimSpace(target.RunID) != "" {
+		requestCtx = runtimecorrelation.WithRunID(requestCtx, target.RunID)
+	}
 
 	if g.store != nil {
-		inserted, err := g.store.RecordInboundEvent(r.Context(), providerEventID, entityID, provider)
+		inserted, err := g.store.RecordInboundEvent(requestCtx, providerEventID, entityID, provider)
 		if err != nil {
 			http.Error(w, "record inbound failed", http.StatusInternalServerError)
 			return
@@ -217,8 +283,9 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	pubType, pubPayload := delivery.EventName, delivery.Payload
 	envelopeBytes := mustJSON(pubPayload)
 	if g.bus != nil {
-		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
-		published := events.NewRootIngressEvent(uuid.NewString(), pubType, "inbound-gateway", "", envelopeBytes, 0, "", "", events.EventEnvelope{EntityID: entityID}, now)
+		pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
+		envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: entityID, FlowInstance: target.FlowInstance})
+		published := events.NewRootIngressEvent(uuid.NewString(), pubType, "inbound-gateway", "", envelopeBytes, 0, target.RunID, "", envelope, now)
 		var err error
 		if delivery.AcknowledgeBeforeDispatch {
 			err = g.bus.PublishAcknowledged(pubCtx, published)
@@ -227,16 +294,16 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			if g.logger != nil {
-				handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
+				handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
 					"provider":          provider,
 					"entity_id":         entityID,
 					"provider_event_id": providerEventID,
 				}, err))
 			}
 			if rollback, ok := g.store.(InboundFailureRollback); ok && rollback != nil {
-				if rollbackErr := rollback.DeleteInboundEvent(r.Context(), providerEventID, entityID, provider); rollbackErr != nil {
+				if rollbackErr := rollback.DeleteInboundEvent(requestCtx, providerEventID, entityID, provider); rollbackErr != nil {
 					if g.logger != nil {
-						handleRuntimeLogPersistenceError("inbound-gateway", "rollback_failed", g.logger.Error(r.Context(), "inbound-gateway", "rollback_failed", map[string]any{
+						handleRuntimeLogPersistenceError("inbound-gateway", "rollback_failed", g.logger.Error(requestCtx, "inbound-gateway", "rollback_failed", map[string]any{
 							"provider":          provider,
 							"entity_id":         entityID,
 							"provider_event_id": providerEventID,

@@ -2,11 +2,9 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 
@@ -15,7 +13,7 @@ func TestSQLiteRuntimeStore_RecordInboundEvent_DedupesWithCanonicalMarker(t *tes
 	ctx := context.Background()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a", "github", "github-secret")
+	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a")
 
 	inserted, err := sqliteStore.RecordInboundEvent(ctx, "delivery-123", entityID, "github")
 	if err != nil {
@@ -46,31 +44,12 @@ func TestSQLiteRuntimeStore_RecordInboundEvent_DedupesWithCanonicalMarker(t *tes
 	}
 }
 
-func TestSQLiteRuntimeStore_ResolveInboundTargetNormalizesWebhookSigningProviderKey(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
-	runID := uuid.NewString()
-	entityID := uuid.NewString()
-	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a", "my-provider", "provider-secret")
-
-	target, err := sqliteStore.ResolveInboundTarget(runtimecorrelation.WithRunID(ctx, runID), "customer-a", "my-provider")
-	if err != nil {
-		t.Fatalf("ResolveInboundTarget: %v", err)
-	}
-	if target.EntityID != entityID || target.EntitySlug != "customer-a" {
-		t.Fatalf("target = %+v, want entity=%s slug=customer-a", target, entityID)
-	}
-	if target.WebhookSecret != "provider-secret" {
-		t.Fatalf("WebhookSecret = %q, want provider-secret", target.WebhookSecret)
-	}
-}
-
 func TestSQLiteRuntimeStore_DeleteInboundEventRemovesRollbackMarker(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a", "github", "github-secret")
+	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a")
 
 	if inserted, err := sqliteStore.RecordInboundEvent(ctx, "delivery-123", entityID, "github"); err != nil || !inserted {
 		t.Fatalf("RecordInboundEvent inserted=%v err=%v, want first insert", inserted, err)
@@ -83,7 +62,7 @@ func TestSQLiteRuntimeStore_DeleteInboundEventRemovesRollbackMarker(t *testing.T
 	}
 }
 
-func seedSQLiteInboundRunAndEntity(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, entityID, slug, provider, secret string) {
+func seedSQLiteInboundRunAndEntity(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, entityID, slug string) {
 	t.Helper()
 	now := time.Now().UTC()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -92,20 +71,10 @@ func seedSQLiteInboundRunAndEntity(t *testing.T, ctx context.Context, sqliteStor
 	`, runID, now); err != nil {
 		t.Fatalf("insert run: %v", err)
 	}
-	configBytes, err := json.Marshal(map[string]any{
-		"secrets": map[string]any{
-			"webhook_signing": map[string]string{
-				normalizeInboundProviderKey(provider): secret,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal flow config: %v", err)
-	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('root', 'root', 'static', ?, 'active', ?)
-	`, string(configBytes), now); err != nil {
+		VALUES ('root', 'root', 'static', '{}', 'active', ?)
+	`, now); err != nil {
 		t.Fatalf("insert flow instance: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `

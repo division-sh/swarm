@@ -72,12 +72,11 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
-	req = req.WithContext(ctx)
 	req.Header.Set("X-Hub-Signature-256", githubWebhookSignature(webhookSecret, body))
 	req.Header.Set("X-GitHub-Delivery", providerEventID)
 	req.Header.Set("X-GitHub-Event", "push")
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -177,11 +176,10 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/slack", strings.NewReader(string(body)))
-	req = req.WithContext(ctx)
 	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
 	req.Header.Set("X-Slack-Signature", slackWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -281,10 +279,9 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
-	req = req.WithContext(ctx)
 	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -371,10 +368,9 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	body := []byte(`{"id":"evt_456","type":"customer.created","data":{"object":{"id":"cus_123"}}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
-	req = req.WithContext(ctx)
 	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -440,9 +436,8 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		"To":         {"+15557654321"},
 	}
 	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
-	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -505,9 +500,8 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		"To":         {"+15557654321"},
 	}
 	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
-	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -567,11 +561,10 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
-	req = req.WithContext(ctx)
 	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
 	req.Header.Set("X-Shopify-Topic", "orders/create")
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -628,11 +621,10 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 
 	body := []byte(`{"id":456,"line_items":[{"sku":"xyz"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
-	req = req.WithContext(ctx)
 	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
 	req.Header.Set("X-Shopify-Topic", "orders/updated")
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -692,9 +684,8 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
-	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -754,9 +745,8 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 
 	body := []byte(`{"update_id":987654321,"message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
-	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -851,9 +841,8 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			g := newTestInboundGateway(t, bus, nil, nil, pg)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
-			req = req.WithContext(ctx)
 			rec := httptest.NewRecorder()
-			g.Handler().ServeHTTP(rec, req)
+			handleBoundedProviderDelivery(t, g, bus, pg, rec, req, tc.runID, tc.entityID, tc.provider, tc.webhookSecret)
 
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -944,9 +933,8 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
-			req = req.WithContext(ctx)
 			rec := httptest.NewRecorder()
-			g.Handler().ServeHTTP(rec, req)
+			handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, tc.runID, tc.entityID, tc.provider, tc.webhookSecret)
 
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())

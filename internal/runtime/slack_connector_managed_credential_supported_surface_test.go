@@ -55,6 +55,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        false,
 		})
 	})
@@ -80,6 +81,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			workflowStore: workflowStore,
 			runID:         runID,
 			entityID:      entityID,
+			flowInstance:  flowInstance,
 			sqlite:        true,
 		})
 	})
@@ -94,6 +96,7 @@ type slackManagedConnectorBackend struct {
 	workflowStore *runtimepipeline.WorkflowInstanceStore
 	runID         string
 	entityID      string
+	flowInstance  string
 	sqlite        bool
 }
 
@@ -311,7 +314,7 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 	body := []byte(fmt.Sprintf(`{"update_id":%s,"message":{"message_id":7,"chat":{"id":42},"text":%q}}`, updateID, text))
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", body).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
-	gateway.Handler().ServeHTTP(rec, req)
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "telegram", "telegram-secret")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status for update %s = %d, want 202 body=%s", backend.name, updateID, rec.Code, rec.Body.String())
 	}
