@@ -108,8 +108,11 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		"permission-contents: write",
 		"permission-pull-requests: write",
 		"automation/test-timing-model",
+		"staging_branch=automation/test-timing-model-build",
 		"git diff --name-only",
 		"repos/division-sh/swarm/contents/.github/test-timing-weights.json",
+		`-f branch="$staging_branch"`,
+		`-f sha="$generated_sha"`,
 		"gh workflow run ci.yml",
 		"human review and normal protection required",
 	} {
