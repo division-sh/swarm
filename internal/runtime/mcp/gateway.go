@@ -253,13 +253,13 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		requestID, err := json.Marshal(req.ID)
+		logicalSegment, err := mcpToolCallLogicalIdentitySegment(req)
 		if err != nil {
-			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.identity", err, map[string]any{"field": "id"})
+			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.identity", err, nil)
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "mcp_tool_call:"+string(requestID))
+		ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, logicalSegment)
 		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
 			err := g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", nil, map[string]any{"tool": toolName})
@@ -760,6 +760,9 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	} else if turn.DifferentOwner != "" {
 		ctx = runtimeeffects.WithDifferentOwner(ctx, turn.DifferentOwner)
 	}
+	if turn.HasLogicalIdentity {
+		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, turn.LogicalIdentity)
+	}
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, turn.Actor)
 	}
@@ -777,6 +780,14 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
 	}
 	return ctx
+}
+
+func mcpToolCallLogicalIdentitySegment(req RPCRequest) (string, error) {
+	raw, err := mcpEffectFingerprint(req)
+	if err != nil {
+		return "", err
+	}
+	return "mcp_tool_call:" + runtimeeffects.Fingerprint(raw), nil
 }
 
 func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {

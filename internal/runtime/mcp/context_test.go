@@ -55,12 +55,72 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	if !turn.HasLifecycleToken || turn.LifecycleToken != harness.Token || turn.EffectController == nil {
 		t.Fatalf("managed effect authority was not preserved: %#v", turn)
 	}
+	if !turn.HasLogicalIdentity || turn.LogicalIdentity != "gateway-turn" {
+		t.Fatalf("managed logical identity was not preserved: %#v", turn)
+	}
 	base := (&Gateway{}).baseContextForResolvedTurn(context.Background(), turn)
 	if restored, ok := runtimeeffects.LifecycleTokenFromContext(base); !ok || restored != harness.Token {
 		t.Fatalf("restored lifecycle token = %+v ok=%v", restored, ok)
 	}
 	if _, ok := runtimeeffects.ControllerFromContext(base); !ok {
 		t.Fatal("restored effect controller is missing")
+	}
+	if identity, ok := runtimeeffects.LogicalOperationIdentityFromContext(base); !ok || identity != "gateway-turn" {
+		t.Fatalf("restored logical identity = %q ok=%v", identity, ok)
+	}
+}
+
+func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTransportID(t *testing.T) {
+	harness := effecttest.New()
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	register := func(identity string) TurnContext {
+		ctx := runtimeeffects.WithLogicalOperationIdentity(harness.Context("inbound-event"), identity)
+		ctx = models.WithActor(ctx, models.AgentConfig{ID: harness.Token.AgentID})
+		token := registry.RegisterTurnContext(ctx)
+		turn, ok := registry.ResolveTurnContext(token)
+		if !ok {
+			t.Fatalf("resolve %s turn context", identity)
+		}
+		return turn
+	}
+
+	requestOne := RPCRequest{JSONRPC: "2.0", Method: "tools/call", ID: float64(1), Params: map[string]any{
+		"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "x"},
+	}}
+	requestReplay := requestOne
+	requestReplay.ID = "replacement-transport-id"
+	firstSegment, err := mcpToolCallLogicalIdentitySegment(requestOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaySegment, err := mcpToolCallLogicalIdentitySegment(requestReplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstSegment != replaySegment {
+		t.Fatalf("transport ID changed semantic child identity: %q != %q", firstSegment, replaySegment)
+	}
+
+	gateway := &Gateway{}
+	begin := func(turn TurnContext, segment string) error {
+		ctx := gateway.baseContextForResolvedTurn(context.Background(), turn)
+		ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, segment)
+		_, err := runtimeeffects.Begin(ctx, "authored_http_tool", []byte("request"), map[string]string{"tool": "write_file"})
+		return err
+	}
+	turnOne := register("provider-turn-1")
+	turnTwo := register("provider-turn-2")
+	if err := begin(turnOne, firstSegment); err != nil {
+		t.Fatalf("first provider-turn child: %v", err)
+	}
+	if err := begin(turnTwo, firstSegment); err != nil {
+		t.Fatalf("sibling provider-turn child collided: %v", err)
+	}
+	if err := begin(turnOne, replaySegment); err == nil {
+		t.Fatal("changed MCP transport ID redispatched the same semantic child")
+	}
+	if len(harness.Attempts) != 2 {
+		t.Fatalf("managed attempts = %d, want two siblings and no replay attempt", len(harness.Attempts))
 	}
 }
 

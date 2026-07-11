@@ -11,6 +11,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -18,10 +19,14 @@ type managedEffectRoundTripper struct {
 	t       *testing.T
 	harness *effecttest.Harness
 	adapter string
+	calls   *int
 }
 
 func (r managedEffectRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	r.t.Helper()
+	if r.calls != nil {
+		(*r.calls)++
+	}
 	if err := r.harness.RequireState(r.adapter, runtimeeffects.StateLaunched); err != nil {
 		r.t.Fatal(err)
 	}
@@ -47,6 +52,22 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		}
 		if _, launched := stale.StateForAdapter("authored_http_tool"); launched {
 			t.Fatal("stale authored HTTP effect reached dispatch")
+		}
+
+		supersededAtLaunch := effecttest.New()
+		supersededAtLaunch.MarkErr = runtimefailures.New(runtimefailures.ClassSupersededGeneration, "superseded_generation", "external-effects", "launch_attempt", nil)
+		dispatches := 0
+		launchFencedExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{
+			t: t, harness: supersededAtLaunch, adapter: "authored_http_tool", calls: &dispatches,
+		}}}
+		if _, err := launchFencedExecutor.execHTTPRequestOnce(supersededAtLaunch.Context("authored-http-launch-fence"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, RegisteredTool{Name: "effect-test"}, nil); err == nil {
+			t.Fatal("superseded launch boundary admitted authored HTTP dispatch")
+		}
+		if dispatches != 0 {
+			t.Fatalf("superseded launch boundary dispatched HTTP %d times", dispatches)
+		}
+		if err := supersededAtLaunch.RequireState("authored_http_tool", runtimeeffects.StateAuthorized); err != nil {
+			t.Fatal(err)
 		}
 	})
 

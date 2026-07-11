@@ -27436,7 +27436,7 @@ managed_external_effect_authority:
     rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof.
   context_authority:
     managed_agent: Every adapter invocation requires the lifecycle token, selected-store controller, and typed logical-operation identity. Missing context fails closed before authorization.
-    gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, inbound identity, and lineage; reconstruction cannot degrade a managed call into an unowned call.
+    gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. MCP tool calls refine that identity with a canonical semantic request fingerprint that excludes replaceable JSON-RPC correlation IDs; reconstruction cannot collapse sibling provider turns or turn transport-ID changes into new logical work.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
     identity: A deterministic operation_id is derived from agent, typed inbound/explicit logical identity, deterministic provider-turn or tool-call child coordinate, adapter, and declared lineage. Sibling turns/calls under one inbound event are distinct while replay of the same child is stable. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
@@ -27446,7 +27446,7 @@ managed_external_effect_authority:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
   launch:
-    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
+    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt. At launch, the selected-store transaction locks and revalidates the same lifecycle cell against the attempt token before atomically marking the operation and attempt launched. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
     rejection: If the primitive subsequently rejects launch with exact zero-effect proof, the already-marked attempt settles terminal_failure with launch_rejected evidence. Marker failure performs zero launch or mutation.
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
@@ -27474,3 +27474,5 @@ managed_external_effect_authority:
     - recovery redispatch of an authorized, launched, response-observed, or uncertain attempt
     - nil-handle or missing-token no-op admission
     - random logical operation or attempt identity on retry
+    - launch transition without current lifecycle-token revalidation
+    - MCP logical child identity derived from replaceable JSON-RPC correlation ID

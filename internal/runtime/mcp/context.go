@@ -18,20 +18,22 @@ import (
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
 type TurnContext struct {
-	Actor             models.AgentConfig
-	Inbound           events.Event
-	HasInbound        bool
-	RuntimeLineage    runtimecorrelation.RuntimeLineage
-	HasRuntimeLineage bool
-	LifecycleToken    runtimeeffects.LifecycleToken
-	HasLifecycleToken bool
-	EffectController  *runtimeeffects.Controller
-	DifferentOwner    runtimeeffects.DifferentOwner
-	Allowed           map[string]struct{}
-	Recorder          *runtimebus.EmittedEventsRecorder
-	Emitted           map[string]struct{}
-	CreatedAt         time.Time
-	ExpiresAt         time.Time
+	Actor              models.AgentConfig
+	Inbound            events.Event
+	HasInbound         bool
+	RuntimeLineage     runtimecorrelation.RuntimeLineage
+	HasRuntimeLineage  bool
+	LifecycleToken     runtimeeffects.LifecycleToken
+	HasLifecycleToken  bool
+	EffectController   *runtimeeffects.Controller
+	DifferentOwner     runtimeeffects.DifferentOwner
+	LogicalIdentity    string
+	HasLogicalIdentity bool
+	Allowed            map[string]struct{}
+	Recorder           *runtimebus.EmittedEventsRecorder
+	Emitted            map[string]struct{}
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
 }
 
 type TurnContextRegistry struct {
@@ -80,20 +82,23 @@ func (r *TurnContextRegistry) RegisterTurnContextWithAllowedTools(ctx context.Co
 	lifecycleToken, hasLifecycleToken := runtimeeffects.LifecycleTokenFromContext(ctx)
 	effectController, _ := runtimeeffects.ControllerFromContext(ctx)
 	differentOwner, _ := runtimeeffects.DifferentOwnerFromContext(ctx)
+	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	r.put(token, TurnContext{
-		Actor:             actor,
-		Inbound:           inbound,
-		HasInbound:        hasInbound,
-		RuntimeLineage:    lineage,
-		HasRuntimeLineage: hasLineage,
-		LifecycleToken:    lifecycleToken,
-		HasLifecycleToken: hasLifecycleToken,
-		EffectController:  effectController,
-		DifferentOwner:    differentOwner,
-		Allowed:           normalizeAllowedTools(allowedTools),
-		Recorder:          recorder,
-		CreatedAt:         now,
-		ExpiresAt:         now.Add(ttl),
+		Actor:              actor,
+		Inbound:            inbound,
+		HasInbound:         hasInbound,
+		RuntimeLineage:     lineage,
+		HasRuntimeLineage:  hasLineage,
+		LifecycleToken:     lifecycleToken,
+		HasLifecycleToken:  hasLifecycleToken,
+		EffectController:   effectController,
+		DifferentOwner:     differentOwner,
+		LogicalIdentity:    logicalIdentity,
+		HasLogicalIdentity: hasLogicalIdentity,
+		Allowed:            normalizeAllowedTools(allowedTools),
+		Recorder:           recorder,
+		CreatedAt:          now,
+		ExpiresAt:          now.Add(ttl),
 	})
 	return token
 }
