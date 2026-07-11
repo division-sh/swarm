@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,29 +36,26 @@ func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 
 func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
 	t.Helper()
-	raw := strings.TrimSpace(os.Getenv(testpostgres.SourceEnv))
-	if raw == "" {
-		t.Fatalf("%s is not set; run tests with `go run ./cmd/swarm-test-postgres -- go test ...` or configure host Postgres using internal/testutil/POSTGRES.md", testpostgres.SourceEnv)
+	connection, err := testpostgres.ConnectionFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheKey, err := connection.String()
+	if err != nil {
+		t.Fatalf("serialize canonical Postgres test connection: %v", err)
 	}
 
 	postgresManagers.Lock()
-	manager := postgresManagers.bySource[raw]
+	manager := postgresManagers.bySource[cacheKey]
 	if manager == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		var err error
-		connection, parseErr := testpostgres.ParseConnection(raw)
-		if parseErr != nil {
-			postgresManagers.Unlock()
-			cancel()
-			t.Fatalf("parse %s: %v", testpostgres.SourceEnv, parseErr)
-		}
 		manager, err = testpostgres.NewManager(ctx, connection)
 		cancel()
 		if err != nil {
 			postgresManagers.Unlock()
 			t.Fatalf("initialize Postgres test manager: %v", err)
 		}
-		postgresManagers.bySource[raw] = manager
+		postgresManagers.bySource[cacheKey] = manager
 	}
 	postgresManagers.Unlock()
 

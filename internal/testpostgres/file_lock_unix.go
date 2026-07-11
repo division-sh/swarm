@@ -11,9 +11,22 @@ import (
 )
 
 func acquireFileLock(path string, nonblocking bool) (*fileLock, bool, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err := validateExistingAuthorityFile(path); err != nil {
+		return nil, false, err
+	}
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, false, fmt.Errorf("open lock %s: %w", path, err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, false, fmt.Errorf("stat lock %s: %w", path, err)
+	}
+	if err := validatePrivateStateInfo(path, info); err != nil {
+		_ = file.Close()
+		return nil, false, err
 	}
 	flags := unix.LOCK_EX
 	if nonblocking {

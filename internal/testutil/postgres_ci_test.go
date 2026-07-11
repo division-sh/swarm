@@ -1,8 +1,12 @@
 package testutil
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -74,6 +78,7 @@ func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 			return err
 		}
 		text := string(data)
+		isProduction := !strings.HasSuffix(path, "_test.go")
 		if strings.Contains(text, "withDB"+"Name(") {
 			t.Errorf("non-authoritative Postgres DSN projector survives in %s", rel)
 		}
@@ -87,19 +92,74 @@ func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 				t.Errorf("manual Postgres DSN interpreter %q survives in %s", fragment, rel)
 			}
 		}
-		if !strings.HasSuffix(path, "_test.go") && strings.Contains(text, `pq.NewConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
+		if isProduction && strings.Contains(text, `pq.NewConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
 			t.Errorf("competing pq.NewConfig owner survives in %s", rel)
 		}
-		if !strings.HasSuffix(path, "_test.go") && strings.Contains(text, `pq.NewConnectorConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
+		if isProduction && strings.Contains(text, `pq.NewConnectorConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
 			t.Errorf("competing pq.NewConnectorConfig owner survives in %s", rel)
 		}
-		if !strings.HasSuffix(path, "_test.go") && strings.Contains(text, `os.Getenv("SWARM_TEST_POSTGRES_DSN")`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
-			t.Errorf("competing SWARM_TEST_POSTGRES_DSN reader survives in %s", rel)
+		if isProduction && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
+			file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
+			if err != nil {
+				return err
+			}
+			for _, violation := range postgresSourceAuthorityViolations(file) {
+				t.Errorf("%s survives in %s", violation, rel)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("scan Postgres environment owners: %v", err)
+	}
+}
+
+func postgresSourceAuthorityViolations(file *ast.File) []string {
+	aliases := make(map[string]string)
+	for _, imp := range file.Imports {
+		importPath, _ := strconv.Unquote(imp.Path.Value)
+		name := filepath.Base(importPath)
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		aliases[name] = importPath
+	}
+	var violations []string
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, _ := selector.X.(*ast.Ident)
+		if pkg == nil {
+			return true
+		}
+		if aliases[pkg.Name] == "os" && selector.Sel.Name == "Getenv" && len(call.Args) == 1 && postgresSourceExpression(call.Args[0]) {
+			violations = append(violations, "competing SWARM_TEST_POSTGRES_DSN reader")
+		}
+		if aliases[pkg.Name] == "github.com/division-sh/swarm/internal/testpostgres" && selector.Sel.Name == "ParseConnection" {
+			violations = append(violations, "competing Postgres source parser")
+		}
+		return true
+	})
+	return violations
+}
+
+func postgresSourceExpression(expression ast.Expr) bool {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name == "SourceEnv"
+	case *ast.SelectorExpr:
+		return value.Sel.Name == "SourceEnv"
+	case *ast.BasicLit:
+		literal, _ := strconv.Unquote(value.Value)
+		return literal == "SWARM_TEST_POSTGRES_DSN"
+	default:
+		return false
 	}
 }
 

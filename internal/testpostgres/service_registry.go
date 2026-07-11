@@ -265,15 +265,27 @@ func (s *Service) Close(ctx context.Context) error {
 	}
 	s.closed = true
 	var errs []error
+	if err := s.registry.initialize(); err != nil {
+		errs = append(errs, err)
+	}
 	if s.record.LeaseID != "" {
-		if err := s.registry.transition(s.record.LeaseID, ServiceTearingDown); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-		if s.record.ContainerID != "" {
-			if _, err := s.registry.inspectExact(ctx, s.record); err != nil {
+		if len(errs) == 0 {
+			if err := s.registry.transition(s.record.LeaseID, ServiceTearingDown); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)
-			} else if out, err := s.registry.runDocker(ctx, "rm", "--force", s.record.ContainerID); err != nil {
-				errs = append(errs, fmt.Errorf("remove Postgres service %s: %v output=%s", s.record.ContainerID, err, strings.TrimSpace(string(out))))
+			}
+		}
+		if len(errs) == 0 && s.record.ContainerID != "" {
+			if _, exists, err := s.registry.inspectExactMaybe(ctx, s.record); err != nil {
+				errs = append(errs, err)
+			} else if exists {
+				if out, err := s.registry.runDocker(ctx, "rm", "--force", s.record.ContainerID); err != nil {
+					errs = append(errs, fmt.Errorf("remove Postgres service %s: %v output=%s", s.record.ContainerID, err, strings.TrimSpace(string(out))))
+				}
+			}
+			if len(errs) == 0 {
+				if err := s.registry.verifyContainerAbsent(ctx, s.record.ContainerID); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 		if len(errs) == 0 {
@@ -293,6 +305,9 @@ func (s *Service) Close(ctx context.Context) error {
 }
 
 func (r *ServiceRegistry) RunCreator(ctx context.Context, leaseID string, creatorFD uintptr) error {
+	if err := r.initialize(); err != nil {
+		return err
+	}
 	creatorFile := os.NewFile(creatorFD, "creator-fence")
 	if creatorFile == nil {
 		return fmt.Errorf("creator fence descriptor is invalid")
@@ -342,6 +357,9 @@ func (r *ServiceRegistry) RunCreator(ctx context.Context, leaseID string, creato
 		record.CreateResult = "docker create exited with failure"
 		return r.putRecord(record)
 	}
+	if err := os.Chmod(record.CIDFile, 0o600); err != nil {
+		return fmt.Errorf("secure Docker cidfile: %w", err)
+	}
 	rawID, err := os.ReadFile(record.CIDFile)
 	if err != nil {
 		return fmt.Errorf("read Docker cidfile: %w", err)
@@ -365,104 +383,188 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 	if err := r.initialize(); err != nil {
 		return err
 	}
-	return r.withRegistry(func(doc *registryDocument) error {
-		candidates, err := r.managedContainers(ctx)
+	doc, err := r.registrySnapshot()
+	if err != nil {
+		return err
+	}
+	candidates, err := r.managedContainers(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validateManagedNamespace(&doc, candidates); err != nil {
+		return err
+	}
+	leaseIDs := make([]string, 0, len(doc.Services))
+	for leaseID := range doc.Services {
+		leaseIDs = append(leaseIDs, leaseID)
+	}
+	sort.Strings(leaseIDs)
+	for _, leaseID := range leaseIDs {
+		record := doc.Services[leaseID]
+		if err := validateServiceRecord(leaseID, record); err != nil {
+			return err
+		}
+		lease, acquired, err := acquireFileLock(r.leasePath(leaseID), true)
 		if err != nil {
 			return err
 		}
-		if err := validateManagedNamespace(doc, candidates); err != nil {
+		if !acquired {
+			continue
+		}
+		record, err = r.record(leaseID)
+		if errors.Is(err, os.ErrNotExist) {
+			_ = lease.Close()
+			continue
+		}
+		if err == nil {
+			err = r.reconcileRecord(ctx, record, candidates[leaseID])
+		}
+		closeErr := lease.Close()
+		if err != nil {
 			return err
 		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
+}
+
+func (r *ServiceRegistry) registrySnapshot() (registryDocument, error) {
+	var snapshot registryDocument
+	err := r.withRegistry(func(doc *registryDocument) error {
+		snapshot = *doc
+		snapshot.Services = make(map[string]ServiceRecord, len(doc.Services))
 		for leaseID, record := range doc.Services {
-			if err := validateServiceRecord(leaseID, record); err != nil {
-				return err
-			}
-			lease, acquired, err := acquireFileLock(r.leasePath(leaseID), true)
-			if err != nil {
-				return err
-			}
-			if !acquired {
-				continue
-			}
-			defer lease.Close()
-			if record.State == ServiceCreateSucceeded || record.State == ServiceCreateFailed {
-				creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
-				if err != nil {
-					return err
-				}
-				if !free {
-					return fmt.Errorf("Postgres service creator %s published %q but still owns terminal handoff", leaseID, record.State)
-				}
-				_ = creator.Close()
-			}
-			switch record.State {
-			case ServicePrepared:
-				delete(doc.Services, leaseID)
-			case ServiceCreatorStarting:
-				creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
-				if err != nil {
-					return err
-				}
-				if !free {
-					return fmt.Errorf("Postgres service creator %s is still starting", leaseID)
-				}
-				_ = creator.Close()
-				delete(doc.Services, leaseID)
-			case ServiceCreating:
-				creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
-				if err != nil {
-					return err
-				}
-				if !free {
-					return fmt.Errorf("Postgres service creator %s is still in flight", leaseID)
-				}
-				_ = creator.Close()
-				return fmt.Errorf("Postgres service creator %s died without a terminal result; state retained and resources left untouched", leaseID)
-			case ServiceCreateFailed:
-				if record.ContainerID != "" || fileExists(record.CIDFile) || len(candidates[leaseID]) != 0 {
-					return fmt.Errorf("failed Postgres creator %s has ambiguous container evidence; left untouched", leaseID)
-				}
-				delete(doc.Services, leaseID)
-			default:
-				if record.ContainerID == "" {
-					return fmt.Errorf("Postgres service %s state %q has no container ID", leaseID, record.State)
-				}
-				if _, err := r.inspectExact(ctx, record); err != nil {
-					return err
-				}
-				if out, err := r.runDocker(ctx, "rm", "--force", record.ContainerID); err != nil {
-					return fmt.Errorf("reconcile Postgres service %s: %v output=%s", record.ContainerID, err, strings.TrimSpace(string(out)))
-				}
-				delete(doc.Services, leaseID)
-				_ = os.Remove(record.CIDFile)
-			}
+			snapshot.Services[leaseID] = record
 		}
 		return nil
 	})
+	return snapshot, err
+}
+
+func (r *ServiceRegistry) reconcileRecord(ctx context.Context, record ServiceRecord, candidates []dockerInspect) error {
+	leaseID := record.LeaseID
+	if record.State == ServiceCreateSucceeded || record.State == ServiceCreateFailed {
+		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
+		if err != nil {
+			return err
+		}
+		if !free {
+			return fmt.Errorf("Postgres service creator %s published %q but still owns terminal handoff", leaseID, record.State)
+		}
+		_ = creator.Close()
+	}
+	switch record.State {
+	case ServicePrepared:
+		return r.deleteRecord(leaseID)
+	case ServiceCreatorStarting:
+		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
+		if err != nil {
+			return err
+		}
+		if !free {
+			return fmt.Errorf("Postgres service creator %s is still starting", leaseID)
+		}
+		_ = creator.Close()
+		return r.deleteRecord(leaseID)
+	case ServiceCreating:
+		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
+		if err != nil {
+			return err
+		}
+		if !free {
+			return fmt.Errorf("Postgres service creator %s is still in flight", leaseID)
+		}
+		_ = creator.Close()
+		return fmt.Errorf("Postgres service creator %s died without a terminal result; state retained and resources left untouched", leaseID)
+	case ServiceCreateFailed:
+		if record.ContainerID != "" || fileExists(record.CIDFile) || len(candidates) != 0 {
+			return fmt.Errorf("failed Postgres creator %s has ambiguous container evidence; left untouched", leaseID)
+		}
+		return r.deleteRecord(leaseID)
+	default:
+		if record.ContainerID == "" {
+			return fmt.Errorf("Postgres service %s state %q has no container ID", leaseID, record.State)
+		}
+		if record.State != ServiceTearingDown {
+			if err := r.transition(leaseID, ServiceTearingDown); err != nil {
+				return err
+			}
+		}
+		_, exists, err := r.inspectExactMaybe(ctx, record)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if out, err := r.runDocker(ctx, "rm", "--force", record.ContainerID); err != nil {
+				return fmt.Errorf("reconcile Postgres service %s: %v output=%s", record.ContainerID, err, strings.TrimSpace(string(out)))
+			}
+		}
+		if err := r.verifyContainerAbsent(ctx, record.ContainerID); err != nil {
+			return err
+		}
+		if err := r.deleteRecord(leaseID); err != nil {
+			return err
+		}
+		_ = os.Remove(record.CIDFile)
+		_ = os.Remove(r.creatorPath(leaseID))
+		return nil
+	}
 }
 
 func (r *ServiceRegistry) inspectExact(ctx context.Context, record ServiceRecord) (dockerInspect, error) {
-	if err := validateCIDFile(record); err != nil {
+	got, exists, err := r.inspectExactMaybe(ctx, record)
+	if err != nil {
 		return dockerInspect{}, err
+	}
+	if !exists {
+		return dockerInspect{}, fmt.Errorf("Postgres service %s is absent; exact identity cannot be verified", record.ContainerID)
+	}
+	return got, nil
+}
+
+func (r *ServiceRegistry) inspectExactMaybe(ctx context.Context, record ServiceRecord) (dockerInspect, bool, error) {
+	if err := validateCIDFile(record); err != nil {
+		return dockerInspect{}, false, err
 	}
 	out, err := r.runDocker(ctx, "inspect", record.ContainerID)
 	if err != nil {
-		return dockerInspect{}, fmt.Errorf("inspect Postgres service %s: %w", record.ContainerID, err)
+		if dockerObjectAbsent(out) {
+			return dockerInspect{}, false, nil
+		}
+		return dockerInspect{}, false, fmt.Errorf("inspect Postgres service %s: %w output=%s", record.ContainerID, err, strings.TrimSpace(string(out)))
 	}
 	var values []dockerInspect
 	if err := json.Unmarshal(out, &values); err != nil || len(values) != 1 {
-		return dockerInspect{}, fmt.Errorf("decode Docker inspect for %s: %w", record.ContainerID, err)
+		return dockerInspect{}, false, fmt.Errorf("decode Docker inspect for %s: %w", record.ContainerID, err)
 	}
 	got := values[0]
 	if got.ID != record.ContainerID || strings.TrimPrefix(got.Name, "/") != record.Name || got.Image != record.ImageID {
-		return dockerInspect{}, fmt.Errorf("Postgres service %s identity mismatch; left untouched", record.ContainerID)
+		return dockerInspect{}, false, fmt.Errorf("Postgres service %s identity mismatch; left untouched", record.ContainerID)
 	}
 	for key, want := range record.Labels {
 		if got.Config.Labels[key] != want {
-			return dockerInspect{}, fmt.Errorf("Postgres service %s label %s mismatch; left untouched", record.ContainerID, key)
+			return dockerInspect{}, false, fmt.Errorf("Postgres service %s label %s mismatch; left untouched", record.ContainerID, key)
 		}
 	}
-	return got, nil
+	return got, true, nil
+}
+
+func (r *ServiceRegistry) verifyContainerAbsent(ctx context.Context, containerID string) error {
+	out, err := r.runDocker(ctx, "inspect", containerID)
+	if err != nil && dockerObjectAbsent(out) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("verify Postgres service %s absence: %w output=%s", containerID, err, strings.TrimSpace(string(out)))
+	}
+	return fmt.Errorf("Postgres service %s still exists after teardown; authority retained", containerID)
+}
+
+func dockerObjectAbsent(out []byte) bool {
+	message := strings.ToLower(string(out))
+	return strings.Contains(message, "no such object") || strings.Contains(message, "no such container")
 }
 
 func validateCIDFile(record ServiceRecord) error {
@@ -481,12 +583,19 @@ func validateCIDFile(record ServiceRecord) error {
 }
 
 func (r *ServiceRegistry) initialize() error {
+	if _, err := os.Lstat(r.StateRoot); err == nil {
+		if err := validatePrivateStateRoot(r.StateRoot); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	for _, dir := range []string{r.StateRoot, filepath.Join(r.StateRoot, "leases"), filepath.Join(r.StateRoot, "creators"), filepath.Join(r.StateRoot, "handoff")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
 	}
-	return nil
+	return validatePrivateStateRoot(r.StateRoot)
 }
 
 func (r *ServiceRegistry) withRegistry(fn func(*registryDocument) error) error {
@@ -507,6 +616,9 @@ func (r *ServiceRegistry) withRegistry(fn func(*registryDocument) error) error {
 
 func (r *ServiceRegistry) loadRegistry() (registryDocument, error) {
 	path := filepath.Join(r.StateRoot, "services-v1.json")
+	if err := validateExistingAuthorityFile(path); err != nil {
+		return registryDocument{}, err
+	}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return registryDocument{Version: serviceRegistryVersion, Services: make(map[string]ServiceRecord)}, nil
@@ -543,7 +655,7 @@ func (r *ServiceRegistry) saveRegistry(doc registryDocument) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return nil
+	return validateExistingAuthorityFile(path)
 }
 
 func (r *ServiceRegistry) putRecord(record ServiceRecord) error {
@@ -604,20 +716,53 @@ func (r *ServiceRegistry) deleteRecord(leaseID string) error {
 
 func (r *ServiceRegistry) ownerID() (string, error) {
 	path := filepath.Join(r.StateRoot, "owner-id")
-	if raw, err := os.ReadFile(path); err == nil {
-		value := strings.TrimSpace(string(raw))
-		if _, err := uuid.Parse(value); err != nil {
-			return "", fmt.Errorf("invalid service owner ID: %w", err)
+	for {
+		if err := validateExistingAuthorityFile(path); err != nil {
+			return "", err
+		}
+		if raw, err := os.ReadFile(path); err == nil {
+			value := strings.TrimSpace(string(raw))
+			if _, err := uuid.Parse(value); err != nil {
+				return "", fmt.Errorf("invalid service owner ID: %w", err)
+			}
+			return value, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		value := uuid.NewString()
+		tmp := filepath.Join(r.StateRoot, ".owner-id-"+uuid.NewString()+".tmp")
+		file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return "", err
+		}
+		_, writeErr := file.WriteString(value + "\n")
+		syncErr := file.Sync()
+		closeErr := file.Close()
+		if writeErr != nil {
+			_ = os.Remove(tmp)
+			return "", writeErr
+		}
+		if syncErr != nil {
+			_ = os.Remove(tmp)
+			return "", syncErr
+		}
+		if closeErr != nil {
+			_ = os.Remove(tmp)
+			return "", closeErr
+		}
+		linkErr := os.Link(tmp, path)
+		_ = os.Remove(tmp)
+		if os.IsExist(linkErr) {
+			continue
+		}
+		if linkErr != nil {
+			return "", fmt.Errorf("publish service owner ID: %w", linkErr)
+		}
+		if err := validateExistingAuthorityFile(path); err != nil {
+			return "", err
 		}
 		return value, nil
-	} else if !os.IsNotExist(err) {
-		return "", err
 	}
-	value := uuid.NewString()
-	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
-		return "", err
-	}
-	return value, nil
 }
 
 func (r *ServiceRegistry) dockerOutput(ctx context.Context, args ...string) (string, error) {
@@ -636,12 +781,27 @@ func (r *ServiceRegistry) runDocker(ctx context.Context, args ...string) ([]byte
 }
 
 func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]dockerInspect, error) {
-	out, err := r.runDocker(ctx, "ps", "--all", "--filter", "label=com.division.swarm.test-postgres.managed=1", "--format", "{{.ID}}")
+	nameOut, err := r.runDocker(ctx, "ps", "--all", "--format", "{{.ID}} {{.Names}}")
 	if err != nil {
-		return nil, fmt.Errorf("enumerate managed Postgres services: %w output=%s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("enumerate canonical Postgres service names: %w output=%s", err, strings.TrimSpace(string(nameOut)))
+	}
+	labelOut, err := r.runDocker(ctx, "ps", "--all", "--filter", "label=com.division.swarm.test-postgres.managed=1", "--format", "{{.ID}}")
+	if err != nil {
+		return nil, fmt.Errorf("enumerate managed Postgres services by label: %w output=%s", err, strings.TrimSpace(string(labelOut)))
+	}
+	ids := make(map[string]struct{})
+	for _, line := range strings.Split(string(nameOut), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.HasPrefix(fields[1], "swarm-test-postgres-v1-") {
+			ids[fields[0]] = struct{}{}
+		}
+	}
+	for _, id := range strings.Fields(string(labelOut)) {
+		ids[id] = struct{}{}
 	}
 	result := make(map[string][]dockerInspect)
-	for _, id := range strings.Fields(string(out)) {
+	seenFullIDs := make(map[string]bool)
+	for id := range ids {
 		inspectOut, err := r.runDocker(ctx, "inspect", id)
 		if err != nil {
 			return nil, fmt.Errorf("inspect managed Postgres service %s: %w", id, err)
@@ -650,11 +810,29 @@ func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]d
 		if err := json.Unmarshal(inspectOut, &values); err != nil || len(values) != 1 {
 			return nil, fmt.Errorf("decode managed Postgres service %s inspection", id)
 		}
-		leaseID := values[0].Config.Labels["com.division.swarm.test-postgres.lease-id"]
-		if leaseID == "" {
-			return nil, fmt.Errorf("managed Postgres service %s has no lease identity; left untouched", values[0].ID)
+		got := values[0]
+		if seenFullIDs[got.ID] {
+			continue
 		}
-		result[leaseID] = append(result[leaseID], values[0])
+		seenFullIDs[got.ID] = true
+		labels := got.Config.Labels
+		if strings.TrimPrefix(got.Name, "/") == "" || !strings.HasPrefix(strings.TrimPrefix(got.Name, "/"), "swarm-test-postgres-v1-") {
+			return nil, fmt.Errorf("managed Postgres service %s has non-canonical name %q; left untouched", got.ID, got.Name)
+		}
+		if labels["com.division.swarm.test-postgres.managed"] != "1" || labels["com.division.swarm.test-postgres.contract"] != "v1" {
+			return nil, fmt.Errorf("canonical Postgres service %s has missing or invalid management labels; left untouched", got.ID)
+		}
+		for _, key := range []string{"owner-id", "daemon-id", "runner-id", "lease-id", "spec-sha256"} {
+			if labels["com.division.swarm.test-postgres."+key] == "" {
+				return nil, fmt.Errorf("managed Postgres service %s has no %s label; left untouched", got.ID, key)
+			}
+		}
+		runnerID := labels["com.division.swarm.test-postgres.runner-id"]
+		if strings.TrimPrefix(got.Name, "/") != "swarm-test-postgres-v1-"+runnerID {
+			return nil, fmt.Errorf("managed Postgres service %s name does not match its runner label; left untouched", got.ID)
+		}
+		leaseID := labels["com.division.swarm.test-postgres.lease-id"]
+		result[leaseID] = append(result[leaseID], got)
 	}
 	return result, nil
 }

@@ -118,7 +118,10 @@ if args[:3] == ["info", "--format", "{{.ID}}"]:
 if args[:4] == ["image", "inspect", "--format", "{{.Id}}"]:
     print("image-id"); sys.exit(0)
 if args[0] == "ps":
-    if os.path.exists(path("inspect.json")): print(load()[0]["Id"])
+    if os.path.exists(path("inspect.json")):
+        value = load()[0]
+        if args[-1] == "{{.ID}} {{.Names}}": print(value["Id"] + " " + value["Name"].lstrip("/"))
+        else: print(value["Id"])
     sys.exit(0)
 if args[0] == "create":
     with open(path("create-count"), "a") as f: f.write("1\n")
@@ -135,6 +138,8 @@ if args[0] == "create":
     with open(path("inspect.json"), "w") as f: json.dump([value], f)
     print("container-id"); sys.exit(0)
 if args[0] == "inspect":
+    if not os.path.exists(path("inspect.json")):
+        print("Error: No such object: " + args[1], file=sys.stderr); sys.exit(1)
     print(json.dumps(load())); sys.exit(0)
 if args[0] == "rm":
     os.remove(path("inspect.json")); sys.exit(0)

@@ -9,18 +9,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
 type fakeDocker struct {
-	outputs map[string][]byte
-	errors  map[string]error
-	calls   []string
+	outputs               map[string][]byte
+	errors                map[string]error
+	calls                 []string
+	removeLeavesContainer bool
+	beforeCall            func(string)
 }
 
 func (d *fakeDocker) CombinedOutput(_ context.Context, args ...string) ([]byte, error) {
 	key := strings.Join(args, " ")
 	d.calls = append(d.calls, key)
+	if d.beforeCall != nil {
+		d.beforeCall(key)
+	}
+	if len(args) == 3 && args[0] == "rm" && args[1] == "--force" && !d.removeLeavesContainer {
+		inspectKey := "inspect " + args[2]
+		delete(d.outputs, inspectKey)
+		d.outputs[inspectKey] = []byte("Error: No such object: " + args[2])
+		d.errors[inspectKey] = errors.New("exit status 1")
+	}
 	return d.outputs[key], d.errors[key]
 }
 
@@ -166,6 +178,72 @@ func TestServiceRegistryExactTerminalContainerIsRemoved(t *testing.T) {
 	}
 }
 
+func TestServiceRegistryTearingDownConvergesAfterContainerAlreadyRemoved(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceTearingDown)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	fake := registry.docker.(*fakeDocker)
+	fake.outputs["inspect "+record.ContainerID] = []byte("Error: No such object: " + record.ContainerID)
+	fake.errors["inspect "+record.ContainerID] = errors.New("exit status 1")
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.record(record.LeaseID); !os.IsNotExist(err) {
+		t.Fatalf("tearing_down record survives exact absence: %v", err)
+	}
+}
+
+func TestServiceRegistryRetainsAuthorityUntilRemovalAbsenceIsVerified(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	inspect := testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID)
+	fake := dockerWithContainers(t, inspect)
+	fake.removeLeavesContainer = true
+	registry.docker = fake
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "still exists") {
+		t.Fatalf("Reconcile() error = %v, want retained-authority blocker", err)
+	}
+	got, err := registry.record(record.LeaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != ServiceTearingDown {
+		t.Fatalf("record state = %q, want tearing_down", got.State)
+	}
+}
+
+func TestServiceRegistryPersistsTearingDownBeforeDockerRemoval(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	fake := dockerWithContainers(t, testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID))
+	var stateAtRemoval ServiceState
+	fake.beforeCall = func(command string) {
+		if command != "rm --force "+record.ContainerID {
+			return
+		}
+		doc, err := registry.loadRegistry()
+		if err == nil {
+			stateAtRemoval = doc.Services[record.LeaseID].State
+		}
+	}
+	registry.docker = fake
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stateAtRemoval != ServiceTearingDown {
+		t.Fatalf("state at Docker removal = %q, want tearing_down", stateAtRemoval)
+	}
+}
+
 func TestServiceRegistryForgedLabelBlocksBeforeRemoval(t *testing.T) {
 	registry, record := testRegistryRecord(t, ServiceReady)
 	attachContainerIdentity(t, &record, "container-id")
@@ -181,6 +259,79 @@ func TestServiceRegistryForgedLabelBlocksBeforeRemoval(t *testing.T) {
 	}
 	if containsCall(registry.docker.(*fakeDocker).calls, "rm --force") {
 		t.Fatal("forged container was removed")
+	}
+}
+
+func TestServiceRegistryCanonicalNameWithoutManagedLabelBlocks(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	inspect := testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID)
+	delete(inspect.Config.Labels, "com.division.swarm.test-postgres.managed")
+	registry.docker = dockerWithContainers(t, inspect)
+	registry.docker.(*fakeDocker).outputs[managedPSCommand()] = nil
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "missing or invalid management labels") {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if containsCall(registry.docker.(*fakeDocker).calls, "rm --force") {
+		t.Fatal("canonical container without labels was removed")
+	}
+}
+
+func TestServiceRegistryNoRowCanonicalNameWithoutLabelsBlocks(t *testing.T) {
+	registry, _ := testRegistryRecord(t, ServicePrepared)
+	deleteRegistryRecord(t, registry, "lease")
+	inspect := testDockerInspect("foreign-container", "foreign-lease", "foreign-runner")
+	inspect.Config.Labels = nil
+	registry.docker = dockerWithContainers(t, inspect)
+	registry.docker.(*fakeDocker).outputs[managedPSCommand()] = nil
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "missing or invalid management labels") {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if containsCall(registry.docker.(*fakeDocker).calls, "rm --force") {
+		t.Fatal("no-row canonical container without labels was removed")
+	}
+}
+
+func TestServiceRegistryInvalidManagedLabelBlocks(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	inspect := testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID)
+	inspect.Config.Labels["com.division.swarm.test-postgres.managed"] = "true"
+	registry.docker = dockerWithContainers(t, inspect)
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "missing or invalid management labels") {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+}
+
+func TestServiceRegistryContainerUnionDeduplicatesFullIdentity(t *testing.T) {
+	registry, record := testRegistryRecord(t, ServiceReady)
+	attachContainerIdentity(t, &record, "container-id")
+	if err := registry.putRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	registry.docker = dockerWithContainers(t, testDockerInspect(record.ContainerID, record.LeaseID, record.RunnerID))
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, call := range registry.docker.(*fakeDocker).calls {
+		if call == "inspect "+record.ContainerID {
+			count++
+		}
+	}
+	// One discovery inspection plus one exact pre-remove inspection and one
+	// absence verification. The namespace union must not add a fourth.
+	if count != 3 {
+		t.Fatalf("inspect count = %d, want 3", count)
 	}
 }
 
@@ -225,11 +376,130 @@ func TestServiceRegistryReportsDockerEnumerationFailure(t *testing.T) {
 	}
 }
 
+func TestServiceRegistryRejectsUnsafeStateRootBeforeDocker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewServiceRegistry(root, "docker-unused")
+	fake := &fakeDocker{outputs: make(map[string][]byte), errors: make(map[string]error)}
+	registry.docker = fake
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unsafe mode") {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("Docker called with unsafe authority: %v", fake.calls)
+	}
+}
+
+func TestServiceRegistryRejectsSymlinkedAuthorityBeforeDocker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewServiceRegistry(root, "docker-unused")
+	if err := registry.initialize(); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "registry.json")
+	if err := os.WriteFile(target, []byte(`{"version":1,"services":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "services-v1.json")); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDocker{outputs: make(map[string][]byte), errors: make(map[string]error)}
+	registry.docker = fake
+	err := registry.Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("Docker called with symlinked authority: %v", fake.calls)
+	}
+}
+
+func TestServiceRegistryOwnerIDFirstCreationIsAtomic(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewServiceRegistry(root, "docker-unused")
+	if err := registry.initialize(); err != nil {
+		t.Fatal(err)
+	}
+	const workers = 32
+	values := make(chan string, workers)
+	errs := make(chan error, workers)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			value, err := registry.ownerID()
+			values <- value
+			errs <- err
+		}()
+	}
+	group.Wait()
+	close(values)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var want string
+	for value := range values {
+		if want == "" {
+			want = value
+		}
+		if value != want {
+			t.Fatalf("concurrent owner IDs differ: %q != %q", value, want)
+		}
+	}
+}
+
+func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
+	registry, first := testRegistryRecord(t, ServicePrepared)
+	second := first
+	second.LeaseID = "lease-two"
+	second.RunnerID = "runner-two"
+	second.Name = "swarm-test-postgres-v1-runner-two"
+	second.CIDFile = filepath.Join(registry.StateRoot, "handoff", "lease-two.cid")
+	second.Labels = serviceLabels(second.OwnerID, second.DaemonID, second.RunnerID, second.LeaseID, second.SpecHash)
+	if err := registry.putRecord(second); err != nil {
+		t.Fatal(err)
+	}
+	firstLease, acquired, err := acquireFileLock(registry.leasePath(first.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("first lease: acquired=%v err=%v", acquired, err)
+	}
+	defer firstLease.Close()
+	secondLease, acquired, err := acquireFileLock(registry.leasePath(second.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("second lease: acquired=%v err=%v", acquired, err)
+	}
+	defer secondLease.Close()
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, leaseID := range []string{first.LeaseID, second.LeaseID} {
+		if _, err := registry.record(leaseID); err != nil {
+			t.Fatalf("live runner %s removed: %v", leaseID, err)
+		}
+	}
+}
+
 func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, ServiceRecord) {
 	t.Helper()
 	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	registry := NewServiceRegistry(root, filepath.Join(root, "docker-unused"))
-	registry.docker = &fakeDocker{outputs: map[string][]byte{managedPSCommand(): nil}, errors: make(map[string]error)}
+	registry.docker = &fakeDocker{outputs: map[string][]byte{managedPSCommand(): nil, canonicalPSCommand(): nil}, errors: make(map[string]error)}
 	if err := registry.initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -249,12 +519,18 @@ func managedPSCommand() string {
 	return "ps --all --filter label=com.division.swarm.test-postgres.managed=1 --format {{.ID}}"
 }
 
+func canonicalPSCommand() string {
+	return "ps --all --format {{.ID}} {{.Names}}"
+}
+
 func dockerWithContainers(t *testing.T, values ...dockerInspect) *fakeDocker {
 	t.Helper()
 	fake := &fakeDocker{outputs: make(map[string][]byte), errors: make(map[string]error)}
 	var ids []string
+	var names []string
 	for _, value := range values {
 		ids = append(ids, value.ID)
+		names = append(names, value.ID+" "+strings.TrimPrefix(value.Name, "/"))
 		raw, err := json.Marshal([]dockerInspect{value})
 		if err != nil {
 			t.Fatal(err)
@@ -262,6 +538,7 @@ func dockerWithContainers(t *testing.T, values ...dockerInspect) *fakeDocker {
 		fake.outputs["inspect "+value.ID] = raw
 	}
 	fake.outputs[managedPSCommand()] = []byte(strings.Join(ids, "\n"))
+	fake.outputs[canonicalPSCommand()] = []byte(strings.Join(names, "\n"))
 	return fake
 }
 
