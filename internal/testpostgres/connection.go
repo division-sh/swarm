@@ -1,9 +1,10 @@
-package testutil
+package testpostgres
 
 import (
 	"database/sql"
 	"fmt"
 	"net/netip"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -14,22 +15,33 @@ import (
 	"github.com/lib/pq"
 )
 
-type testPostgresDSN struct {
+const SourceEnv = "SWARM_TEST_POSTGRES_DSN"
+
+type Connection struct {
 	config pq.Config
 }
 
-func parseTestPostgresDSN(raw string) (testPostgresDSN, error) {
+type Parameters struct {
+	Host     string
+	Port     uint16
+	Database string
+	User     string
+	Password string
+	SSLMode  string
+}
+
+func ParseConnection(raw string) (Connection, error) {
 	cfg, err := pq.NewConfig(strings.TrimSpace(raw))
 	if err != nil {
-		return testPostgresDSN{}, fmt.Errorf("parse postgres test DSN: %w", err)
+		return Connection{}, fmt.Errorf("parse postgres test DSN: %w", err)
 	}
 	if cfg.SSLMode == "" {
 		cfg.SSLMode = pq.SSLModeRequire
 	}
-	return newTestPostgresDSN(cfg)
+	return newConnection(cfg)
 }
 
-func newTestPostgresDSN(cfg pq.Config) (testPostgresDSN, error) {
+func newConnection(cfg pq.Config) (Connection, error) {
 	if cfg.SSLNegotiation == "" {
 		cfg.SSLNegotiation = pq.SSLNegotiationPostgres
 	}
@@ -46,16 +58,16 @@ func newTestPostgresDSN(cfg pq.Config) (testPostgresDSN, error) {
 		cfg.Datestyle = "ISO, MDY"
 	}
 	if err := validateTestPostgresConfig(cfg); err != nil {
-		return testPostgresDSN{}, err
+		return Connection{}, err
 	}
-	return testPostgresDSN{config: cfg.Clone()}, nil
+	return Connection{config: cfg.Clone()}, nil
 }
 
-func newOwnedDockerPostgresDSN(port uint16) (testPostgresDSN, error) {
+func NewOwnedDockerConnection(port uint16) (Connection, error) {
 	if port == 0 {
-		return testPostgresDSN{}, fmt.Errorf("owned Docker postgres port is required")
+		return Connection{}, fmt.Errorf("owned Docker postgres port is required")
 	}
-	owned, err := newTestPostgresDSN(pq.Config{
+	owned, err := newConnection(pq.Config{
 		Host:           "127.0.0.1",
 		Hostaddr:       netip.MustParseAddr("127.0.0.1"),
 		Port:           port,
@@ -68,17 +80,17 @@ func newOwnedDockerPostgresDSN(port uint16) (testPostgresDSN, error) {
 		Datestyle:      "ISO, MDY",
 	})
 	if err != nil {
-		return testPostgresDSN{}, err
+		return Connection{}, err
 	}
-	canonical, err := owned.string()
+	canonical, err := owned.String()
 	if err != nil {
-		return testPostgresDSN{}, err
+		return Connection{}, err
 	}
 	// pq keeps password presence in private parser state and otherwise replaces
 	// a directly assigned password with pgpass lookup during connection. Reparse
 	// the fully explicit canonical form so pq records that state without giving
 	// any supported PG environment field authority over the owned source.
-	return parseTestPostgresDSN(canonical)
+	return ParseConnection(canonical)
 }
 
 func validateTestPostgresConfig(cfg pq.Config) error {
@@ -115,16 +127,16 @@ func validateTestPostgresConfig(cfg pq.Config) error {
 	return nil
 }
 
-func (d testPostgresDSN) withDatabase(database string) (testPostgresDSN, error) {
+func (d Connection) WithDatabase(database string) (Connection, error) {
 	if strings.TrimSpace(database) == "" {
-		return testPostgresDSN{}, fmt.Errorf("postgres test database name is required")
+		return Connection{}, fmt.Errorf("postgres test database name is required")
 	}
 	cfg := d.config.Clone()
 	cfg.Database = database
-	return newTestPostgresDSN(cfg)
+	return newConnection(cfg)
 }
 
-func (d testPostgresDSN) open() (*sql.DB, error) {
+func (d Connection) Open() (*sql.DB, error) {
 	connector, err := pq.NewConnectorConfig(d.config.Clone())
 	if err != nil {
 		return nil, err
@@ -132,8 +144,43 @@ func (d testPostgresDSN) open() (*sql.DB, error) {
 	return sql.OpenDB(connector), nil
 }
 
-func (d testPostgresDSN) string() (string, error) {
+func (d Connection) String() (string, error) {
 	return serializeTestPostgresConfig(d.config)
+}
+
+func (d Connection) Parameters() Parameters {
+	return Parameters{
+		Host: d.config.Host, Port: d.config.Port, Database: d.config.Database,
+		User: d.config.User, Password: d.config.Password, SSLMode: string(d.config.SSLMode),
+	}
+}
+
+func ConnectionFromEnvironment() (Connection, error) {
+	raw := strings.TrimSpace(os.Getenv(SourceEnv))
+	if raw == "" {
+		return Connection{}, fmt.Errorf("%s is not set; use `go run ./cmd/swarm-test-postgres -- <command>` or configure host Postgres using internal/testutil/POSTGRES.md", SourceEnv)
+	}
+	return ParseConnection(raw)
+}
+
+func withoutPostgresConnectionEnv(env []string) []string {
+	result := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "PG") || key == SourceEnv {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func ChildEnvironment(env []string, connection Connection) ([]string, error) {
+	dsn, err := connection.String()
+	if err != nil {
+		return nil, err
+	}
+	return append(withoutPostgresConnectionEnv(env), SourceEnv+"="+dsn), nil
 }
 
 func serializeTestPostgresConfig(cfg pq.Config) (string, error) {

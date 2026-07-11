@@ -86,12 +86,22 @@ Use port `55432` in `SWARM_TEST_POSTGRES_DSN`. Stop the dedicated instance with:
   -D "$HOME/Library/Application Support/swarm/postgres-test" stop
 ```
 
-## Docker Fallback
+## Runner-Owned Docker
 
-When `SWARM_TEST_POSTGRES_DSN` is absent, the harness announces and uses a Docker
-fallback if a daemon is already running. It does not start Docker Desktop or
-Colima. The owned container uses tmpfs plus `fsync=off`,
-`synchronous_commit=off`, and `full_page_writes=off`.
+When a dedicated host instance is not available, run the suite through the
+single-service owner:
 
-If Docker is missing or unavailable, the failure points back to this guide and
-retains the underlying executable, socket, startup, or readiness error.
+```bash
+go run ./cmd/swarm-test-postgres -- go test ./...
+```
+
+The runner requires an already-running Docker daemon; it does not start Docker
+Desktop or Colima. It owns exactly one disposable container for the child
+command, uses tmpfs plus `fsync=off`, `synchronous_commit=off`, and
+`full_page_writes=off`, and tears the service down on every observable exit.
+Durable labeled state reconciles a service left by abrupt runner death.
+
+Direct package tests with no explicit DSN fail closed and point to this runner
+or the host setup above. If Docker is missing or unavailable, the runner points
+back to this guide and retains the underlying executable, socket, startup, or
+readiness error.

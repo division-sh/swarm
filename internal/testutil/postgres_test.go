@@ -3,8 +3,12 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 	"time"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStartPostgres_Smoke(t *testing.T) {
@@ -19,6 +23,20 @@ func TestStartPostgres_Smoke(t *testing.T) {
 	if one != 1 {
 		t.Fatalf("expected 1, got %d", one)
 	}
+}
+
+func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
+	path, err := platformSpecPath()
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, err
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	err = yaml.Unmarshal(raw, &spec)
+	return spec, err
 }
 
 func TestStartPostgres_CanonicalSchemaTemplatePreservesIsolation(t *testing.T) {

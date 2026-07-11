@@ -241,7 +241,7 @@ settings in repo `.env` files.
 ```bash
 go build ./cmd/swarm
 golangci-lint run
-go test ./...
+go run ./cmd/swarm-test-postgres -- go test ./...
 ```
 
 For faster scoped validation while developing, use the changed-package local

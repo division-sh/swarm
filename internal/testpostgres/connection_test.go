@@ -1,4 +1,4 @@
-package testutil
+package testpostgres
 
 import (
 	"crypto/tls"
@@ -47,11 +47,11 @@ func TestTestPostgresDSNRoundTripsSupportedRepresentations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			owner, err := parseTestPostgresDSN(tt.raw)
+			owner, err := ParseConnection(tt.raw)
 			if err != nil {
 				t.Fatalf("parseTestPostgresDSN: %v", err)
 			}
-			projected, err := owner.withDatabase("projected_db")
+			projected, err := owner.WithDatabase("projected_db")
 			if err != nil {
 				t.Fatalf("withDatabase: %v", err)
 			}
@@ -60,7 +60,7 @@ func TestTestPostgresDSNRoundTripsSupportedRepresentations(t *testing.T) {
 			want.Database = "projected_db"
 			assertPostgresConfigEqual(t, projected.config, want)
 
-			canonical, err := projected.string()
+			canonical, err := projected.String()
 			if err != nil {
 				t.Fatalf("string: %v", err)
 			}
@@ -68,7 +68,7 @@ func TestTestPostgresDSNRoundTripsSupportedRepresentations(t *testing.T) {
 				t.Fatalf("canonical DSN remained URL-shaped: %q", canonical)
 			}
 
-			reparsed, err := parseTestPostgresDSN(canonical)
+			reparsed, err := ParseConnection(canonical)
 			if err != nil {
 				t.Fatalf("reparse canonical DSN: %v\nDSN: %s", err, canonical)
 			}
@@ -80,22 +80,39 @@ func TestTestPostgresDSNRoundTripsSupportedRepresentations(t *testing.T) {
 	}
 }
 
+func TestConnectionParametersAreTypedAcrossKeywordAndURLInputs(t *testing.T) {
+	for _, raw := range []string{
+		`host=127.0.0.1 port=55432 user='swarm user' password='slash\\ quote\' space' dbname='swarm db' sslmode=disable`,
+		`postgres://swarm%20user:slash%5C%20quote%27%20space@127.0.0.1:55432/swarm%20db?sslmode=disable`,
+	} {
+		connection, err := ParseConnection(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := connection.Parameters()
+		want := Parameters{Host: "127.0.0.1", Port: 55432, Database: "swarm db", User: "swarm user", Password: `slash\ quote' space`, SSLMode: "disable"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Parameters() = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestTestPostgresDSNPreservesExplicitEmptyApplicationName(t *testing.T) {
-	owner, err := parseTestPostgresDSN("host=127.0.0.1 port=5432 user=tester password=secret dbname=postgres sslmode=disable application_name='' fallback_application_name='fallback'")
+	owner, err := ParseConnection("host=127.0.0.1 port=5432 user=tester password=secret dbname=postgres sslmode=disable application_name='' fallback_application_name='fallback'")
 	if err != nil {
 		t.Fatalf("parse explicit-empty application name: %v", err)
 	}
 	if owner.config.ApplicationName != "" || owner.config.FallbackApplicationName != "fallback" {
 		t.Fatalf("source application names = (%q, %q), want empty and fallback", owner.config.ApplicationName, owner.config.FallbackApplicationName)
 	}
-	canonical, err := owner.string()
+	canonical, err := owner.String()
 	if err != nil {
 		t.Fatalf("serialize explicit-empty application name: %v", err)
 	}
 	if !strings.Contains(canonical, "application_name=''") {
 		t.Fatalf("canonical DSN omitted explicit empty application_name: %q", canonical)
 	}
-	reparsed, err := parseTestPostgresDSN(canonical)
+	reparsed, err := ParseConnection(canonical)
 	if err != nil {
 		t.Fatalf("reparse explicit-empty application name: %v", err)
 	}
@@ -133,11 +150,11 @@ func TestOwnedDockerPostgresDSNIgnoresAmbientPGEnv(t *testing.T) {
 		t.Setenv(key, value)
 	}
 
-	owner, err := newOwnedDockerPostgresDSN(55432)
+	owner, err := NewOwnedDockerConnection(55432)
 	if err != nil {
 		t.Fatalf("newOwnedDockerPostgresDSN: %v", err)
 	}
-	want, err := newTestPostgresDSN(pq.Config{
+	want, err := newConnection(pq.Config{
 		Host:           "127.0.0.1",
 		Hostaddr:       netip.MustParseAddr("127.0.0.1"),
 		Port:           55432,
@@ -154,11 +171,11 @@ func TestOwnedDockerPostgresDSNIgnoresAmbientPGEnv(t *testing.T) {
 	}
 	assertPostgresConfigEqual(t, owner.config, want.config)
 
-	canonical, err := owner.string()
+	canonical, err := owner.String()
 	if err != nil {
 		t.Fatalf("serialize owned Docker config: %v", err)
 	}
-	reparsed, err := parseTestPostgresDSN(canonical)
+	reparsed, err := ParseConnection(canonical)
 	if err != nil {
 		t.Fatalf("reparse owned Docker config under hostile PG env: %v", err)
 	}
@@ -197,7 +214,7 @@ func TestTestPostgresDSNRejectsNonTransportableSemantics(t *testing.T) {
 	}
 	pq.RegisterGSSProvider(func() (pq.GSS, error) { return nil, nil })
 	t.Cleanup(func() { pq.RegisterGSSProvider(nil) })
-	if _, err := parseTestPostgresDSN("host=127.0.0.1 user=tester password=secret sslmode=disable"); err != nil {
+	if _, err := ParseConnection("host=127.0.0.1 user=tester password=secret sslmode=disable"); err != nil {
 		t.Fatalf("registered but unused GSS provider changed password-auth DSN acceptance: %v", err)
 	}
 
@@ -218,7 +235,7 @@ func TestTestPostgresDSNRejectsNonTransportableSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseTestPostgresDSN(tt.raw)
+			_, err := ParseConnection(tt.raw)
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("error = %v, want substring %q", err, tt.contains)
 			}
@@ -237,18 +254,18 @@ func TestTestPostgresDSNRejectsRuntimeCollisionsAndUnsafeKeys(t *testing.T) {
 		SSLSNI:   true,
 		Runtime:  map[string]string{"host": "other"},
 	}
-	if _, err := newTestPostgresDSN(base); err == nil || !strings.Contains(err.Error(), "collides") {
+	if _, err := newConnection(base); err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Fatalf("collision error = %v", err)
 	}
 	base.Runtime = map[string]string{"bad key": "value"}
-	if _, err := newTestPostgresDSN(base); err == nil || !strings.Contains(err.Error(), "cannot be transported safely") {
+	if _, err := newConnection(base); err == nil || !strings.Contains(err.Error(), "cannot be transported safely") {
 		t.Fatalf("unsafe key error = %v", err)
 	}
 }
 
 func TestTestPostgresDSNRejectsEnvironmentPassfile(t *testing.T) {
 	t.Setenv("PGPASSFILE", "/tmp/postgres test passfile")
-	_, err := parseTestPostgresDSN("host=127.0.0.1 user=tester password=secret sslmode=disable")
+	_, err := ParseConnection("host=127.0.0.1 user=tester password=secret sslmode=disable")
 	if err == nil || !strings.Contains(err.Error(), "passfile is unsupported") {
 		t.Fatalf("PGPASSFILE error = %v, want passfile rejection", err)
 	}
@@ -286,15 +303,15 @@ func TestTestPostgresDSNPreservesMaterializedConfigValues(t *testing.T) {
 			Port:     6543,
 		}},
 	}
-	owner, err := newTestPostgresDSN(cfg)
+	owner, err := newConnection(cfg)
 	if err != nil {
 		t.Fatalf("newTestPostgresDSN: %v", err)
 	}
-	canonical, err := owner.string()
+	canonical, err := owner.String()
 	if err != nil {
 		t.Fatalf("string: %v", err)
 	}
-	reparsed, err := parseTestPostgresDSN(canonical)
+	reparsed, err := ParseConnection(canonical)
 	if err != nil {
 		t.Fatalf("reparse: %v\nDSN: %s", err, canonical)
 	}
@@ -307,14 +324,14 @@ func TestTestPostgresDSNMaterializesEnvironmentDefaults(t *testing.T) {
 	t.Setenv("PGCONNECT_TIMEOUT", "11")
 	t.Setenv("PGOPTIONS", "-c statement_timeout=1234")
 
-	owner, err := parseTestPostgresDSN("host=127.0.0.1 port=5432 user=tester dbname=postgres sslmode=disable")
+	owner, err := ParseConnection("host=127.0.0.1 port=5432 user=tester dbname=postgres sslmode=disable")
 	if err != nil {
 		t.Fatalf("parse environment-backed DSN: %v", err)
 	}
 	if owner.config.Password != "environment secret" || owner.config.ApplicationName != "environment app" || owner.config.ConnectTimeout != 11*time.Second || owner.config.Options != "-c statement_timeout=1234" {
 		t.Fatalf("environment defaults were not materialized: %#v", exportedPostgresConfig(owner.config))
 	}
-	canonical, err := owner.string()
+	canonical, err := owner.String()
 	if err != nil {
 		t.Fatalf("serialize environment-backed DSN: %v", err)
 	}
@@ -323,7 +340,7 @@ func TestTestPostgresDSNMaterializesEnvironmentDefaults(t *testing.T) {
 	t.Setenv("PGAPPNAME", "changed app")
 	t.Setenv("PGCONNECT_TIMEOUT", "2")
 	t.Setenv("PGOPTIONS", "-c statement_timeout=99")
-	reparsed, err := parseTestPostgresDSN(canonical)
+	reparsed, err := ParseConnection(canonical)
 	if err != nil {
 		t.Fatalf("reparse canonical DSN under changed environment: %v", err)
 	}
@@ -335,7 +352,6 @@ func TestWithoutPostgresConnectionEnv(t *testing.T) {
 		"PATH=/bin",
 		"PGPASSWORD=secret",
 		"PGHOST=other",
-		"SWARM_TEST_POSTGRES_TEMPLATE_NAME=template",
 		"SWARM_CONFIG=/tmp/swarm.yaml",
 	})
 	want := []string{"PATH=/bin", "SWARM_CONFIG=/tmp/swarm.yaml"}

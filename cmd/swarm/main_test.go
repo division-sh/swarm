@@ -54,9 +54,9 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
 
@@ -11452,10 +11452,11 @@ func runForkReadinessFactHasDisposition(values []store.RunForkSelectedContractRe
 
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 	t.Helper()
-	parsed, err := pq.NewConfig(dsn)
+	connection, err := testpostgres.ParseConnection(dsn)
 	if err != nil {
 		t.Fatalf("parse canonical test Postgres DSN: %v", err)
 	}
+	parsed := connection.Parameters()
 	t.Setenv("PGPASSWORD", parsed.Password)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	t.Setenv("SWARM_CONFIG", configPath)
@@ -11480,6 +11481,27 @@ llm:
     timeout: 2s
     output_format: json
 `, parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
+}
+
+func TestSetPostgresEnvFromDSNConsumesCanonicalTypedConnection(t *testing.T) {
+	for _, raw := range []string{
+		`host=127.0.0.1 port=55432 user='swarm user' password='slash\\ quote\' space' dbname='swarm db' sslmode=disable`,
+		`postgres://swarm%20user:slash%5C%20quote%27%20space@127.0.0.1:55432/swarm%20db?sslmode=disable`,
+	} {
+		t.Run(raw[:8], func(t *testing.T) {
+			setPostgresEnvFromDSN(t, raw)
+			cfg, err := loadRuntimeConfig(os.Getenv("SWARM_CONFIG"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 55432 || cfg.Database.Name != "swarm db" || cfg.Database.User != "swarm user" || cfg.Database.SSLMode != "disable" {
+				t.Fatalf("database config = %#v", cfg.Database)
+			}
+			if got := os.Getenv("PGPASSWORD"); got != `slash\ quote' space` {
+				t.Fatalf("PGPASSWORD = %q", got)
+			}
+		})
+	}
 }
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
