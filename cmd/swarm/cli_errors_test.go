@@ -131,6 +131,118 @@ func TestCLIAPITransportDiagnosticPreservesWrapperContext(t *testing.T) {
 	}
 }
 
+func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reason    string
+		declared  []string
+		routable  []string
+		want      []string
+		forbidden []string
+	}{
+		{
+			name:     "undeclared",
+			reason:   "not_declared_root_input",
+			declared: []string{"z.event", "a.event", "z.event"},
+			routable: []string{"z.event", "a.event"},
+			want: []string{
+				`ERROR: event "missing.event" is not a declared root input.`,
+				"A root input is an event declared in the root flow's `pins.inputs.events`.",
+				"Declared root inputs: a.event, z.event.",
+				"Routable root inputs: a.event, z.event.",
+				`Declare "missing.event" under ` + "`pins.inputs.events`",
+				"Code: EVENT_NOT_DECLARED",
+			},
+		},
+		{
+			name:     "declared but unroutable",
+			reason:   "declared_root_input_not_routable",
+			declared: []string{"waiting.event"},
+			routable: []string{},
+			want: []string{
+				`ERROR: root input "missing.event" has no runtime route.`,
+				"Declared root inputs: waiting.event.",
+				"Routable root inputs: none.",
+				`Connect "missing.event" to a runtime handler`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{
+				"code": "EVENT_NOT_DECLARED",
+				"details": map[string]any{
+					"event_name":      "missing.event",
+					"reason":          tc.reason,
+					"declared_events": tc.declared,
+					"routable_events": tc.routable,
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal diagnostic: %v", err)
+			}
+			got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("diagnostic = %q, want substring %q", got, want)
+				}
+			}
+			for _, forbidden := range append(tc.forbidden, "details:") {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("diagnostic = %q, must not contain %q", got, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestCLIRootInputDiagnosticRequiresCompleteServerOwnedDomains(t *testing.T) {
+	for _, details := range []map[string]any{
+		{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"routable_events": []string{},
+		},
+		{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{},
+			"routable_events": nil,
+		},
+	} {
+		data, err := json.Marshal(map[string]any{
+			"code":    "EVENT_NOT_DECLARED",
+			"details": details,
+		})
+		if err != nil {
+			t.Fatalf("marshal diagnostic: %v", err)
+		}
+		got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
+		if strings.Contains(got, "A root input is") || strings.Contains(got, "Routable root inputs: none") {
+			t.Fatalf("incomplete server facts entered root-input renderer: %q", got)
+		}
+	}
+}
+
+func TestCLIRootInputDiagnosticDoesNotCaptureOtherEventNotDeclaredReasons(t *testing.T) {
+	data, err := json.Marshal(map[string]any{
+		"code": "EVENT_NOT_DECLARED",
+		"details": map[string]any{
+			"event_name": "missing.event",
+			"reason":     "unknown_event",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal diagnostic: %v", err)
+	}
+	got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
+	if strings.Contains(got, "A root input is") {
+		t.Fatalf("event-catalog rejection entered root-input renderer: %q", got)
+	}
+	if !strings.Contains(got, "EVENT_NOT_DECLARED") || !strings.Contains(got, "reason=unknown_event") {
+		t.Fatalf("generic event-catalog diagnostic lost context: %q", got)
+	}
+}
+
 func TestCLIAPIErrorDoesNotClassifyGenericYAMLAsContractLoaderDiagnostic(t *testing.T) {
 	err := errors.New("load runtime config: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `oops` into config.Config")
 

@@ -218,7 +218,7 @@ func executeOperatorEventPublication(
 			if cfg.publishError != nil {
 				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
 			}
-			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
+			return store.APIIdempotencyCompletion{}, eventCatalogPublishError(params.EventName, err)
 		}
 		result, resourceID, err := cfg.buildCompletion(ctx, selectedOpts, params)
 		if err != nil {
@@ -433,9 +433,9 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) e
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {
 	if cfg.rootInputOnly {
-		set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
+		_, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
 		if err != nil {
-			return params, runStartRootInputError(params.EventName, set, err)
+			return params, rootInputApplicationError(err)
 		}
 		return params, nil
 	}
@@ -667,7 +667,7 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 		if cfg.publishError != nil {
 			return cfg.publishError(params, err)
 		}
-		return runStartPublishError(params.EventName, err)
+		return eventCatalogPublishError(params.EventName, err)
 	}
 	if strings.TrimSpace(plan.TargetFailure) != "" {
 		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
@@ -719,31 +719,17 @@ func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventNam
 	return false
 }
 
-func runStartRootInputError(eventName string, set runtimerunstart.RootInputSet, err error) error {
-	declared := append([]string{}, set.Declared...)
-	routable := append([]string{}, set.Routable...)
-	details := map[string]any{
-		"event_name":      eventName,
-		"declared_events": declared,
-		"routable_events": routable,
-		"reason":          strings.TrimSpace(err.Error()),
+func rootInputApplicationError(err error) error {
+	diagnostic, ok := runtimerunstart.AsRootInputValidationError(err)
+	if !ok {
+		return err
 	}
-	if !stringSliceContains(declared, eventName) {
-		details["reason"] = "not_declared_root_input"
-	} else if !stringSliceContains(routable, eventName) {
-		details["reason"] = "declared_root_input_not_routable"
-	}
-	return NewApplicationError(EventNotDeclaredCode, false, details)
-}
-
-func stringSliceContains(values []string, target string) bool {
-	target = strings.TrimSpace(target)
-	for _, value := range values {
-		if strings.TrimSpace(value) == target {
-			return true
-		}
-	}
-	return false
+	return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+		"event_name":      diagnostic.EventName,
+		"declared_events": append([]string{}, diagnostic.Inputs.Declared...),
+		"routable_events": append([]string{}, diagnostic.Inputs.Routable...),
+		"reason":          string(diagnostic.Reason),
+	})
 }
 
 func eventPublishSourceAgent(req Request) string {
@@ -755,12 +741,25 @@ func eventPublishSourceAgent(req Request) string {
 }
 
 func eventPublishPublishError(params eventPublicationParams, err error) error {
-	mapped := runStartPublishError(params.EventName, err)
+	mapped := eventCatalogPublishError(params.EventName, err)
 	var appErr *ApplicationError
 	if errors.As(mapped, &appErr) {
 		return mapped
 	}
-	return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+	return eventPublishFailureError(params, err, true)
+}
+
+func runStartEventPublishError(params eventPublicationParams, err error) error {
+	mapped := publicationApplicationError(params.EventName, err)
+	var appErr *ApplicationError
+	if errors.As(mapped, &appErr) {
+		return mapped
+	}
+	return eventPublishFailureError(params, err, !errors.Is(err, runtimebus.ErrInvalidEventType))
+}
+
+func eventPublishFailureError(params eventPublicationParams, err error, retryable bool) error {
+	return NewApplicationError(EventPublishFailedCode, retryable, map[string]any{
 		"event_name": params.EventName,
 		"event_id":   params.EventID,
 		"run_id":     params.RunID,

@@ -64,6 +64,7 @@ func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != -32602 {
 		t.Fatalf("rpc error = %+v, want invalid params", resp.Error)
 	}
+	assertBuilderRootInputDiagnostic(t, resp.Error, "scan.requested", "not_declared_root_input", []string{"scan.corpus_file_requested"}, []string{"scan.corpus_file_requested"})
 	if len(store.appended) != 0 {
 		t.Fatalf("published events = %#v, want none before invalid input failure", store.appended)
 	}
@@ -106,8 +107,40 @@ func TestHandlerRunStartRejectsDeclaredUnroutableInputBeforePublish(t *testing.T
 	if resp.Error == nil || resp.Error.Code != -32602 {
 		t.Fatalf("rpc error = %+v, want invalid params", resp.Error)
 	}
+	assertBuilderRootInputDiagnostic(t, resp.Error, eventName, "declared_root_input_not_routable", []string{eventName}, nil)
 	if len(store.appended) != 0 {
 		t.Fatalf("published events = %#v, want none before invalid input failure", store.appended)
+	}
+}
+
+func assertBuilderRootInputDiagnostic(t *testing.T, rpcErr *RPCError, eventName, reason string, declared, routable []string) {
+	t.Helper()
+	data, ok := rpcErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("rpc error data = %T %#v, want structured map", rpcErr.Data, rpcErr.Data)
+	}
+	if data["event_name"] != eventName || data["reason"] != reason {
+		t.Fatalf("rpc error data = %#v", data)
+	}
+	assertStringSlice := func(field string, want []string) {
+		t.Helper()
+		got, ok := data[field].([]string)
+		if !ok {
+			t.Fatalf("%s = %T %#v, want []string", field, data[field], data[field])
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s = %#v, want %#v", field, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s = %#v, want %#v", field, got, want)
+			}
+		}
+	}
+	assertStringSlice("declared_events", declared)
+	assertStringSlice("routable_events", routable)
+	if rpcErr.Message == "" || rpcErr.Message == reason {
+		t.Fatalf("rpc error message = %q, want author-facing summary", rpcErr.Message)
 	}
 }
 

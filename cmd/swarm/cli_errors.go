@@ -1,14 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 )
 
 const (
@@ -117,6 +120,9 @@ func formatCLIAPIError(err error) string {
 	if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 		return formatCLILoaderDiagnostic(diagnostic)
 	}
+	if diagnostic, ok := cliRootInputDiagnosticParts(err); ok {
+		return formatCLIRootInputDiagnostic(err, diagnostic)
+	}
 	if diagnostic, ok := cliAPITransportDiagnosticParts(err); ok {
 		lines := []string{"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, diagnostic.problem)}
 		lines = append(lines, diagnostic.evidence...)
@@ -124,6 +130,93 @@ func formatCLIAPIError(err error) string {
 		return strings.Join(lines, "\n")
 	}
 	return err.Error()
+}
+
+type cliRootInputDiagnostic struct {
+	leaf           *jsonRPCError
+	eventName      string
+	reason         runtimerunstart.RootInputValidationReason
+	declaredEvents []string
+	routableEvents []string
+}
+
+func cliRootInputDiagnosticParts(err error) (cliRootInputDiagnostic, bool) {
+	var rpcErr *jsonRPCError
+	if !errors.As(err, &rpcErr) || rpcErr == nil || applicationErrorCode(rpcErr.Data) != "EVENT_NOT_DECLARED" {
+		return cliRootInputDiagnostic{}, false
+	}
+	var data struct {
+		Details struct {
+			EventName      string    `json:"event_name"`
+			Reason         string    `json:"reason"`
+			DeclaredEvents *[]string `json:"declared_events"`
+			RoutableEvents *[]string `json:"routable_events"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(rpcErr.Data, &data) != nil {
+		return cliRootInputDiagnostic{}, false
+	}
+	reason := runtimerunstart.RootInputValidationReason(strings.TrimSpace(data.Details.Reason))
+	if reason != runtimerunstart.RootInputNotDeclared && reason != runtimerunstart.RootInputNotRoutable {
+		return cliRootInputDiagnostic{}, false
+	}
+	eventName := strings.TrimSpace(data.Details.EventName)
+	if eventName == "" {
+		return cliRootInputDiagnostic{}, false
+	}
+	if data.Details.DeclaredEvents == nil || data.Details.RoutableEvents == nil {
+		return cliRootInputDiagnostic{}, false
+	}
+	return cliRootInputDiagnostic{
+		leaf:           rpcErr,
+		eventName:      eventName,
+		reason:         reason,
+		declaredEvents: normalizeCLIStringDomain(*data.Details.DeclaredEvents),
+		routableEvents: normalizeCLIStringDomain(*data.Details.RoutableEvents),
+	}, true
+}
+
+func formatCLIRootInputDiagnostic(err error, diagnostic cliRootInputDiagnostic) string {
+	problem := fmt.Sprintf("event %q is not a declared root input.", diagnostic.eventName)
+	remediation := fmt.Sprintf("Declare %q under `pins.inputs.events` and connect it to a runtime handler, or start the run with a declared routable input.", diagnostic.eventName)
+	if diagnostic.reason == runtimerunstart.RootInputNotRoutable {
+		problem = fmt.Sprintf("root input %q has no runtime route.", diagnostic.eventName)
+		remediation = fmt.Sprintf("Connect %q to a runtime handler, or start the run with a routable root input.", diagnostic.eventName)
+	}
+	return strings.Join([]string{
+		"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, problem),
+		"  A root input is an event declared in the root flow's `pins.inputs.events`.",
+		"  Declared root inputs: " + formatCLIStringDomain(diagnostic.declaredEvents) + ".",
+		"  Routable root inputs: " + formatCLIStringDomain(diagnostic.routableEvents) + ".",
+		"  Remediation: " + remediation,
+		"  Code: EVENT_NOT_DECLARED.",
+	}, "\n")
+}
+
+func normalizeCLIStringDomain(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func formatCLIStringDomain(values []string) string {
+	values = normalizeCLIStringDomain(values)
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ", ")
 }
 
 func formatCLILoaderDiagnostic(diagnostic *runtimecontracts.LoaderDiagnostic) string {

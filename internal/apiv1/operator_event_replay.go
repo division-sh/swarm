@@ -668,5 +668,5 @@ func eventReplayError(err error) error {
 }
 
 func eventReplayPublishError(eventName string, err error) error {
-	return runStartPublishError(eventName, err)
+	return eventCatalogPublishError(eventName, err)
 }

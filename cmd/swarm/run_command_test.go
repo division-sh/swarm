@@ -412,6 +412,75 @@ func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 	}
 }
 
+func TestRunCommandStartRendersRootInputRejectionFromServerFacts(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/ws" {
+			t.Fatal("run.subscribe_trace must not be opened after failed run.start")
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case "health.check":
+			writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
+		case "run.start":
+			w.Header().Set("content-type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"error": map[string]any{
+					"code":    -32003,
+					"message": "Application error: EVENT_NOT_DECLARED",
+					"data": map[string]any{
+						"code":      "EVENT_NOT_DECLARED",
+						"retryable": false,
+						"details": map[string]any{
+							"event_name":      "scan.missing",
+							"reason":          "not_declared_root_input",
+							"declared_events": []string{"scan.requested"},
+							"routable_events": []string{"scan.requested"},
+						},
+					},
+				},
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected method = %q", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"run", "start", "--connect", server.URL, "--event", "scan.missing", "--payload", payloadPath, "--no-follow",
+	}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, &calls, []string{"health.check", "run.start"})
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	for _, want := range []string{
+		`ERROR: event "scan.missing" is not a declared root input.`,
+		"A root input is an event declared in the root flow's `pins.inputs.events`.",
+		"Declared root inputs: scan.requested.",
+		"Routable root inputs: scan.requested.",
+		"Remediation:",
+		"Code: EVENT_NOT_DECLARED",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
+		}
+	}
+}
+
 func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
