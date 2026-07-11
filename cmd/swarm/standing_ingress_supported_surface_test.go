@@ -83,8 +83,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
-	mutateStandingFixtureBundleVersion(t, contractsRoot)
-	requireChangedStandingColdStartRejected(t, opts)
+	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, nil)
 
 	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
 	if err != nil {
@@ -134,6 +133,45 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	if entityEvents == 0 || wrongRunEvents != 0 {
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
+	}
+}
+
+func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("set credential %s: %v", key, err)
+		}
+	}
+	packagePath := filepath.Join(contractsRoot, "package.yaml")
+	raw, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read package: %v", err)
+	}
+	writeStandingCandidateFile(t, packagePath, strings.Replace(string(raw), "alias: chat", "alias: chat/support", 1))
+	sqlitePath := filepath.Join(t.TempDir(), "invalid-alias.sqlite")
+	process := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, Dev: true, Verbose: true,
+	})
+	code, exited := process.waitForExit(15 * time.Second)
+	if !exited {
+		process.cleanup()
+		t.Fatal("serve reached a live process with an unreachable standing ingress alias")
+	}
+	process.recordStopped(code)
+	output := process.outputString()
+	if code == 0 || !strings.Contains(output, "one URL-safe path segment") || strings.Contains(output, "swarm runtime ready") {
+		t.Fatalf("invalid alias exit/output = %d\n%s", code, output)
 	}
 }
 
@@ -211,12 +249,13 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
-	mutateStandingFixtureBundleVersion(t, contractsRoot)
-	runtimePG, err = store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", err)
-	}
-	requireChangedStandingColdStartRejected(t, opts)
+	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, func(t *testing.T) {
+		var reopenErr error
+		runtimePG, reopenErr = store.NewPostgresStore(dsn)
+		if reopenErr != nil {
+			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
+		}
+	})
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -269,33 +308,109 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 }
 
-func mutateStandingFixtureBundleVersion(t testing.TB, contractsRoot string) {
+func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, contractsRoot string, prepare func(*testing.T)) {
 	t.Helper()
-	path := filepath.Join(contractsRoot, "package.yaml")
-	body, err := os.ReadFile(path)
+	packagePath := filepath.Join(contractsRoot, "package.yaml")
+	basePackage, err := os.ReadFile(packagePath)
 	if err != nil {
-		t.Fatalf("read standing package for changed-bundle probe: %v", err)
+		t.Fatalf("read standing package: %v", err)
 	}
-	changed := strings.Replace(string(body), `version: "1.0.0"`, `version: "1.0.1"`, 1)
-	if changed == string(body) {
-		t.Fatal("standing package version marker was not found")
+	flowDir := filepath.Join(contractsRoot, "flows", "telegram-chat")
+	flowSchemaPath := filepath.Join(flowDir, "schema.yaml")
+	baseFlowSchema, err := os.ReadFile(flowSchemaPath)
+	if err != nil {
+		t.Fatalf("read standing flow schema: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
-		t.Fatalf("write changed standing package: %v", err)
+	nodesPath := filepath.Join(flowDir, "nodes.yaml")
+	baseNodes, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatalf("read standing flow nodes: %v", err)
+	}
+	type candidateMutation struct {
+		name  string
+		apply func(*testing.T)
+	}
+	mutations := []candidateMutation{
+		{name: "package identity renamed", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), "name: standing-telegram-proof", "name: renamed-standing-proof", 1))
+		}},
+		{name: "standing declaration removed", apply: func(t *testing.T) {
+			before := string(basePackage)
+			start := strings.Index(before, "flows:\n")
+			if start < 0 {
+				t.Fatal("flows declaration not found")
+			}
+			writeStandingCandidateFile(t, packagePath, before[:start]+"flows: []\n")
+		}},
+		{name: "standing changed to non-standing", apply: func(t *testing.T) {
+			before := string(basePackage)
+			standingBlock := `    activation: standing
+    ingress:
+      alias: chat
+      providers:
+        - provider: telegram
+          signing_secret: webhook_signing.telegram
+`
+			changed := strings.Replace(before, standingBlock, "", 1)
+			if changed == before {
+				t.Fatal("standing activation block not found")
+			}
+			writeStandingCandidateFile(t, packagePath, changed)
+			changedNodes := strings.Replace(string(baseNodes), "    inbound.telegram:\n      activity:", "    inbound.telegram:\n      select_or_create_entity:\n        by:\n          service_id: payload.provider\n      activity:", 1)
+			if changedNodes == string(baseNodes) {
+				t.Fatal("standing handler marker not found")
+			}
+			writeStandingCandidateFile(t, nodesPath, changedNodes)
+			t.Cleanup(func() { _ = os.WriteFile(nodesPath, baseNodes, 0o600) })
+		}},
+		{name: "flow identity renamed", apply: func(t *testing.T) {
+			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-chat-v2")
+			if err := os.Rename(flowDir, renamedDir); err != nil {
+				t.Fatalf("rename flow directory: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = os.Rename(renamedDir, flowDir)
+				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
+			})
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-chat", "name: telegram-chat-v2", 1))
+			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-chat", "telegram-chat-v2"))
+		}},
+	}
+	for _, mutation := range mutations {
+		mutation := mutation
+		t.Run(mutation.name, func(t *testing.T) {
+			writeStandingCandidateFile(t, packagePath, string(basePackage))
+			if _, err := os.Stat(flowDir); err != nil {
+				t.Fatalf("standing flow directory unavailable before mutation: %v", err)
+			}
+			mutation.apply(t)
+			if prepare != nil {
+				prepare(t)
+			}
+			requireChangedStandingColdStartRejected(t, opts)
+		})
+	}
+	writeStandingCandidateFile(t, packagePath, string(basePackage))
+}
+
+func writeStandingCandidateFile(t testing.TB, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write standing candidate %s: %v", path, err)
 	}
 }
 
 func requireChangedStandingColdStartRejected(t *testing.T, opts serveOptions) {
 	t.Helper()
 	process := startServeRuntimeTestProcess(t, opts)
-	code, exited := process.waitForExit(5 * time.Second)
+	code, exited := process.waitForExit(15 * time.Second)
 	if !exited {
 		process.cleanup()
 		t.Fatal("changed standing bundle did not fail startup")
 	}
 	process.recordStopped(code)
 	output := process.outputString()
-	if code == 0 || !strings.Contains(output, "serve the admitted bundle or perform an explicit reset/migration") {
+	if code == 0 || !strings.Contains(output, "outside candidate bundle set") || !strings.Contains(output, "serve the admitted bundle or perform an explicit reset/migration") {
 		t.Fatalf("changed standing bundle exit/output = %d\n%s", code, output)
 	}
 }

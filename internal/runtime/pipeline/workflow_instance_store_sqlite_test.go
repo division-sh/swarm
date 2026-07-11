@@ -312,9 +312,11 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{
 		`CREATE TABLE runs (
-			run_id TEXT PRIMARY KEY,
-			status TEXT,
-			started_at TIMESTAMP
+				run_id TEXT PRIMARY KEY,
+				status TEXT,
+				bundle_hash TEXT,
+				bundle_source TEXT,
+				started_at TIMESTAMP
 		)`,
 		`CREATE TABLE flow_instances (
 			instance_id TEXT PRIMARY KEY,

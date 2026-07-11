@@ -67,9 +67,16 @@ type InboundGateway struct {
 	store                   InboundPersistence
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
+	beginAdmission          func() (func(), bool)
 	runtimeIngress          *runtimeingress.Controller
 	providers               *providertriggers.Registry
 	credentials             runtimecredentials.Store
+}
+
+func (g *InboundGateway) SetAdmissionGuard(begin func() (func(), bool)) {
+	if g != nil {
+		g.beginAdmission = begin
+	}
 }
 
 func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
@@ -112,7 +119,14 @@ func (g *InboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *http.Re
 }
 
 func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
-	if g.shutdownAdmissionClosed != nil && g.shutdownAdmissionClosed() {
+	if g.beginAdmission != nil {
+		release, admitted := g.beginAdmission()
+		if !admitted {
+			http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		defer release()
+	} else if g.shutdownAdmissionClosed != nil && g.shutdownAdmissionClosed() {
 		http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
 		return
 	}

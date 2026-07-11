@@ -495,6 +495,9 @@ func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDe
 		return err
 	}
 	entry := m.contexts[existingHash]
+	if entry.context != nil && entry.context.Runtime != nil {
+		entry.context.Runtime.CloseAdmission()
+	}
 	if existingHash != contextDef.BundleHash {
 		delete(m.contexts, existingHash)
 		for i, bundleHash := range m.order {
@@ -605,6 +608,10 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 }
 
 func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) RuntimeContextDeactivationResult {
+	return m.DeactivateBundleHashWithOptions(bundleHash, cause, DefaultShutdownOptions())
+}
+
+func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, cause string, opts ShutdownOptions) RuntimeContextDeactivationResult {
 	result := RuntimeContextDeactivationResult{
 		BundleHash: strings.TrimSpace(bundleHash),
 		State:      RuntimeContextStateUnloaded,
@@ -638,15 +645,22 @@ func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) R
 	result.Changed = true
 	if entry.context != nil {
 		runtimeToShutdown = entry.context.Runtime
+		if runtimeToShutdown != nil {
+			runtimeToShutdown.CloseAdmission()
+		}
 	}
 	m.mu.Unlock()
 	if runtimeToShutdown != nil {
-		result.ShutdownErr = runtimeToShutdown.Shutdown()
+		result.ShutdownErr = runtimeToShutdown.ShutdownWithOptions(opts)
 	}
 	return result
 }
 
 func (m *RuntimeContextManager) DeactivateAll(cause string) []RuntimeContextDeactivationResult {
+	return m.DeactivateAllWithOptions(cause, DefaultShutdownOptions())
+}
+
+func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts ShutdownOptions) []RuntimeContextDeactivationResult {
 	if m == nil {
 		return nil
 	}
@@ -655,7 +669,7 @@ func (m *RuntimeContextManager) DeactivateAll(cause string) []RuntimeContextDeac
 	m.mu.RUnlock()
 	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
 	for _, bundleHash := range hashes {
-		results = append(results, m.DeactivateBundleHash(bundleHash, cause))
+		results = append(results, m.DeactivateBundleHashWithOptions(bundleHash, cause, opts))
 	}
 	return results
 }

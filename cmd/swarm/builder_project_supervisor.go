@@ -43,6 +43,7 @@ type runtimeProjectSupervisor struct {
 	initStateStores     func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
 	newWorkspaces       func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error)
 	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
+	operationMu         sync.Mutex
 
 	mu                              sync.RWMutex
 	currentRoot                     string
@@ -188,12 +189,14 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 }
 
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
 	s.mu.RUnlock()
 	if manager != nil && bundleHash != "" {
-		result := manager.DeactivateBundleHash(bundleHash, runtime.RuntimeContextCauseUnloaded)
+		result := manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnloaded, opts)
 		_ = s.detachCurrentRuntime()
 		return builderpkg.ProjectStatus{}, result.ShutdownErr
 	}
@@ -208,6 +211,8 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 }
 
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
 	if reason := s.sourceReplacementDisabled(); reason != "" {
 		return s.CurrentProject(), fmt.Errorf("project source replacement is disabled: %s", reason)
 	}
@@ -284,6 +289,9 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	if err := s.validatePersistedStandingOwnership(ctx, newRT, bundleSourceFact); err != nil {
+		return s.CurrentProject(), err
+	}
 
 	status, err := s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT)
 	if err != nil {
@@ -291,6 +299,26 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
 	return status, nil
+}
+
+func (s *runtimeProjectSupervisor) validatePersistedStandingOwnership(ctx context.Context, candidate *runtime.Runtime, candidateFact runtimecorrelation.BundleSourceFact) error {
+	if candidate == nil || candidate.Stores.PipelineStore == nil {
+		return nil
+	}
+	facts := []runtimecorrelation.BundleSourceFact{candidateFact.Normalized()}
+	s.mu.RLock()
+	manager := s.runtimeContexts
+	currentHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	s.mu.RUnlock()
+	if manager != nil {
+		for _, loaded := range manager.LoadedContexts() {
+			if strings.TrimSpace(loaded.BundleHash) == currentHash {
+				continue
+			}
+			facts = append(facts, loaded.BundleSourceFact.Normalized())
+		}
+	}
+	return candidate.Stores.PipelineStore.ValidatePersistedStandingOwnership(ctx, facts)
 }
 
 func (s *runtimeProjectSupervisor) rejectChangedStandingBundle(candidateHash string) error {
@@ -360,6 +388,19 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
+		s.mu.RLock()
+		oldRT := s.currentRT
+		s.mu.RUnlock()
+		handoff, err := newRT.PrepareStartupOwnershipHandoff(oldRT)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
+		finalized := false
+		defer func() {
+			if !finalized {
+				handoff.Rollback()
+			}
+		}()
 		if err := s.startCurrentRuntime(ctx, newRT); err != nil {
 			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 			return builderpkg.ProjectStatus{}, err
@@ -370,14 +411,21 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 			return builderpkg.ProjectStatus{}, err
 		}
 		contextDef.StandingTargets = targets
-		if err := manager.ReplaceBundleHash(oldHash, contextDef); err != nil {
+		if err := handoff.Commit(); err != nil {
 			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
 			return builderpkg.ProjectStatus{}, err
 		}
-		oldRT := s.swapCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT)
+		if err := manager.ReplaceBundleHash(oldHash, contextDef); err != nil {
+			handoff.Rollback()
+			_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+			return builderpkg.ProjectStatus{}, err
+		}
+		oldRT = s.swapCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT)
+		handoff.Finalize()
+		finalized = true
 		if oldRT != nil {
 			if err := s.shutdownCurrentRuntime(ctx, oldRT); err != nil {
-				return builderpkg.ProjectStatus{}, err
+				slog.Error("predecessor runtime shutdown failed after replacement commit", "error", err, "old_bundle_hash", oldHash, "new_bundle_hash", newHash)
 			}
 		}
 		return s.CurrentProject(), nil
