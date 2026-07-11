@@ -88,7 +88,7 @@ func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedA
 	if epoch <= 0 {
 		epoch = runtimebus.CurrentRuntimeEpoch()
 	}
-	if generation == 0 {
+	if generation == 0 && persist {
 		generation = 1
 	}
 	if phase == "" {
@@ -201,6 +201,17 @@ func (c *agentLifecycleCoordinator) finishReset() {
 	c.runMode = AgentRunModeStopped
 	c.runCtx = nil
 	c.cancelRun = nil
+	c.mu.Unlock()
+}
+
+func (c *agentLifecycleCoordinator) abortReset() {
+	c.mu.Lock()
+	if c.phase == runtimeLifecycleResetting {
+		c.phase = runtimeLifecycleStopped
+		c.runMode = AgentRunModeStopped
+		c.runCtx = nil
+		c.cancelRun = nil
+	}
 	c.mu.Unlock()
 }
 

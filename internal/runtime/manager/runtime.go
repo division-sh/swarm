@@ -1310,15 +1310,25 @@ func platformResetSourceAuthorized(source string) bool {
 
 func (am *AgentManager) resetRuntimeState(source string) error {
 	if err := am.shutdownWithOptions(DefaultShutdownOptions(), true); err != nil {
+		am.lifecycle.abortReset()
 		return err
 	}
+	resetFinalized := false
+	stateCleared := false
+	defer func() {
+		if resetFinalized {
+			return
+		}
+		if stateCleared {
+			am.lifecycle.finishReset()
+			return
+		}
+		am.lifecycle.abortReset()
+	}()
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
 			return fmt.Errorf("kill workspace orphan processes: %w", err)
 		}
-	}
-	if am.resetRuntimeOwnedState != nil {
-		am.resetRuntimeOwnedState()
 	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
 		summary, err := resetter.ResetAll(sessions.NormalizeConversationRuntimeMode(am.runtimeMode), sessions.ResetMetadata{
@@ -1348,6 +1358,20 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 			return fmt.Errorf("reset event bus state: %w", err)
 		}
 	}
+	source = strings.TrimSpace(source)
+	var platformResetEvent events.Event
+	hasPlatformResetEvent := false
+	if platformResetSourceAuthorized(source) && am.bus != nil {
+		payload, err := json.Marshal(map[string]any{
+			"source":    source,
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal platform.reset payload: %w", err)
+		}
+		platformResetEvent = events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.reset"), "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now())
+		hasPlatformResetEvent = true
+	}
 
 	entities := map[string]struct{}{}
 	am.mu.Lock()
@@ -1364,26 +1388,23 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
+	stateCleared = true
+	if am.resetRuntimeOwnedState != nil {
+		am.resetRuntimeOwnedState()
+	}
 
 	for entityID := range entities {
 		if am.workspaces != nil {
 			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), entityID)
 		}
 	}
-	source = strings.TrimSpace(source)
-	if platformResetSourceAuthorized(source) && am.bus != nil {
-		payload, err := json.Marshal(map[string]any{
-			"source":    source,
-			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return fmt.Errorf("marshal platform.reset payload: %w", err)
-		}
-		if err := am.bus.Publish(am.runtimeContext(), events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.reset"), "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now())); err != nil {
+	if hasPlatformResetEvent {
+		if err := am.bus.Publish(am.runtimeContext(), platformResetEvent); err != nil {
 			return fmt.Errorf("publish platform.reset: %w", err)
 		}
 	}
 	am.lifecycle.finishReset()
+	resetFinalized = true
 	return nil
 }
 
