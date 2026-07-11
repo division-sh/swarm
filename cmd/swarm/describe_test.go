@@ -311,6 +311,46 @@ func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 	}
 }
 
+func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
+	contractsRoot := writeDescribeStageGraphContracts(t)
+	nodesPath := filepath.Join(contractsRoot, "flows", "support", "nodes.yaml")
+	nodes, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(nodes), "      join:\n        stage: active", "      join:\n        complete_when: join.missing > 1\n        remaining: ignore\n        stage: active", 1)
+	if updated == string(nodes) {
+		t.Fatal("join fixture mutation did not match")
+	}
+	writeDescribeTestFile(t, nodesPath, updated)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"verify",
+		"--contracts", contractsRoot,
+		"--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code == 0 {
+		t.Fatalf("verify --json code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("verify --json stderr = %q, want structured stdout failure", stderr.String())
+	}
+	output := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if output.OK || len(output.Errors) == 0 {
+		t.Fatalf("verify --json output = %#v, want hard invalidity", output)
+	}
+	found := false
+	for _, finding := range output.Errors {
+		if finding.CheckID == "join_validation" && strings.Contains(finding.Message, "join.missing > 1") && strings.Contains(finding.Message, "no matching overload") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("verify --json errors = %#v, want typed join_validation rejection", output.Errors)
+	}
+}
+
 func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()

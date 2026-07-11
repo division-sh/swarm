@@ -51,6 +51,19 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.CompleteWhen = "join.expected"
 			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
 		}, wantError: "must return bool"},
+		{name: "custom completion rejects invalid missing operand", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+			h.Join.CompleteWhen = "join.missing > 1"
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "no matching overload"},
+		{name: "custom completion types results from output schema", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+			event := bundle.Events["item.completed"]
+			result := event.Payload.Properties["result"]
+			result.Type = "text"
+			event.Payload.Properties["result"] = result
+			bundle.Events["item.completed"] = event
+			h.Join.CompleteWhen = "join.results[0] > 1"
+			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
+		}, wantError: "no matching overload"},
 		{name: "outcome payload forbidden", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression("payload.result")
 		}, wantError: "may not reference payload.*"},

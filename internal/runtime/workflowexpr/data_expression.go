@@ -49,10 +49,11 @@ type ValueContext struct {
 }
 
 type ValueExpressionOptions struct {
-	AllowBareItem bool
-	ItemAlias     string
-	AllowJoin     bool
-	RequireBool   bool
+	AllowBareItem  bool
+	ItemAlias      string
+	AllowJoin      bool
+	RequireBool    bool
+	JoinResultType string
 }
 
 func ValidateValueExpression(expression string) error {
@@ -86,19 +87,30 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
 	}
+	_, err = compileValueExpression(env, expression, opts)
+	return err
+}
+
+func compileValueExpression(env *cel.Env, expression string, opts ValueExpressionOptions) (*cel.Ast, error) {
 	compiled, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return issues.Err()
+		return nil, issues.Err()
 	}
+	typeChecked := compiled
 	if opts.AllowJoin {
 		if err := validateJoinAccesses(compiled); err != nil {
-			return err
+			return nil, err
+		}
+		var err error
+		typeChecked, err = typeCheckJoinExpression(env, compiled, opts.JoinResultType)
+		if err != nil {
+			return nil, err
 		}
 	}
-	if opts.RequireBool && compiled.OutputType() != cel.BoolType {
-		return fmt.Errorf("workflow expression must return bool, got %s", compiled.OutputType())
+	if opts.RequireBool && typeChecked.OutputType() != cel.BoolType {
+		return nil, fmt.Errorf("workflow expression must return bool, got %s", typeChecked.OutputType())
 	}
-	return nil
+	return compiled, nil
 }
 
 func validateJoinAccesses(compiled *cel.Ast) error {
@@ -148,6 +160,77 @@ func validateJoinAccesses(compiled *cel.Ast) error {
 	return visit(root)
 }
 
+type joinFieldTypeOptimizer struct{}
+
+func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *celast.AST) *celast.AST {
+	matches := celast.MatchDescendants(celast.NavigateAST(expression), func(expr celast.NavigableExpr) bool {
+		if expr.Kind() != celast.SelectKind {
+			return false
+		}
+		operand := expr.AsSelect().Operand()
+		return operand.Kind() == celast.IdentKind && operand.AsIdent() == "join"
+	})
+	for _, match := range matches {
+		ctx.UpdateExpr(match, ctx.NewIdent(joinTypedVariable(match.AsSelect().FieldName())))
+	}
+	return ctx.NewAST(expression.Expr())
+}
+
+func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, resultType string) (*cel.Ast, error) {
+	typedEnv, err := env.Extend(
+		cel.Variable(joinTypedVariable("expected"), cel.IntType),
+		cel.Variable(joinTypedVariable("completed"), cel.IntType),
+		cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
+		cel.Variable(joinTypedVariable("results"), cel.ListType(joinResultCELType(resultType))),
+		cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
+	)
+	if err != nil {
+		return nil, err
+	}
+	optimizer, err := cel.NewStaticOptimizer(joinFieldTypeOptimizer{})
+	if err != nil {
+		return nil, err
+	}
+	typed, issues := optimizer.Optimize(typedEnv, compiled)
+	if issues != nil && issues.Err() != nil {
+		return nil, issues.Err()
+	}
+	return typed, nil
+}
+
+func joinTypedVariable(field string) string {
+	return "__swarm_join_" + strings.TrimSpace(field)
+}
+
+func joinResultCELType(typeRef string) *cel.Type {
+	typeRef = strings.TrimSpace(typeRef)
+	if strings.HasSuffix(typeRef, "[]") {
+		return cel.ListType(joinResultCELType(strings.TrimSpace(strings.TrimSuffix(typeRef, "[]"))))
+	}
+	if strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") {
+		return cel.ListType(joinResultCELType(strings.TrimSpace(typeRef[1 : len(typeRef)-1])))
+	}
+	lower := strings.ToLower(typeRef)
+	if strings.HasPrefix(lower, "list<") && strings.HasSuffix(typeRef, ">") {
+		return cel.ListType(joinResultCELType(strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])))
+	}
+	if strings.HasPrefix(lower, "numeric(") {
+		return cel.DoubleType
+	}
+	switch lower {
+	case "text", "string", "uuid", "timestamp", "timestamptz":
+		return cel.StringType
+	case "integer", "int", "bigint":
+		return cel.IntType
+	case "number", "numeric", "float", "double", "real":
+		return cel.DoubleType
+	case "boolean", "bool":
+		return cel.BoolType
+	default:
+		return cel.DynType
+	}
+}
+
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	return EvalValueExpressionWithOptions(expression, ctx, ValueExpressionOptions{})
 }
@@ -182,9 +265,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
 		return nil, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
-	ast, issues := env.Compile(normalized)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
+	ast, err := compileValueExpression(env, normalized, opts)
+	if err != nil {
+		return nil, err
 	}
 	program, err := env.Program(ast)
 	if err != nil {

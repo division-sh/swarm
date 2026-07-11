@@ -77,6 +77,40 @@ func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
 	}
 }
 
+func TestJoinExpressionTypeCheckingMatchesRuntimeContext(t *testing.T) {
+	opts := ValueExpressionOptions{AllowJoin: true, RequireBool: true, JoinResultType: "text"}
+	for _, expression := range []string{
+		`join.completed <= join.expected`,
+		`join.missing.size() > 0`,
+		`join.results.all(result, result != "")`,
+		`join.timed_out == false`,
+	} {
+		t.Run("valid "+expression, func(t *testing.T) {
+			if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
+			}
+		})
+	}
+	for _, expression := range []string{
+		`join.missing > 1`,
+		`join.timed_out > 0`,
+		`join.results[0] > 1`,
+	} {
+		t.Run("invalid "+expression, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(expression, opts)
+			if err == nil || !strings.Contains(err.Error(), "no matching overload") {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v, want typed overload rejection", expression, err)
+			}
+			_, evalErr := EvalValueExpressionWithOptions(expression, ValueContext{Join: map[string]any{
+				"expected": 2, "completed": 1, "missing": []any{"b"}, "results": []any{"ok"}, "timed_out": false,
+			}}, opts)
+			if evalErr == nil || !strings.Contains(evalErr.Error(), "no matching overload") {
+				t.Fatalf("EvalValueExpressionWithOptions(%q) error = %v, want the same typed rejection before evaluation", expression, evalErr)
+			}
+		})
+	}
+}
+
 func TestValidateValueExpression_RejectsRetiredFanOutTarget(t *testing.T) {
 	tests := []string{
 		`fan_out.target`,

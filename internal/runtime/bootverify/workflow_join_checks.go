@@ -36,6 +36,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
 			}
 			spec := *handler.Join
+			resultType := c.joinOutputType(flowID, eventType, spec)
 			prefix := fmt.Sprintf("join %s", spec.EffectiveID())
 			if !flowUsesAuthoredStages(c.source, flowID) {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
@@ -58,7 +59,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				if spec.Remaining != runtimecontracts.JoinRemainingIgnore {
 					findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" complete_when requires remaining: ignore"))
 				}
-				findings = append(findings, validateJoinExpression(flowID, nodeID, eventType, "complete_when", spec.CompleteWhen, true)...)
+				findings = append(findings, validateJoinExpression(flowID, nodeID, eventType, "complete_when", spec.CompleteWhen, true, resultType)...)
 			} else if spec.Remaining != "" {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" remaining is forbidden when complete_when is omitted"))
 			}
@@ -70,11 +71,23 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			} else if !joinDelayValid(c.source, flowID, spec.Timeout.After) {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s timeout.after %q must be a positive duration or resolved policy-scalar duration", prefix, spec.Timeout.After)))
 			}
-			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID))...)
-			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, c.source.FlowStates(flowID))...)
+			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID), resultType)...)
+			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, c.source.FlowStates(flowID), resultType)...)
 		}
 	}
 	return findings
+}
+
+func (c *checkerContext) joinOutputType(flowID, eventType string, spec runtimecontracts.JoinSpec) string {
+	if c == nil || c.source == nil {
+		return ""
+	}
+	field := joinPathField(spec.Output, "payload")
+	if field == "" {
+		return ""
+	}
+	proof := semanticview.ResolveFlowEventProof(c.source, flowID, eventType)
+	return proof.Entry.Payload.Properties[field].Type
 }
 
 func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) []Finding {
@@ -114,26 +127,26 @@ func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spe
 	return out
 }
 
-func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string) []Finding {
+func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType string) []Finding {
 	out := make([]Finding, 0)
 	if target := strings.TrimSpace(rule.AdvancesTo); target != "" && !containsString(states, target) {
 		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s advances_to references unknown stage %s", label, target)))
 	}
 	for field, expr := range rule.Emit.Fields {
 		if text := joinExpressionText(expr); text != "" {
-			out = append(out, validateJoinExpression(flowID, nodeID, eventType, label+" emit.fields."+field, text, false)...)
+			out = append(out, validateJoinExpression(flowID, nodeID, eventType, label+" emit.fields."+field, text, false, resultType)...)
 		}
 	}
 	for idx, write := range rule.DataAccumulation.Writes {
 		if text := joinExpressionText(write.Value); text != "" {
-			out = append(out, validateJoinExpression(flowID, nodeID, eventType, fmt.Sprintf("%s data_accumulation.writes[%d]", label, idx), text, false)...)
+			out = append(out, validateJoinExpression(flowID, nodeID, eventType, fmt.Sprintf("%s data_accumulation.writes[%d]", label, idx), text, false, resultType)...)
 		}
 	}
 	return out
 }
 
-func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool) []Finding {
-	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly}); err != nil {
+func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType string) []Finding {
+	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}); err != nil {
 		return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
 	}
 	for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
