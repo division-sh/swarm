@@ -46,6 +46,7 @@ type ConnectRoutePlanFailure string
 
 const (
 	ConnectFailureSourceMissing              ConnectRoutePlanFailure = "source_missing"
+	ConnectFailureSourceLocationMissing      ConnectRoutePlanFailure = "connect_source_location_missing"
 	ConnectFailurePinRefInvalid              ConnectRoutePlanFailure = "connect_pin_ref_invalid"
 	ConnectFailureProducerFlowMissing        ConnectRoutePlanFailure = "producer_flow_missing"
 	ConnectFailureProducerOutputPinMissing   ConnectRoutePlanFailure = "producer_output_pin_missing"
@@ -132,6 +133,7 @@ const (
 
 type ConnectRoutePlan struct {
 	PackageKey                string
+	AuthoredLocation          string
 	Source                    ConnectRoutePlanEndpoint
 	Receiver                  ConnectRoutePlanEndpoint
 	Adapter                   string
@@ -150,9 +152,10 @@ type ConnectRoutePlan struct {
 }
 
 type ConnectRoutePlanIssue struct {
-	Connect runtimecontracts.FlowPackageConnect
-	Failure ConnectRoutePlanFailure
-	Detail  string
+	Connect          runtimecontracts.FlowPackageConnect
+	AuthoredLocation string
+	Failure          ConnectRoutePlanFailure
+	Detail           string
 }
 
 type ConnectRoutePlanMaterializationInput struct {
@@ -202,6 +205,22 @@ func LowerCompositionConnectRoutePlans(source semanticview.Source) ([]ConnectRou
 }
 
 func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+	plan, issue := lowerCompositionConnectRoutePlan(source, connect)
+	authoredLocation := connect.AuthoredLocation()
+	plan.AuthoredLocation = authoredLocation
+	issue.AuthoredLocation = authoredLocation
+	if issue.Failure == "" && authoredLocation == "" {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{
+			Connect:          connect,
+			AuthoredLocation: authoredLocation,
+			Failure:          ConnectFailureSourceLocationMissing,
+			Detail:           "connect requires exact package.yaml source file and line metadata",
+		}
+	}
+	return plan, issue
+}
+
+func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	if source == nil {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}
 	}
@@ -250,8 +269,9 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	}
 	targetKind := connectTargetKind(delivery)
 	plan := ConnectRoutePlan{
-		PackageKey: strings.TrimSpace(connect.PackageKey),
-		Source:     sourceEndpoint,
+		PackageKey:       strings.TrimSpace(connect.PackageKey),
+		AuthoredLocation: connect.AuthoredLocation(),
+		Source:           sourceEndpoint,
 		Receiver: ConnectRoutePlanEndpoint{
 			FlowID:        strings.TrimSpace(to.FlowID),
 			FlowPath:      strings.Trim(strings.TrimSpace(receiverScope.Path), "/"),

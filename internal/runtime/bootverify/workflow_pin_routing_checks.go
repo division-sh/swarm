@@ -259,7 +259,7 @@ func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, t
 	input, ok := census.ResolveDeclaredInputEndpoint(flowID, eventType).Endpoint()
 	if ok {
 		for _, edge := range topology.Edges {
-			if edge.Scope != routingtopology.DeliveryScopeInterFlow || edge.Consumer.ID != input.ID {
+			if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || edge.Consumer.ID != input.ID {
 				continue
 			}
 			if endpoint, exists := census.Endpoint(edge.Producer.ID); exists && endpoint.Direction == semanticview.EventEndpointProducer {
@@ -294,7 +294,7 @@ func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoi
 
 func topologyConnectsProducerToReceiver(topology routingtopology.Topology, producerID, receiverFlowID string) bool {
 	for _, edge := range topology.Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlow || strings.TrimSpace(edge.Consumer.FlowID) != strings.TrimSpace(receiverFlowID) {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || strings.TrimSpace(edge.Consumer.FlowID) != strings.TrimSpace(receiverFlowID) {
 			continue
 		}
 		if edge.Producer.ID == producerID {

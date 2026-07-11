@@ -1430,6 +1430,8 @@ type FlowInputPinResolutionInstanceKey struct {
 }
 type FlowPackageConnect struct {
 	PackageKey string                           `yaml:"-"`
+	SourceFile string                           `yaml:"-"`
+	SourceLine int                              `yaml:"-"`
 	From       string                           `yaml:"from"`
 	To         string                           `yaml:"to"`
 	Adapter    string                           `yaml:"adapter"`

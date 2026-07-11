@@ -1,6 +1,11 @@
 package apispec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
@@ -16,6 +21,21 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "endpoint_rule"), "interface exposures")
 	assertScalarContains(t, mustMappingValue(t, routing, "resolution_rule"), "select-or-create")
 	assertScalarContains(t, mustMappingValue(t, routing, "identity_rule"), "fail closed")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "evaluates each producer-or-input/consumer pair exactly once")
+	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "Canonical name equality alone never authorizes a cross-flow edge")
+	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "exact authored package.yaml file:line")
+	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "connect_source_location_missing")
+	assertScalarContains(t, mustMappingValue(t, routing, "legacy_qualified_subscription_rule"), "any root or child flow authors stages")
+	deliveryScopes := mustMappingValue(t, routing, "delivery_scopes")
+	if deliveryScopes.Kind != yaml.SequenceNode || len(deliveryScopes.Content) != 2 {
+		t.Fatalf("delivery_scopes = %#v, want exactly two canonical scopes", deliveryScopes)
+	}
+	assertScalarContains(t, deliveryScopes.Content[0], "typed_pubsub")
+	assertScalarContains(t, deliveryScopes.Content[1], "inter_flow_connect")
+	rejectedScope := "intra" + "_" + "flow"
+	if strings.Contains(deliveryScopes.Content[0].Value+deliveryScopes.Content[1].Value, rejectedScope) {
+		t.Fatalf("delivery_scopes retained rejected scope %q", rejectedScope)
+	}
 
 	rows := mustYAMLPath(t, root, "cli_specification", "foundations", "output_contract", "command_support", "output_conformance_registry", "rows")
 	row := mustMappingValue(t, rows, "describe_routes")

@@ -105,10 +105,40 @@ func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
 			t.Fatalf("describe routes output changed on iteration %d", i)
 		}
 	}
-	for _, want := range []string{"routing topology: routing-topology/v1", "inter_flow_connect", "resolution:"} {
+	for _, want := range []string{"routing topology: routing-topology/v1", "typed_pubsub", "typed pub/sub: match=exact boundary=same_flow", "inter_flow_connect", "resolution:"} {
 		if !strings.Contains(firstHuman, want) {
 			t.Fatalf("human routes missing %q:\n%s", want, firstHuman)
 		}
+	}
+}
+
+func TestDescribeRoutesProjectsImportBoundaryWildcardProofOnHumanAndJSONSurfaces(t *testing.T) {
+	contractsRoot := filepath.Join(repoRoot(), "tests", "tier11-flow-composition", "test-wildcard-deep-subscription")
+	var jsonOut, jsonErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
+		t.Fatalf("decode topology: %v", err)
+	}
+	found := false
+	for _, edge := range topology.Edges {
+		if edge.Event.Canonical != "child/grandchild/task.done" || edge.Consumer.NodeID != "collector" {
+			continue
+		}
+		found = edge.Scope == routingtopology.DeliveryScopeTypedPubSub && edge.TypedPubSub != nil && edge.TypedPubSub.Match == "pattern" && edge.TypedPubSub.Boundary == "import_boundary" && edge.TypedPubSub.Authorization != nil
+	}
+	if !found {
+		t.Fatalf("topology edges = %#v, want import-boundary wildcard proof", topology.Edges)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
+	}
+	if !strings.Contains(humanOut.String(), "typed pub/sub: match=pattern boundary=import_boundary") {
+		t.Fatalf("human routes omitted import proof:\n%s", humanOut.String())
 	}
 }
 
@@ -133,6 +163,19 @@ func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
 	for _, want := range []string{"event_consumer_exists [semantic_drift_warning]", "orphan.unconsumed", "route issues:"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human dangling route output missing %q:\n%s", want, humanOut.String())
+		}
+	}
+}
+
+func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T) {
+	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{BadConnectMapping: true})
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
+	}
+	for _, want := range []string{"route issues:", "route_plan_instance_key_adapter_invalid", "package.yaml:"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human route issue missing %q:\n%s", want, humanOut.String())
 		}
 	}
 }

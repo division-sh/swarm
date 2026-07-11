@@ -174,7 +174,7 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 		}
 	}
 	for _, edge := range routingtopology.Build(source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlow || edge.Boundary == nil {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || edge.Boundary == nil {
 			continue
 		}
 		if edge.Producer.Event.Canonical == decl.Canonical || edge.Producer.Event.Local == decl.Canonical {

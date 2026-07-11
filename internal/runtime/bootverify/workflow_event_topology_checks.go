@@ -45,11 +45,12 @@ func (c *checkerContext) eventWarnings() []Finding {
 	c.eventWarningLoaded = true
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	topology := routingtopology.Build(c.source)
+	stagedBundle := bundleUsesAuthoredStages(c.source)
 	for _, subscription := range topology.LegacyQualifiedSubscriptions {
 		message := fmt.Sprintf("legacy qualified subscription '%s' at %s still delivers at runtime but is outside canonical same-flow pub/sub and pin/connect topology; migrate to pins/connect", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)
 		remediation := subscription.Migration
 		evidence := []string{fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)}
-		if flowUsesAuthoredStages(c.source, subscription.Consumer.FlowID) {
+		if stagedBundle {
 			c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", subscription.AuthoredLocation, message, remediation, evidence...))
 		} else {
 			c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -90,7 +91,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 			for _, subscription := range legacy {
 				evidence = append(evidence, fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation))
 			}
-			if flowUsesAuthoredStages(c.source, entry.FlowID) {
+			if stagedBundle {
 				c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("event_consumer_exists", ref.Canonical, message, remediation, evidence...))
 			} else {
 				c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -188,7 +189,7 @@ func topologyRoutesProducer(topology routingtopology.Topology, endpointID string
 			return true
 		}
 		for _, edge := range topology.Edges {
-			if edge.Scope == routingtopology.DeliveryScopeInterFlow && edge.Producer.ID == exposure.Output.ID {
+			if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Producer.ID == exposure.Output.ID {
 				return true
 			}
 		}
@@ -198,14 +199,14 @@ func topologyRoutesProducer(topology routingtopology.Topology, endpointID string
 
 func topologyRoutesConsumer(topology routingtopology.Topology, endpointID string) bool {
 	for _, edge := range topology.Edges {
-		if edge.Consumer.ID == endpointID && edge.Scope == routingtopology.DeliveryScopeInterFlow {
+		if edge.Consumer.ID == endpointID && edge.Scope == routingtopology.DeliveryScopeInterFlowConnect {
 			return true
 		}
-		if edge.Consumer.ID != endpointID || edge.Scope != routingtopology.DeliveryScopeIntraFlow || edge.Producer.Direction != semanticview.EventEndpointInputPin {
+		if edge.Consumer.ID != endpointID || edge.Scope != routingtopology.DeliveryScopeTypedPubSub || edge.Producer.Direction != semanticview.EventEndpointInputPin {
 			continue
 		}
 		for _, upstream := range topology.Edges {
-			if upstream.Scope == routingtopology.DeliveryScopeInterFlow && upstream.Consumer.ID == edge.Producer.ID {
+			if upstream.Scope == routingtopology.DeliveryScopeInterFlowConnect && upstream.Consumer.ID == edge.Producer.ID {
 				return true
 			}
 		}

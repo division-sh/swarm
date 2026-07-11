@@ -394,21 +394,24 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 	}
 	fmt.Fprintf(out, "routing topology: %s\n", topology.SchemaVersion)
 	fmt.Fprintf(out, "  source authority: %s\n", topology.SourceAuthority)
-	intra, inter := 0, 0
+	pubsub, inter := 0, 0
 	for _, edge := range topology.Edges {
-		if edge.Scope == routingtopology.DeliveryScopeInterFlow {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect {
 			inter++
 		} else {
-			intra++
+			pubsub++
 		}
 	}
 	if len(topology.Edges) == 0 {
 		fmt.Fprintln(out, "  routes: none")
 	} else if inter == 0 {
-		fmt.Fprintf(out, "  cross-flow routes: none (%d intra-flow routes)\n", intra)
+		fmt.Fprintf(out, "  connect routes: none (%d typed pub/sub routes)\n", pubsub)
 	}
 	for _, edge := range topology.Edges {
 		fmt.Fprintf(out, "  - [%s] %s: %s -> %s\n", edge.Scope, edge.Event.Canonical, routingEndpointText(edge.Producer), routingEndpointText(edge.Consumer))
+		if edge.TypedPubSub != nil {
+			fmt.Fprintf(out, "    typed pub/sub: match=%s boundary=%s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.TypedPubSub.Match), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.TypedPubSub.Boundary))
+		}
 		if edge.Boundary != nil {
 			fmt.Fprintf(out, "    connect: %s -> %s (%s)\n", edge.Boundary.From, edge.Boundary.To, edge.Boundary.AuthoredLocation)
 		}
@@ -439,12 +442,12 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 		for _, issue := range topology.Issues {
 			if issue.CheckID != "" {
 				fmt.Fprintf(out, "    - %s [%s] at %s: %s\n", issue.CheckID, issue.Severity, firstNonEmpty(issue.AuthoredLocation, issue.Location), issue.Message)
-				if issue.Remediation != "" {
-					fmt.Fprintf(out, "      remediation: %s\n", issue.Remediation)
-				}
-				continue
+			} else {
+				fmt.Fprintf(out, "    - %s: %s -> %s at %s: %s\n", issue.Failure, issue.From, issue.To, firstNonEmpty(issue.AuthoredLocation, issue.Location), firstNonEmpty(issue.Message, issue.Detail))
 			}
-			fmt.Fprintf(out, "    - %s: %s -> %s at %s: %s\n", issue.Failure, issue.From, issue.To, issue.AuthoredLocation, issue.Detail)
+			if issue.Remediation != "" {
+				fmt.Fprintf(out, "      remediation: %s\n", issue.Remediation)
+			}
 		}
 	}
 }

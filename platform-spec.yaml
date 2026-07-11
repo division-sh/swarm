@@ -671,11 +671,11 @@ contract_formats:
           call sites and extra calls added inside an existing allowed function;
           route-probe allowlist entries MUST meet the same exactness bar.
     routing_derivation:
-      description: 'Routing is derived from two sources depending on scope:'
-      intra_flow: 'Within a flow, routing derives from local subscriptions — agents.yaml subscriptions,
-        nodes.yaml subscribes_to, and event_handlers keys. The platform matches local event names
-        against local subscriber declarations.'
-      cross_flow: 'Between flows, authored topology derives from parent package connect entries
+      description: 'Routing is derived from two mechanisms:'
+      typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
+        nodes.yaml subscribes_to, and event_handlers keys. The platform matches canonical event identity
+        through same-flow declarations or governed import-boundary wildcard authorization.'
+      inter_flow_connect: 'Between flows, authored topology derives from parent package connect entries
         over output and input pins. Output pins declare event identity and producer key/carries
         evidence, template receivers declare instance.by route keys, input pins declare receiver
         interface and explicit addressed-input routing when needed, and parent connect lowers into concrete route-plan facts. See
@@ -8637,8 +8637,20 @@ flow_model:
             a field requires a new artifact schema identity. Runtime recipients, persisted deliveries, replay facts,
             conformance status, and historical route-decision provenance are forbidden inputs and fields.
           delivery_scopes:
-          - intra_flow typed pub/sub between authored endpoints in one flow scope
+          - typed_pubsub between authored endpoints, with match exact|pattern and boundary same_flow|import_boundary proof
           - inter_flow_connect lowered from declared output pin through parent connect to declared input pin
+          typed_pubsub_rule: >
+            One semanticview relation resolver evaluates each producer-or-input/consumer pair exactly once. Same canonical
+            flow identity may return exact or pattern with boundary same_flow. Different canonical flow identity may return
+            only pattern with boundary import_boundary and a stable normalized authorization proof naming the authorizing
+            parent package, child package, import label/source, event pattern, and route source. Exact duplicate proofs
+            collapse deterministically; distinct proofs for one relation are a typed ambiguity and produce an issue, not an
+            edge. Canonical name equality alone never authorizes a cross-flow edge.
+          connect_source_rule: >
+            Every inter_flow_connect edge and connect-lowering issue carries the exact authored package.yaml file:line
+            captured by contract loading and propagated through normalization and lowering. Missing source file or positive
+            line is connect_source_location_missing and cannot produce an edge. Projection/rendering MUST NOT reconstruct
+            source proof from package keys or bundle paths.
           endpoint_rule: >
             Producers, consumers, input pins, and output pins come from one immutable authored endpoint census.
             Output pins are interface exposures and become delivery only through a lowered connect edge.
@@ -8654,7 +8666,7 @@ flow_model:
             projected in `legacy_qualified_subscriptions` with disposition `legacy_qualified_subscription`, exact
             authored file:line evidence, runtime_delivery true, canonical_edge false, migration remediation, and a
             linked verifier finding. It MUST NOT appear as a canonical edge. Staged/new-model bundles receive a hard
-            invalidity; legacy bundles receive a semantic-drift warning until E1a retires qualified cross-flow
+            invalidity when any root or child flow authors stages; all-legacy bundles receive a semantic-drift warning until E1a retires qualified cross-flow
             delivery. Wildcard imports and consumers reached through a declared input pin plus connect are not this
             legacy class.
           supported_outputs:
@@ -15208,7 +15220,7 @@ static_analyzer:
       - state reachability
       - platform catalog membership as proof
     active_role_carriers:
-      intra_flow_local_usage:
+      same_flow_local_usage:
         rule: Handlers or agents within the same flow as the declaration reference the event by local name or same-flow resolved
           identity.
       root_local_usage_for_root_declared_events:

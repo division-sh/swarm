@@ -878,7 +878,7 @@ func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, even
 		return false
 	}
 	for _, edge := range routingtopology.Build(source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlow || strings.TrimSpace(edge.Producer.FlowID) != strings.TrimSpace(flowID) {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || strings.TrimSpace(edge.Producer.FlowID) != strings.TrimSpace(flowID) {
 			continue
 		}
 		if eventidentity.Normalize(edge.Producer.Event.Authored) == eventType || eventidentity.Normalize(edge.Producer.Event.Local) == eventType || eventidentity.Normalize(edge.Producer.Event.Canonical) == eventType {

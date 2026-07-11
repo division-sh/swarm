@@ -3,6 +3,7 @@ package routingtopology
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,8 +21,8 @@ const (
 type DeliveryScope string
 
 const (
-	DeliveryScopeIntraFlow DeliveryScope = "intra_flow"
-	DeliveryScopeInterFlow DeliveryScope = "inter_flow_connect"
+	DeliveryScopeTypedPubSub      DeliveryScope = "typed_pubsub"
+	DeliveryScopeInterFlowConnect DeliveryScope = "inter_flow_connect"
 )
 
 type EventIdentity struct {
@@ -81,9 +82,27 @@ type Edge struct {
 	Event                     EventIdentity `json:"event"`
 	Producer                  Endpoint      `json:"producer"`
 	Consumer                  Endpoint      `json:"consumer"`
+	TypedPubSub               *TypedPubSub  `json:"typed_pubsub,omitempty"`
 	Boundary                  *Boundary     `json:"boundary,omitempty"`
 	Resolution                *Resolution   `json:"resolution,omitempty"`
 	RequiresRuntimeResolution bool          `json:"requires_runtime_resolution"`
+}
+
+type TypedPubSub struct {
+	Match         string                         `json:"match"`
+	Boundary      string                         `json:"boundary"`
+	Authorization *TypedPubSubAuthorizationProof `json:"authorization,omitempty"`
+}
+
+type TypedPubSubAuthorizationProof struct {
+	ParentPackageKey string `json:"parent_package_key,omitempty"`
+	ChildPackageKey  string `json:"child_package_key"`
+	ImportLabel      string `json:"import_label,omitempty"`
+	Source           string `json:"source,omitempty"`
+	EventPattern     string `json:"event_pattern"`
+	MatchPattern     string `json:"match_pattern"`
+	LocalizedEvent   string `json:"localized_event"`
+	RouteSource      string `json:"route_source"`
 }
 
 type Boundary struct {
@@ -187,12 +206,11 @@ func Build(source semanticview.Source) Topology {
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	plans, planIssues := pinrouting.LowerCompositionConnectRoutePlans(source)
 	builder := topologyBuilder{
-		source:        source,
 		census:        census,
 		seenEdges:     map[string]struct{}{},
 		seenExposures: map[string]struct{}{},
 	}
-	builder.addIntraFlowEdges()
+	builder.addTypedPubSubEdges()
 	builder.addBoundaryExposures()
 	builder.addConnectEdges(plans)
 	return Topology{
@@ -206,71 +224,66 @@ func Build(source semanticview.Source) Topology {
 		BoundaryExposures:            builder.sortedExposures(),
 		Edges:                        builder.sortedEdges(),
 		LegacyQualifiedSubscriptions: legacyQualifiedSubscriptionViews(census.LegacyQualifiedSubscriptions()),
-		Issues:                       issueViews(source, planIssues),
+		Issues:                       issueViews(planIssues, builder.relationIssues),
 	}
 }
 
 type topologyBuilder struct {
-	source        semanticview.Source
-	census        semanticview.AuthoredEventEndpointCensus
-	edges         []Edge
-	exposures     []BoundaryExposure
-	seenEdges     map[string]struct{}
-	seenExposures map[string]struct{}
+	census         semanticview.AuthoredEventEndpointCensus
+	edges          []Edge
+	exposures      []BoundaryExposure
+	seenEdges      map[string]struct{}
+	seenExposures  map[string]struct{}
+	relationIssues []semanticview.TypedPubSubConsumerIssue
 }
 
-func (b *topologyBuilder) addIntraFlowEdges() {
+func (b *topologyBuilder) addTypedPubSubEdges() {
 	for _, producer := range b.census.Producers() {
 		if !isExecutableEndpoint(producer) {
 			continue
 		}
-		for _, consumer := range b.census.MatchingConsumers(producer.FlowID, producer.Event.EventKey()) {
-			if !isExecutableEndpoint(consumer) {
-				continue
-			}
-			b.addEdge(Edge{
-				Scope:    DeliveryScopeIntraFlow,
-				Event:    eventView(producer.Event),
-				Producer: endpointView(producer),
-				Consumer: endpointView(consumer),
-			})
-		}
-		for _, consumer := range b.census.MatchingWildcardConsumersAcrossFlows(producer.FlowID, producer.Event.EventKey()) {
-			if !isExecutableEndpoint(consumer) {
-				continue
-			}
-			b.addEdge(Edge{
-				Scope:    DeliveryScopeIntraFlow,
-				Event:    eventView(producer.Event),
-				Producer: endpointView(producer),
-				Consumer: endpointView(consumer),
-			})
-		}
+		b.addTypedPubSubMatches(producer)
 	}
 	for _, input := range b.census.InputPins() {
-		for _, consumer := range b.census.MatchingConsumers(input.FlowID, input.Event.EventKey()) {
-			if !isExecutableEndpoint(consumer) {
-				continue
-			}
-			b.addEdge(Edge{
-				Scope:    DeliveryScopeIntraFlow,
-				Event:    eventView(input.Event),
-				Producer: endpointView(input),
-				Consumer: endpointView(consumer),
-			})
+		b.addTypedPubSubMatches(input)
+	}
+}
+
+func (b *topologyBuilder) addTypedPubSubMatches(producer semanticview.AuthoredEventEndpoint) {
+	matches, issues := b.census.ResolveTypedPubSubConsumerMatches(producer)
+	b.relationIssues = append(b.relationIssues, issues...)
+	for _, match := range matches {
+		if !isExecutableEndpoint(match.Consumer) {
+			continue
 		}
-		for _, consumer := range b.census.MatchingWildcardConsumersAcrossFlows(input.FlowID, input.Event.EventKey()) {
-			if !isExecutableEndpoint(consumer) {
-				continue
-			}
-			b.addEdge(Edge{
-				Scope:    DeliveryScopeIntraFlow,
-				Event:    eventView(input.Event),
-				Producer: endpointView(input),
-				Consumer: endpointView(consumer),
-			})
+		b.addEdge(Edge{
+			Scope:       DeliveryScopeTypedPubSub,
+			Event:       eventView(match.Event),
+			Producer:    endpointView(match.Producer),
+			Consumer:    endpointView(match.Consumer),
+			TypedPubSub: typedPubSubView(match),
+		})
+	}
+}
+
+func typedPubSubView(match semanticview.TypedPubSubConsumerMatch) *TypedPubSub {
+	view := &TypedPubSub{
+		Match:    string(match.Kind),
+		Boundary: string(match.Boundary),
+	}
+	if match.Authorization != nil {
+		view.Authorization = &TypedPubSubAuthorizationProof{
+			ParentPackageKey: strings.TrimSpace(match.Authorization.ParentPackageKey),
+			ChildPackageKey:  strings.TrimSpace(match.Authorization.ChildPackageKey),
+			ImportLabel:      strings.TrimSpace(match.Authorization.ImportLabel),
+			Source:           strings.TrimSpace(match.Authorization.Source),
+			EventPattern:     strings.TrimSpace(match.Authorization.EventPattern),
+			MatchPattern:     strings.TrimSpace(match.Authorization.MatchPattern),
+			LocalizedEvent:   strings.TrimSpace(match.Authorization.LocalizedEvent),
+			RouteSource:      strings.TrimSpace(match.Authorization.RouteSource),
 		}
 	}
+	return view
 }
 
 func (b *topologyBuilder) addBoundaryExposures() {
@@ -308,7 +321,7 @@ func (b *topologyBuilder) addConnectEdges(plans []pinrouting.ConnectRoutePlan) {
 		}
 		for _, producer := range producerEndpoints {
 			b.addEdge(Edge{
-				Scope:                     DeliveryScopeInterFlow,
+				Scope:                     DeliveryScopeInterFlowConnect,
 				Event:                     eventIdentity(plan.Source.Event, plan.Source.ResolvedEvent),
 				Producer:                  endpointView(producer),
 				Consumer:                  endpointView(consumer),
@@ -451,7 +464,7 @@ func findPinEndpoint(endpoints []semanticview.AuthoredEventEndpoint, flowID, pin
 func boundaryView(plan pinrouting.ConnectRoutePlan) *Boundary {
 	return &Boundary{
 		PackageKey:       strings.TrimSpace(plan.PackageKey),
-		AuthoredLocation: strings.TrimSpace(plan.PackageKey),
+		AuthoredLocation: strings.TrimSpace(plan.AuthoredLocation),
 		From:             connectEndpointRef(plan.Source),
 		To:               connectEndpointRef(plan.Receiver),
 		OutputPin:        strings.TrimSpace(plan.Source.Pin),
@@ -527,23 +540,40 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 	return resolution
 }
 
-func issueViews(source semanticview.Source, issues []pinrouting.ConnectRoutePlanIssue) []Issue {
-	out := make([]Issue, 0, len(issues))
-	for _, issue := range issues {
+func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues []semanticview.TypedPubSubConsumerIssue) []Issue {
+	out := make([]Issue, 0, len(connectIssues)+len(relationIssues))
+	for _, issue := range connectIssues {
 		view := Issue{
 			PackageKey:       strings.TrimSpace(issue.Connect.PackageKey),
 			From:             strings.TrimSpace(issue.Connect.From),
 			To:               strings.TrimSpace(issue.Connect.To),
 			Failure:          string(issue.Failure),
 			Detail:           strings.TrimSpace(issue.Detail),
-			AuthoredLocation: connectSourceFile(source, issue.Connect.PackageKey),
+			AuthoredLocation: strings.TrimSpace(issue.AuthoredLocation),
+		}
+		view.ID = issueID(view)
+		out = append(out, view)
+	}
+	for _, issue := range relationIssues {
+		details := make([]string, 0, len(issue.Authorizations))
+		for _, authorization := range issue.Authorizations {
+			details = append(details, authorization.Identity())
+		}
+		view := Issue{
+			Location:    strings.TrimSpace(issue.Event.EventKey()),
+			From:        strings.TrimSpace(issue.Producer.ID),
+			To:          strings.TrimSpace(issue.Consumer.ID),
+			Failure:     strings.TrimSpace(issue.Failure),
+			Detail:      strings.Join(details, ", "),
+			Message:     fmt.Sprintf("typed pub/sub relation %s -> %s for %s has multiple distinct import authorization proofs", issue.Producer.ID, issue.Consumer.ID, issue.Event.EventKey()),
+			Remediation: "Remove overlapping import grants so exactly one authorization proof owns this delivery relation.",
 		}
 		view.ID = issueID(view)
 		out = append(out, view)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		left := strings.Join([]string{out[i].PackageKey, out[i].From, out[i].To, out[i].Failure}, "\x00")
-		right := strings.Join([]string{out[j].PackageKey, out[j].From, out[j].To, out[j].Failure}, "\x00")
+		left := strings.Join([]string{out[i].PackageKey, out[i].From, out[i].To, out[i].Failure, out[i].Detail}, "\x00")
+		right := strings.Join([]string{out[j].PackageKey, out[j].From, out[j].To, out[j].Failure, out[j].Detail}, "\x00")
 		return left < right
 	})
 	return out
@@ -586,21 +616,18 @@ func WithIssues(topology Topology, additional ...Issue) Topology {
 func linkLegacyQualifiedSubscriptionFindings(subscriptions []LegacyQualifiedSubscription, issues []Issue) []LegacyQualifiedSubscription {
 	out := append([]LegacyQualifiedSubscription(nil), subscriptions...)
 	for i := range out {
-		for _, issue := range issues {
+		best := -1
+		for j := range issues {
+			issue := issues[j]
 			if issue.CheckID != "legacy_qualified_subscription" || strings.TrimSpace(issue.Location) != strings.TrimSpace(out[i].AuthoredLocation) {
 				continue
 			}
-			out[i].FindingID = issue.ID
-			break
-		}
-		if out[i].FindingID != "" {
-			continue
-		}
-		for _, issue := range issues {
-			if issue.CheckID == "event_consumer_exists" && strings.TrimSpace(issue.Location) == strings.TrimSpace(out[i].Event.Canonical) {
-				out[i].FindingID = issue.ID
-				break
+			if best < 0 || legacyFindingSeverityRank(issue.Severity) > legacyFindingSeverityRank(issues[best].Severity) {
+				best = j
 			}
+		}
+		if best >= 0 {
+			out[i].FindingID = issues[best].ID
 		}
 	}
 	if out == nil {
@@ -609,25 +636,21 @@ func linkLegacyQualifiedSubscriptionFindings(subscriptions []LegacyQualifiedSubs
 	return out
 }
 
+func legacyFindingSeverityRank(severity string) int {
+	switch strings.TrimSpace(severity) {
+	case "hard_invalidity", "error":
+		return 2
+	case "semantic_drift_warning", "warning":
+		return 1
+	default:
+		return 0
+	}
+}
+
 func issueID(issue Issue) string {
 	parts := []string{issue.CheckID, issue.Severity, issue.Location, issue.PackageKey, issue.From, issue.To, issue.Failure, issue.Detail, issue.AuthoredLocation}
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 	return "issue-" + hex.EncodeToString(digest[:8])
-}
-
-func connectSourceFile(source semanticview.Source, packageKey string) string {
-	packageKey = strings.TrimSpace(packageKey)
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
-		if packageKey == "" || packageKey == "." {
-			return strings.TrimSpace(bundle.Paths.ProjectPackageFile)
-		}
-		for _, loaded := range bundle.PackageTree {
-			if strings.TrimSpace(loaded.Key) == packageKey {
-				return strings.TrimSpace(loaded.Paths.PackageFile)
-			}
-		}
-	}
-	return packageKey
 }
 
 func edgeID(edge Edge) string {
@@ -635,6 +658,21 @@ func edgeID(edge Edge) string {
 		return ""
 	}
 	parts := []string{string(edge.Scope), edge.Event.Canonical, edge.Producer.ID, edge.Consumer.ID}
+	if edge.TypedPubSub != nil {
+		parts = append(parts, edge.TypedPubSub.Match, edge.TypedPubSub.Boundary)
+		if edge.TypedPubSub.Authorization != nil {
+			parts = append(parts,
+				edge.TypedPubSub.Authorization.RouteSource,
+				edge.TypedPubSub.Authorization.ParentPackageKey,
+				edge.TypedPubSub.Authorization.ChildPackageKey,
+				edge.TypedPubSub.Authorization.ImportLabel,
+				edge.TypedPubSub.Authorization.Source,
+				edge.TypedPubSub.Authorization.EventPattern,
+				edge.TypedPubSub.Authorization.MatchPattern,
+				edge.TypedPubSub.Authorization.LocalizedEvent,
+			)
+		}
+	}
 	if edge.Boundary != nil {
 		parts = append(parts, edge.Boundary.PackageKey, edge.Boundary.From, edge.Boundary.To)
 	}

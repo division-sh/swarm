@@ -98,7 +98,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	}
 	for _, pkg := range bundle.PackageTree {
 		for _, connect := range pkg.Manifest.Connect {
-			semantics.CompositionConnects = append(semantics.CompositionConnects, connect.WithPackageKey(pkg.Key))
+			semantics.CompositionConnects = append(semantics.CompositionConnects, connect.WithPackageSource(pkg.Key, pkg.Paths.PackageFile))
 		}
 	}
 	for nodeID, node := range bundle.Nodes {
