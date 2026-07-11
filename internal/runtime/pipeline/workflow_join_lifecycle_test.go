@@ -265,16 +265,19 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			arrival := eventtest.RootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			triggerState := pc.currentWorkflowState(ctx, entityID)
 			start := make(chan struct{})
 			armErr := make(chan error, 1)
 			arrivalErr := make(chan error, 1)
 			go func() {
 				<-start
+				unlock := pc.lockWorkflowEntity(entityID)
+				defer unlock()
 				armErr <- pc.updateEntityState(ctx, entityID, "awaiting", "dispatch.completed")
 			}()
 			go func() {
 				<-start
-				_, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: arrival, State: pc.currentWorkflowState(ctx, entityID), HandlerEventKey: "item.completed"}, false)
+				_, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: arrival, State: triggerState, HandlerEventKey: "item.completed"}, false)
 				arrivalErr <- err
 			}()
 			close(start)
