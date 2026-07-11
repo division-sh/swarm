@@ -11,6 +11,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -97,6 +98,96 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	if current, err := runtimeeffects.ProjectionCurrent(activeCtx); err != nil || !current {
 		t.Fatalf("current generation projection authorization = %v, err=%v", current, err)
+	}
+	claudeRetryCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "claude-prelaunch-retry")
+	claudeFirst, err := runtimeeffects.Begin(claudeRetryCtx, "claude_cli", []byte("stable-request"), nil)
+	if err != nil {
+		t.Fatalf("authorize first claude attempt: %v", err)
+	}
+	if err := claudeFirst.MarkLaunched(claudeRetryCtx); err != nil {
+		t.Fatalf("mark first claude attempt launched before exact rejection: %v", err)
+	}
+	prelaunchFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "test", "start", map[string]any{"launch_rejected": true}), "test", "start")
+	if err := claudeFirst.Settle(claudeRetryCtx, runtimeeffects.StateTerminalFailure, &prelaunchFailure.Failure, map[string]any{"launch_rejected": true}); err != nil {
+		t.Fatalf("settle first claude attempt prelaunch: %v", err)
+	}
+	claudeSecond, err := runtimeeffects.Begin(claudeRetryCtx, "claude_cli", []byte("stable-request"), nil)
+	if err != nil {
+		t.Fatalf("authorize second claude attempt: %v", err)
+	}
+	if claudeSecond.Attempt().Ordinal != 2 || claudeSecond.Attempt().AttemptID == claudeFirst.Attempt().AttemptID {
+		t.Fatalf("second claude attempt = %#v, want fresh ordinal two", claudeSecond.Attempt())
+	}
+	if err := claudeSecond.MarkLaunched(claudeRetryCtx); err != nil {
+		t.Fatalf("mark second claude attempt launched: %v", err)
+	}
+	uncertainClaude := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "test", "wait", nil), "test", "wait")
+	if err := claudeSecond.Settle(claudeRetryCtx, runtimeeffects.StateOutcomeUncertain, &uncertainClaude.Failure, nil); err != nil {
+		t.Fatalf("settle second claude attempt uncertain: %v", err)
+	}
+	if _, err := runtimeeffects.Begin(claudeRetryCtx, "claude_cli", []byte("stable-request"), nil); err == nil {
+		t.Fatal("postlaunch uncertain claude attempt was redispatched")
+	}
+	var registry runtimesessions.Registry
+	if sqlite {
+		registry = store.(*SQLiteRuntimeStore)
+	} else {
+		registry = runtimesessions.NewPostgresRegistry(db, time.Minute)
+	}
+	lease, err := registry.Acquire(ctx, started.AgentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "provider-head-owner", "global")
+	if err != nil {
+		t.Fatalf("acquire provider-head session: %v", err)
+	}
+	headCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "claude-provider-head")
+	headAttempt, err := runtimeeffects.Begin(headCtx, "claude_cli", []byte("head-request"), nil)
+	if err != nil {
+		t.Fatalf("authorize provider-head attempt: %v", err)
+	}
+	if err := headAttempt.MarkLaunched(headCtx); err != nil {
+		t.Fatalf("mark provider-head attempt launched: %v", err)
+	}
+	if err := headAttempt.SucceedAndPromoteProviderHead(headCtx, runtimeeffects.ProviderHeadSettlement{
+		Settlement: runtimeeffects.Settlement{Evidence: map[string]any{"provider_session_id": headAttempt.Attempt().AttemptID}},
+		AgentID:    started.AgentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
+		ScopeKey: lease.ScopeKey, LockOwner: lease.LockOwner, NewProviderHead: headAttempt.Attempt().AttemptID,
+	}); err != nil {
+		t.Fatalf("settle provider head: %v", err)
+	}
+	refreshed, err := registry.Acquire(ctx, started.AgentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, lease.LockOwner, lease.ScopeKey)
+	if err != nil {
+		t.Fatalf("reload provider-head session: %v", err)
+	}
+	if refreshed.ProviderSessionID != headAttempt.Attempt().AttemptID {
+		t.Fatalf("provider head = %q, want %q", refreshed.ProviderSessionID, headAttempt.Attempt().AttemptID)
+	}
+	requireExternalAttemptState(t, db, sqlite, headAttempt.Attempt().AttemptID, runtimeeffects.StateSettled)
+	conflictCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "claude-provider-head-conflict")
+	conflictAttempt, err := runtimeeffects.Begin(conflictCtx, "claude_cli", []byte("head-conflict-request"), nil)
+	if err != nil {
+		t.Fatalf("authorize provider-head conflict attempt: %v", err)
+	}
+	if err := conflictAttempt.MarkLaunched(conflictCtx); err != nil {
+		t.Fatalf("mark provider-head conflict attempt launched: %v", err)
+	}
+	if err := conflictAttempt.SucceedAndPromoteProviderHead(conflictCtx, runtimeeffects.ProviderHeadSettlement{
+		Settlement: runtimeeffects.Settlement{Evidence: map[string]any{"provider_session_id": conflictAttempt.Attempt().AttemptID}},
+		AgentID:    started.AgentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
+		ScopeKey: lease.ScopeKey, LockOwner: lease.LockOwner,
+		ExpectedProviderHead: "stale-provider-head", NewProviderHead: conflictAttempt.Attempt().AttemptID,
+	}); err == nil {
+		t.Fatal("provider-head conflict settlement succeeded")
+	}
+	refreshed, err = registry.Acquire(ctx, started.AgentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, lease.LockOwner, lease.ScopeKey)
+	if err != nil {
+		t.Fatalf("reload provider-head session after conflict: %v", err)
+	}
+	if refreshed.ProviderSessionID != headAttempt.Attempt().AttemptID {
+		t.Fatalf("provider head after conflict = %q, want unchanged %q", refreshed.ProviderSessionID, headAttempt.Attempt().AttemptID)
+	}
+	requireExternalAttemptState(t, db, sqlite, conflictAttempt.Attempt().AttemptID, runtimeeffects.StateLaunched)
+	conflictFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_cas_conflict", "test", "settle_provider_head", nil), "test", "settle_provider_head")
+	if err := conflictAttempt.Settle(conflictCtx, runtimeeffects.StateOutcomeUncertain, &conflictFailure.Failure, nil); err != nil {
+		t.Fatalf("settle provider-head conflict attempt uncertain: %v", err)
 	}
 	prelaunchCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-prelaunch")
 	prelaunch, err := runtimeeffects.Begin(prelaunchCtx, "authored_http_tool", []byte("recover-prelaunch"), nil)

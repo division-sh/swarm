@@ -10,6 +10,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
@@ -145,7 +146,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	if err != nil {
 		agentFailure := runtimefailures.FromError(err, "agent-manager", "process_event.on_event")
 		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID(), agentFailure.Failure)
-		am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusError, &agentFailure.Failure)
+		am.writeReceipt(ctx, evt.ID(), agent.ID(), receiptStatusForAgentFailure(agentFailure), &agentFailure.Failure)
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.Failure = runtimefailures.CloneEnvelope(&agentFailure.Failure)
@@ -185,6 +186,17 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	record.Outcome = startupManagerReplayOutcomeReplayed
 	record.ReasonCode = startupManagerReplayReasonReplayed
 	return eventProcessResult{record: record}
+}
+
+func receiptStatusForAgentFailure(err error) ReceiptStatus {
+	switch runtimeengine.FailureDispositionFor(err) {
+	case runtimeengine.FailureDispositionRetry:
+		return ReceiptStatusError
+	case runtimeengine.FailureDispositionDeadLetter:
+		return ReceiptStatusDeadLetter
+	default:
+		return ReceiptStatusTerminal
+	}
 }
 
 func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID, agentID string) (startupManagerReplayReasonCode, bool) {
@@ -474,7 +486,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 
 	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
 	// decides whether to retry, skip, or escalate further.
-	if status == ReceiptStatusError {
+	if status != ReceiptStatusProcessed {
 		escalateCtx := ctx
 		if receiptCancel != nil {
 			escalateCtx = context.WithoutCancel(writeCtx)
@@ -508,7 +520,11 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agent
 		AgentID:   strings.TrimSpace(agentID),
 		Detail:    detail,
 	}
-	switch receipt.Status {
+	status := receipt.Status
+	if requestedStatus == ReceiptStatusTerminal {
+		status = ReceiptStatusTerminal
+	}
+	switch status {
 	case ReceiptStatusProcessed:
 		detail["delivery_state"] = string(runtimedelivery.StateDelivered)
 		detail["delivery_transition"] = string(runtimedelivery.StateDelivered)
@@ -534,10 +550,19 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agent
 		if receipt.Failure != nil {
 			detail["failure"] = *receipt.Failure
 		}
+	case ReceiptStatusTerminal:
+		detail["delivery_state"] = string(runtimedelivery.StateExhausted)
+		detail["delivery_transition"] = string(runtimedelivery.StateExhausted)
+		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
+		detail["delivery_reason"] = "terminal_failure"
+		detail["delivery_terminal_outcome"] = "terminal_failure"
+		entry.Message = "Delivery entered terminal state"
+		if receipt.Failure != nil {
+			detail["failure"] = *receipt.Failure
+		}
 	default:
 		return
 	}
-	_ = requestedStatus
 	_ = failure
 	_ = am.bus.LogRuntime(ctx, entry)
 }

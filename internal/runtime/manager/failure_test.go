@@ -33,6 +33,16 @@ type failureReturningAgent struct {
 	err error
 }
 
+type countingFailureAgent struct {
+	failureReturningAgent
+	calls int
+}
+
+func (a *countingFailureAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	a.calls++
+	return nil, a.err
+}
+
 func (a failureReturningAgent) ID() string                      { return a.id }
 func (failureReturningAgent) Type() string                      { return "test" }
 func (failureReturningAgent) Subscriptions() []events.EventType { return nil }
@@ -80,8 +90,12 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			if result.record.Failure == nil {
 				t.Fatal("startup replay record failure = nil")
 			}
-			if store.lastStatus != ReceiptStatusError || store.lastFailure == nil {
-				t.Fatalf("receipt = status:%q failure:%#v, want typed error receipt", store.lastStatus, store.lastFailure)
+			wantStatus := ReceiptStatusTerminal
+			if expected.Retryable {
+				wantStatus = ReceiptStatusError
+			}
+			if store.lastStatus != wantStatus || store.lastFailure == nil {
+				t.Fatalf("receipt = status:%q failure:%#v, want status %q with typed failure", store.lastStatus, store.lastFailure, wantStatus)
 			}
 			assertManagerFailureEqual(t, *result.record.Failure, expected)
 			assertManagerFailureEqual(t, *store.lastFailure, expected)
@@ -91,6 +105,24 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			}
 			assertManagerFailureEqual(t, returned, expected)
 		})
+	}
+}
+
+func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.T) {
+	store := &receiptReaderStub{}
+	am := NewAgentManager(&recordingReceiptBus{}, nil, store)
+	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
+	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
+	evt := eventtest.RootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+	first := am.processEventDetailed(context.Background(), agent, evt)
+	if first.err == nil || agent.calls != 1 || store.lastStatus != ReceiptStatusTerminal || store.lastFailure == nil {
+		t.Fatalf("first result err=%v calls=%d status=%s failure=%#v", first.err, agent.calls, store.lastStatus, store.lastFailure)
+	}
+	store.receipt = EventReceipt{EventID: evt.ID(), AgentID: agent.ID(), Status: ReceiptStatusDeadLetter, RetryCount: 0, Failure: runtimefailures.CloneEnvelope(store.lastFailure)}
+	store.found = true
+	second := am.processEventDetailed(context.Background(), agent, evt)
+	if second.err != nil || agent.calls != 1 || second.record.ReasonCode != startupManagerReplayReasonReceiptDeadLettered {
+		t.Fatalf("replay result err=%v calls=%d record=%#v", second.err, agent.calls, second.record)
 	}
 }
 

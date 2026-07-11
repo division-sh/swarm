@@ -13,6 +13,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 const cliStartupProbePrompt = "Startup validation probe. Do not call any tools. Reply with the exact text ok."
@@ -40,7 +41,7 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
 		args := []string{
 			"-p",
-			"--session-id", sessionToken(s),
+			"--session-id", uuid.NewString(),
 			"--output-format", "stream-json",
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)

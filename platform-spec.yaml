@@ -4911,6 +4911,11 @@ engine:
           - Platform session IDs remain platform-owned; external provider session IDs, when present, are stored only as provider
             implementation details.
           - Session rotation and retry lineage must be accounted for by the adapter contract.
+          - Claude CLI provider child-session identity is the durable external-effect attempt ID. First turns start that child;
+            continued turns resume the selected-store confirmed provider head and fork into a fresh attempt-owned child.
+          - A missing confirmed Claude provider head is never reconstructed from the platform session ID. Provider response
+            settlement and reusable confirmed-head promotion commit through one selected-store transaction before mutable
+            conversation projections advance.
         response_normalization:
           rules:
           - Provider responses must normalize assistant messages and tool calls into the platform response model.
@@ -6197,6 +6202,10 @@ engine:
         backoff: Same configurable base as handler retries.
         note: Agent sessions are expensive (LLM calls). Retry once, then dead-letter. The 1-retry limit is separate from the
           handler 3-retry limit.
+        decision_owner: internal/runtime/engine.FailureDispositionFor consumes the canonical returned Agent.OnEvent failure envelope.
+        terminal_rule: A terminal or dead-letter disposition terminalizes the delivery immediately, preserves the original envelope,
+          does not advance retry_count, and must not be labeled retry_exhausted.
+        exhaustion_rule: platform.retry_exhausted is synthesized only after retry dispositions consume the configured retry budget.
     timer_failure:
       behavior: Timer event treated as regular event. Same retry policy as handler failures.
     chain_depth_limit:
@@ -27765,8 +27774,8 @@ managed_external_effect_authority:
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
     identity: A deterministic operation_id is derived from agent, typed inbound/explicit logical identity, deterministic provider-turn or provider-owned tool-call occurrence coordinate, adapter, and declared lineage. Sibling turns/calls under one inbound event are distinct while replay of the same child is stable. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
-    replay: Authorization loads the existing operation and ordinal-one attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, or uncertain replay returns platform.outcome_uncertain; changed request or registration fields return a fingerprint conflict.
-    attempts: One actual attempt is authorized for each logical operation. No adapter creates a second attempt or operation during replay.
+    replay: Authorization loads the existing operation and latest attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, settled, or uncertain replay never dispatches; changed request or registration fields return a fingerprint conflict.
+    attempts: One actual attempt is authorized for each logical operation except Claude CLI may allocate the next ordinal after the preceding attempt has exact durable zero-process-launch proof. The attempt ID is deterministically derived from operation_id and ordinal. No other adapter creates a second attempt or operation during replay.
   effect_classes:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
@@ -27776,7 +27785,7 @@ managed_external_effect_authority:
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
     success: Correlated known success settles the same attempt exactly once with immutable evidence.
-    prelaunch_failure: Proven zero-effect rejection is terminal.
+    prelaunch_failure: Proven zero-effect rejection is terminal for the attempt. Claude CLI may admit a later ordinal only when the canonical returned failure disposition is retry and the delivery retry budget permits another invocation.
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
     postlaunch_write_or_unknown_failure: platform.outcome_uncertain with an adapter-specific detail; automatic redispatch is forbidden.
     mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
@@ -27784,7 +27793,10 @@ managed_external_effect_authority:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
     launched_or_response_observed: Startup settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
-  automatic_redispatch_allowlist: []
+  automatic_redispatch_allowlist:
+    - adapter: claude_cli
+      condition: preceding attempt is terminal_failure with no launched_at, or carries exact launch_rejected=true evidence after cmd.Start rejection
+      exclusion: cmd.Start success, launched/response_observed/outcome_uncertain/settled state, provider exit classification, and inferred gateway/native/customization inactivity never authorize another attempt
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
     tool: [authored_http_tool, managed_credential, native_web_search]
@@ -27792,7 +27804,7 @@ managed_external_effect_authority:
     native: [native_bash, native_read_file, native_write_file]
     relay: [tool_result_relay, claude_tool_result_relay]
   forbidden:
-    - provider or authored HTTP automatic retries
+    - provider or authored HTTP automatic retries except the exact Claude CLI zero-process-launch transition above
     - managed-credential 401 refresh followed by target redispatch
     - effect classification derived from HTTP status, JSON-RPC correlation, exit code, or provider self-description
     - post-mutation native file failure reported as a proven terminal no-effect outcome

@@ -93,6 +93,7 @@ type ReceiptStatus string
 const (
 	ReceiptStatusProcessed  ReceiptStatus = "processed"
 	ReceiptStatusError      ReceiptStatus = "error"
+	ReceiptStatusTerminal   ReceiptStatus = "terminal"
 	ReceiptStatusDeadLetter ReceiptStatus = "dead_letter"
 )
 

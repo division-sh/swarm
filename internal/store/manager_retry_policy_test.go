@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -123,6 +124,29 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	}
 	if deliveryStatus != "dead_letter" || managerStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" {
 		t.Fatalf("terminal status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
+	}
+}
+
+func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.immediate_terminal_delivery")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
+		t.Fatalf("insert delivery: %v", err)
+	}
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil), "claude-cli-adapter", "wait")
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusTerminal, &failure); err != nil {
+		t.Fatalf("upsert immediate terminal: %v", err)
+	}
+	var status, reason, failureCode string
+	var retries int
+	if err := pg.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count, failure->'detail'->>'code' FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`, evt.ID(), agentID).Scan(&status, &reason, &retries, &failureCode); err != nil {
+		t.Fatalf("load immediate terminal delivery: %v", err)
+	}
+	if status != "dead_letter" || reason != "terminal_failure" || retries != 0 || failureCode != failure.Detail.Code {
+		t.Fatalf("terminal delivery status=%s reason=%s retries=%d failure=%s", status, reason, retries, failureCode)
 	}
 }
 

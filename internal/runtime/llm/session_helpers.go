@@ -20,16 +20,6 @@ func ensurePlatformSessionID(id string) string {
 	return uuid.NewString()
 }
 
-func sessionToken(s *Session) string {
-	if s == nil {
-		return ""
-	}
-	if sid := strings.TrimSpace(s.ProviderSessionID); sid != "" {
-		return sid
-	}
-	return strings.TrimSpace(s.ID)
-}
-
 func shouldPersistConversationMode(mode sessions.RuntimeMode) bool {
 	return true
 }
