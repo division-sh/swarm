@@ -63,6 +63,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/runtime.go:startSystemNodesAndWaitForSubscriptions:http_do:1":                                       ownerRuntimeDependency,
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                 ownerRuntimeDependency,
 	"internal/runtime/sessions/heartbeat.go:StartLeaseHeartbeatWithErrorHandler:http_do:1":                                ownerRuntimeDependency,
+	"internal/runtime/shutdown_admission.go:BeginContext:http_do:1":                                                       ownerRuntimeDependency,
 	"internal/runtime/testfixtures/fanoutpinroute/fixture.go:writeFile:filesystem_write:1":                                ownerBuildTest,
 	"internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go:writeFile:filesystem_write:1":                    ownerBuildTest,
 	"internal/runtime/testfixtures/sealedpackage/fixture.go:writeFile:filesystem_write:1":                                 ownerBuildTest,
