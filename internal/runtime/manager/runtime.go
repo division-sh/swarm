@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -831,10 +832,55 @@ func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error 
 	return nil
 }
 
+func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
+	if am == nil || am.bus == nil || am.lifecycle == nil {
+		return nil
+	}
+	store, ok := am.lifecycle.store.(AgentLifecycleDiagnosticPersistence)
+	if !ok || store == nil {
+		return nil
+	}
+	for {
+		items, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			detail := make(map[string]any, len(item.Payload)+3)
+			for key, value := range item.Payload {
+				detail[key] = value
+			}
+			detail["outbox_id"] = item.OutboxID
+			detail["operation_id"] = item.OperationID
+			detail["event_name"] = item.EventName
+			if err := am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level: "info", Component: "agent-lifecycle", Action: item.EventName,
+				AgentID: item.AgentID, Detail: detail,
+			}); err != nil {
+				return err
+			}
+			if err := store.MarkAgentLifecycleDiagnosticProjected(ctx, item.OutboxID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
+		if len(items) < 100 {
+			return nil
+		}
+	}
+}
+
 func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
 	summary := StartupReplaySummary{}
 	if am.store == nil {
 		return summary, nil
+	}
+	if recoveryStore, ok := am.lifecycle.store.(runtimeeffects.RecoveryStore); ok && recoveryStore != nil {
+		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, time.Now().UTC()); err != nil {
+			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
+		}
+	}
+	if err := am.projectLifecycleDiagnostics(ctx); err != nil {
+		return summary, fmt.Errorf("project lifecycle diagnostics: %w", err)
 	}
 
 	agents, err := am.store.LoadAgents(ctx)
@@ -1384,6 +1430,7 @@ func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent A
 	if err != nil {
 		return err
 	}
+	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 	if loopCtx == nil {
 		return nil
 	}
@@ -1400,6 +1447,7 @@ func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent A
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
+			_ = am.projectLifecycleDiagnostics(context.Background())
 		}()
 		consecutivePanics := 0
 		for {

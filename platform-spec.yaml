@@ -27422,7 +27422,7 @@ agent_lifecycle_authority:
     operation_identity: Derived from agent id and candidate config revision.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
-    rule: Recovery hydrates only durable non-terminal cells and reconciles operation/outbox state without inferring success from process-local loop presence.
+    rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
   forbidden:
     - direct lifecycle map writes outside the coordinator
     - memory-only fallback for a selected persistent runtime store
@@ -27446,6 +27446,10 @@ managed_external_effect_authority:
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
     postlaunch_write_or_unknown_failure: platform.outcome_uncertain with an adapter-specific detail; automatic redispatch is forbidden.
     mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
+  recovery:
+    authorized: An authorized attempt has proven no primitive launch because durable launched state is committed before dispatch; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
+    launched_or_response_observed: Startup settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch.
+    terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   automatic_redispatch_allowlist: []
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]

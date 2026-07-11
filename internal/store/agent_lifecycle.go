@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -14,6 +15,80 @@ import (
 
 var _ runtimemanager.AgentLifecyclePersistence = (*PostgresStore)(nil)
 var _ runtimemanager.AgentLifecyclePersistence = (*SQLiteRuntimeStore)(nil)
+var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*PostgresStore)(nil)
+var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*SQLiteRuntimeStore)(nil)
+
+func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT outbox_id::text, operation_id::text, agent_id, event_name, payload, created_at FROM agent_lifecycle_diagnostic_outbox WHERE projected_at IS NULL ORDER BY created_at, outbox_id LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgentLifecycleDiagnostics(rows)
+}
+
+func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT outbox_id, operation_id, agent_id, event_name, payload, created_at FROM agent_lifecycle_diagnostic_outbox WHERE projected_at IS NULL ORDER BY created_at, outbox_id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgentLifecycleDiagnostics(rows)
+}
+
+func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	out := make([]runtimemanager.AgentLifecycleDiagnostic, 0)
+	for rows.Next() {
+		var item runtimemanager.AgentLifecycleDiagnostic
+		var raw []byte
+		var rawCreatedAt any
+		if err := rows.Scan(&item.OutboxID, &item.OperationID, &item.AgentID, &item.EventName, &raw, &rawCreatedAt); err != nil {
+			return nil, err
+		}
+		createdAt, _, err := storeTimeValue(rawCreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("decode lifecycle diagnostic created_at: %w", err)
+		}
+		item.CreatedAt = createdAt
+		if err := json.Unmarshal(raw, &item.Payload); err != nil {
+			return nil, fmt.Errorf("decode lifecycle diagnostic payload: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
+	return requireSingleLifecycleDiagnosticProjection(res, err)
+}
+
+func (s *SQLiteRuntimeStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
+	return s.runRuntimeMutation(ctx, "sqlite mark lifecycle diagnostic projected", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = ? WHERE outbox_id = ? AND projected_at IS NULL`, at.UTC(), outboxID)
+		return requireSingleLifecycleDiagnosticProjection(res, err)
+	})
+}
+
+func requireSingleLifecycleDiagnosticProjection(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("lifecycle diagnostic projection conflict")
+	}
+	return nil
+}
 
 func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	if err := validateLifecycleTransition(req); err != nil {

@@ -14,6 +14,34 @@ import (
 
 var _ runtimeeffects.Store = (*PostgresStore)(nil)
 var _ runtimeeffects.Store = (*SQLiteRuntimeStore)(nil)
+var _ runtimeeffects.RecoveryStore = (*PostgresStore)(nil)
+var _ runtimeeffects.RecoveryStore = (*SQLiteRuntimeStore)(nil)
+
+func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	defer tx.Rollback()
+	summary, err := reconcileExternalEffectAttemptsPostgres(ctx, tx, now.UTC())
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	return summary, nil
+}
+
+func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	var summary runtimeeffects.RecoverySummary
+	err := s.runRuntimeMutation(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, tx, now.UTC())
+		return err
+	})
+	return summary, err
+}
 
 func (s *PostgresStore) IsLifecycleTokenCurrent(ctx context.Context, token runtimeeffects.LifecycleToken) (bool, error) {
 	var epoch int64
@@ -286,3 +314,76 @@ func nullableJSON(raw []byte) any {
 }
 
 func sqliteNullableJSON(raw []byte) any { return nullableJSON(raw) }
+
+func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now time.Time) ([]byte, error) {
+	err := runtimefailures.New(class, code, "external-effects", "startup_reconcile", map[string]any{"recovered_at": now.UTC().Format(time.RFC3339Nano)})
+	envelope, ok := runtimefailures.EnvelopeFromError(err)
+	if !ok {
+		return nil, fmt.Errorf("construct external effect recovery failure")
+	}
+	return json.Marshal(envelope)
+}
+
+func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	prelaunchFailure, err := externalEffectRecoveryFailure(runtimefailures.ClassLifecycleConflict, "effect_recovery_prelaunch_abandoned", now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	uncertainFailure, err := externalEffectRecoveryFailure(runtimefailures.ClassOutcomeUncertain, "effect_recovery_outcome_unconfirmed", now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state='terminal_failure', completed_at=$1, updated_at=$1 WHERE state='authorized' AND operation_id IN (SELECT operation_id FROM agent_external_effect_attempts WHERE state='authorized')`, now); err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	prelaunch, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state='terminal_failure', failure=$1::jsonb, completed_at=$2, updated_at=$2 WHERE state='authorized'`, string(prelaunchFailure), now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state='outcome_uncertain', completed_at=$1, updated_at=$1 WHERE state IN ('launched','response_observed') AND operation_id IN (SELECT operation_id FROM agent_external_effect_attempts WHERE state IN ('launched','response_observed'))`, now); err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	uncertain, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state='outcome_uncertain', failure=$1::jsonb, completed_at=$2, updated_at=$2 WHERE state IN ('launched','response_observed')`, string(uncertainFailure), now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	return externalEffectRecoverySummary(prelaunch, uncertain)
+}
+
+func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	prelaunchFailure, err := externalEffectRecoveryFailure(runtimefailures.ClassLifecycleConflict, "effect_recovery_prelaunch_abandoned", now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	uncertainFailure, err := externalEffectRecoveryFailure(runtimefailures.ClassOutcomeUncertain, "effect_recovery_outcome_unconfirmed", now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state='terminal_failure', completed_at=?, updated_at=? WHERE state='authorized' AND operation_id IN (SELECT operation_id FROM agent_external_effect_attempts WHERE state='authorized')`, now, now); err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	prelaunch, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state='terminal_failure', failure=?, completed_at=?, updated_at=? WHERE state='authorized'`, string(prelaunchFailure), now, now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_operations SET state='outcome_uncertain', completed_at=?, updated_at=? WHERE state IN ('launched','response_observed') AND operation_id IN (SELECT operation_id FROM agent_external_effect_attempts WHERE state IN ('launched','response_observed'))`, now, now); err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	uncertain, err := tx.ExecContext(ctx, `UPDATE agent_external_effect_attempts SET state='outcome_uncertain', failure=?, completed_at=?, updated_at=? WHERE state IN ('launched','response_observed')`, string(uncertainFailure), now, now)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	return externalEffectRecoverySummary(prelaunch, uncertain)
+}
+
+func externalEffectRecoverySummary(prelaunch, uncertain sql.Result) (runtimeeffects.RecoverySummary, error) {
+	prelaunchRows, err := prelaunch.RowsAffected()
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	uncertainRows, err := uncertain.RowsAffected()
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	return runtimeeffects.RecoverySummary{PrelaunchTerminal: int(prelaunchRows), OutcomeUncertain: int(uncertainRows)}, nil
+}

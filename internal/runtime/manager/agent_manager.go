@@ -308,6 +308,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	}
 	am.agentUpAt[a.ID()] = startedAt
 	am.mu.Unlock()
+	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
 
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
@@ -490,6 +491,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	if err := am.lifecycle.terminate(am.runtimeContext(), agentID, "teardown", AgentLifecycleTerminated); err != nil {
 		return err
 	}
+	_ = am.projectLifecycleDiagnostics(context.Background())
 
 	am.mu.Lock()
 	delete(am.agents, agentID)
