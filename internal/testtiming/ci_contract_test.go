@@ -109,6 +109,7 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		"permission-pull-requests: write",
 		"automation/test-timing-model",
 		"git diff --name-only",
+		"repos/division-sh/swarm/contents/.github/test-timing-weights.json",
 		"gh workflow run ci.yml",
 		"human review and normal protection required",
 	} {
@@ -116,7 +117,7 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 			t.Fatalf("publisher contract missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"gh pr merge", "git push origin master", "GH_PAT", "PERSONAL_ACCESS_TOKEN"} {
+	for _, forbidden := range []string{"gh pr merge", "git push origin master", "git commit", "GH_PAT", "PERSONAL_ACCESS_TOKEN"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("publisher retains forbidden authority %q", forbidden)
 		}

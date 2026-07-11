@@ -413,12 +413,19 @@ jobs:
             -changed-files test-results/generated-diff.txt
 
           branch=automation/test-timing-model
-          git config user.name division-sh-swarm-timing-publisher[bot]
-          git config user.email 227853450+division-sh-swarm-timing-publisher[bot]@users.noreply.github.com
-          git checkout -B "$branch"
-          git add .github/test-timing-weights.json
-          git commit -m "test: refresh generated timing weights"
-          git push --force-with-lease origin "$branch"
+          ref="heads/$branch"
+          if gh api "repos/division-sh/swarm/git/ref/$ref" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/division-sh/swarm/git/refs/$ref" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST repos/division-sh/swarm/git/refs \
+              -f ref="refs/$ref" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          blob_sha=$(gh api "repos/division-sh/swarm/contents/.github/test-timing-weights.json?ref=$branch" --jq .sha)
+          content=$(base64 < .github/test-timing-weights.json | tr -d '\n')
+          gh api --method PUT repos/division-sh/swarm/contents/.github/test-timing-weights.json \
+            -f message="test: refresh generated timing weights" \
+            -f content="$content" -f branch="$branch" -f sha="$blob_sha" >/dev/null
 
           pr=$(gh pr list --head "division-sh:$branch" --base master --state open --json number --jq '.[0].number // empty')
           if [ -z "$pr" ]; then
