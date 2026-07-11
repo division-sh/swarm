@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -614,6 +615,57 @@ func TestRuntimeLogProjectionPreservesMismatchedResidualEvidence(t *testing.T) {
 	}
 }
 
+func TestRuntimeLogFailureEquivalencePreservesExactLargeNumbers(t *testing.T) {
+	topFailure := runtimeLogDataLimitFailure(t, "9007199254740992")
+	identicalFailure := runtimeLogDataLimitFailure(t, "9007199254740992")
+	distinctFailure := runtimeLogDataLimitFailure(t, "9007199254740993")
+
+	for _, tc := range []struct {
+		name            string
+		detailFailure   json.RawMessage
+		wantResidual    bool
+		wantLimitNumber string
+	}{
+		{name: "identical large number deduplicates", detailFailure: identicalFailure},
+		{name: "distinct large number remains", detailFailure: distinctFailure, wantResidual: true, wantLimitNumber: "9007199254740993"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := fmt.Sprintf(`{
+				"log_id":"log-large-number",
+				"ts":"2026-05-19T10:00:01Z",
+				"level":"error",
+				"component":"runtime",
+				"source":"runtime",
+				"failure":%s,
+				"message":"Data limit exceeded",
+				"details":{"failure":%s}
+			}`, topFailure, tc.detailFailure)
+			var log runtimeLogEntry
+			if err := json.Unmarshal([]byte(raw), &log); err != nil {
+				t.Fatalf("decode runtime log: %v", err)
+			}
+			projection, err := projectRuntimeLogEntry("test", log)
+			if err != nil {
+				t.Fatalf("project runtime log: %v", err)
+			}
+			residualFailure, exists := projection.ResidualDetails["failure"]
+			if exists != tc.wantResidual {
+				t.Fatalf("residual failure exists=%t, want %t: %#v", exists, tc.wantResidual, projection.ResidualDetails)
+			}
+			if !tc.wantResidual {
+				return
+			}
+			failureMap := residualFailure.(map[string]any)
+			detail := failureMap["detail"].(map[string]any)
+			attributes := detail["attributes"].(map[string]any)
+			limit, ok := attributes["limit"].(json.Number)
+			if !ok || limit.String() != tc.wantLimitNumber {
+				t.Fatalf("residual limit = %#v, want exact json.Number(%s)", attributes["limit"], tc.wantLimitNumber)
+			}
+		})
+	}
+}
+
 func TestRuntimeLogSnapshotProjectionCoversMixedRowsDatesAndFailures(t *testing.T) {
 	failureRaw, _ := runtimeLogTestFailure(t)
 	exactMessage := "Event was published to the event bus"
@@ -939,6 +991,30 @@ func runtimeLogTestFailure(t *testing.T) (json.RawMessage, map[string]any) {
 		t.Fatalf("decode test failure: %v", err)
 	}
 	return raw, value
+}
+
+func runtimeLogDataLimitFailure(t *testing.T, limit string) json.RawMessage {
+	t.Helper()
+	failure := runtimefailures.Normalize(
+		runtimefailures.New(
+			runtimefailures.ClassDataLimitExceeded,
+			"limit",
+			"runtime",
+			"read",
+			map[string]any{
+				"limit_kind": "bytes",
+				"limit":      json.Number(limit),
+				"actual":     json.Number(limit),
+			},
+		),
+		"runtime",
+		"read",
+	)
+	raw, err := runtimefailures.MarshalEnvelope(failure)
+	if err != nil {
+		t.Fatalf("marshal data-limit failure: %v", err)
+	}
+	return raw
 }
 
 func writeRuntimeLogJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {

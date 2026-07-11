@@ -241,6 +241,89 @@ func TestConversationTurnRuntimeLogProjection(t *testing.T) {
 	}
 }
 
+func TestConversationTurnJSONPreservesCanonicalRuntimeLogShape(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	failureRaw := runtimeLogDataLimitFailure(t, "9007199254740993")
+	failureValue, err := runtimeLogDecodeJSONValue(failureRaw)
+	if err != nil {
+		t.Fatalf("decode failure fixture: %v", err)
+	}
+	const (
+		fullLogID     = "log-1234567890abcdef"
+		fullRunID     = "run-1234567890abcdef"
+		fullEntityID  = "entity-1234567890abcdef"
+		fullSessionID = "session-1234567890abcdef"
+		fullTimestamp = "2026-05-20T01:01:01.123456789-03:00"
+		exactMessage  = "Event was published to the event bus"
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		result := validConversationTurnDetail("sess-1", 2)
+		turn := result["turn"].(map[string]any)
+		log := turn["runtime_log_entries"].([]map[string]any)[0]
+		log["log_id"] = fullLogID
+		log["ts"] = fullTimestamp
+		log["component"] = "eventbus"
+		log["run_id"] = fullRunID
+		log["entity_id"] = fullEntityID
+		log["session_id"] = fullSessionID
+		log["failure"] = failureValue
+		log["message"] = exactMessage
+		log["details"] = map[string]any{
+			"action":   "published",
+			"run_id":   fullRunID,
+			"failure":  failureValue,
+			"evidence": json.Number("9007199254740993"),
+		}
+		writeJSONRPCResult(t, w, req.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", "2", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	decoded, err := runtimeLogDecodeJSONValue(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode CLI JSON: %v\n%s", err, stdout.String())
+	}
+	result := decoded.(map[string]any)
+	turn := result["turn"].(map[string]any)
+	logs := turn["runtime_log_entries"].([]any)
+	if len(logs) != 1 {
+		t.Fatalf("runtime_log_entries = %#v", logs)
+	}
+	log := logs[0].(map[string]any)
+	for key, want := range map[string]string{
+		"log_id": fullLogID, "ts": fullTimestamp, "run_id": fullRunID,
+		"entity_id": fullEntityID, "session_id": fullSessionID, "message": exactMessage,
+	} {
+		if got := log[key]; got != want {
+			t.Errorf("runtime log %s = %#v, want %q", key, got, want)
+		}
+	}
+	if !reflect.DeepEqual(log["failure"], failureValue) {
+		t.Errorf("top-level failure changed:\ngot:  %#v\nwant: %#v", log["failure"], failureValue)
+	}
+	details := log["details"].(map[string]any)
+	if details["action"] != "published" || details["run_id"] != fullRunID || !reflect.DeepEqual(details["failure"], failureValue) {
+		t.Errorf("machine details were projected or elided: %#v", details)
+	}
+	if evidence, ok := details["evidence"].(json.Number); !ok || evidence.String() != "9007199254740993" {
+		t.Errorf("details.evidence = %#v, want exact large json.Number", details["evidence"])
+	}
+	failure := log["failure"].(map[string]any)
+	if failure["class"] != "platform.data_limit_exceeded" {
+		t.Errorf("failure.class = %#v, want canonical machine class", failure["class"])
+	}
+	if strings.Contains(stdout.String(), `"failure":"data_limit_exceeded/limit"`) {
+		t.Fatalf("human failure projection leaked into JSON: %s", stdout.String())
+	}
+}
+
 func TestConversationTurnMalformedRuntimeLogFailureIsVisibleAndFailsClosed(t *testing.T) {
 	for _, args := range [][]string{
 		{"conversation", "turn", "sess-1", "2"},
