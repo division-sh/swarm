@@ -413,19 +413,34 @@ jobs:
             -changed-files test-results/generated-diff.txt
 
           branch=automation/test-timing-model
+          staging_branch=automation/test-timing-model-build
           ref="heads/$branch"
-          if gh api "repos/division-sh/swarm/git/ref/$ref" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/division-sh/swarm/git/refs/$ref" \
+          staging_ref="heads/$staging_branch"
+          cleanup_staging() {
+            gh api --method DELETE "repos/division-sh/swarm/git/refs/$staging_ref" >/dev/null 2>&1 || true
+          }
+          trap cleanup_staging EXIT
+          if gh api "repos/division-sh/swarm/git/ref/$staging_ref" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/division-sh/swarm/git/refs/$staging_ref" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
           else
             gh api --method POST repos/division-sh/swarm/git/refs \
-              -f ref="refs/$ref" -f sha="$GITHUB_SHA" >/dev/null
+              -f ref="refs/$staging_ref" -f sha="$GITHUB_SHA" >/dev/null
           fi
-          blob_sha=$(gh api "repos/division-sh/swarm/contents/.github/test-timing-weights.json?ref=$branch" --jq .sha)
+          blob_sha=$(gh api "repos/division-sh/swarm/contents/.github/test-timing-weights.json?ref=$staging_branch" --jq .sha)
           content=$(base64 < .github/test-timing-weights.json | tr -d '\n')
-          gh api --method PUT repos/division-sh/swarm/contents/.github/test-timing-weights.json \
+          generated_sha=$(gh api --method PUT repos/division-sh/swarm/contents/.github/test-timing-weights.json \
             -f message="test: refresh generated timing weights" \
-            -f content="$content" -f branch="$branch" -f sha="$blob_sha" >/dev/null
+            -f content="$content" -f branch="$staging_branch" -f sha="$blob_sha" --jq .commit.sha)
+          if gh api "repos/division-sh/swarm/git/ref/$ref" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/division-sh/swarm/git/refs/$ref" \
+              -f sha="$generated_sha" -F force=true >/dev/null
+          else
+            gh api --method POST repos/division-sh/swarm/git/refs \
+              -f ref="refs/$ref" -f sha="$generated_sha" >/dev/null
+          fi
+          cleanup_staging
+          trap - EXIT
 
           pr=$(gh pr list --head "division-sh:$branch" --base master --state open --json number --jq '.[0].number // empty')
           if [ -z "$pr" ]; then
