@@ -126,6 +126,110 @@ func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *tes
 	}
 }
 
+func TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	probe.failNext = fmt.Errorf("injected spawn persistence failure")
+	coordinator := newAgentLifecycleCoordinator(probe)
+	rec := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), rec, true); err == nil {
+		t.Fatal("register succeeded despite persistence failure")
+	}
+	coordinator.mu.Lock()
+	_, exists := coordinator.cells[rec.Config.ID]
+	coordinator.mu.Unlock()
+	if exists {
+		t.Fatal("spawn persistence failure published a lifecycle cell")
+	}
+}
+
+func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe)
+	rec := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), rec, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	coordinator.beginRun(context.Background(), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	probe.mu.Lock()
+	probe.failNext = fmt.Errorf("injected teardown persistence failure")
+	probe.mu.Unlock()
+	if err := coordinator.terminate(context.Background(), rec.Config.ID, "teardown", AgentLifecycleTerminated); err == nil {
+		t.Fatal("teardown succeeded despite persistence failure")
+	}
+	select {
+	case <-loopCtx.Done():
+		t.Fatal("teardown persistence failure cancelled the current loop")
+	default:
+	}
+	if current, ok := coordinator.token(rec.Config.ID); !ok || current != token {
+		t.Fatalf("current token = %+v ok=%v, want %+v", current, ok, token)
+	}
+	coordinator.cancelShutdownWork()
+	if err := coordinator.releaseLoop(token, done); err != nil {
+		t.Fatalf("release loop: %v", err)
+	}
+}
+
+func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe)
+	rec := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), rec, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	coordinator.beginRun(context.Background(), AgentRunModeStandard)
+	initialCtx, initialToken, initialDone, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	go func() {
+		<-initialCtx.Done()
+		_ = coordinator.releaseLoop(initialToken, initialDone)
+	}()
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		loopCtx, token, done, restartErr := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", uuid.NewString(), nil)
+		if restartErr == nil && loopCtx != nil {
+			go func() {
+				<-loopCtx.Done()
+				_ = coordinator.releaseLoop(token, done)
+			}()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_ = coordinator.terminate(context.Background(), rec.Config.ID, "teardown", AgentLifecycleTerminated)
+	}()
+	close(start)
+	wg.Wait()
+
+	if token, ok := coordinator.token(rec.Config.ID); ok {
+		t.Fatalf("restart-versus-teardown left live token %+v", token)
+	}
+	coordinator.mu.Lock()
+	cell := coordinator.cells[rec.Config.ID]
+	var phase AgentLifecyclePhase
+	var cancel context.CancelFunc
+	var done chan struct{}
+	if cell != nil {
+		phase, cancel, done = cell.phase, cell.cancel, cell.done
+	}
+	coordinator.mu.Unlock()
+	if cell == nil || phase != AgentLifecycleTerminated || cancel != nil || done != nil {
+		t.Fatalf("final lifecycle cell phase=%s cancel=%v done=%v, want terminated without loop owner", phase, cancel != nil, done != nil)
+	}
+}
+
 func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe)
