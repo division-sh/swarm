@@ -50,20 +50,6 @@ type runtimeLogListResult struct {
 	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
-type runtimeLogEntry struct {
-	LogID     string         `json:"log_id"`
-	TS        string         `json:"ts"`
-	Level     string         `json:"level"`
-	Component string         `json:"component"`
-	Source    string         `json:"source"`
-	RunID     string         `json:"run_id,omitempty"`
-	EntityID  string         `json:"entity_id,omitempty"`
-	SessionID string         `json:"session_id,omitempty"`
-	ErrorCode string         `json:"error_code,omitempty"`
-	Message   *string        `json:"message"`
-	Details   map[string]any `json:"details,omitempty"`
-}
-
 type runtimeLogSubscriptionResult struct {
 	SubscriptionID string `json:"subscription_id"`
 }
@@ -153,7 +139,9 @@ func runLogsSnapshotCommand(ctx context.Context, out, errOut io.Writer, opts run
 	if err := validateRuntimeLogListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, runtimeLogErrorClassifier())
 	}
-	writeRuntimeLogListResult(out, result)
+	if err := writeRuntimeLogListResult(out, result, params); err != nil {
+		return returnCLIAPIError(errOut, err, runtimeLogErrorClassifier())
+	}
 	return nil
 }
 
@@ -175,6 +163,7 @@ func runLogsFollowCommand(ctx context.Context, out, errOut io.Writer, opts runti
 		return returnCLIAPIError(errOut, err, runtimeLogErrorClassifier())
 	}
 	defer sub.close()
+	lastDate := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -191,7 +180,11 @@ func runLogsFollowCommand(ctx context.Context, out, errOut io.Writer, opts runti
 				}
 				return nil
 			}
-			writeRuntimeLogFollowEntry(out, log)
+			var err error
+			lastDate, err = writeRuntimeLogFollowEntry(out, log, lastDate)
+			if err != nil {
+				return returnCLIAPIError(errOut, err, runtimeLogErrorClassifier())
+			}
 		case err := <-sub.errs:
 			if err != nil {
 				return returnCLIAPIError(errOut, err, runtimeLogErrorClassifier())
@@ -341,6 +334,9 @@ func validateRuntimeLogEntry(prefix string, log runtimeLogEntry) error {
 	if log.Message == nil {
 		return fmt.Errorf("malformed %s: message is required", prefix)
 	}
+	if _, err := projectRuntimeLogEntry(prefix, log); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -447,46 +443,112 @@ func (s *runtimeLogSubscription) close() {
 	_ = s.conn.Close()
 }
 
-func writeRuntimeLogListResult(out io.Writer, result runtimeLogListResult) {
+func writeRuntimeLogListResult(out io.Writer, result runtimeLogListResult, params map[string]any) error {
 	if out == nil {
-		return
+		return nil
 	}
 	if len(result.Logs) == 0 {
-		fmt.Fprintln(out, "No runtime logs match the filter.")
-		return
+		writeCLIEmptyState(out, runtimeLogEmptyMessage(params))
+		return nil
 	}
-	fmt.Fprintln(out, "TIME\tLEVEL\tCOMPONENT\tACTION\tSOURCE\tRUN\tENTITY\tSESSION\tERROR\tMESSAGE")
-	for _, log := range result.Logs {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			log.TS,
-			log.Level,
-			log.Component,
-			runtimeLogDash(runtimeLogAction(log)),
-			log.Source,
-			runtimeLogDash(log.RunID),
-			runtimeLogDash(log.EntityID),
-			runtimeLogDash(log.SessionID),
-			runtimeLogDash(log.ErrorCode),
-			runtimeLogMessage(log),
-		)
+
+	type projectedRow struct {
+		log        runtimeLogEntry
+		projection runtimeLogSemanticProjection
+		date       string
+		time       string
+	}
+	rows := make([]projectedRow, 0, len(result.Logs))
+	dates := map[string]struct{}{}
+	showAction, showRun, showEntity, showSession, showFailure, showMessage := false, false, false, false, false, false
+	for i, log := range result.Logs {
+		projection, err := projectRuntimeLogEntry(fmt.Sprintf("runtime.logs result: logs[%d]", i), log)
+		if err != nil {
+			return err
+		}
+		date, clock, err := runtimeLogDisplayTime(log.TS)
+		if err != nil {
+			return err
+		}
+		dates[date] = struct{}{}
+		showAction = showAction || projection.Action != ""
+		showRun = showRun || strings.TrimSpace(log.RunID) != ""
+		showEntity = showEntity || strings.TrimSpace(log.EntityID) != ""
+		showSession = showSession || strings.TrimSpace(log.SessionID) != ""
+		showFailure = showFailure || projection.Failure != ""
+		showMessage = showMessage || projection.MessageVisible
+		rows = append(rows, projectedRow{log: log, projection: projection, date: date, time: clock})
+	}
+
+	type column struct {
+		spec    cliTableColumn
+		include bool
+		value   func(projectedRow) string
+	}
+	columns := []column{
+		{spec: cliTableColumn{Header: "DATE"}, include: len(dates) > 1, value: func(row projectedRow) string { return row.date }},
+		{spec: cliTableColumn{Header: "TIME"}, include: true, value: func(row projectedRow) string { return row.time }},
+		{spec: cliTableColumn{Header: "LEVEL"}, include: true, value: func(row projectedRow) string { return row.log.Level }},
+		{spec: cliTableColumn{Header: "COMPONENT"}, include: true, value: func(row projectedRow) string { return row.log.Component }},
+		{spec: cliTableColumn{Header: "ACTION"}, include: showAction, value: func(row projectedRow) string { return row.projection.Action }},
+		{spec: cliTableColumn{Header: "SOURCE"}, include: true, value: func(row projectedRow) string { return row.log.Source }},
+		{spec: cliTableColumn{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun}, include: showRun, value: func(row projectedRow) string { return row.log.RunID }},
+		{spec: cliTableColumn{Header: "ENTITY", IdentifierFamily: cliIdentifierFamilyEntity}, include: showEntity, value: func(row projectedRow) string { return row.log.EntityID }},
+		{spec: cliTableColumn{Header: "SESSION", IdentifierFamily: cliIdentifierFamilySession}, include: showSession, value: func(row projectedRow) string { return row.log.SessionID }},
+		{spec: cliTableColumn{Header: "FAILURE", Truncatable: true}, include: showFailure, value: func(row projectedRow) string { return row.projection.Failure }},
+		{spec: cliTableColumn{Header: "MESSAGE", Truncatable: true}, include: showMessage, value: func(row projectedRow) string {
+			if !row.projection.MessageVisible {
+				return ""
+			}
+			return row.projection.Message
+		}},
+	}
+	table := cliTable{}
+	for _, candidate := range columns {
+		if candidate.include {
+			table.Columns = append(table.Columns, candidate.spec)
+		}
+	}
+	for _, row := range rows {
+		values := make([]string, 0, len(table.Columns))
+		for _, candidate := range columns {
+			if candidate.include {
+				values = append(values, candidate.value(row))
+			}
+		}
+		table.Rows = append(table.Rows, values)
 	}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		table.FooterLines = []string{"Next cursor: " + result.NextCursor}
 	}
+	writeCLITable(out, table)
+	return nil
 }
 
-func writeRuntimeLogFollowEntry(out io.Writer, log runtimeLogEntry) {
+func writeRuntimeLogFollowEntry(out io.Writer, log runtimeLogEntry, lastDate string) (string, error) {
 	if out == nil {
-		return
+		return lastDate, nil
+	}
+	projection, err := projectRuntimeLogEntry("runtime.subscribe_logs notification", log)
+	if err != nil {
+		return lastDate, err
+	}
+	date, clock, err := runtimeLogDisplayTime(log.TS)
+	if err != nil {
+		return lastDate, err
+	}
+	if date != lastDate {
+		fmt.Fprintf(out, "--- %s UTC ---\n", date)
+		lastDate = date
 	}
 	fields := []string{
 		"log_id=" + log.LogID,
-		"ts=" + log.TS,
+		"ts=" + clock,
 		"level=" + log.Level,
 		"component=" + log.Component,
 	}
-	if action := runtimeLogAction(log); action != "" {
-		fields = append(fields, "action="+action)
+	if projection.Action != "" {
+		fields = append(fields, "action="+projection.Action)
 	}
 	fields = append(fields, "source="+log.Source)
 	if log.RunID != "" {
@@ -498,14 +560,52 @@ func writeRuntimeLogFollowEntry(out io.Writer, log runtimeLogEntry) {
 	if log.SessionID != "" {
 		fields = append(fields, "session_id="+log.SessionID)
 	}
-	if log.ErrorCode != "" {
-		fields = append(fields, "error_code="+log.ErrorCode)
+	if projection.Failure != "" {
+		fields = append(fields, "failure="+projection.Failure)
 	}
-	fields = append(fields, "message="+runtimeLogMessage(log))
-	if len(log.Details) > 0 {
-		fields = append(fields, "details="+runtimeLogCompactJSON(log.Details))
+	if projection.MessageVisible {
+		fields = append(fields, "message="+projection.Message)
+	}
+	if len(projection.ResidualDetails) > 0 {
+		fields = append(fields, "details="+runtimeLogCompactJSON(projection.ResidualDetails))
 	}
 	fmt.Fprintf(out, "log %s\n", strings.Join(fields, " "))
+	return lastDate, nil
+}
+
+func runtimeLogDisplayTime(raw string) (string, string, error) {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", fmt.Errorf("malformed runtime log timestamp %q: %w", raw, err)
+	}
+	at = at.UTC()
+	return at.Format("2006-01-02"), at.Format("15:04:05.000"), nil
+}
+
+func runtimeLogEmptyMessage(params map[string]any) string {
+	var filters []string
+	for _, item := range []struct {
+		param string
+		flag  string
+	}{
+		{param: "run_id", flag: "--run-id"},
+		{param: "entity_id", flag: "--entity-id"},
+		{param: "session_id", flag: "--session-id"},
+		{param: "component", flag: "--component"},
+		{param: "level", flag: "--level"},
+		{param: "error_code", flag: "--error-code"},
+		{param: "source", flag: "--source"},
+		{param: "since", flag: "--since"},
+		{param: "until", flag: "--until"},
+	} {
+		if value := strings.TrimSpace(fmt.Sprint(params[item.param])); value != "" && value != "<nil>" {
+			filters = append(filters, item.flag+" "+value)
+		}
+	}
+	if len(filters) == 0 {
+		return "No runtime log entries have been recorded."
+	}
+	return "No log entries match " + strings.Join(filters, " ") + ". Remove filters or widen the time range."
 }
 
 func runtimeLogCompactJSON(value map[string]any) string {
@@ -514,14 +614,6 @@ func runtimeLogCompactJSON(value map[string]any) string {
 		return "{}"
 	}
 	return string(raw)
-}
-
-func runtimeLogDash(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "-"
-	}
-	return value
 }
 
 func runtimeLogAction(log runtimeLogEntry) string {

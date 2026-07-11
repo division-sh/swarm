@@ -12,11 +12,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLogsUsesRuntimeLogsV1RPCWithSnapshotFilters(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
+	_, failureValue := runtimeLogTestFailure(t)
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -28,8 +31,11 @@ func TestLogsUsesRuntimeLogsV1RPCWithSnapshotFilters(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		log := validRuntimeLogEntry("log-1")
+		log["failure"] = failureValue
+		log["details"] = map[string]any{"attempt": 2, "action": "delivery_failed", "failure": failureValue}
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"logs":        []any{validRuntimeLogEntry("log-1")},
+			"logs":        []any{log},
 			"next_cursor": "log-cursor-2",
 		})
 	}))
@@ -74,7 +80,7 @@ func TestLogsUsesRuntimeLogsV1RPCWithSnapshotFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"TIME", "ACTION", "delivery_failed", "log message", "run-1", "entity-1", "session-1", "DELIVERY_FAILED", "next_cursor=log-cursor-2"} {
+	for _, want := range []string{"TIME", "ACTION", "delivery_failed", "connector_failure/waiting", "log message", "run-1", "entity-1", "session-1", "Next cursor: log-cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -128,13 +134,53 @@ func TestLogsFollowUsesRuntimeSubscribeLogsV1WS(t *testing.T) {
 	if !reflect.DeepEqual(req.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
 	}
-	for _, want := range []string{"log log_id=log-live-1", "action=delivery_failed", "run_id=run-1", "message=log message", "details={\"action\":\"delivery_failed\",\"attempt\":2}"} {
+	for _, want := range []string{"--- 2026-05-19 UTC ---", "log log_id=log-live-1", "ts=10:00:01.000", "action=delivery_failed", "run_id=run-1", "message=log message", "details={\"attempt\":2}"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestLogsFollowProjectsExactMessageAndValidFailureThroughWebSocket(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	_, failureValue := runtimeLogTestFailure(t)
+	exact := validRuntimeLogEntry("log-exact")
+	exact["component"] = "eventbus"
+	exact["message"] = "Event was published to the event bus"
+	exact["details"] = map[string]any{"action": "published"}
+	failing := validRuntimeLogEntry("log-failure")
+	failing["component"] = "connector"
+	failing["message"] = "Connector request failed"
+	failing["failure"] = failureValue
+	failing["details"] = map[string]any{"action": "request_failed", "failure": failureValue}
+
+	server, _ := newRuntimeLogWSServer(t, runtimeLogWSServerOptions{
+		logs:           []map[string]any{exact, failing},
+		closeAfterRows: true,
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"logs", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{
+		"log_id=log-exact ts=10:00:01.000 level=info component=eventbus action=published source=runtime",
+		"log_id=log-failure ts=10:00:01.000 level=info component=connector action=request_failed source=runtime",
+		"failure=connector_failure/waiting",
+		"message=Connector request failed",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "message=Event was published to the event bus") {
+		t.Fatalf("stdout retained exact redundant message:\n%s", text)
 	}
 }
 
@@ -417,20 +463,316 @@ func TestLogsRenderMissingActionGracefully(t *testing.T) {
 	}
 
 	var snapshot bytes.Buffer
-	writeRuntimeLogListResult(&snapshot, runtimeLogListResult{Logs: []runtimeLogEntry{log}})
-	for _, want := range []string{"ACTION", "scheduler\t-\truntime", "without action"} {
+	if err := writeRuntimeLogListResult(&snapshot, runtimeLogListResult{Logs: []runtimeLogEntry{log}}, nil); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	for _, want := range []string{"TIME", "scheduler", "runtime", "without action"} {
 		if !strings.Contains(snapshot.String(), want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, snapshot.String())
 		}
 	}
+	if strings.Contains(snapshot.String(), "ACTION") {
+		t.Fatalf("snapshot = %q, want page-empty ACTION elided", snapshot.String())
+	}
 
 	var follow bytes.Buffer
-	writeRuntimeLogFollowEntry(&follow, log)
+	if _, err := writeRuntimeLogFollowEntry(&follow, log, ""); err != nil {
+		t.Fatalf("write follow: %v", err)
+	}
 	if strings.Contains(follow.String(), "action=") {
 		t.Fatalf("follow = %q, want no action field", follow.String())
 	}
 	if !strings.Contains(follow.String(), "source=runtime") {
 		t.Fatalf("follow = %q, want source", follow.String())
+	}
+}
+
+func TestRuntimeLogProjectionExactMessageAndResidualDetails(t *testing.T) {
+	failureRaw, failureValue := runtimeLogTestFailure(t)
+	exactMessage := "Event was published to the event bus"
+	log := runtimeLogEntry{
+		LogID:     "log-1",
+		TS:        "2026-05-19T10:00:01Z",
+		Level:     "info",
+		Component: "eventbus",
+		Source:    "agent-1",
+		RunID:     "run-1",
+		EntityID:  "entity-1",
+		SessionID: "session-1",
+		Failure:   failureRaw,
+		Message:   &exactMessage,
+		Details: map[string]any{
+			"component":  "eventbus",
+			"action":     "published",
+			"agent_id":   "agent-1",
+			"run_id":     "run-1",
+			"entity_id":  "entity-1",
+			"session_id": "session-1",
+			"failure":    failureValue,
+			"attempt":    float64(2),
+		},
+	}
+
+	projection, err := projectRuntimeLogEntry("test", log)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if projection.Action != "published" || projection.MessageVisible {
+		t.Fatalf("projection = %#v, want published action and suppressed exact message", projection)
+	}
+	if projection.Failure != "connector_failure/waiting" {
+		t.Fatalf("failure = %q", projection.Failure)
+	}
+	if !reflect.DeepEqual(projection.ResidualDetails, map[string]any{"attempt": float64(2)}) {
+		t.Fatalf("residual details = %#v", projection.ResidualDetails)
+	}
+
+	nearMessage := exactMessage + "."
+	log.Message = &nearMessage
+	projection, err = projectRuntimeLogEntry("test", log)
+	if err != nil {
+		t.Fatalf("project near match: %v", err)
+	}
+	if !projection.MessageVisible || projection.Message != nearMessage {
+		t.Fatalf("near-match projection = %#v", projection)
+	}
+}
+
+func TestRuntimeLogRedundantMessageTuplesMatchSpec(t *testing.T) {
+	cli := loadCLISpecification(t)
+	catalog := driftMappingValue(cli, "command_catalog")
+	logs := driftMappingValue(catalog, "logs")
+	output := driftMappingValue(logs, "output")
+	projection := driftMappingValue(output, "semantic_projection")
+	tuples := driftMappingValue(projection, "exact_redundant_message_tuples")
+	if tuples == nil || tuples.Kind != yaml.SequenceNode {
+		t.Fatal("logs semantic projection exact_redundant_message_tuples must be a sequence")
+	}
+	want := map[runtimeLogMessageTuple]struct{}{}
+	for _, row := range tuples.Content {
+		want[runtimeLogMessageTuple{
+			Component: yamlScalar(t, row, "component"),
+			Action:    yamlScalar(t, row, "action"),
+			Message:   yamlScalar(t, row, "message"),
+		}] = struct{}{}
+	}
+	if !reflect.DeepEqual(runtimeLogRedundantMessageTuples, want) {
+		t.Fatalf("runtime-log redundant-message registry differs from authoritative spec:\ngot:  %#v\nwant: %#v", runtimeLogRedundantMessageTuples, want)
+	}
+}
+
+func TestRuntimeLogProjectionPreservesMismatchedResidualEvidence(t *testing.T) {
+	failureRaw, failureValue := runtimeLogTestFailure(t)
+	message := "meaningful"
+	base := runtimeLogEntry{
+		LogID:     "log-1",
+		TS:        "2026-05-19T10:00:01Z",
+		Level:     "warn",
+		Component: "runtime",
+		Source:    "runtime",
+		RunID:     "run-1",
+		EntityID:  "entity-1",
+		SessionID: "session-1",
+		Failure:   failureRaw,
+		Message:   &message,
+	}
+
+	for _, tc := range []struct {
+		name  string
+		key   string
+		value any
+	}{
+		{name: "mismatched component", key: "component", value: "scheduler"},
+		{name: "malformed component", key: "component", value: map[string]any{"unexpected": true}},
+		{name: "malformed action", key: "action", value: map[string]any{"unexpected": true}},
+		{name: "mismatched agent", key: "agent_id", value: "agent-2"},
+		{name: "malformed agent", key: "agent_id", value: map[string]any{"unexpected": true}},
+		{name: "mismatched run", key: "run_id", value: "run-2"},
+		{name: "malformed run", key: "run_id", value: map[string]any{"unexpected": true}},
+		{name: "mismatched entity", key: "entity_id", value: "entity-2"},
+		{name: "malformed entity", key: "entity_id", value: map[string]any{"unexpected": true}},
+		{name: "mismatched session", key: "session_id", value: "session-2"},
+		{name: "malformed session", key: "session_id", value: map[string]any{"unexpected": true}},
+		{name: "mismatched failure", key: "failure", value: map[string]any{"class": "different"}},
+		{name: "malformed failure detail", key: "failure", value: "not-an-envelope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := base
+			log.Details = map[string]any{
+				"component": "runtime", "action": "failed", "agent_id": "runtime", "run_id": "run-1",
+				"entity_id": "entity-1", "session_id": "session-1", "failure": failureValue, "extra": "kept",
+			}
+			log.Details[tc.key] = tc.value
+			projection, err := projectRuntimeLogEntry("test", log)
+			if err != nil {
+				t.Fatalf("project: %v", err)
+			}
+			if !reflect.DeepEqual(projection.ResidualDetails[tc.key], tc.value) || projection.ResidualDetails["extra"] != "kept" {
+				t.Fatalf("residual details = %#v", projection.ResidualDetails)
+			}
+		})
+	}
+}
+
+func TestRuntimeLogSnapshotProjectionCoversMixedRowsDatesAndFailures(t *testing.T) {
+	failureRaw, _ := runtimeLogTestFailure(t)
+	exactMessage := "Event was published to the event bus"
+	meaningfulMessage := "Connector request failed"
+	logs := []runtimeLogEntry{
+		{LogID: "log-1", TS: "2026-05-19T23:59:59.123456Z", Level: "info", Component: "eventbus", Source: "runtime", Message: &exactMessage, Details: map[string]any{"action": "published"}},
+		{LogID: "log-2", TS: "2026-05-20T00:00:00.987654Z", Level: "error", Component: "connector", Source: "runtime", Failure: failureRaw, Message: &meaningfulMessage, Details: map[string]any{"action": "request_failed"}},
+	}
+
+	var out bytes.Buffer
+	if err := writeRuntimeLogListResult(&out, runtimeLogListResult{Logs: logs, NextCursor: "cursor-2"}, nil); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"DATE", "TIME", "ACTION", "FAILURE", "MESSAGE", "2026-05-19", "23:59:59.123", "2026-05-20", "00:00:00.987", "connector_failure/waiting", "Connector request failed", "Next cursor: cursor-2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("snapshot missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, exactMessage) || strings.Contains(text, "\t") {
+		t.Fatalf("snapshot contains suppressed message or literal tab:\n%s", text)
+	}
+	if strings.Index(text, "23:59:59.123") > strings.Index(text, "00:00:00.987") {
+		t.Fatalf("snapshot reordered rows:\n%s", text)
+	}
+}
+
+func TestRuntimeLogSnapshotElidesPageEmptyOptionalColumns(t *testing.T) {
+	message := ""
+	log := runtimeLogEntry{LogID: "log-1", TS: "2026-05-19T10:00:01Z", Level: "info", Component: "runtime", Source: "runtime", Message: &message}
+	var out bytes.Buffer
+	if err := writeRuntimeLogListResult(&out, runtimeLogListResult{Logs: []runtimeLogEntry{log}}, nil); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	header := strings.Split(out.String(), "\n")[0]
+	if got, want := strings.Fields(header), []string{"TIME", "LEVEL", "COMPONENT", "SOURCE"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("header = %q", header)
+	}
+}
+
+func TestRuntimeLogSnapshotConvertsSingleDayTimeToUTCWithoutDateColumn(t *testing.T) {
+	message := "visible"
+	log := runtimeLogEntry{LogID: "log-1", TS: "2026-05-19T07:00:01.234567-03:00", Level: "info", Component: "runtime", Source: "runtime", Message: &message}
+	var out bytes.Buffer
+	if err := writeRuntimeLogListResult(&out, runtimeLogListResult{Logs: []runtimeLogEntry{log}}, nil); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	text := out.String()
+	header := strings.Split(text, "\n")[0]
+	if strings.Contains(header, "DATE") || !strings.Contains(text, "10:00:01.234") || strings.Contains(text, "07:00:01.234") {
+		t.Fatalf("single-day UTC projection =\n%s", text)
+	}
+}
+
+func TestRuntimeLogEmptyStateDistinguishesFilters(t *testing.T) {
+	var unfiltered bytes.Buffer
+	if err := writeRuntimeLogListResult(&unfiltered, runtimeLogListResult{Logs: []runtimeLogEntry{}}, nil); err != nil {
+		t.Fatalf("write unfiltered: %v", err)
+	}
+	if got := strings.TrimSpace(unfiltered.String()); got != "No runtime log entries have been recorded." {
+		t.Fatalf("unfiltered = %q", got)
+	}
+
+	params := map[string]any{
+		"run_id": "run-1", "entity_id": "entity-1", "session_id": "session-1",
+		"component": "runtime", "level": "warn", "error_code": "waiting", "source": "agent-1",
+		"since": "2026-05-19T10:00:00Z", "until": "2026-05-19T11:00:00Z",
+		"limit": 10, "cursor": "ignored", "order": "asc",
+	}
+	var filtered bytes.Buffer
+	if err := writeRuntimeLogListResult(&filtered, runtimeLogListResult{Logs: []runtimeLogEntry{}}, params); err != nil {
+		t.Fatalf("write filtered: %v", err)
+	}
+	want := "No log entries match --run-id run-1 --entity-id entity-1 --session-id session-1 --component runtime --level warn --error-code waiting --source agent-1 --since 2026-05-19T10:00:00Z --until 2026-05-19T11:00:00Z. Remove filters or widen the time range."
+	if got := strings.TrimSpace(filtered.String()); got != want {
+		t.Fatalf("filtered = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeLogFollowProjectionDeduplicatesDetailsAndSeparatesDates(t *testing.T) {
+	failureRaw, failureValue := runtimeLogTestFailure(t)
+	message := "Connector request failed"
+	log := runtimeLogEntry{
+		LogID: "log-1", TS: "2026-05-19T23:59:59.123Z", Level: "error", Component: "connector", Source: "agent-1",
+		RunID: "run-1", EntityID: "entity-1", SessionID: "session-1", Failure: failureRaw, Message: &message,
+		Details: map[string]any{
+			"component": "connector", "action": "request_failed", "agent_id": "agent-1", "run_id": "run-1",
+			"entity_id": "entity-1", "session_id": "session-1", "failure": failureValue, "attempt": float64(2),
+		},
+	}
+	var out bytes.Buffer
+	lastDate, err := writeRuntimeLogFollowEntry(&out, log, "")
+	if err != nil {
+		t.Fatalf("write first follow row: %v", err)
+	}
+	log.LogID = "log-2"
+	log.TS = "2026-05-20T00:00:00.456Z"
+	if _, err := writeRuntimeLogFollowEntry(&out, log, lastDate); err != nil {
+		t.Fatalf("write second follow row: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"--- 2026-05-19 UTC ---", "--- 2026-05-20 UTC ---", "action=request_failed", "run_id=run-1", "failure=connector_failure/waiting", "message=Connector request failed", "details={\"attempt\":2}"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("follow missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "run_id=run-1") != 2 || strings.Contains(text, "\"run_id\"") || strings.Contains(text, "\"failure\"") || strings.Contains(text, "\"action\"") {
+		t.Fatalf("follow retained projected duplicates:\n%s", text)
+	}
+}
+
+func TestLogsMalformedFailureEvidenceIsVisibleAndFailsClosed(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		log := validRuntimeLogEntry("log-invalid-failure")
+		log["failure"] = map[string]any{"schema_version": "platform.failure/v1", "class": "platform.unknown"}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"logs": []any{log}})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"logs"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 3 {
+		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"WARNING:", "log-invalid-failure", "platform.failure/v1", "platform.unknown"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %s", want, stderr.String())
+		}
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("stdout = %q, want no successful table", stdout.String())
+	}
+}
+
+func TestLogsFollowMalformedFailureEvidenceIsVisibleAndFailsClosed(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	log := validRuntimeLogEntry("log-invalid-follow-failure")
+	log["failure"] = map[string]any{"schema_version": "platform.failure/v1", "class": "platform.unknown"}
+	server, _ := newRuntimeLogWSServer(t, runtimeLogWSServerOptions{
+		logs:           []map[string]any{log},
+		closeAfterRows: true,
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"logs", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 3 {
+		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"WARNING:", "log-invalid-follow-failure", "platform.failure/v1", "platform.unknown"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %s", want, stderr.String())
+		}
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("stdout = %q, want no successful log line", stdout.String())
 	}
 }
 
@@ -579,6 +921,24 @@ func validRuntimeLogEntry(logID string) map[string]any {
 			"action":  "delivery_failed",
 		},
 	}
+}
+
+func runtimeLogTestFailure(t *testing.T) (json.RawMessage, map[string]any) {
+	t.Helper()
+	failure := runtimefailures.Normalize(
+		runtimefailures.New(runtimefailures.ClassConnectorFailure, "waiting", "connector", "wait", nil),
+		"connector",
+		"wait",
+	)
+	raw, err := runtimefailures.MarshalEnvelope(failure)
+	if err != nil {
+		t.Fatalf("marshal test failure: %v", err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatalf("decode test failure: %v", err)
+	}
+	return raw, value
 }
 
 func writeRuntimeLogJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {

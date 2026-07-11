@@ -170,6 +170,112 @@ func TestConversationTurnUsesConversationGetTurnAndRendersDeepTurn(t *testing.T)
 	}
 }
 
+func TestConversationTurnRuntimeLogProjection(t *testing.T) {
+	_, failureValue := runtimeLogTestFailure(t)
+
+	for _, tc := range []struct {
+		name      string
+		configure func(map[string]any)
+		want      []string
+		doNotWant []string
+	}{
+		{
+			name: "exact redundant message keeps action visible",
+			configure: func(log map[string]any) {
+				log["component"] = "eventbus"
+				log["message"] = "Event was published to the event bus"
+				log["details"] = map[string]any{"action": "published"}
+			},
+			want:      []string{"component=eventbus action=published source=runtime"},
+			doNotWant: []string{"message=Event was published to the event bus"},
+		},
+		{
+			name: "near match remains visible",
+			configure: func(log map[string]any) {
+				log["component"] = "eventbus"
+				log["message"] = "Event was published to the event bus."
+				log["details"] = map[string]any{"action": "published"}
+			},
+			want: []string{"component=eventbus action=published source=runtime", "message=Event was published to the event bus."},
+		},
+		{
+			name: "valid failure uses canonical class and detail",
+			configure: func(log map[string]any) {
+				log["component"] = "connector"
+				log["message"] = "Connector request failed"
+				log["failure"] = failureValue
+				log["details"] = map[string]any{"action": "request_failed", "failure": failureValue}
+			},
+			want: []string{"component=connector action=request_failed source=runtime failure=connector_failure/waiting message=Connector request failed"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validConversationTurnDetail("sess-1", 2)
+				turn := result["turn"].(map[string]any)
+				log := turn["runtime_log_entries"].([]map[string]any)[0]
+				tc.configure(log)
+				writeJSONRPCResult(t, w, req.ID, result)
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", "2"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+			for _, unwanted := range tc.doNotWant {
+				if strings.Contains(stdout.String(), unwanted) {
+					t.Fatalf("stdout contains %q:\n%s", unwanted, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestConversationTurnMalformedRuntimeLogFailureIsVisibleAndFailsClosed(t *testing.T) {
+	for _, args := range [][]string{
+		{"conversation", "turn", "sess-1", "2"},
+		{"conversation", "turn", "sess-1", "2", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validConversationTurnDetail("sess-1", 2)
+				turn := result["turn"].(map[string]any)
+				log := turn["runtime_log_entries"].([]map[string]any)[0]
+				log["failure"] = map[string]any{"schema_version": "platform.failure/v1", "class": "platform.unknown"}
+				writeJSONRPCResult(t, w, req.ID, result)
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			for _, want := range []string{"WARNING:", "log-1", "platform.failure/v1", "platform.unknown"} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q: %s", want, stderr.String())
+				}
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want no successful document", stdout.String())
+			}
+		})
+	}
+}
+
 func TestConversationCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
