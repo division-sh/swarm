@@ -64,9 +64,11 @@ type registryDocument struct {
 }
 
 type ServiceRegistry struct {
-	StateRoot string
-	DockerBin string
-	docker    dockerExecutor
+	StateRoot          string
+	DockerBin          string
+	docker             dockerExecutor
+	beforeRegistrySave func(registryDocument) error
+	afterRecordDelete  func(ServiceRecord) error
 }
 
 type dockerExecutor interface {
@@ -403,6 +405,9 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 	if err := validateManagedNamespace(&doc, candidates); err != nil {
 		return err
 	}
+	if err := r.reconcileOrphanAuthority(doc); err != nil {
+		return err
+	}
 	leaseIDs := make([]string, 0, len(doc.Services))
 	for leaseID := range doc.Services {
 		leaseIDs = append(leaseIDs, leaseID)
@@ -447,8 +452,8 @@ func (r *ServiceRegistry) Reconcile(ctx context.Context) error {
 
 func (r *ServiceRegistry) registrySnapshot() (registryDocument, error) {
 	var snapshot registryDocument
-	err := r.withRegistry(func(doc *registryDocument) error {
-		snapshot = *doc
+	err := r.readRegistry(func(doc registryDocument) error {
+		snapshot = doc
 		snapshot.Services = make(map[string]ServiceRecord, len(doc.Services))
 		for leaseID, record := range doc.Services {
 			snapshot.Services[leaseID] = record
@@ -530,16 +535,101 @@ func (r *ServiceRegistry) reconcileRecord(ctx context.Context, record ServiceRec
 }
 
 func (r *ServiceRegistry) retireRecordAuthority(record ServiceRecord) error {
-	if err := errors.Join(
-		removeAuthorityFile(record.CIDFile, "container ID handoff"),
-		removeAuthorityFile(r.creatorPath(record.LeaseID), "creator fence"),
-	); err != nil {
-		return err
-	}
 	if err := r.deleteRecord(record.LeaseID); err != nil {
 		return fmt.Errorf("retire Postgres service registry record %s: %w", record.LeaseID, err)
 	}
+	if r.afterRecordDelete != nil {
+		if err := r.afterRecordDelete(record); err != nil {
+			return err
+		}
+	}
+	return errors.Join(
+		removeAuthorityFile(record.CIDFile, "container ID handoff"),
+		removeAuthorityFile(r.creatorPath(record.LeaseID), "creator fence"),
+	)
+}
+
+func (r *ServiceRegistry) reconcileOrphanAuthority(snapshot registryDocument) error {
+	leaseIDs, err := r.authorityLeaseIDs()
+	if err != nil {
+		return err
+	}
+	for _, leaseID := range leaseIDs {
+		if _, tracked := snapshot.Services[leaseID]; tracked {
+			continue
+		}
+		lease, acquired, err := acquireFileLock(r.leasePath(leaseID), true)
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			continue
+		}
+		if _, err := r.record(leaseID); err == nil {
+			_ = lease.Close()
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			_ = lease.Close()
+			return err
+		}
+		creator, free, err := acquireFileLock(r.creatorPath(leaseID), true)
+		if err != nil {
+			_ = lease.Close()
+			return err
+		}
+		if !free {
+			_ = lease.Close()
+			return fmt.Errorf("rowless Postgres service creator %s is still active; authority retained", leaseID)
+		}
+		if err := creator.Close(); err != nil {
+			_ = lease.Close()
+			return err
+		}
+		if err := errors.Join(
+			removeAuthorityFile(filepath.Join(r.StateRoot, "handoff", leaseID+".cid"), "orphan container ID handoff"),
+			removeAuthorityFile(r.creatorPath(leaseID), "orphan creator fence"),
+		); err != nil {
+			_ = lease.Close()
+			return err
+		}
+		if err := lease.Close(); err != nil {
+			return err
+		}
+		if err := removeAuthorityFile(r.leasePath(leaseID), "orphan service lease"); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (r *ServiceRegistry) authorityLeaseIDs() ([]string, error) {
+	ids := make(map[string]struct{})
+	for _, source := range []struct {
+		dir    string
+		suffix string
+	}{
+		{dir: "leases", suffix: ".lock"},
+		{dir: "creators", suffix: ".lock"},
+		{dir: "handoff", suffix: ".cid"},
+	} {
+		entries, err := os.ReadDir(filepath.Join(r.StateRoot, source.dir))
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, source.suffix) || len(name) == len(source.suffix) {
+				return nil, fmt.Errorf("invalid Postgres service authority entry %q in %s", name, source.dir)
+			}
+			ids[strings.TrimSuffix(name, source.suffix)] = struct{}{}
+		}
+	}
+	values := make([]string, 0, len(ids))
+	for id := range ids {
+		values = append(values, id)
+	}
+	sort.Strings(values)
+	return values, nil
 }
 
 func removeAuthorityFile(path, kind string) error {
@@ -647,7 +737,25 @@ func (r *ServiceRegistry) withRegistry(fn func(*registryDocument) error) error {
 	if err := fn(&doc); err != nil {
 		return err
 	}
+	if r.beforeRegistrySave != nil {
+		if err := r.beforeRegistrySave(doc); err != nil {
+			return err
+		}
+	}
 	return r.saveRegistry(doc)
+}
+
+func (r *ServiceRegistry) readRegistry(fn func(registryDocument) error) error {
+	lock, acquired, err := acquireFileLock(filepath.Join(r.StateRoot, "services-v1.lock"), false)
+	if err != nil || !acquired {
+		return fmt.Errorf("acquire service registry lock: %w", err)
+	}
+	defer lock.Close()
+	doc, err := r.loadRegistry()
+	if err != nil {
+		return err
+	}
+	return fn(doc)
 }
 
 func (r *ServiceRegistry) loadRegistry() (registryDocument, error) {
@@ -685,6 +793,7 @@ func (r *ServiceRegistry) saveRegistry(doc registryDocument) error {
 	path := filepath.Join(r.StateRoot, "services-v1.json")
 	tmp := path + ".tmp-" + uuid.NewString()
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -700,7 +809,7 @@ func (r *ServiceRegistry) putRecord(record ServiceRecord) error {
 
 func (r *ServiceRegistry) record(leaseID string) (ServiceRecord, error) {
 	var record ServiceRecord
-	err := r.withRegistry(func(doc *registryDocument) error {
+	err := r.readRegistry(func(doc registryDocument) error {
 		var ok bool
 		record, ok = doc.Services[leaseID]
 		if !ok {

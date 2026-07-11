@@ -524,22 +524,26 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 			defer manager.deleteIntent(context.Background(), name)
 			defer dropDatabase(context.Background(), adminDB, name)
 
-			controlDB, err := manager.control.Open()
-			if err != nil {
-				t.Fatal(err)
+			snapshotReady := make(chan struct{})
+			resume := make(chan struct{})
+			resumed := false
+			manager.afterCandidateSnapshot = func() {
+				close(snapshotReady)
+				<-resume
 			}
-			defer controlDB.Close()
-			blocker, err := controlDB.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer blocker.Rollback()
-			if _, err := blocker.ExecContext(ctx, `LOCK TABLE `+quoteIdent(intentTableName)+` IN ACCESS EXCLUSIVE MODE`); err != nil {
-				t.Fatal(err)
-			}
+			defer func() {
+				if !resumed {
+					close(resume)
+				}
+				manager.afterCandidateSnapshot = nil
+			}()
 			done := make(chan error, 1)
 			go func() { done <- manager.Reconcile(ctx) }()
-			waitForBlockedIntentRead(t, ctx, adminDB, manager.controlName)
+			select {
+			case <-snapshotReady:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
 
 			lockKey := leaseKey
 			if kind == "template" {
@@ -556,9 +560,8 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 				t.Fatal(err)
 			}
 			releaseAdvisoryLock(creator, lockKey)
-			if err := blocker.Commit(); err != nil {
-				t.Fatal(err)
-			}
+			close(resume)
+			resumed = true
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
@@ -614,26 +617,6 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 			}
 		})
 	}
-}
-
-func waitForBlockedIntentRead(t *testing.T, ctx context.Context, db *sql.DB, controlName string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		var blocked bool
-		err := db.QueryRowContext(ctx, `SELECT EXISTS(
-			SELECT 1 FROM pg_stat_activity
-			WHERE datname=$1 AND query LIKE $2 AND wait_event_type='Lock'
-		)`, controlName, "%"+intentTableName+"%").Scan(&blocked)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if blocked {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("reconciliation did not block on the intent snapshot")
 }
 
 func integrationManager(t *testing.T) *Manager {
