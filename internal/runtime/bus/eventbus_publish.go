@@ -193,6 +193,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err != nil {
 		return err
 	}
+	ictx = publicationClaim.BindContext(ictx)
 	defer publicationClaim.Release(ictx)
 	if replayed, err := eb.publishCommittedReplayIfPresent(ictx, evt); replayed || err != nil {
 		return err
@@ -329,6 +330,7 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err != nil {
 		return err
 	}
+	ictx = publicationClaim.BindContext(ictx)
 	claimTransferred := false
 	defer func() {
 		if !claimTransferred {
@@ -407,6 +409,7 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 	if err != nil {
 		return err
 	}
+	txctx = publicationClaim.BindContext(txctx)
 	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func() { publicationClaim.Release(txctx) }) {
 		publicationClaim.Release(txctx)
 		return errors.New("event mutation rollback actions are required for pipeline publication claim")
@@ -889,6 +892,13 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
 	if runtimepipeline.IsPipelineReceiptDeferred(publishErr) {
 		_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), publishErr)
+		return
+	}
+	if publishErr != nil && evt.Type() == events.EventType("mailbox.card_decided") {
+		if err := eb.QuarantineRecoveredPipelineEvent(ctx, evt, publishErr); err != nil {
+			failure := eventBusDependencyFailure(err, "decision_route_obligation_quarantine_failed", "quarantine_decision_route")
+			eb.logRuntime(ctx, "error", "Quarantining the failed foreground decision route failed", "eventbus", "decision_route_obligation_quarantine_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, nil, failure, 0)
+		}
 		return
 	}
 	if !shouldPersistPipelineReceipt(true, publishErr) {

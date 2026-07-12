@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*PostgresStore)(nil)
@@ -33,7 +35,15 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	default:
 		return nil, unsupportedSchemaCapability("agents", caps.Agents)
 	}
-	rows, err := s.DB.QueryContext(ctx, query)
+	var queryer interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	} = s.DB
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		queryer = conn
+	}
+	rows, err := queryer.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

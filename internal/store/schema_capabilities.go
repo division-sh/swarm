@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type SchemaFlavor string
@@ -69,6 +71,11 @@ type schemaColumnCatalog struct {
 	tables map[string]map[string]struct{}
 }
 
+type schemaCapabilityQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func (c schemaColumnCatalog) hasTable(tableName string) bool {
 	_, ok := c.tables[strings.TrimSpace(tableName)]
 	return ok
@@ -87,7 +94,7 @@ func (c schemaColumnCatalog) hasColumns(tableName string, columns ...string) boo
 	return true
 }
 
-func loadSchemaColumnCatalog(ctx context.Context, db *sql.DB) (schemaColumnCatalog, error) {
+func loadSchemaColumnCatalog(ctx context.Context, db schemaCapabilityQueryer) (schemaColumnCatalog, error) {
 	catalog := schemaColumnCatalog{tables: map[string]map[string]struct{}{}}
 	if db == nil {
 		return catalog, fmt.Errorf("postgres store is required")
@@ -123,7 +130,7 @@ func loadSchemaColumnCatalog(ctx context.Context, db *sql.DB) (schemaColumnCatal
 	return catalog, nil
 }
 
-func eventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db *sql.DB) (bool, error) {
+func eventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db schemaCapabilityQueryer) (bool, error) {
 	if db == nil {
 		return false, fmt.Errorf("postgres store is required")
 	}
@@ -336,13 +343,19 @@ func (s *PostgresStore) BindSchemaCapabilities(ctx context.Context) (StoreSchema
 	if s == nil || s.DB == nil {
 		return StoreSchemaCapabilities{}, fmt.Errorf("postgres store is required")
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	var queryer schemaCapabilityQueryer = s.DB
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		queryer = conn
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, queryer)
 	if err != nil {
 		return StoreSchemaCapabilities{}, err
 	}
 	caps := detectStoreSchemaCapabilities(catalog)
 	if caps.Events.Receipts == SchemaFlavorCanonical {
-		hasTypedIdentity, err := eventReceiptsTypedSubscriberIdentityKeyExists(ctx, s.DB)
+		hasTypedIdentity, err := eventReceiptsTypedSubscriberIdentityKeyExists(ctx, queryer)
 		if err != nil {
 			return StoreSchemaCapabilities{}, err
 		}

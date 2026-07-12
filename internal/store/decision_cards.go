@@ -1003,12 +1003,22 @@ func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(co
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return fn(ctx, tx)
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	if !borrowed {
+		var err error
+		conn, err = db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
+	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
 	if err := fn(txctx, tx); err != nil {
 		return err
 	}

@@ -48,13 +48,23 @@ func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	if !borrowed {
+		var err error
+		conn, err = s.DB.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	postCommit := make([]func(), 0, 4)
 	rollbackActions := make([]func(), 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
+	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {

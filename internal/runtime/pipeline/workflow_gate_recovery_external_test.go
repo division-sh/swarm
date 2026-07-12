@@ -193,6 +193,130 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 	}
 }
 
+func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForms(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		for _, form := range []string{"synchronous", "acknowledged", "mutation_bound"} {
+			t.Run(tc.name+"/"+form, func(t *testing.T) {
+				selected := tc.open(t)
+				runID := uuid.NewString()
+				insertGateRecoveryRun(t, selected, runID)
+				fixture := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC())
+				bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+					Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				switch form {
+				case "synchronous":
+					if err := bus.Publish(context.Background(), fixture.event); err == nil {
+						t.Fatal("synchronous poison route publish succeeded, want interceptor failure")
+					}
+				case "acknowledged":
+					if err := bus.PublishAcknowledged(context.Background(), fixture.event); err != nil {
+						t.Fatalf("acknowledged poison route publish: %v", err)
+					}
+					waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := bus.WaitForQuiescence(waitCtx); err != nil {
+						t.Fatalf("wait for acknowledged poison route: %v", err)
+					}
+				case "mutation_bound":
+					runner, ok := selected.events.(runtimebus.EventMutationRunner)
+					if !ok {
+						t.Fatalf("event store %T lacks mutation runner", selected.events)
+					}
+					if err := runner.RunEventMutation(context.Background(), func(mutation runtimebus.EventMutation) error {
+						return bus.PublishInMutation(mutation.Context(), fixture.event)
+					}); err != nil {
+						t.Fatalf("mutation-bound poison route publish: %v", err)
+					}
+				}
+
+				assertGateRecoveryObligationStatus(t, selected, fixture.event.ID(), "quarantined")
+				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "event_interceptor_failed")
+				assertGateRecoveryActivation(t, selected.workflowStore, runtimecorrelation.WithRunID(context.Background(), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
+				card, err := selected.cards.GetDecisionCard(context.Background(), fixture.cardID)
+				if err != nil {
+					t.Fatalf("read quarantined decision card: %v", err)
+				}
+				if card.Status != decisioncard.StatusDecided || card.DecisionEventID != fixture.event.ID() {
+					t.Fatalf("quarantined decision card = status:%q event:%q, want decided/%q", card.Status, card.DecisionEventID, fixture.event.ID())
+				}
+
+				validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
+				if _, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil {
+					t.Fatalf("sweep unrelated route behind quarantined foreground failure: %v", err)
+				}
+				assertGateRecoveryProcessedReceipt(t, selected, validEventID)
+				assertGateRecoveryObligationStatus(t, selected, validEventID, "completed")
+				if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", got, err)
+				}
+			})
+		}
+	}
+}
+
+type gateRecoveryForegroundFixture struct {
+	event    events.Event
+	entityID string
+	cardID   string
+}
+
+func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
+	t.Helper()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	entityID := uuid.NewString()
+	bundle := gateRecoveryContractBundle()
+	setupBus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
+		DecisionCards: tc.cards, BundleFingerprint: gateRecoveryBundle,
+	})
+	if err := tc.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID: "launch/foreground-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		CurrentState: "awaiting_review", EnteredStageAt: at,
+		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return coordinator.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("foreground decision cards = %#v, %v", items, err)
+	}
+	card, err := tc.cards.GetDecisionCard(ctx, items[0].CardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID := uuid.NewString()
+	if err := tc.workflowStore.CommitGateDecision(ctx, card, eventID, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
+		DecisionEventID: eventID, Now: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
+	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.FlowInstance), at)
+	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID}
+}
+
 func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) string {
 	t.Helper()
 	card, err := decisioncard.New(decisioncard.Card{

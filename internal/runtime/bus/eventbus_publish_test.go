@@ -1423,6 +1423,116 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 	}
 }
 
+type publicationClaimBarrierStore struct {
+	*store.PostgresStore
+	claimed chan<- struct{}
+	release <-chan struct{}
+}
+
+func (s *publicationClaimBarrierStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	lease, claimed, err := s.PostgresStore.ClaimPipelinePublication(ctx, eventID)
+	if err != nil || !claimed {
+		return lease, claimed, err
+	}
+	select {
+	case s.claimed <- struct{}{}:
+	case <-ctx.Done():
+		_ = lease.Release(context.WithoutCancel(ctx))
+		return nil, false, ctx.Err()
+	}
+	select {
+	case <-s.release:
+		return lease, true, nil
+	case <-ctx.Done():
+		_ = lease.Release(context.WithoutCancel(ctx))
+		return nil, false, ctx.Err()
+	}
+}
+
+func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing.T) {
+	const poolSize = 4
+	for _, form := range []string{"synchronous", "acknowledged", "mutation_bound"} {
+		t.Run(form, func(t *testing.T) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			pg := &store.PostgresStore{DB: db}
+			db.SetMaxOpenConns(poolSize)
+			db.SetMaxIdleConns(poolSize)
+
+			claimed := make(chan struct{}, poolSize)
+			release := make(chan struct{})
+			selected := &publicationClaimBarrierStore{PostgresStore: pg, claimed: claimed, release: release}
+			bus, err := runtimebus.NewEventBus(selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			start := make(chan struct{})
+			eventIDs := make([]string, poolSize)
+			runIDs := make([]string, poolSize)
+			errs := make(chan error, poolSize)
+			for i := 0; i < poolSize; i++ {
+				eventIDs[i] = uuid.NewString()
+				runIDs[i] = uuid.NewString()
+				if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runIDs[i]); err != nil {
+					t.Fatalf("insert run: %v", err)
+				}
+				eventID := eventIDs[i]
+				runID := runIDs[i]
+				go func() {
+					<-start
+					evt := eventtest.RootIngress(
+						eventID, events.EventType("custom.pool_saturation"), "test", "", []byte(`{}`), 0, runID, "",
+						events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC(),
+					)
+					switch form {
+					case "synchronous":
+						errs <- bus.Publish(ctx, evt)
+					case "acknowledged":
+						errs <- bus.PublishAcknowledged(ctx, evt)
+					case "mutation_bound":
+						errs <- selected.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+							return bus.PublishInMutation(mutation.Context(), evt)
+						})
+					}
+				}()
+			}
+			close(start)
+			for i := 0; i < poolSize; i++ {
+				requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL publication claim")
+			}
+			close(release)
+			for i := 0; i < poolSize; i++ {
+				if err := requireErrorBefore(t, errs, 10*time.Second, "pool-saturated publication"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer waitCancel()
+			if err := bus.WaitForQuiescence(waitCtx); err != nil {
+				t.Fatalf("wait for publication settlement: %v", err)
+			}
+			for _, eventID := range eventIDs {
+				var count int
+				if err := db.QueryRowContext(context.Background(), `
+					SELECT COUNT(*)
+					FROM event_receipts
+					WHERE event_id = $1::uuid
+					  AND subscriber_type = 'platform'
+					  AND subscriber_id = 'pipeline'
+				`, eventID).Scan(&count); err != nil {
+					t.Fatalf("count pipeline receipt for %s: %v", eventID, err)
+				}
+				if count != 1 {
+					t.Fatalf("pipeline receipt count for %s = %d, want 1", eventID, count)
+				}
+			}
+		})
+	}
+}
+
 func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{

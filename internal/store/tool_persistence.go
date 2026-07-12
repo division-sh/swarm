@@ -396,13 +396,23 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	if !borrowed {
+		var err error
+		conn, err = s.DB.Conn(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire postgres human task decision connection: %w", err)
+		}
+		defer conn.Close()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin postgres human task decision: %w", err)
 	}
 	postCommitActions := make([]func(), 0, 4)
 	rollbackActions := make([]func(), 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
+	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	committed := false

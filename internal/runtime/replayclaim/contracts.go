@@ -43,6 +43,18 @@ type PublicationOwner interface {
 	ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
 }
 
+type ContextBindingLease interface {
+	runtimeownership.Lease
+	BindContext(context.Context) context.Context
+}
+
+func BindLeaseContext(ctx context.Context, lease runtimeownership.Lease) context.Context {
+	if binder, ok := lease.(ContextBindingLease); ok && binder != nil {
+		return binder.BindContext(ctx)
+	}
+	return ctx
+}
+
 type Store interface {
 	Lister
 	Owner
