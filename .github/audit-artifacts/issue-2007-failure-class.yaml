@@ -2,12 +2,13 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
 audit_base: e0ab4dbbf358438b8ccb689642703ff6799178ee
-working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_and_terminal_event_admission
+working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_and_typed_event_admission
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
 binding_context:
   lead_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952893673
   insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952943372
+  diagnostic_direct_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953045570
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -250,10 +251,12 @@ reconciliation_transaction:
 terminal_immutability:
   owner: internal/store/runlifecycle
   rule: >-
-    completed, failed, cancelled, and forked run rows and their ended_at,
-    failure, run-control, and terminal event evidence are immutable. Standing
-    reconciliation never updates a terminal run back to running or clears its
-    terminal evidence.
+    completed, failed, cancelled, and forked lifecycle truth, including status,
+    ended_at, failure, run-control, and terminal outcome event identity, is
+    immutable. Standing reconciliation never updates a terminal run back to
+    running or clears its terminal evidence. The derived event_count aggregate
+    may advance or decrease only with admitted diagnostic-direct evidence rows;
+    it is observational metadata, not lifecycle authority.
   backend_enforcement:
     - postgres_run_status_failure_ended_at_constraints
     - sqlite_run_status_failure_ended_at_triggers
@@ -286,7 +289,8 @@ terminal_event_admission:
     A new event carrying an existing run_id may persist only when the locked run
     is running or paused. Completed, cancelled, failed, and forked runs reject
     the event before event, delivery, receipt, replay-scope, outbox, state, or
-    counter mutation. Event persistence never rewrites run lifecycle truth.
+    counter mutation, except through the separately typed diagnostic-direct
+    evidence owner below. Event persistence never rewrites run lifecycle truth.
   ordering:
     - validate_event_shape_and_lineage
     - check_existing_event_id_first
@@ -303,15 +307,116 @@ terminal_event_admission:
   terminal_evidence_events: >-
     There is no generic post-terminal event exception. Executable terminal
     outcome events must persist before the terminal transition in the same
-    owner transaction. Non-executable diagnostics use runtime_logs, run
-    terminal fields, run_control_state, or the standing-service journal rather
-    than appending to events under a terminal run.
+    owner transaction. The only post-terminal events are admitted through the
+    closed diagnostic_direct_event_admission owner below; a diagnostic label or
+    produced_by_type value is not itself an admission bypass.
   backend_atomicity:
     postgres: lock run FOR UPDATE in the same transaction before event or delivery insert
     sqlite: consume the serialized runtime mutation transaction and read status before insert
   removed_behavior:
     - ReopenCompleted option and completed-to-running event append
     - SQLite terminal-run event insertion with unchanged terminal status
+
+diagnostic_direct_event_admission:
+  canonical_owner: typed selected-store diagnostic-direct evidence mutation boundary
+  preserved_closed_owner: issue_1150_runtime_log_event_storage_and_read_architecture
+  allowed_event_types:
+    - platform.runtime_log
+    - platform.inbound_recorded
+  type_rule: >-
+    Admission is a closed event-type match, not a name prefix, producer label,
+    payload heuristic, or caller privilege. Generic AppendEvent and every
+    executable EventBus path reject diagnostic-direct events and require the
+    typed owner. Adding another type requires an authoritative spec change and
+    an exhaustive owner/reader/proof update.
+  producer_rule: >-
+    Both admitted types persist produced_by_type=platform. Runtime logs persist
+    produced_by=runtime. Inbound provider identity remains explicit in the
+    payload and idempotency key rather than reclassifying the platform evidence
+    row as an agent/external executable event. The current PostgreSQL and SQLite
+    inbound direct INSERT values produced_by_type=external are non-authoritative
+    and are removed with the bypass.
+  run_rule: >-
+    A global diagnostic-direct event has no run_id by design. A run-scoped row
+    requires an existing locked run but may target running, paused, completed,
+    cancelled, failed, or forked because it records non-executable evidence. It
+    never creates a run, reopens a run, changes terminal lifecycle truth, or
+    confers execution authority.
+  ordering:
+    - validate_canonical_diagnostic_direct_type_payload_shape_and_lineage
+    - check_event_id_or_inbound_idempotency_identity_first
+    - exact_duplicate_returns_idempotent_success_without_mutation
+    - conflicting_duplicate_fails_closed_without_mutation
+    - lock_and_require_existing_run_when_run_scoped
+    - insert_only_the_diagnostic_event_row
+    - synchronize_the_derived_run_event_count_when_run_scoped
+    - commit_without_delivery_dispatch_or_runtime_publication
+  forbidden_effects:
+    - event_deliveries
+    - event_receipts
+    - committed_replay_scope
+    - outbox_or_deferred_publish
+    - entity_or_flow_state_mutation
+    - run_creation_or_status_transition
+    - ended_at_failure_run_control_or_terminal_outcome_identity_mutation
+    - handler_or_pipeline_execution
+  counter_policy: >-
+    event_count remains the count of every persisted run-scoped events row, so
+    a newly admitted diagnostic-direct row changes event_count by exactly one
+    on both backends even after terminalization. Exact duplicates do not change
+    it. Purging or deleting a run-scoped platform.inbound_recorded row decreases
+    it in the same transaction. entity_count never changes. This derived-count
+    mutation is explicitly not a lifecycle transition.
+  runtime_log_owner: >-
+    RuntimeLogPersistence and RuntimeLogger retain the #1150 event-backed model.
+    Run-scoped platform.runtime_log uses this typed mutation instead of generic
+    AppendEvent; global logs use the same typed validation and duplicate policy
+    without a run lock or counter.
+  inbound_record_owner: >-
+    PostgreSQL and SQLite RecordInboundEvent use this typed mutation with their
+    canonical provider/entity/provider_event_id idempotency identity. Recording
+    evidence against a terminal run is allowed, but the subsequent executable
+    inbound publication independently refuses at ordinary terminal admission.
+    DeleteInboundEvent and PurgeInboundEventsBefore keep event_count coherent.
+  readers:
+    - runtime.logs
+    - runtime.subscribe_logs
+    - run.trace_include_internal
+    - run.subscribe_trace_include_internal
+    - run_diagnostics_and_debug_read_surfaces
+    - conversation_and_turn_runtime_log_projections
+    - compute_module_replay_evidence
+  post_terminal_producers:
+    - runtime_failure_and_completion_adjacent_logging
+    - delivery_receipt_and_manager_aftermath_logging
+    - scheduler_timer_and_startup_recovery_aftermath_logging
+    - event_bus_payload_and_publish_failure_logging
+    - inbound_publish_and_rollback_failure_logging
+    - agent_llm_tool_activity_and_pipeline_aftermath_logging
+  backend_atomicity:
+    postgres: duplicate check, run FOR UPDATE, insert, and event_count sync in one transaction
+    sqlite: duplicate check, run lookup, insert, and event_count sync in one serialized runtime mutation
+
+direct_event_sql_writers:
+  postgres_inbound_record_persistence:
+    classification: move_to_typed_diagnostic_direct_owner
+    event_type: platform.inbound_recorded
+    invalid_behavior: direct_insert_records_produced_by_type_external
+  sqlite_inbound_record_persistence:
+    classification: move_to_typed_diagnostic_direct_owner
+    event_type: platform.inbound_recorded
+    invalid_behavior: direct_insert_records_produced_by_type_external
+  postgres_and_sqlite_runtime_log_persistence:
+    classification: move_run_scoped_and_global_rows_to_typed_diagnostic_direct_owner
+    event_type: platform.runtime_log
+  run_fork_delivery_event_replay:
+    classification: consume_ordinary_duplicate_and_status_admission
+    rule: >-
+      The owner-authorized fork-local replay inserts executable event and
+      delivery rows while the fork run is paused, then atomically activates it.
+      It must duplicate-check and require that same locked paused fork run
+      before direct insert. Completed, cancelled, failed, or forked targets
+      refuse. This is not a diagnostic-direct exception.
 
 startup_order:
   - load_verify_and_plan_all_declarations_without_mutation
@@ -359,6 +464,18 @@ systematic_consumers:
     - agent_directive_operation_event_persistence
     - workflow_system_node_agent_tool_activity_and_mailbox_event_producers
     - recovery_and_sweeper_duplicate_replay_paths
+  diagnostic_direct_admission_consumers:
+    - postgres_and_sqlite_RuntimeLogPersistence_global_and_run_scoped
+    - postgres_and_sqlite_RecordInboundEvent_DeleteInboundEvent_and_PurgeInboundEventsBefore
+    - runtime_logs_and_runtime_subscribe_logs
+    - run_trace_and_run_subscribe_trace_include_internal
+    - run_diagnostics_debug_conversation_turn_and_compute_module_replay_readers
+    - all_runtime_logger_callers_in_failure_completion_recovery_and_post_commit_aftermath
+  direct_event_writer_consumers:
+    - postgres_inbound_record_direct_insert
+    - sqlite_inbound_record_direct_insert
+    - postgres_and_sqlite_runtime_log_direct_insert
+    - postgres_run_fork_delivery_event_replay_direct_insert
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
     - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
@@ -396,9 +513,27 @@ proof_manifestations:
     - every_atomic_event_delivery_persistence_variant_zero_mutation_on_terminal_refusal
     - EventBus_Publish_PublishDirect_PublishInMutation_and_outbox_zero_mutation_on_terminal_refusal
     - event_publish_run_start_inbound_replay_directive_and_internal_producers_consume_same_owner
-    - no_post_terminal_diagnostic_event_exception
+    - generic_post_terminal_runtime_or_user_event_has_no_diagnostic_bypass
     - postgres_ReopenCompleted_behavior_and_regression_test_removed
     - sqlite_terminal_append_divergence_removed
+  diagnostic_direct_event_admission:
+    - postgres_and_sqlite_runtime_log_persists_for_running_paused_completed_cancelled_failed_and_forked
+    - postgres_and_sqlite_inbound_recorded_persists_for_running_paused_completed_cancelled_failed_and_forked
+    - global_runtime_log_persists_without_creating_a_run
+    - exact_duplicate_is_idempotent_and_conflicting_duplicate_refuses
+    - only_platform_runtime_log_and_platform_inbound_recorded_are_admitted
+    - both_types_persist_produced_by_type_platform_and_inbound_provider_stays_payload_evidence
+    - generic_AppendEvent_and_EventBus_paths_refuse_diagnostic_direct_events
+    - no_delivery_receipt_replay_scope_outbox_state_or_execution_rows_are_created
+    - status_ended_at_failure_run_control_and_terminal_outcome_identity_remain_unchanged
+    - event_count_changes_exactly_with_insert_delete_and_purge_while_entity_count_is_unchanged
+    - runtime_logs_subscribe_logs_trace_debug_conversation_turn_and_compute_replay_readback_preserved
+    - post_terminal_failure_completion_recovery_and_post_commit_logger_callers_persist_without_reopening
+  direct_event_sql_writers:
+    - postgres_and_sqlite_inbound_record_writers_consume_typed_diagnostic_admission
+    - postgres_and_sqlite_runtime_log_writers_consume_typed_diagnostic_admission
+    - run_fork_delivery_event_replay_requires_locked_paused_fork_and_duplicate_first_admission
+    - run_fork_delivery_event_replay_refuses_every_terminal_fork_target_without_partial_rows
   preserved_or_split:
     - normal_completion_regression_matrix
     - unavailable_bundle_cleanup_regression_matrix
