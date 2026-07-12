@@ -238,6 +238,10 @@ func (s startupRecoveryEventStore) ClaimPipelineReplay(context.Context, string) 
 	return startupRecoveryTestLease{}, true, nil
 }
 
+func (startupRecoveryEventStore) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return startupRecoveryTestLease{}, true, nil
+}
+
 func (startupRecoveryEventStore) SupportsPersistedReplay() bool { return true }
 
 func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
