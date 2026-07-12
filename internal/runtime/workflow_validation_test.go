@@ -711,7 +711,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Stores:  Stores{InboundStore: &recordingInboundStore{}},
 				Options: RuntimeOptions{WorkflowModule: validModule},
 			},
-			errContains: "provider trigger registry is required when inbound store is configured",
+			errContains: "provider trigger catalog snapshot is required when inbound store is configured",
 		},
 	}
 

@@ -105,7 +105,7 @@ func startProviderTriggerSmokeServer(
 	if strings.TrimSpace(listenAddr) == "" {
 		listenAddr = "localhost:0"
 	}
-	gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, nil, nil, testProviderTriggerRegistry(t), sqliteStore)
+	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
 	gateway.SetCredentialStore(providerTriggerSmokeCredentialStore{target.SigningSecret: signingSecret})
 	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &providerTriggerSmokeCaptureWriter{ResponseWriter: w, status: http.StatusOK}

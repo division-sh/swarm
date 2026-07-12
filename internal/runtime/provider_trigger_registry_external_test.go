@@ -29,7 +29,7 @@ func (boundedProviderCredentialStore) Set(context.Context, string, string) error
 func (boundedProviderCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (boundedProviderCredentialStore) Delete(context.Context, string) error      { return nil }
 
-func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
+func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()
 	root := filepath.Join("..", "..", "packs", "provider-triggers")
 	entries, err := os.ReadDir(root)
@@ -43,7 +43,7 @@ func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
 		}
 	}
 	sort.Strings(dirs)
-	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", dirs, nil)
+	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", dirs, nil)
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
@@ -52,7 +52,7 @@ func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runtimepkg.RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {
 	t.Helper()
-	gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, testProviderTriggerRegistry(t), stores...)
+	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
 	gateway.SetCredentialStore(boundedProviderCredentialStore{})
 	return gateway
 }
@@ -79,7 +79,13 @@ func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGate
 			formParsed = true
 		}
 	}
-	delivery, err := testProviderTriggerRegistry(t).Accept(providertriggers.Request{
+	plan, err := testProviderTriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: entityID, Provider: provider, SigningSecret: "test.signing_secret",
+	})
+	if err != nil {
+		t.Fatalf("compile provider admission: %v", err)
+	}
+	delivery, err := plan.Accept(providertriggers.Request{
 		Provider: provider,
 		Target:   providertriggers.Target{EntityID: entityID, EntitySlug: entityID, WebhookSecret: signingSecret},
 		Method:   r.Method, URL: r.URL.String(), Body: body, Headers: r.Header, Payload: payload,

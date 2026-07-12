@@ -74,8 +74,13 @@ type StandingIngressView struct {
 }
 
 type StandingIngressProviderView struct {
-	Provider      string `json:"provider"`
-	SigningSecret string `json:"signing_secret"`
+	Provider              string `json:"provider"`
+	SigningSecret         string `json:"signing_secret,omitempty"`
+	AdmissionKind         string `json:"admission_kind"`
+	PackID                string `json:"pack_id,omitempty"`
+	RequestAuthentication string `json:"request_authentication,omitempty"`
+	Event                 string `json:"event,omitempty"`
+	Acknowledgement       string `json:"acknowledgement,omitempty"`
 }
 
 type FlowSourceFiles struct {
@@ -370,7 +375,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 				}
 				ingress := &StandingIngressView{Alias: alias}
 				for _, provider := range ref.Ingress.Providers {
-					ingress.Providers = append(ingress.Providers, StandingIngressProviderView{Provider: strings.TrimSpace(provider.Provider), SigningSecret: strings.TrimSpace(provider.SigningSecret)})
+					ingress.Providers = append(ingress.Providers, standingIngressProviderView(provider))
 				}
 				item.Ingress = ingress
 			}
@@ -404,6 +409,28 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		out = append(out, item)
 	}
 	return out
+}
+
+func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressProvider) StandingIngressProviderView {
+	kind := strings.ToLower(strings.TrimSpace(provider.Admission.Kind))
+	if kind == "" {
+		kind = "pack-required"
+	}
+	view := StandingIngressProviderView{
+		Provider: strings.TrimSpace(provider.Provider), SigningSecret: strings.TrimSpace(provider.SigningSecret),
+		AdmissionKind: kind, Event: strings.TrimSpace(provider.Admission.Event),
+		Acknowledgement: strings.TrimSpace(provider.Admission.Acknowledge),
+	}
+	if provider.Admission.Pack != nil {
+		view.PackID = strings.TrimSpace(provider.Admission.Pack.ID)
+	}
+	if provider.Admission.Authentication != nil {
+		view.RequestAuthentication = strings.ToUpper(strings.TrimSpace(provider.Admission.Authentication.Kind))
+		if view.RequestAuthentication == "NONE" {
+			view.RequestAuthentication = "UNAUTHENTICATED"
+		}
+	}
+	return view
 }
 
 func packageFlowRefsByID(bundle *runtimecontracts.WorkflowContractBundle) map[string]runtimecontracts.ProjectFlowRef {

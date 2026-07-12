@@ -1,6 +1,7 @@
 package packs
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,51 @@ func TestNormalizeSubjectsRejectsGlobalTriggerReadiness(t *testing.T) {
 	subject.Requirements = []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.stripe", RequirementScopeTarget, "BOUND", "credential_store")}
 	if _, err := NormalizeSubjects([]Subject{subject}); err == nil || !strings.Contains(err.Error(), "target-scoped and unevaluated") {
 		t.Fatalf("NormalizeSubjects error = %v, want evaluated trigger requirement rejection", err)
+	}
+}
+
+func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	base := Subject{
+		ID: "ingress:" + bundleHash + ":chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
+		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",
+		TriggerAdmission: &TriggerAdmission{
+			BundleHash: bundleHash, Alias: "chat", CatalogGeneration: strings.Repeat("b", 64),
+			PolicySource: "verified_pack", RequestAuthentication: "TOKEN_EQUALITY", Event: "inbound.acme",
+			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "external"},
+		},
+		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+	}
+	normalized, err := NormalizeSubjects([]Subject{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized[0].Status != StatusAvailable {
+		t.Fatalf("effective trigger status = %q, want AVAILABLE until target binding readback", normalized[0].Status)
+	}
+
+	invalid := base
+	invalid.Source = "raw_declaration"
+	if _, err := NormalizeSubjects([]Subject{invalid}); err == nil || !strings.Contains(err.Error(), "trigger_pack_binding source") {
+		t.Fatalf("pack/source mismatch error = %v", err)
+	}
+	invalid = base
+	invalid.TriggerAdmission = &TriggerAdmission{
+		BundleHash: bundleHash, Alias: "chat", CatalogGeneration: strings.Repeat("b", 64),
+		PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.acme",
+	}
+	invalid.Source = "raw_declaration"
+	invalid.Requirements = base.Requirements
+	if _, err := NormalizeSubjects([]Subject{invalid}); err == nil || !strings.Contains(err.Error(), "must not carry secret requirements") {
+		t.Fatalf("unsigned requirement error = %v", err)
+	}
+	invalid.Requirements = nil
+	normalized, err = NormalizeSubjects([]Subject{invalid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered := RenderSubject(normalized[0], false); !strings.Contains(rendered, "request_authentication=UNAUTHENTICATED") || !strings.Contains(rendered, "policy_source=raw_declaration") {
+		t.Fatalf("unauthenticated trigger readback = %q", rendered)
 	}
 }
 
@@ -135,5 +181,54 @@ func TestNormalizeSubjectsOrdersDeterministicallyAndRejectsDuplicates(t *testing
 	}
 	if _, err := NormalizeSubjects(append(items, items[0])); err == nil || !strings.Contains(err.Error(), "duplicate capability subject") {
 		t.Fatalf("duplicate error = %v", err)
+	}
+}
+
+func TestCloneSubjectsDoesNotExposeNestedCapabilityState(t *testing.T) {
+	satisfied := true
+	original := []Subject{{
+		ID: "ingress:bundle:chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
+		Source: "trigger_pack_binding", Applicability: "effective",
+		TriggerAdmission: &TriggerAdmission{Pack: &TriggerPackIdentity{ID: "provider.acme"}},
+		Requirements:     []Requirement{{Satisfied: &satisfied, Scopes: []string{"write"}, TokenRequest: &TokenRequestProfile{StaticHeaders: map[string]string{"Version": "1"}}}},
+		Evidence:         []Evidence{{Fields: map[string]string{"generation": "old"}}},
+	}}
+	cloned := CloneSubjects(original)
+	cloned[0].TriggerAdmission.Pack.ID = "mutated"
+	cloned[0].Requirements[0].Scopes[0] = "mutated"
+	cloned[0].Requirements[0].TokenRequest.StaticHeaders["Version"] = "2"
+	cloned[0].Evidence[0].Fields["generation"] = "new"
+	*cloned[0].Requirements[0].Satisfied = false
+	if original[0].TriggerAdmission.Pack.ID != "provider.acme" || original[0].Requirements[0].Scopes[0] != "write" || original[0].Requirements[0].TokenRequest.StaticHeaders["Version"] != "1" || original[0].Evidence[0].Fields["generation"] != "old" || !*original[0].Requirements[0].Satisfied {
+		t.Fatalf("CloneSubjects exposed nested state: %#v", original[0])
+	}
+}
+
+func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("d", 64)
+	subject := Subject{
+		ID: "ingress:" + bundleHash + ":chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
+		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",
+		TriggerAdmission: &TriggerAdmission{
+			BundleHash: bundleHash, Alias: "chat", CatalogGeneration: strings.Repeat("e", 64),
+			PolicySource: "verified_pack", RequestAuthentication: "HMAC_SHA256", Event: "inbound.acme",
+			SignedPayload: "raw_body", DigestEncoding: "base64",
+			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.2.3", ManifestHash: "sha256:" + strings.Repeat("f", 64), Provenance: "external"},
+		},
+		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+	}
+	normalized, err := NormalizeSubjects([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(normalized[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := RenderSubject(normalized[0], false)
+	for _, value := range []string{"chat", "verified_pack", "HMAC_SHA256", "inbound.acme", strings.Repeat("e", 64), "provider.acme", "1.2.3", "webhook_signing.acme"} {
+		if !strings.Contains(string(body), value) || !strings.Contains(text, value) {
+			t.Fatalf("typed fact %q missing from JSON or text\njson=%s\ntext=%s", value, body, text)
+		}
 	}
 }

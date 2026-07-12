@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -29,7 +30,7 @@ type WorkflowContractValidationOptions struct {
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
 	HarnessInjections              []runtimecontracts.FlowInputProducerInjection
-	ProviderTriggerRegistry        *providertriggers.Registry
+	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 }
 
 type WorkflowContractValidationResult struct {
@@ -38,6 +39,7 @@ type WorkflowContractValidationResult struct {
 	MissingEmitSchemaEventTypes      []string
 	GeneratedEmitSchemaErrors        []error
 	GeneratedToolSchemaClosureErrors []error
+	CapabilitySubjects               []packs.Subject
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
@@ -47,7 +49,7 @@ func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Sto
 		StrictEmitSchemas:              runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
 		FatalToolImplementationWarning: bootWarningsFatal(),
 		FatalBootWarnings:              bootWarningsFatal(),
-		ExcludedFatalBootWarningChecks: []string{"tool_resolution"},
+		ExcludedFatalBootWarningChecks: []string{"tool_resolution", "inbound_unsigned_webhook"},
 	}
 }
 
@@ -117,11 +119,40 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if len(connectorErrors) > 0 {
 		return result, fmt.Errorf("provider connector validation failed:\n%s", formatValidationErrors(connectorErrors))
 	}
-	if _, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerRegistry); err != nil {
+	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog)
+	if err != nil {
 		return result, fmt.Errorf("standing ingress validation failed: %w", err)
+	}
+	for _, finding := range unsignedRawAdmissionFindings(declarations) {
+		result.BootReport.Add(finding)
+	}
+	result.BootReport.Sort()
+	result.CapabilitySubjects, err = EffectiveStandingIngressCapabilitySubjects(source, opts.ProviderTriggerCatalog)
+	if err != nil {
+		return result, fmt.Errorf("standing ingress capability projection failed: %w", err)
 	}
 
 	return result, nil
+}
+
+func unsignedRawAdmissionFindings(declarations []StandingTargetDeclaration) []runtimebootverify.Finding {
+	var findings []runtimebootverify.Finding
+	for _, declaration := range declarations {
+		for _, binding := range declaration.Ingress {
+			if binding.AdmissionPlan.PolicySource() != providertriggers.PolicySourceRawDeclaration ||
+				binding.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone ||
+				binding.AdmissionPlan.AcknowledgedUnsigned() {
+				continue
+			}
+			findings = append(findings, runtimebootverify.Finding{
+				CheckID: "inbound_unsigned_webhook", Severity: runtimebootverify.SeveritySemanticDriftWarn,
+				Location:    declaration.SourcePath,
+				Message:     fmt.Sprintf("ingress alias %q provider %q accepts unsigned webhooks; anyone who learns /webhooks/%s/%s can POST events into this flow", declaration.Alias, binding.Provider, declaration.Alias, binding.Provider),
+				Remediation: "add admission.acknowledge: unsigned_webhook to confirm this intentional public endpoint",
+			})
+		}
+	}
+	return findings
 }
 
 func formatWorkflowValidationFindings(findings []runtimebootverify.Finding, blocking bool) string {

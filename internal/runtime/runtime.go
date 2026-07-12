@@ -84,7 +84,7 @@ type RuntimeOptions struct {
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
-	ProviderTriggerRegistry          *providertriggers.Registry
+	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -391,7 +391,7 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
-	validationOpts.ProviderTriggerRegistry = opts.ProviderTriggerRegistry
+	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return err
@@ -468,8 +468,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
 	}
-	if stores.InboundStore != nil && opts.ProviderTriggerRegistry == nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger registry is required when inbound store is configured")
+	if stores.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
 	}
 	var source semanticview.Source
 	if opts.WorkflowModule != nil {
@@ -819,7 +819,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGatewayWithProviderRegistry(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, opts.ProviderTriggerRegistry, stores.InboundStore)
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)

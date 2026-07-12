@@ -87,14 +87,24 @@ func (e Error) Error() string {
 	return e.Message
 }
 
-type Registry struct {
-	manifests map[string]Manifest
-	sources   map[string]string
+type PackIdentity struct {
+	ID           string `json:"id"`
+	Version      string `json:"version"`
+	ManifestHash string `json:"manifest_hash"`
+	Provenance   string `json:"provenance"`
 }
 
-type ManifestSource struct {
-	Manifest Manifest
-	Source   string
+type CatalogEntry struct {
+	Identity   PackIdentity
+	Manifest   Manifest
+	SourcePath string
+	Source     string
+}
+
+type CatalogSnapshot struct {
+	generationID string
+	byProvider   map[string]CatalogEntry
+	byID         map[string]CatalogEntry
 }
 
 type LoadedPack struct {
@@ -126,33 +136,49 @@ func RequiredPlatformPackIdentities() []PlatformPackIdentity {
 	return append([]PlatformPackIdentity(nil), requiredPlatformPackIdentities...)
 }
 
-func NewRegistry(manifests ...Manifest) (*Registry, error) {
-	sources := make([]ManifestSource, 0, len(manifests))
-	for _, manifest := range manifests {
-		sources = append(sources, ManifestSource{Manifest: manifest, Source: "direct"})
+func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{
+		byProvider: make(map[string]CatalogEntry, len(entries)),
+		byID:       make(map[string]CatalogEntry, len(entries)),
 	}
-	return NewRegistryFromSources(sources...)
-}
-
-func NewRegistryFromSources(sources ...ManifestSource) (*Registry, error) {
-	r := &Registry{
-		manifests: make(map[string]Manifest, len(sources)),
-		sources:   make(map[string]string, len(sources)),
-	}
-	for _, source := range sources {
-		manifest := source.Manifest
+	normalizedEntries := make([]CatalogEntry, 0, len(entries))
+	for _, entry := range entries {
+		manifest := entry.Manifest
 		if err := manifest.Validate(); err != nil {
 			return nil, err
 		}
 		provider := NormalizeProviderName(manifest.Provider)
-		if existingSource, exists := r.sources[provider]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existingSource, firstNonEmpty(source.Source, "unknown"))
+		entry.Manifest.Provider = provider
+		entry.Identity.ID = strings.TrimSpace(entry.Identity.ID)
+		entry.Identity.Version = strings.TrimSpace(entry.Identity.Version)
+		entry.Identity.ManifestHash = strings.TrimSpace(entry.Identity.ManifestHash)
+		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
+		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
+		entry.Source = firstNonEmpty(entry.Source, "unknown")
+		clonedManifest, err := cloneManifest(entry.Manifest)
+		if err != nil {
+			return nil, fmt.Errorf("clone provider trigger manifest %q: %w", provider, err)
 		}
-		manifest.Provider = provider
-		r.manifests[provider] = manifest
-		r.sources[provider] = firstNonEmpty(source.Source, "unknown")
+		entry.Manifest = clonedManifest
+		if entry.Identity.ID == "" || entry.Identity.Version == "" || entry.Identity.ManifestHash == "" || entry.Identity.Provenance == "" {
+			return nil, fmt.Errorf("provider trigger catalog entry for %q requires pack id, version, manifest_hash, and provenance", provider)
+		}
+		if existing, exists := snapshot.byProvider[provider]; exists {
+			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.Source, entry.Source)
+		}
+		if existing, exists := snapshot.byID[entry.Identity.ID]; exists {
+			return nil, fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", entry.Identity.ID, existing.Source, entry.Source)
+		}
+		snapshot.byProvider[provider] = entry
+		snapshot.byID[entry.Identity.ID] = entry
+		normalizedEntries = append(normalizedEntries, entry)
 	}
-	return r, nil
+	generationID, err := catalogGenerationID(normalizedEntries)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.generationID = generationID
+	return snapshot, nil
 }
 
 func LoadPlatformPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
@@ -185,15 +211,15 @@ func loadPackDirs(runningPlatformVersion, expectedProvenance string, dirs ...str
 	return loaded, nil
 }
 
-func NewRegistryFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*Registry, []LoadedPack, error) {
-	return newRegistryFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, false)
+func NewCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*CatalogSnapshot, []LoadedPack, error) {
+	return newCatalogSnapshotFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, false)
 }
 
-func NewRegistryFromRequiredPlatformPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*Registry, []LoadedPack, error) {
-	return newRegistryFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, true)
+func NewCatalogSnapshotFromRequiredPlatformPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*CatalogSnapshot, []LoadedPack, error) {
+	return newCatalogSnapshotFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, true)
 }
 
-func newRegistryFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string, requireCompletePlatformInventory bool) (*Registry, []LoadedPack, error) {
+func newCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string, requireCompletePlatformInventory bool) (*CatalogSnapshot, []LoadedPack, error) {
 	if err := rejectDuplicatePackDirectories(platformDirs, externalDirs); err != nil {
 		return nil, nil, err
 	}
@@ -219,11 +245,11 @@ func newRegistryFromPackDirs(runningPlatformVersion string, platformDirs, extern
 	if err := validateLoadedPackIdentities(loaded); err != nil {
 		return nil, nil, err
 	}
-	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(loaded...)...)
+	snapshot, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(loaded...)...)
 	if err != nil {
 		return nil, nil, err
 	}
-	return registry, loaded, nil
+	return snapshot, loaded, nil
 }
 
 func validateRequiredPlatformPackInventory(loaded []LoadedPack) error {
@@ -334,15 +360,19 @@ func loadedPackSource(pack LoadedPack) string {
 	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Envelope.ID))
 }
 
-func SourcesFromLoadedPacks(loaded ...LoadedPack) []ManifestSource {
-	sources := make([]ManifestSource, 0, len(loaded))
+func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
+	entries := make([]CatalogEntry, 0, len(loaded))
 	for _, pack := range loaded {
-		sources = append(sources, ManifestSource{
-			Manifest: pack.Manifest,
-			Source:   firstNonEmpty(pack.Source, loadedPackSource(pack)),
+		entries = append(entries, CatalogEntry{
+			Identity: PackIdentity{
+				ID: strings.TrimSpace(pack.Envelope.ID), Version: strings.TrimSpace(pack.Envelope.Version),
+				ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash), Provenance: strings.TrimSpace(pack.Envelope.Provenance.Source),
+			},
+			Manifest: pack.Manifest, SourcePath: strings.TrimSpace(pack.SourcePath),
+			Source: firstNonEmpty(pack.Source, loadedPackSource(pack)),
 		})
 	}
-	return sources
+	return entries
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
@@ -448,32 +478,83 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 	return normalized[0], nil
 }
 
-func (r *Registry) Accept(req Request) (Delivery, error) {
-	provider := NormalizeProviderName(req.Provider)
-	if provider == "" {
-		return Delivery{}, badRequest("provider is required")
-	}
-	if r != nil {
-		if manifest, ok := r.manifests[provider]; ok {
-			return manifest.Accept(req.withProvider(provider))
-		}
-	}
-	return acceptRaw(req.withProvider(provider))
-}
-
-func (r *Registry) Manifest(provider string) (Manifest, bool) {
-	if r == nil {
-		return Manifest{}, false
-	}
-	manifest, ok := r.manifests[NormalizeProviderName(provider)]
-	return manifest, ok
-}
-
-func (r *Registry) Source(provider string) string {
-	if r == nil {
+func (s *CatalogSnapshot) GenerationID() string {
+	if s == nil {
 		return ""
 	}
-	return strings.TrimSpace(r.sources[NormalizeProviderName(provider)])
+	return s.generationID
+}
+
+func (s *CatalogSnapshot) EntryByProvider(provider string) (CatalogEntry, bool) {
+	if s == nil {
+		return CatalogEntry{}, false
+	}
+	entry, ok := s.byProvider[NormalizeProviderName(provider)]
+	if !ok {
+		return CatalogEntry{}, false
+	}
+	return cloneCatalogEntry(entry), true
+}
+
+func (s *CatalogSnapshot) EntryByID(id string) (CatalogEntry, bool) {
+	if s == nil {
+		return CatalogEntry{}, false
+	}
+	entry, ok := s.byID[strings.TrimSpace(id)]
+	if !ok {
+		return CatalogEntry{}, false
+	}
+	return cloneCatalogEntry(entry), true
+}
+
+func (s *CatalogSnapshot) Entries() []CatalogEntry {
+	if s == nil {
+		return nil
+	}
+	out := make([]CatalogEntry, 0, len(s.byID))
+	for _, entry := range s.byID {
+		out = append(out, cloneCatalogEntry(entry))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Identity.ID < out[j].Identity.ID })
+	return out
+}
+
+func cloneCatalogEntry(entry CatalogEntry) CatalogEntry {
+	manifest, err := cloneManifest(entry.Manifest)
+	if err != nil {
+		panic("provider trigger catalog contains an invalid manifest clone: " + err.Error())
+	}
+	entry.Manifest = manifest
+	return entry
+}
+
+func cloneManifest(manifest Manifest) (Manifest, error) {
+	body, err := yaml.Marshal(manifest)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return parseManifestStrict(body)
+}
+
+func catalogGenerationID(entries []CatalogEntry) (string, error) {
+	type tuple struct {
+		ID, Provider, Version, ManifestHash, Provenance string
+	}
+	tuples := make([]tuple, 0, len(entries))
+	for _, entry := range entries {
+		tuples = append(tuples, tuple{
+			ID: strings.TrimSpace(entry.Identity.ID), Provider: NormalizeProviderName(entry.Manifest.Provider),
+			Version: strings.TrimSpace(entry.Identity.Version), ManifestHash: strings.TrimSpace(entry.Identity.ManifestHash),
+			Provenance: strings.TrimSpace(entry.Identity.Provenance),
+		})
+	}
+	sort.Slice(tuples, func(i, j int) bool { return tuples[i].ID < tuples[j].ID })
+	body, err := json.Marshal(tuples)
+	if err != nil {
+		return "", fmt.Errorf("encode provider trigger catalog generation: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (req Request) withProvider(provider string) Request {
@@ -608,6 +689,9 @@ func (m Manifest) Validate() error {
 	signatureType := strings.TrimSpace(m.Signature.Type)
 	if m.Secret.Required && signatureType == "" {
 		return fmt.Errorf("%s manifest requires signature when secret is required", provider)
+	}
+	if signatureType != "" && !m.Secret.Required {
+		return fmt.Errorf("provider trigger manifest %q declares signature.type %q with secret.required false; signed request authentication requires secret.required true", provider, signatureType)
 	}
 	switch strings.TrimSpace(m.PayloadSource) {
 	case "", "payload", "form":
@@ -786,6 +870,9 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 }
 
 func (m Manifest) verifySignature(secret string, req Request) error {
+	if strings.TrimSpace(secret) == "" {
+		return unauthorized(NormalizeProviderName(m.Provider) + " webhook signing secret is required")
+	}
 	if strings.TrimSpace(m.Signature.Type) == signatureTypeTokenEquality {
 		return m.verifyTokenEquality(secret, req)
 	}
@@ -1086,96 +1173,6 @@ func formValuesPayload(values url.Values) map[string]any {
 		payload[key] = copied
 	}
 	return payload
-}
-
-func acceptRaw(req Request) (Delivery, error) {
-	provider := NormalizeProviderName(req.Provider)
-	if provider == "" {
-		return Delivery{}, badRequest("provider is required")
-	}
-	if !verifyRawWebhookSignature(req.Target.WebhookSecret, req.Body, req.Headers) {
-		return Delivery{}, unauthorized("invalid signature")
-	}
-	entityID := req.Target.EffectiveEntityID()
-	deliveryID := firstNonEmpty(
-		req.Headers.Get("X-Provider-Event-ID"),
-		req.Headers.Get("X-Request-ID"),
-		extractProviderEventID(req.Payload),
-		fingerprintInbound(entityID, provider, req.Body),
-	)
-	eventType := resolveProviderEventType(req.Payload)
-	payload := map[string]any{
-		"entity_id":            strings.TrimSpace(entityID),
-		"provider":             provider,
-		"event_type":           eventType,
-		"provider_event_type":  eventType,
-		"provider_event_id":    deliveryID,
-		"provider_delivery_id": deliveryID,
-		"payload":              req.Payload,
-		"headers":              map[string]any{"user_agent": req.UserAgent},
-		"received_at":          req.Received.UTC().Format(time.RFC3339),
-	}
-	return Delivery{
-		ProviderEventID:   deliveryID,
-		ProviderEventType: eventType,
-		EventName:         events.EventType("inbound." + provider),
-		Payload:           payload,
-	}, nil
-}
-
-func verifyRawWebhookSignature(secret string, body []byte, headers http.Header) bool {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return true
-	}
-	if sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256")); strings.HasPrefix(strings.ToLower(sig), "sha256=") {
-		given := strings.TrimSpace(sig[len("sha256="):])
-		mac := hmac.New(sha256.New, []byte(secret))
-		_, _ = mac.Write(body)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
-	}
-	token := strings.TrimSpace(headers.Get("X-Webhook-Token"))
-	if token == "" {
-		auth := strings.TrimSpace(headers.Get("Authorization"))
-		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-			token = strings.TrimSpace(auth[7:])
-		}
-	}
-	return hmac.Equal([]byte(token), []byte(secret))
-}
-
-func extractProviderEventID(payload any) string {
-	m, ok := payload.(map[string]any)
-	if !ok {
-		return ""
-	}
-	for _, key := range []string{"id", "event_id", "message_id"} {
-		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func fingerprintInbound(entityID, provider string, body []byte) string {
-	h := sha1.New()
-	_, _ = h.Write([]byte(entityID))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(provider))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write(body)
-	return "fp:" + hex.EncodeToString(h.Sum(nil))
-}
-
-func resolveProviderEventType(payload any) string {
-	m, _ := payload.(map[string]any)
-	for _, key := range []string{"event_type", "type", "status", "kind", "action"} {
-		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return NormalizeEventToken(v)
-		}
-	}
-	return "event"
 }
 
 func stringFromJSONPath(payload any, path string) (string, bool) {

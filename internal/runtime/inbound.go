@@ -42,6 +42,7 @@ type InboundTarget struct {
 	Alias         string
 	Provider      string
 	SigningSecret string
+	AdmissionPlan providertriggers.InboundAdmissionPlan
 }
 
 func (t InboundTarget) EffectiveEntityID() string {
@@ -69,7 +70,6 @@ type InboundGateway struct {
 	shutdownAdmissionClosed func() bool
 	beginAdmission          func(context.Context) (context.Context, func(), bool)
 	runtimeIngress          *runtimeingress.Controller
-	providers               *providertriggers.Registry
 	credentials             runtimecredentials.Store
 }
 
@@ -79,20 +79,16 @@ func (g *InboundGateway) SetAdmissionGuard(begin func(context.Context) (context.
 	}
 }
 
-func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
-	}
-	if providers == nil {
-		panic("provider trigger registry is required")
 	}
 	g := &InboundGateway{
 		bus:                     bus,
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
-		providers:               providers,
 	}
 	return g
 }
@@ -149,6 +145,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, "provider is required", http.StatusBadRequest)
 		return
 	}
+	if !target.AdmissionPlan.Valid() {
+		http.Error(w, fmt.Sprintf("ingress target %q provider %q has no compiled admission plan; request rejected before provider admission", target.Alias, provider), http.StatusServiceUnavailable)
+		return
+	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, inboundWebhookMaxBodyBytes+1))
 	if err != nil {
@@ -167,7 +167,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	formValues, formParsed, formParseError := inboundFormValues(r.Header.Get("Content-Type"), body)
 
 	signingValue := ""
-	if target.SigningSecret != "" {
+	if target.AdmissionPlan.RequiresSecret() {
+		if target.SigningSecret == "" {
+			http.Error(w, fmt.Sprintf("ingress alias %q provider %q requires a signing secret for %s request authentication", target.Alias, provider, target.AdmissionPlan.RequestAuthentication()), http.StatusServiceUnavailable)
+			return
+		}
 		if g.credentials == nil {
 			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
 			return
@@ -191,7 +195,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	entityID := target.EffectiveEntityID()
 	entitySlug := target.EffectiveEntitySlug()
 	now := time.Now().UTC()
-	delivery, err := g.providers.Accept(providertriggers.Request{
+	delivery, err := target.AdmissionPlan.Accept(providertriggers.Request{
 		Provider: provider,
 		Target: providertriggers.Target{
 			EntityID:      target.EntityID,

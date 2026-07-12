@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type testInboundTargetResolver interface {
@@ -36,6 +37,37 @@ type testInboundTargetResolver interface {
 type testInboundGateway struct {
 	*InboundGateway
 	resolver testInboundTargetResolver
+	catalog  *providertriggers.CatalogSnapshot
+}
+
+func (g *testInboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
+	if target.Provider == "" || target.Alias == "" {
+		alias, provider, _ := parseWebhookPath(r.URL.Path)
+		if target.Alias == "" {
+			target.Alias = alias
+		}
+		if target.Provider == "" {
+			target.Provider = provider
+		}
+	}
+	if !target.AdmissionPlan.Valid() && g.catalog != nil {
+		declaration := providertriggers.AdmissionDeclaration{}
+		if _, installed := g.catalog.EntryByProvider(target.Provider); !installed && target.SigningSecret == "" {
+			declaration = providertriggers.AdmissionDeclaration{
+				Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
+				Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
+				Event:          "inbound." + providertriggers.NormalizeProviderName(target.Provider),
+				DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "json_path", JSONPath: "$.id"}, Payload: "json",
+			}
+		}
+		plan, err := g.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+			Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, Declaration: declaration,
+		})
+		if err == nil {
+			target.AdmissionPlan = plan
+		}
+	}
+	g.InboundGateway.HandleResolvedWebhook(w, r, target, source)
 }
 
 func (g *testInboundGateway) Handler() http.Handler {
@@ -72,17 +104,17 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 		}
 	}
 	sort.Strings(dirs)
-	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", dirs, nil)
+	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", dirs, nil)
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
-	gateway := NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, registry, stores...)
+	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	var resolver testInboundTargetResolver
 	if len(stores) > 0 {
 		resolver, _ = any(stores[0]).(testInboundTargetResolver)
 	}
-	return &testInboundGateway{InboundGateway: gateway, resolver: resolver}
+	return &testInboundGateway{InboundGateway: gateway, resolver: resolver, catalog: registry}
 }
 
 type identityInboundCredentialStore struct{}
@@ -561,8 +593,8 @@ func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testi
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
 	}
 	if store.recorded {
 		t.Fatal("Slack request without configured signing secret recorded inbound marker")
@@ -1891,7 +1923,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
 			target:     InboundTarget{EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a"},
 			configure:  func(*http.Request, []byte) {},
-			wantStatus: http.StatusUnauthorized,
+			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name:       "missing token header",
@@ -1998,7 +2030,7 @@ func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.
 	}
 }
 
-func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(t *testing.T) {
+func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		body      []byte
@@ -2040,11 +2072,11 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(
 			rec := httptest.NewRecorder()
 			g.Handler().ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
 			}
 			if store.recorded {
-				t.Fatalf("raw fallback accepted %s signature and recorded inbound marker", tc.name)
+				t.Fatalf("missing compiled plan accepted %s signature and recorded inbound marker", tc.name)
 			}
 			if len(eventStore.events) != 0 {
 				t.Fatalf("published events = %d, want 0", len(eventStore.events))
@@ -2053,7 +2085,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(
 	}
 }
 
-func TestInboundGateway_RawFallbackDoesNotInterpretTelegramSecretToken(t *testing.T) {
+func TestInboundGateway_NoPlanDoesNotInterpretTelegramSecretToken(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
@@ -2075,18 +2107,18 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTelegramSecretToken(t *testin
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
 	}
 	if store.recorded {
-		t.Fatal("raw fallback accepted Telegram secret token and recorded inbound marker")
+		t.Fatal("missing compiled plan accepted Telegram secret token and recorded inbound marker")
 	}
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
 }
 
-func TestInboundGateway_RawFallbackDoesNotInterpretShopifySignature(t *testing.T) {
+func TestInboundGateway_NoPlanDoesNotInterpretShopifySignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
@@ -2108,18 +2140,18 @@ func TestInboundGateway_RawFallbackDoesNotInterpretShopifySignature(t *testing.T
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
 	}
 	if store.recorded {
-		t.Fatal("raw fallback accepted Shopify signature and recorded inbound marker")
+		t.Fatal("missing compiled plan accepted Shopify signature and recorded inbound marker")
 	}
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
 }
 
-func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T) {
+func TestInboundGateway_NoPlanDoesNotInterpretStripeSignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
@@ -2142,14 +2174,81 @@ func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
 	}
 	if store.recorded {
-		t.Fatal("raw fallback accepted Stripe-Signature and recorded inbound marker")
+		t.Fatal("missing compiled plan accepted Stripe-Signature and recorded inbound marker")
 	}
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
+	catalog, err := providertriggers.NewCatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "partner", Provider: "partner-events", SigningSecret: "partner-secret",
+		Declaration: providertriggers.AdmissionDeclaration{
+			Kind: "raw", Event: "inbound.partner", Payload: "json",
+			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "hmac_sha256", Header: "X-Partner-Signature", Prefix: "sha256=", Encoding: "hex"},
+			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "header", Header: "X-Partner-Delivery"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"id":"payload-id-is-not-authority","value":1}`)
+	mac := hmac.New(sha256.New, []byte("partner-secret"))
+	_, _ = mac.Write(body)
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	for _, tc := range []struct {
+		name, signature string
+		wantStatus      int
+		wantRecorded    bool
+	}{
+		{name: "declared signature and delivery header", signature: signature, wantStatus: http.StatusAccepted, wantRecorded: true},
+		{name: "provider-shaped but undeclared signature is rejected", signature: shopifyWebhookSignature("partner-secret", body), wantStatus: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &recordingInboundStore{inserted: true}
+			gateway := NewInboundGateway(bus, nil, nil, store)
+			gateway.SetCredentialStore(identityInboundCredentialStore{})
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", strings.NewReader(string(body)))
+			req.Header.Set("X-Partner-Signature", tc.signature)
+			req.Header.Set("X-Partner-Delivery", "declared-delivery")
+			// These old heuristic candidates are deliberately irrelevant.
+			req.Header.Set("Stripe-Signature", signature)
+			req.Header.Set("X-GitHub-Event", "push")
+			rec := httptest.NewRecorder()
+			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
+				BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), FlowID: "partner-flow", RunID: "run-partner",
+				FlowInstance: "partner-flow/standing", EntityID: "entity-partner", Alias: "partner", Provider: "partner-events",
+				SigningSecret: "partner-secret", AdmissionPlan: plan,
+			}, nil)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if store.recorded != tc.wantRecorded {
+				t.Fatalf("marker recorded=%t, want %t", store.recorded, tc.wantRecorded)
+			}
+			if tc.wantRecorded {
+				if store.providerEventID != "declared-delivery" || len(eventStore.events) != 1 || eventStore.events[0].Type() != "inbound.partner" {
+					t.Fatalf("accepted raw delivery marker=%q events=%#v", store.providerEventID, eventStore.events)
+				}
+			} else if len(eventStore.events) != 0 {
+				t.Fatalf("rejected raw delivery published %d events", len(eventStore.events))
+			}
+		})
 	}
 }
 

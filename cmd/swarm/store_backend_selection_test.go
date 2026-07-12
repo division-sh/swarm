@@ -671,7 +671,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 			SelfCheck:               true,
 			WorkflowModule:          stubWorkflowModule{source: semanticview.Wrap(bundle)},
 			LLMRuntime:              storeBackendSelectionNoopLLMRuntime{},
-			ProviderTriggerRegistry: testProviderTriggerRegistry(t),
+			ProviderTriggerCatalog: testProviderTriggerCatalog(t),
 		},
 	})
 	if err != nil {

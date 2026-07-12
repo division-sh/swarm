@@ -89,20 +89,100 @@ func TestResolveStandingTargetDeclarationsRejectsUnreachableIngressAlias(t *test
 	}
 }
 
+func TestStandingIngressAdmissionOmissionIsPackRequired(t *testing.T) {
+	source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
+	bundle, _ := semanticview.Bundle(source)
+	binding := &bundle.PackageTree[0].Manifest.Flows[0].Ingress.Providers[0]
+	binding.Provider = "partner"
+	binding.SigningSecret = ""
+	binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{}
+	emptyCatalog, err := providertriggers.NewCatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ResolveStandingTargetDeclarations(source, emptyCatalog)
+	if err == nil || !strings.Contains(err.Error(), `provider "partner" is pack-required`) || !strings.Contains(err.Error(), "admission.kind: raw") {
+		t.Fatalf("omitted admission error = %v", err)
+	}
+}
+
+func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		acknowledge string
+		wantWarning bool
+	}{
+		{name: "warning teaches acknowledgement", wantWarning: true},
+		{name: "structured acknowledgement suppresses warning", acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
+			bundle, _ := semanticview.Bundle(source)
+			binding := &bundle.PackageTree[0].Manifest.Flows[0].Ingress.Providers[0]
+			binding.Provider = "partner"
+			binding.SigningSecret = ""
+			binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{
+				Kind: "raw", Acknowledge: tc.acknowledge, Event: "inbound.partner", Payload: "json",
+				Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "none"},
+				DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "json_path", JSONPath: "$.id"},
+			}
+			emptyCatalog, err := providertriggers.NewCatalogSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			declarations, err := ResolveStandingTargetDeclarations(source, emptyCatalog)
+			if err != nil {
+				t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
+			}
+			warnings := unsignedRawAdmissionFindings(declarations)
+			found := false
+			for _, warning := range warnings {
+				if warning.CheckID != "inbound_unsigned_webhook" {
+					continue
+				}
+				found = true
+				if !strings.Contains(warning.Message, "anyone who learns") || !strings.Contains(warning.Remediation, "admission.acknowledge: unsigned_webhook") {
+					t.Fatalf("unsigned warning = %#v", warning)
+				}
+			}
+			if found != tc.wantWarning {
+				t.Fatalf("unsigned warning found=%t, want %t: %#v", found, tc.wantWarning, warnings)
+			}
+			bundleHash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+			subject, err := declarations[0].Ingress[0].AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{BundleHash: bundleHash, Alias: declarations[0].Alias})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if subject.TriggerAdmission == nil || subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" || len(subject.Requirements) != 0 {
+				t.Fatalf("effective unsigned subject = %#v", subject)
+			}
+		})
+	}
+}
+
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bus, err := runtimebus.NewEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	hash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	manager, err := NewRuntimeContextManager(nil, BundleContext{
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewRuntimeContextManagerWithAdmission(nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
 		BundleHash: hash,
 		Source:     source,
 		Runtime:    &Runtime{Bus: bus},
 		StandingTargets: []StandingTarget{{
 			BundleHash: hash, FlowID: "coordinator", Alias: "chat", Provider: "telegram",
 			RunID: "run", FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
+			AdmissionPlan: plan,
 		}},
 	})
 	if err != nil {
@@ -117,7 +197,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 }
 
 func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "lead.observed")
+	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
@@ -128,11 +208,16 @@ func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(`{"update_id":124,"message":{"chat":{"id":42}}}`))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "telegram-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "coordinator",
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
+		AdmissionPlan: plan,
 	}, source)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "no exact external input pin") {
 		t.Fatalf("response = %d %q, want exact-pin rejection", rec.Code, rec.Body.String())
@@ -143,14 +228,14 @@ func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
 }
 
 func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *testing.T) {
-	source, registry := standingProviderDeclarationSource(t, "github", "inbound.github.issues")
+	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.issues")
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{inserted: true}
-	gateway := NewInboundGatewayWithProviderRegistry(bus, nil, nil, registry, store)
+	gateway := NewInboundGateway(bus, nil, nil, store)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	body := []byte(`{"action":"created","issue":{"number":7}}`)
 	mac := hmac.New(sha256.New, []byte("github-secret"))
@@ -160,11 +245,16 @@ func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *
 	req.Header.Set("X-GitHub-Delivery", "delivery-comment-1")
 	req.Header.Set("X-GitHub-Event", "issue_comment")
 	rec := httptest.NewRecorder()
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "issues", Provider: "github", SigningSecret: "github-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), FlowID: "coordinator",
 		RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b",
 		EntityID: "42000000-0000-0000-0000-000000000002", Alias: "issues", Provider: "github",
 		SigningSecret: "github-secret",
+		AdmissionPlan: plan,
 	}, source)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `resolved event "inbound.github.issue_comment"`) || !strings.Contains(rec.Body.String(), "has no exact external input pin") {
 		t.Fatalf("response = %d %q, want exact mapped dynamic-event rejection", rec.Code, rec.Body.String())
@@ -174,11 +264,11 @@ func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *
 	}
 }
 
-func standingTelegramDeclarationSource(t testing.TB, inputEvent string) (semanticview.Source, *providertriggers.Registry) {
+func standingTelegramDeclarationSource(t testing.TB, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {
 	return standingProviderDeclarationSource(t, "telegram", inputEvent)
 }
 
-func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string) (semanticview.Source, *providertriggers.Registry) {
+func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {
 	t.Helper()
 	alias := provider
 	if provider == "telegram" {
@@ -209,7 +299,7 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", []string{filepath.Join(repoRoot, "packs", "provider-triggers", provider)}, nil)
+	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", []string{filepath.Join(repoRoot, "packs", "provider-triggers", provider)}, nil)
 	if err != nil {
 		t.Fatalf("load %s pack: %v", provider, err)
 	}

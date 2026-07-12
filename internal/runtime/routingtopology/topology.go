@@ -77,12 +77,21 @@ type BoundaryExposure struct {
 }
 
 type RootInputSource struct {
-	ID               string          `json:"id"`
-	Kind             string          `json:"kind"`
-	Alias            string          `json:"alias"`
-	Provider         string          `json:"provider"`
-	Target           RootInputTarget `json:"target"`
-	AuthoredLocation string          `json:"authored_location,omitempty"`
+	ID               string             `json:"id"`
+	Kind             string             `json:"kind"`
+	Alias            string             `json:"alias"`
+	Provider         string             `json:"provider"`
+	Target           RootInputTarget    `json:"target"`
+	AuthoredLocation string             `json:"authored_location,omitempty"`
+	Admission        RootInputAdmission `json:"admission"`
+}
+
+type RootInputAdmission struct {
+	Kind                   string `json:"kind"`
+	PackID                 string `json:"pack_id,omitempty"`
+	DeclaredAuthentication string `json:"declared_authentication,omitempty"`
+	Event                  string `json:"event,omitempty"`
+	Acknowledgement        string `json:"acknowledgement,omitempty"`
 }
 
 type RootInputTarget struct {
@@ -272,12 +281,26 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 				sourceFile = "package.yaml"
 			}
 			for providerIndex, binding := range ref.Ingress.Providers {
+				admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
+				if admissionKind == "" {
+					admissionKind = "pack-required"
+				}
 				item := RootInputSource{
 					Kind:             RootInputSourceStandingIngress,
 					Alias:            alias,
 					Provider:         strings.TrimSpace(binding.Provider),
 					Target:           target,
 					AuthoredLocation: sourceFile + ":flows[" + strconv.Itoa(flowIndex) + "].ingress.providers[" + strconv.Itoa(providerIndex) + "]",
+					Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
+				}
+				if binding.Admission.Pack != nil {
+					item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
+				}
+				if binding.Admission.Authentication != nil {
+					item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
+					if item.Admission.DeclaredAuthentication == "NONE" {
+						item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
+					}
 				}
 				item.ID = rootInputSourceID(item)
 				out = append(out, item)

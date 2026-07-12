@@ -24,6 +24,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -407,25 +408,25 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
-	Ctx                     context.Context
-	Stores                  storeBundle
-	Config                  *config.Config
-	Loaded                  serveRuntimeBundle
-	StateStoreSummary       string
-	Options                 serveOptions
-	MountSources            workspaceMountSources
-	WorkspaceBackend        workspaceBackendSelection
-	Credentials             runtimecredentials.Store
-	ManagedCredentials      runtimemanagedcredentials.Store
-	ProviderCredentials     runtimecredentials.Store
-	ProviderTriggerRegistry *providertriggers.Registry
-	BootStartedAt           time.Time
-	BootProgress            func(runtime.BootProgressEvent)
-	EnableToolGateway       bool
-	ToolGatewayBinding      toolgateway.Binding
-	UseStartupOwnership     bool
-	UseStartupRecovery      bool
-	RequireBundleScopeName  bool
+	Ctx                    context.Context
+	Stores                 storeBundle
+	Config                 *config.Config
+	Loaded                 serveRuntimeBundle
+	StateStoreSummary      string
+	Options                serveOptions
+	MountSources           workspaceMountSources
+	WorkspaceBackend       workspaceBackendSelection
+	Credentials            runtimecredentials.Store
+	ManagedCredentials     runtimemanagedcredentials.Store
+	ProviderCredentials    runtimecredentials.Store
+	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
+	BootStartedAt          time.Time
+	BootProgress           func(runtime.BootProgressEvent)
+	EnableToolGateway      bool
+	ToolGatewayBinding     toolgateway.Binding
+	UseStartupOwnership    bool
+	UseStartupRecovery     bool
+	RequireBundleScopeName bool
 }
 
 func defaultServeOptions() serveOptions {
@@ -739,7 +740,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
-	validationOpts.ProviderTriggerRegistry = req.ProviderTriggerRegistry
+	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
 	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
@@ -767,7 +768,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			Credentials:                      req.Credentials,
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
-			ProviderTriggerRegistry:          req.ProviderTriggerRegistry,
+			ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -960,7 +961,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	logWorkspaceBackendDecision(opts.Output, primaryWorkspaceBackend)
 	if shouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded)
+		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			reporter.emit(5, "local_preflight", "FAILED", detail)
@@ -1102,25 +1103,25 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			logWorkspaceBackendDecision(opts.Output, workspaceBackend)
 		}
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-			Ctx:                     ctx,
-			Stores:                  stores,
-			Config:                  cfg,
-			Loaded:                  loaded,
-			StateStoreSummary:       serveStateStoreSummaryAt(stateStoreSummaries, i),
-			Options:                 opts,
-			MountSources:            mountSources,
-			WorkspaceBackend:        workspaceBackend,
-			Credentials:             credentialStore,
-			ManagedCredentials:      managedCredentialStore,
-			ProviderCredentials:     providerCredentialStore,
-			ProviderTriggerRegistry: providerPackLoad.Registry,
-			BootStartedAt:           bootStartedAt,
-			BootProgress:            reporter.runtimeSink(),
-			EnableToolGateway:       i == 0,
-			ToolGatewayBinding:      contextToolGatewayBinding,
-			UseStartupOwnership:     len(loadedBundles) == 1 && i == 0,
-			UseStartupRecovery:      len(loadedBundles) == 1,
-			RequireBundleScopeName:  len(loadedBundles) > 1,
+			Ctx:                    ctx,
+			Stores:                 stores,
+			Config:                 cfg,
+			Loaded:                 loaded,
+			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
+			Options:                opts,
+			MountSources:           mountSources,
+			WorkspaceBackend:       workspaceBackend,
+			Credentials:            credentialStore,
+			ManagedCredentials:     managedCredentialStore,
+			ProviderCredentials:    providerCredentialStore,
+			ProviderTriggerCatalog: providerPackLoad.Catalog,
+			BootStartedAt:          bootStartedAt,
+			BootProgress:           reporter.runtimeSink(),
+			EnableToolGateway:      i == 0,
+			ToolGatewayBinding:     contextToolGatewayBinding,
+			UseStartupOwnership:    len(loadedBundles) == 1 && i == 0,
+			UseStartupRecovery:     len(loadedBundles) == 1,
+			RequireBundleScopeName: len(loadedBundles) > 1,
 		})
 		if err != nil {
 			reporter.emit(5, "runtime_context", "FAILED", err.Error())
@@ -1146,12 +1147,19 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("plan runtime contexts: %v", err)
 		return 1
 	}
-	if err := runtime.ValidateRuntimeContextSet(preflightContexts...); err != nil {
+	installedTriggerSubjects, err := providerPackLoad.Catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("derive provider trigger capability subjects: %v", err)
+		return 1
+	}
+	admissionState := runtime.ProcessAdmissionState{GenerationID: providerPackLoad.Catalog.GenerationID(), InstalledSubjects: installedTriggerSubjects}
+	if err := runtime.ValidateRuntimeContextSetWithAdmission(admissionState, preflightContexts...); err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
 		log.Printf("validate runtime contexts: %v", err)
 		return 1
 	}
-	runtimeContextManager, err := runtime.NewRuntimeContextManager(runtimeContextAvailabilityReader(stores))
+	runtimeContextManager, err := runtime.NewRuntimeContextManagerWithAdmission(runtimeContextAvailabilityReader(stores), admissionState)
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
 		log.Printf("init runtime context manager: %v", err)
@@ -1165,7 +1173,10 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Registry, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Catalog, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) {
+		return providerPackLoad.Reload()
+	}
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
@@ -1294,7 +1305,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, apiListener.Addr(), mcpListener.Addr())
-	logReadyStandingIngress(ctx, runtimeContextManager, providerCredentialStore, apiListener.Addr())
+	logReadyStandingIngress(runtimeContextManager, apiListener.Addr())
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -1335,20 +1346,15 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 	return planned, nil
 }
 
-func logReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeContextManager, credentials runtimecredentials.Store, apiAddr net.Addr) {
+func logReadyStandingIngress(manager *runtime.RuntimeContextManager, apiAddr net.Addr) {
 	if manager == nil || apiAddr == nil {
 		return
 	}
-	for _, contextDef := range manager.LoadedContexts() {
-		for _, target := range contextDef.StandingTargets {
-			state := "UNBOUND"
-			if credentials != nil {
-				if value, ok, err := credentials.Get(ctx, target.SigningSecret); err == nil && ok && strings.TrimSpace(value) != "" {
-					state = "BOUND"
-				}
-			}
-			log.Printf("standing ingress ready: provider=%s url=http://%s/webhooks/%s/%s signing_secret=%s %s bundle_hash=%s", target.Provider, apiAddr.String(), target.Alias, target.Provider, target.SigningSecret, state, target.BundleHash)
+	for _, subject := range manager.CapabilitySubjects() {
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
+			continue
 		}
+		log.Printf("standing ingress admitted: api_base_url=http://%s %s", apiAddr.String(), packs.RenderSubject(subject, false))
 	}
 }
 
@@ -1487,12 +1493,13 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 }
 
 type verifyCommandResult struct {
-	OK               bool                  `json:"ok"`
-	Contracts        string                `json:"contracts"`
-	WorkspaceBackend string                `json:"workspace_backend"`
-	Errors           []verifyFindingOutput `json:"errors"`
-	Warnings         []verifyFindingOutput `json:"warnings"`
-	LintEvidence     []verifyFindingOutput `json:"lint_evidence"`
+	OK                 bool                  `json:"ok"`
+	Contracts          string                `json:"contracts"`
+	WorkspaceBackend   string                `json:"workspace_backend"`
+	Errors             []verifyFindingOutput `json:"errors"`
+	Warnings           []verifyFindingOutput `json:"warnings"`
+	LintEvidence       []verifyFindingOutput `json:"lint_evidence"`
+	CapabilitySubjects []packs.Subject       `json:"capability_subjects"`
 }
 
 type verifyFindingOutput struct {
@@ -1594,6 +1601,9 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			if out != nil {
 				fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
 				fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
+				for _, subject := range result.CapabilitySubjects {
+					fmt.Fprintln(out, packs.RenderSubject(subject, false))
+				}
 			}
 		}, func() ([]string, error) {
 			return []string{"ok"}, nil
@@ -1606,12 +1616,13 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 
 func verifyCommandOutput(ok bool, contractsRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult) verifyCommandResult {
 	return verifyCommandResult{
-		OK:               ok,
-		Contracts:        contractsRoot,
-		WorkspaceBackend: workspaceBackend,
-		Errors:           verifyFindingOutputs(result.BootReport.Errors()),
-		Warnings:         verifyFindingOutputs(result.BootReport.Warnings()),
-		LintEvidence:     verifyFindingOutputs(result.BootReport.LintEvidence()),
+		OK:                 ok,
+		Contracts:          contractsRoot,
+		WorkspaceBackend:   workspaceBackend,
+		Errors:             verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:           verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:       verifyFindingOutputs(result.BootReport.LintEvidence()),
+		CapabilitySubjects: append([]packs.Subject(nil), result.CapabilitySubjects...),
 	}
 }
 
@@ -2235,7 +2246,7 @@ func verifyWorkflowContractValidationOptions(repo string, source semanticview.So
 		if err != nil {
 			return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
 		}
-		opts.ProviderTriggerRegistry = providerPacks.Registry
+		opts.ProviderTriggerCatalog = providerPacks.Catalog
 	}
 	return opts, nil
 }

@@ -248,7 +248,20 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 			if flow.Ingress != nil {
 				fmt.Fprintf(out, "    ingress: alias=%s\n", flow.Ingress.Alias)
 				for _, provider := range flow.Ingress.Providers {
-					fmt.Fprintf(out, "      - provider=%s signing_secret=%s\n", provider.Provider, provider.SigningSecret)
+					fmt.Fprintf(out, "      - provider=%s admission=%s", provider.Provider, provider.AdmissionKind)
+					if provider.PackID != "" {
+						fmt.Fprintf(out, " pack_id=%s", provider.PackID)
+					}
+					if provider.RequestAuthentication != "" {
+						fmt.Fprintf(out, " authentication=%s", provider.RequestAuthentication)
+					}
+					if provider.Event != "" {
+						fmt.Fprintf(out, " event=%s", provider.Event)
+					}
+					if provider.SigningSecret != "" {
+						fmt.Fprintf(out, " signing_secret=%s", provider.SigningSecret)
+					}
+					fmt.Fprintln(out)
 				}
 			}
 			if flow.PrimaryEntity != nil {
@@ -413,7 +426,17 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 		fmt.Fprintln(out, "  root input sources:")
 		for _, source := range topology.RootInputSources {
 			target := firstNonEmpty(source.Target.FlowPath, source.Target.FlowID)
-			fmt.Fprintf(out, "    - [%s] %s/%s -> flow %s (%s)\n", source.Kind, source.Alias, source.Provider, target, source.AuthoredLocation)
+			fmt.Fprintf(out, "    - [%s] %s/%s -> flow %s admission=%s", source.Kind, source.Alias, source.Provider, target, source.Admission.Kind)
+			if source.Admission.PackID != "" {
+				fmt.Fprintf(out, " pack_id=%s", source.Admission.PackID)
+			}
+			if source.Admission.DeclaredAuthentication != "" {
+				fmt.Fprintf(out, " authentication=%s", source.Admission.DeclaredAuthentication)
+			}
+			if source.Admission.Event != "" {
+				fmt.Fprintf(out, " event=%s", source.Admission.Event)
+			}
+			fmt.Fprintf(out, " (%s)\n", source.AuthoredLocation)
 		}
 	}
 	pubsub, inter := 0, 0

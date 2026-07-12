@@ -1218,8 +1218,36 @@ type ProjectFlowIngress struct {
 }
 
 type ProjectFlowIngressProvider struct {
-	Provider      string `yaml:"provider"`
-	SigningSecret string `yaml:"signing_secret"`
+	Provider      string                      `yaml:"provider"`
+	SigningSecret string                      `yaml:"signing_secret"`
+	Admission     ProjectFlowIngressAdmission `yaml:"admission"`
+}
+
+type ProjectFlowIngressAdmission struct {
+	Kind           string                            `yaml:"kind"`
+	Pack           *ProjectFlowIngressAdmissionPack  `yaml:"pack"`
+	Acknowledge    string                            `yaml:"acknowledge"`
+	Authentication *ProjectFlowIngressAuthentication `yaml:"authentication"`
+	Event          string                            `yaml:"event"`
+	DeliveryID     *ProjectFlowIngressDeliveryID     `yaml:"delivery_id"`
+	Payload        string                            `yaml:"payload"`
+}
+
+type ProjectFlowIngressAdmissionPack struct {
+	ID string `yaml:"id"`
+}
+
+type ProjectFlowIngressAuthentication struct {
+	Kind     string `yaml:"kind"`
+	Header   string `yaml:"header"`
+	Prefix   string `yaml:"prefix"`
+	Encoding string `yaml:"encoding"`
+}
+
+type ProjectFlowIngressDeliveryID struct {
+	Source   string `yaml:"source"`
+	Header   string `yaml:"header"`
+	JSONPath string `yaml:"json_path"`
 }
 type FlowPackageRequires struct {
 	Inputs          []string               `yaml:"inputs"`
