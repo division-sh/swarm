@@ -16633,7 +16633,8 @@ cli_specification:
             domains with `none` for an empty domain, and gives a contract-field remediation. CLI and Builder consumers
             MUST NOT reload contracts, infer the domains independently, normalize malformed server facts, or flatten the
             structured facts to raw error text. The CLI renders `none` only from an explicit canonical empty array; missing,
-            null, non-canonical, or reason-inconsistent domains fall back to the generic application-error rendering.
+            null, non-canonical scalar or domain, or reason-inconsistent facts fall back to the generic application-error
+            rendering. The application code, reason, and rejected event name are exact scalar facts and are never trimmed.
         exit_code_taxonomy:
           success: 0
           unexpected_or_internal_failure: 1

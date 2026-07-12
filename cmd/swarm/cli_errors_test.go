@@ -202,6 +202,7 @@ func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
 func TestCLIRootInputDiagnosticRequiresCompleteServerOwnedDomains(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		code    string
 		details map[string]any
 	}{
 		{name: "missing declared domain", details: map[string]any{
@@ -251,10 +252,32 @@ func TestCLIRootInputDiagnosticRequiresCompleteServerOwnedDomains(t *testing.T) 
 			"declared_events": []string{"declared.event"},
 			"routable_events": []string{},
 		}},
+		{name: "padded application code", code: " EVENT_NOT_DECLARED ", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{},
+			"routable_events": []string{},
+		}},
+		{name: "padded event name", details: map[string]any{
+			"event_name":      " missing.event ",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{},
+			"routable_events": []string{},
+		}},
+		{name: "padded reason", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          " not_declared_root_input ",
+			"declared_events": []string{},
+			"routable_events": []string{},
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			code := tc.code
+			if code == "" {
+				code = "EVENT_NOT_DECLARED"
+			}
 			data, err := json.Marshal(map[string]any{
-				"code":    "EVENT_NOT_DECLARED",
+				"code":    code,
 				"details": tc.details,
 			})
 			if err != nil {
