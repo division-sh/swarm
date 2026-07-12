@@ -18,6 +18,7 @@ func TestEventCatalogPayloadFieldSupportsEveryWave1Shape(t *testing.T) {
 		{name: "scalar", yaml: "payload: json\n", wantType: "json"},
 		{name: "singleton list", yaml: "payload: [json]\n", wantType: "[json]"},
 		{name: "mapping", yaml: "payload: {type: json, description: raw provider envelope}\n", wantType: "json"},
+		{name: "mapping list", yaml: "payload: {type: list, of: json}\n", wantType: "[json]"},
 		{
 			name: "mapping refinements and citation",
 			yaml: `payload:
