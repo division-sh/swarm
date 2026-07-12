@@ -345,7 +345,7 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(decisi
 		return nil, err
 	}
 	return func() {
-		r.routeTable.RemoveFlowInstanceRoute(identity)
+		_ = r.routeTable.RemoveFlowInstanceRoute(identity)
 	}, nil
 }
 

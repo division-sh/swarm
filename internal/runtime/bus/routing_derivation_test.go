@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -68,6 +69,7 @@ type routePersistenceTestStore struct {
 	upsertErr        error
 	deleteErr        error
 	rollbackCalls    []string
+	deleteCalls      []runtimeflowidentity.Route
 	upsertAfterWrite bool
 }
 
@@ -105,11 +107,76 @@ func (s *routePersistenceTestStore) RollbackFlowInstanceRoute(_ context.Context,
 }
 
 func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	s.deleteCalls = append(s.deleteCalls, identity)
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
 	delete(s.routes, identity.ScopeKey+"/"+identity.InstanceID)
 	return nil
+}
+
+func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *testing.T) {
+	store := &routePersistenceTestStore{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	installed := runtimeflowidentity.DeriveRoute("review", "inst-1")
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "reviewer-{instance_id}",
+			Produces:     []string{"task.started"},
+			SubscribesTo: []string{"task.started"},
+		},
+		Identity: installed,
+	}
+	if err := eb.AddFlowInstanceRoute(req); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(req); err != nil {
+		t.Fatalf("exact AddFlowInstanceRoute replay: %v", err)
+	}
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
+		t.Fatalf("routes after exact replay = %#v, want one installed owner route", got)
+	}
+	mismatched := runtimeflowidentity.StoredRoute("worker", "other", installed.InstancePath)
+	if eb.RouteTable().HasFlowInstanceRoute(mismatched) {
+		t.Fatal("HasFlowInstanceRoute accepted a different identity at the installed path")
+	}
+	mismatchedReq := req
+	mismatchedReq.Identity = mismatched
+	if err := eb.AddFlowInstanceRoute(mismatchedReq); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
+		t.Fatalf("mismatched AddFlowInstanceRoute error = %v, want complete-owner conflict", err)
+	}
+	if err := eb.RemoveFlowInstanceRoute(mismatched); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
+		t.Fatalf("mismatched RemoveFlowInstanceRoute error = %v, want complete-owner conflict", err)
+	}
+	if len(store.deleteCalls) != 0 {
+		t.Fatalf("persistence delete calls = %#v, want none for rejected removal", store.deleteCalls)
+	}
+	if !eb.RouteTable().HasFlowInstanceRoute(installed) {
+		t.Fatal("installed identity disappeared after mismatched add/remove")
+	}
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
+		t.Fatalf("routes after mismatched add/remove = %#v, want owner authority unchanged", got)
+	}
+	normalizedRemoval := runtimeflowidentity.Route{
+		ScopeKey:     " /review/ ",
+		InstanceID:   " inst-1 ",
+		InstancePath: " /review/inst-1/ ",
+	}
+	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
+		t.Fatalf("RemoveFlowInstanceRoute owner: %v", err)
+	}
+	if len(store.deleteCalls) != 1 || store.deleteCalls[0] != installed {
+		t.Fatalf("persistence delete calls = %#v, want one canonical owner", store.deleteCalls)
+	}
+	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
+		t.Fatalf("exact RemoveFlowInstanceRoute replay: %v", err)
+	}
+	if len(store.deleteCalls) != 1 {
+		t.Fatalf("persistence delete calls after absent replay = %#v, want no duplicate delete", store.deleteCalls)
+	}
 }
 
 func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
@@ -420,7 +487,9 @@ func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInst
 		t.Fatalf("resolved subscriber = %#v, want operating-accumulator wildcard route", got[0])
 	}
 
-	rt.RemoveFlowInstanceRoute(identity)
+	if err := rt.RemoveFlowInstanceRoute(identity); err != nil {
+		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
+	}
 	if got := rt.Resolve("component-scaffold/component-a/component.scaffolded"); len(got) != 0 {
 		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
 	}

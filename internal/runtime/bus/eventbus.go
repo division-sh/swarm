@@ -268,9 +268,9 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	if addedRoute {
 		if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
 			if !runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
-				table.RemoveFlowInstanceRoute(req.Identity)
+				_ = table.RemoveFlowInstanceRoute(req.Identity)
 			}) {
-				table.RemoveFlowInstanceRoute(req.Identity)
+				_ = table.RemoveFlowInstanceRoute(req.Identity)
 				return errors.New("flow-instance route rollback action is required in pipeline transaction")
 			}
 		}
@@ -289,7 +289,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 				if rollback, ok := eb.store.(FlowInstanceRouteRollbackPersistence); ok && rollback != nil {
 					_ = rollback.RollbackFlowInstanceRoute(ctx, route.Identity)
 				}
-				table.RemoveFlowInstanceRoute(route.Identity)
+				_ = table.RemoveFlowInstanceRoute(route.Identity)
 			}
 			return err
 		}
@@ -307,13 +307,19 @@ func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) 
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
+	owner, exists, err := table.flowInstanceRouteRemovalOwner(identity)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
 	if persister, ok := eb.store.(FlowInstanceRoutePersistence); ok {
-		if err := persister.DeleteFlowInstanceRoute(context.Background(), identity); err != nil {
+		if err := persister.DeleteFlowInstanceRoute(context.Background(), owner); err != nil {
 			return err
 		}
 	}
-	table.RemoveFlowInstanceRoute(identity)
-	return nil
+	return table.RemoveFlowInstanceRoute(owner)
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {
