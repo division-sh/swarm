@@ -3822,3 +3822,46 @@ legacy_buffer: dimensions_received
 		t.Fatalf("diagnostic valid options = %#v, want accumulate options", diagnostic.ValidOptions)
 	}
 }
+
+func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{name: "true", yaml: "event: account.notify.requested\ntarget:\n  flow: account\n  match:\n    account_id: payload.account_id\n  allow_fanout: true\n"},
+		{name: "false", yaml: "event: account.notify.requested\ntarget:\n  flow: account\n  match:\n    account_id: payload.account_id\n  allow_fanout: false\n"},
+		{name: "malformed value", yaml: "event: account.notify.requested\ntarget:\n  flow: account\n  match:\n    account_id: payload.account_id\n  allow_fanout: [legacy]\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var emit EmitSpec
+			err := yaml.Unmarshal([]byte(tc.yaml), &emit)
+			if err == nil {
+				t.Fatal("yaml.Unmarshal succeeded, want retired allow_fanout rejection")
+			}
+			for _, want := range []string{"RETIRED-EMIT-TARGET", "examples/routing/notify-all-children", "issues/1934"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: entity.account_ids
+as: account_id
+emit:
+  event: account.notify.requested
+  target:
+    flow: account
+    match:
+      account_id: account_id
+    allow_fanout: false
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "examples/routing/notify-all-children") {
+		t.Fatalf("yaml.Unmarshal error = %v, want nested retired allow_fanout diagnostic", err)
+	}
+}

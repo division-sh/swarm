@@ -487,7 +487,7 @@ func resolveFlowMatch(input ResolutionInput, target runtimecontracts.EmitTargetS
 		return nil, FailureTargetUnreachableNoSub
 	}
 	matches = uniqueRoutes(matches)
-	if len(matches) > 1 && !target.AllowFanout {
+	if len(matches) > 1 {
 		return nil, FailureTargetAmbiguous
 	}
 	return matches, ""

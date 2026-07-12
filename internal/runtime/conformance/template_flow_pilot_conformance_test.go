@@ -17,7 +17,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/fanoutpinroute"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
@@ -223,34 +223,39 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 	}
 }
 
-func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{})
+func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
-		t.Fatalf("fanout pin-route hard invalidities = %#v, want none", got)
+		t.Fatalf("notify-all-children hard invalidities = %#v, want none", got)
 	}
 
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one instance-key plan", plans)
+	if len(plans) != 2 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want registration and notification plans", plans)
 	}
-	plan := plans[0]
-	if plan.Source.FlowID != "coordinator" || plan.Source.Pin != "account_classified" || plan.Source.Key != "account_id" {
-		t.Fatalf("route plan source = %#v, want coordinator.account_classified keyed by account_id", plan.Source)
+	var plan runtimepinrouting.ConnectRoutePlan
+	for _, candidate := range plans {
+		if candidate.Source.FlowID == notifyallchildren.OwnerFlowID && candidate.Source.Pin == notifyallchildren.OwnerOutputPin {
+			plan = candidate
+		}
 	}
-	if plan.Receiver.FlowID != "account" || plan.Receiver.Pin != "account_classified" || plan.Receiver.Mode != "template" {
-		t.Fatalf("route plan receiver = %#v, want account.account_classified template", plan.Receiver)
+	if plan.Source.FlowID != notifyallchildren.OwnerFlowID || plan.Source.Pin != notifyallchildren.OwnerOutputPin || plan.Source.Key != "account_id" {
+		t.Fatalf("route plan source = %#v, want portfolio.account_notify_requested keyed by account_id", plan.Source)
 	}
-	if plan.InstanceKey == nil || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
-		t.Fatalf("route plan instance key = %#v, want account_id", plan.InstanceKey)
+	if plan.Receiver.FlowID != notifyallchildren.ChildFlowID || plan.Receiver.Pin != notifyallchildren.ChildInputPin || plan.Receiver.Mode != "template" {
+		t.Fatalf("route plan receiver = %#v, want account.account_notify_requested template", plan.Receiver)
+	}
+	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select" || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
+		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey)
 	}
 
-	handler, ok := source.NodeEventHandler("classifier-coordinator", "batch.classify.completed")
+	handler, ok := source.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
 	if !ok {
-		t.Fatal("classifier-coordinator batch.classify.completed handler missing")
+		t.Fatal("portfolio-coordinator notify handler missing")
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:     source,
@@ -264,30 +269,31 @@ func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *t
 		t.Fatalf("NewExecutor: %v", err)
 	}
 	parent := eventtest.RootIngress(
-		"evt-fanout-pin-route-parent",
-		events.EventType("coordinator/batch.classify.completed"),
+		"evt-notify-all-children-parent",
+		events.EventType("portfolio/portfolio.notify.requested"),
 		"",
 		"",
-		json.RawMessage(`{"coordinator_id":"singleton","results":[{"account_id":"acct-a","bucket":"priority","score":91},{"account_id":"acct-b","bucket":"nurture","score":72}]}`),
+		json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
 		0,
-		"run-fanout-pin-route",
+		"run-notify-all-children",
 		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID:       "coordinator",
-			FlowInstance: "coordinator",
-			EntityID:     "coordinator",
+			FlowID:       "portfolio",
+			FlowInstance: "portfolio",
+			EntityID:     "portfolio",
 		}),
 		time.Now().UTC(),
 	)
 	result, err := exec.Execute(context.Background(), runtimeengine.ExecutionRequest{
-		EntityID: "coordinator",
-		NodeID:   "classifier-coordinator",
-		FlowID:   "coordinator",
+		EntityID: "portfolio",
+		NodeID:   "portfolio-coordinator",
+		FlowID:   "portfolio",
 		Event:    parent,
 		Handler:  handler,
 		State: runtimeengine.StateSnapshot{
-			EntityID:     "coordinator",
+			EntityID:     "portfolio",
 			CurrentState: "active",
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"account_ids": []any{"acct-a", "acct-b"}}, nil, nil),
 		},
 	})
 	if err != nil {
@@ -327,7 +333,7 @@ func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *t
 	}
 	for idx, intent := range result.EmitIntents {
 		evt := eventtest.Child(
-			"evt-fanout-pin-route-child-"+string(rune('a'+idx)),
+			"evt-notify-all-children-child-"+string(rune('a'+idx)),
 			intent.Event.Type(),
 			intent.Event.SourceAgent(),
 			intent.Event.TaskID(),
@@ -337,7 +343,7 @@ func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *t
 			intent.Event.Envelope(),
 			intent.Event.CreatedAt(),
 		)
-		if got, wantType := string(evt.Type()), "coordinator/account.classified"; got != wantType {
+		if got, wantType := string(evt.Type()), "portfolio/account.notify.requested"; got != wantType {
 			t.Fatalf("fan_out emitted event type = %q, want %q", got, wantType)
 		}
 		if target := evt.TargetRoute(); !target.Empty() {
@@ -370,8 +376,8 @@ func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *t
 	}
 }
 
-func TestFanOutPinRouteConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{})
+func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	tests := []struct {
 		name          string
 		payload       json.RawMessage
@@ -380,12 +386,12 @@ func TestFanOutPinRouteConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	}{
 		{
 			name:        "missing account key",
-			payload:     json.RawMessage(`{"bucket":"priority","score":91}`),
+			payload:     json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
 			wantFailure: string(runtimepinrouting.ConnectFailureAddressValueMissing),
 		},
 		{
 			name:    "ambiguous account key",
-			payload: json.RawMessage(`{"account_id":"acct-a","bucket":"priority","score":91}`),
+			payload: json.RawMessage(`{"portfolio_id":"portfolio","account_id":"acct-a","command":"refresh"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
 				{InstanceID: "acct-a-one", EntityID: "ent-a1", FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 				{InstanceID: "acct-a-two", EntityID: "ent-a2", FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
@@ -407,18 +413,18 @@ func TestFanOutPinRouteConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			evt := eventtest.RootIngress(
-				"evt-fanout-pin-route-negative",
-				events.EventType("coordinator/account.classified"),
+				"evt-notify-all-children-negative",
+				events.EventType("portfolio/account.notify.requested"),
 				"",
 				"",
 				tc.payload,
 				0,
-				"run-fanout-pin-route",
+				"run-notify-all-children",
 				"",
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-					FlowID:       "coordinator",
-					FlowInstance: "coordinator",
-					EntityID:     "coordinator",
+					FlowID:       "portfolio",
+					FlowInstance: "portfolio",
+					EntityID:     "portfolio",
 				}),
 				time.Now().UTC(),
 			)
@@ -513,7 +519,7 @@ func (s *fanOutPinRouteMemoryStore) InsertEventDeliveryRoutes(_ context.Context,
 func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {
 	target = target.Normalized()
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == "node" && route.SubscriberID == "account-classifier" && route.Target == target {
+		if route.SubscriberType == "node" && route.SubscriberID == "account-node" && route.Target == target {
 			return true
 		}
 	}

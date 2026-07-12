@@ -139,7 +139,7 @@ var definitions = map[Class]Definition{
 	ClassAuthorizationDenied:   definition(ClassAuthorizationDenied, true, false, true, "Authorization was denied", "Grant the required authority or use an authorized principal"),
 	ClassTargetUnreachable:     definition(ClassTargetUnreachable, true, false, false, "Runtime target is unreachable", "Restore or select a reachable target"),
 	ClassTargetAmbiguous:       definition(ClassTargetAmbiguous, true, false, true, "Runtime target is ambiguous", "Make target selection resolve to exactly one target"),
-	ClassFanOutBoundExceeded:   definition(ClassFanOutBoundExceeded, true, false, true, "Fan-out bound was exceeded", "Reduce the collection or raise the declared bound"),
+	ClassFanOutBoundExceeded:   definition(ClassFanOutBoundExceeded, true, false, true, "Fan-out bound was exceeded", "Raise max_items or split the batch"),
 	ClassChainDepthExceeded:    definition(ClassChainDepthExceeded, true, false, true, "Event chain depth was exceeded", "Break the causal event cycle or reduce its depth"),
 	ClassEarlyArrival:          definition(ClassEarlyArrival, false, false, true, "Event arrived before its admitted window", "Retry only through the owning temporal policy"),
 	ClassStaleArrival:          definition(ClassStaleArrival, false, false, true, "Event arrived after its owning lifecycle closed", "Start a new lifecycle rather than reusing the closed one"),

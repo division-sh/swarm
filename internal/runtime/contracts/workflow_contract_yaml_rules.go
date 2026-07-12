@@ -240,9 +240,6 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	if err := ValidateFanOutAlias(aux.As); err != nil {
 		return fmt.Errorf("fan_out.%w", err)
 	}
-	if strings.TrimSpace(aux.Identity) == "" {
-		return fmt.Errorf("fan_out.identity is required")
-	}
 	maxItems := 0
 	maxItemsSet := hasYAMLMappingKey(node, "max_items")
 	if maxItemsSet && aux.MaxItems == nil {

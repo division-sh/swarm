@@ -77,7 +77,7 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				event.Payload.Properties["customer_id"] = runtimecontracts.EventFieldSpec{Type: "text"}
 				bundle.Events["order.accepted"] = event
 			},
-			wantError: `must reference a collection payload field; field customer_id has type "text"`,
+			wantError: `must reference a list/array collection field; field has type "text"`,
 		},
 		{
 			name: "items source must not descend below declared collection field",
@@ -125,36 +125,11 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 	}
 }
 
-func TestFanOutCollectionTypeRef(t *testing.T) {
-	tests := []struct {
-		raw  string
-		want bool
-	}{
-		{raw: "[text]", want: true},
-		{raw: "list<text>", want: true},
-		{raw: "text[]", want: true},
-		{raw: "[]text", want: true},
-		{raw: "array", want: true},
-		{raw: "array (required for batch modes)", want: true},
-		{raw: "array<text>", want: true},
-		{raw: "", want: false},
-		{raw: "text", want: false},
-		{raw: "[]", want: false},
-		{raw: "[ ]", want: false},
-		{raw: "list<>", want: false},
-		{raw: "array<>", want: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.raw, func(t *testing.T) {
-			if got := fanOutCollectionTypeRef(tc.raw); got != tc.want {
-				t.Fatalf("fanOutCollectionTypeRef(%q) = %v, want %v", tc.raw, got, tc.want)
-			}
-		})
-	}
-}
-
 func fanOutValidationBundle(spec runtimecontracts.FanOutSpec) *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"LineItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"order.accepted": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{

@@ -1,0 +1,29 @@
+name: account
+mode: template
+initial_state: active
+states: [active]
+instance:
+  by: account_id
+pins:
+  inputs:
+    events:
+      - name: account_registered
+        event: account.registered
+        resolution:
+          mode: select-or-create
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+      - name: account_notify_requested
+        event: account.notify.requested
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+  outputs:
+    events: []

@@ -1,0 +1,44 @@
+portfolio-coordinator:
+  id: portfolio-coordinator
+  execution_type: system_node
+  subscribes_to:
+    - portfolio.opened
+    - portfolio.account.register.requested
+    - portfolio.membership.seeded
+    - portfolio.notify.requested
+  event_handlers:
+    portfolio.opened:
+      create_entity: true
+      data_accumulation:
+        writes:
+          - source_field: portfolio_id
+            target_field: portfolio_id
+    portfolio.account.register.requested:
+      select_entity:
+        by:
+          portfolio_id: payload.portfolio_id
+      emit:
+        event: account.registered
+        fields:
+          account_id: payload.account_id
+    portfolio.membership.seeded:
+      select_entity:
+        by:
+          portfolio_id: payload.portfolio_id
+      data_accumulation:
+        writes:
+          - source_field: account_ids
+            target_field: account_ids
+    portfolio.notify.requested:
+      select_entity:
+        by:
+          portfolio_id: payload.portfolio_id
+      fan_out:
+        items_from: entity.account_ids
+        as: account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account_id
+            command: payload.command

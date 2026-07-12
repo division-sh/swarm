@@ -235,11 +235,12 @@ var activityFieldOptions = map[string]struct{}{
 }
 
 var emitTargetFieldOptions = map[string]struct{}{
-	"instance_id":  {},
-	"flow":         {},
-	"match":        {},
-	"allow_fanout": {},
+	"instance_id": {},
+	"flow":        {},
+	"match":       {},
 }
+
+const retiredAllowFanoutDiagnostic = "RETIRED-EMIT-TARGET: emit.target.allow_fanout is deferred and not runnable; use collection fan_out over the owner's child-key list, then an ordinary output pin/connect and receiver resolution.mode: select. See examples/routing/notify-all-children. True one-event multi-instance delivery is evidence-gated at https://github.com/division-sh/swarm/issues/1934"
 
 var mailboxFieldOptions = map[string]struct{}{
 	"item_type":     {},
@@ -425,6 +426,9 @@ func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 			if key == "" {
 				continue
 			}
+			if key == "allow_fanout" {
+				return EmitTargetSpec{}, fmt.Errorf("%s", retiredAllowFanoutDiagnostic)
+			}
 			if _, ok := emitTargetFieldOptions[key]; !ok {
 				return EmitTargetSpec{}, NewUndefinedFieldDiagnostic("emit.target", key, emitTargetFieldOptions)
 			}
@@ -448,22 +452,16 @@ func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 					return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.match must be a mapping: %w", err)
 				}
 				out.Match = match
-			case "allow_fanout":
-				if err := value.Decode(&out.AllowFanout); err != nil {
-					return EmitTargetSpec{}, err
-				}
 			}
 		}
 		out = out.Normalized()
 		switch {
-		case out.InstanceID != "" && (out.Flow != "" || len(out.Match) > 0 || out.AllowFanout):
-			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.instance_id cannot be combined with flow/match/allow_fanout")
+		case out.InstanceID != "" && (out.Flow != "" || len(out.Match) > 0):
+			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.instance_id cannot be combined with flow/match")
 		case out.InstanceID != "":
 			out.Kind = EmitTargetKindInstanceID
 		case out.Flow != "" && len(out.Match) > 0:
 			out.Kind = EmitTargetKindFlowMatch
-		case out.AllowFanout:
-			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.allow_fanout requires flow and match")
 		default:
 			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target requires sender, instance_id, or flow+match")
 		}

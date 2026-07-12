@@ -323,7 +323,7 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 		t.Fatalf("graph fan_outs = %#v, want one fan-out edge", graph.FanOuts)
 	}
 	got := graph.FanOuts[0]
-	if got.Emit != "line_item.requested" || got.ItemsFrom != "payload.line_items" || got.ItemAlias != "line_item" || got.Identity != "line_item.id" {
+	if got.Emit != "line_item.requested" || got.ItemsFrom != "payload.line_items" || got.ItemAlias != "line_item" || got.Identity != "line_item.id" || got.MaxItems != runtimecontracts.DefaultFanOutMaxItems {
 		t.Fatalf("fan-out view = %#v, want multiplicity metadata", got)
 	}
 	if len(got.From) != 1 || got.From[0] != "waiting" {

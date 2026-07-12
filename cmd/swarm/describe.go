@@ -365,6 +365,9 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 					if strings.TrimSpace(fanOut.Identity) != "" {
 						parts = append(parts, "identity "+strings.TrimSpace(fanOut.Identity))
 					}
+					if fanOut.MaxItems > 0 {
+						parts = append(parts, fmt.Sprintf("max_items %d", fanOut.MaxItems))
+					}
 					detail := strings.TrimSpace(fanOut.Source)
 					if strings.TrimSpace(fanOut.NodeID) != "" {
 						detail += " " + strings.TrimSpace(fanOut.NodeID)

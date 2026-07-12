@@ -1,0 +1,7 @@
+account.registered:
+  account_id: text
+  required: [account_id]
+account.notify.requested:
+  account_id: text
+  command: text
+  required: [account_id, command]

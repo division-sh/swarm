@@ -99,7 +99,7 @@ func validatePolicySheetValidationValueRow(source semanticview.Source, ref polic
 	} else {
 		findings = append(findings, validatePolicySheetValidationDispositionConsumer(ref, handler, rule, storeAs, set)...)
 	}
-	if !policySheetLookupBindingConsumed(handler, rule, storeAs) {
+	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.EventType, handler, rule, storeAs) {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
 	}
 	return findings

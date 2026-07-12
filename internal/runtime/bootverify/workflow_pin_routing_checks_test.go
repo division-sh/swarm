@@ -9,7 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/fanoutpinroute"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 )
 
 func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *testing.T) {
@@ -62,7 +62,7 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPat
 }
 
 func TestPinTargetResolution_AllowsTargetlessFanOutEmitThroughParentConnect(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{})
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	report := Run(context.Background(), source, Options{})
 	if reportContains(report.Errors(), "pin_target_resolution", "") ||
 		reportContains(report.Errors(), "composition_connect_validation", "") ||
@@ -72,7 +72,7 @@ func TestPinTargetResolution_AllowsTargetlessFanOutEmitThroughParentConnect(t *t
 }
 
 func TestPinTargetResolution_FanOutEmitFailsClosedWithoutRouteAuthority(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{OmitConnect: true})
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{OmitConnect: true})
 	report := Run(context.Background(), source, Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "handler.fan_out.emit") ||
 		!reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
@@ -81,7 +81,7 @@ func TestPinTargetResolution_FanOutEmitFailsClosedWithoutRouteAuthority(t *testi
 }
 
 func TestPinTargetResolution_FanOutEmitFailsClosedWithoutOutputPin(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{OmitOutputPin: true})
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{OmitOutputPin: true})
 	report := Run(context.Background(), source, Options{})
 	if !reportContains(report.Errors(), "composition_connect_validation", "producer_output_pin_missing") {
 		t.Fatalf("expected missing output pin to fail connect validation, got %#v", report.Errors())
@@ -89,15 +89,15 @@ func TestPinTargetResolution_FanOutEmitFailsClosedWithoutOutputPin(t *testing.T)
 }
 
 func TestPinTargetResolution_FanOutEmitFailsClosedForMissingConnectKeyMaterial(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{BadConnectMapping: true})
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{BadConnectMapping: true})
 	report := Run(context.Background(), source, Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "connect_key_adapter_source_missing") {
-		t.Fatalf("expected bad connect key adapter to fail closed, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "composition_connect_validation", "instance_resolution_invalid") {
+		t.Fatalf("expected incompatible instance adapter to fail closed, got %#v", report.Errors())
 	}
 }
 
 func TestPinTargetResolution_FanOutEmitFailsClosedForMissingCarriesPayload(t *testing.T) {
-	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{MissingEmitCarry: true})
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{MissingEmitCarry: true})
 	report := Run(context.Background(), source, Options{})
 	if !reportContains(report.Errors(), "output_pin_key_carries_validation", "emit_payload_missing_key") ||
 		!reportContains(report.Errors(), "output_pin_key_carries_validation", "handler.fan_out.emit") {
@@ -108,23 +108,23 @@ func TestPinTargetResolution_FanOutEmitFailsClosedForMissingCarriesPayload(t *te
 func TestPinTargetResolution_FanOutEmitRejectsProducerTargetAndBroadcastCommonPath(t *testing.T) {
 	tests := []struct {
 		name string
-		opts fanoutpinroute.Options
+		opts notifyallchildren.Options
 		want string
 	}{
 		{
 			name: "producer target",
-			opts: fanoutpinroute.Options{ProducerTarget: true},
+			opts: notifyallchildren.Options{ProducerTarget: true},
 			want: "producer_target_common_path_forbidden",
 		},
 		{
 			name: "producer broadcast",
-			opts: fanoutpinroute.Options{ProducerBroadcast: true},
+			opts: notifyallchildren.Options{ProducerBroadcast: true},
 			want: "producer_broadcast_common_path_forbidden",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := fanoutpinroute.LoadSource(t, tc.opts)
+			source := notifyallchildren.LoadSource(t, tc.opts)
 			report := Run(context.Background(), source, Options{})
 			if !reportContains(report.Errors(), "pin_target_resolution", tc.want) {
 				t.Fatalf("expected %s, got %#v", tc.want, report.Errors())
@@ -408,7 +408,7 @@ func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
 	}
 }
 
-func TestPinTargetResolution_AllowsDynamicFlowMatchWhenNotPackageComposition(t *testing.T) {
+func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposition(t *testing.T) {
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -418,7 +418,6 @@ func TestPinTargetResolution_AllowsDynamicFlowMatchWhenNotPackageComposition(t *
           flow: consumer
           match:
             entity_id: payload.entity_id
-          allow_fanout: true
 `, false)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

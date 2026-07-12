@@ -509,7 +509,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
-		"waiting ->xN line_item.requested items_from payload.line_items as line_item identity line_item (handler.fan_out support-node on ticket.opened)",
+		"waiting ->xN line_item.requested items_from payload.line_items as line_item identity line_item max_items 1000 (handler.fan_out support-node on ticket.opened)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
