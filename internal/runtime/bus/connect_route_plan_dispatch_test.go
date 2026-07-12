@@ -78,9 +78,18 @@ type targetRouteMemoryEventMutation struct {
 }
 
 func (s *connectRoutePlanMutationStore) RunEventMutation(ctx context.Context, fn func(EventMutation) error) error {
+	postCommit := make([]func(), 0, 2)
+	rollback := make([]func(), 0, 2)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	mutation := &targetRouteMemoryEventMutation{store: s}
 	mutation.ctx = WithEventMutationContext(ctx, mutation)
-	return fn(mutation)
+	if err := fn(mutation); err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
 }
 
 func (m *targetRouteMemoryEventMutation) Context() context.Context {

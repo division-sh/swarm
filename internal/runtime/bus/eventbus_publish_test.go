@@ -378,6 +378,10 @@ func (*replayCapableAtomicStoreMissingScope) ClaimPipelineReplay(context.Context
 	return nil, false, nil
 }
 
+func (*replayCapableAtomicStoreMissingScope) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return sweeperClaimLease{}, true, nil
+}
+
 func assertSortedStringsEqual(t *testing.T, got, want []string) {
 	t.Helper()
 	got = append([]string(nil), got...)
@@ -1350,6 +1354,72 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	defer cancel()
 	if err := eb.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after acknowledged dispatch completion: %v", err)
+	}
+}
+
+func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgres(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, selected, selected.DB, "?"
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return &store.PostgresStore{DB: db}, &store.PostgresStore{DB: db}, db, "$1::uuid"
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			foregroundStore, siblingStore, db, runPlaceholder := tc.open(t)
+			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			if _, err := db.ExecContext(context.Background(), "INSERT INTO runs (run_id, status) VALUES ("+runPlaceholder+", 'running')", runID); err != nil {
+				t.Fatalf("insert run: %v", err)
+			}
+			started := make(chan struct{}, 1)
+			release := make(chan struct{})
+			foreground, err := runtimebus.NewEventBusWithOptions(foregroundStore, runtimebus.EventBusOptions{
+				Interceptors: []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sibling, err := runtimebus.NewEventBus(siblingStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publishDone := make(chan error, 1)
+			go func() {
+				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.RootIngress(
+					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID, "",
+					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()))
+			}()
+			requireSignalBefore(t, started, 5*time.Second, "foreground dispatch start")
+			if err := requireErrorBefore(t, publishDone, 5*time.Second, "acknowledged foreground publish"); err != nil {
+				t.Fatal(err)
+			}
+
+			if got, err := sibling.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", got, err)
+			}
+			close(release)
+			waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := foreground.WaitForQuiescence(waitCtx); err != nil {
+				t.Fatalf("wait foreground completion: %v", err)
+			}
+			if got, err := sibling.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+				t.Fatalf("sibling sweep after foreground settlement = %d, %v; want 0, nil", got, err)
+			}
+		})
 	}
 }
 

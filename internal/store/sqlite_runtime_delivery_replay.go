@@ -415,7 +415,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 		  AND `+where+`
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
-			WHERE o.event_id = e.event_id AND o.status = 'pending'
+			WHERE o.event_id = e.event_id AND o.status <> 'completed'
 		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		ORDER BY e.created_at ASC, e.event_id ASC
@@ -596,16 +596,27 @@ func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID st
 	if !pending {
 		return nil, false, nil
 	}
+	return s.claimPipelineEvent(eventID)
+}
+
+func (s *SQLiteRuntimeStore) ClaimPipelinePublication(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, false, fmt.Errorf("event_id is required")
+	}
+	return s.claimPipelineEvent(eventID)
+}
+
+func (s *SQLiteRuntimeStore) claimPipelineEvent(eventID string) (runtimeownership.Lease, bool, error) {
 	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
 	if s.replayClaims == nil {
 		s.replayClaims = map[string]struct{}{}
 	}
 	if _, exists := s.replayClaims[eventID]; exists {
-		s.replayMu.Unlock()
 		return nil, false, nil
 	}
 	s.replayClaims[eventID] = struct{}{}
-	s.replayMu.Unlock()
 	return &sqliteReplayLease{store: s, eventID: eventID}, true, nil
 }
 

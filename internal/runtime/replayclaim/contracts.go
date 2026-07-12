@@ -12,6 +12,8 @@ import (
 var (
 	ErrMissingReplayEventReader                  = errors.New("store does not support replay-eligible event reads")
 	ErrMissingReplayClaimOwner                   = errors.New("store does not support explicit pipeline replay claims")
+	ErrMissingPublicationClaimOwner              = errors.New("store does not support foreground pipeline publication claims")
+	ErrPublicationClaimBusy                      = errors.New("pipeline event is already owned by publication or replay")
 	ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
 	ErrMissingCommittedReplayScope               = errors.New("store does not support authoritative committed replay scope for persisted replay")
 )
@@ -33,6 +35,12 @@ type Lister interface {
 
 type Owner interface {
 	ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
+}
+
+// PublicationOwner acquires the same event-identity exclusion used by replay
+// before foreground persistence makes an event visible to recovery.
+type PublicationOwner interface {
+	ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
 }
 
 type Store interface {

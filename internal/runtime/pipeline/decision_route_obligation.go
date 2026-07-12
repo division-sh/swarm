@@ -15,6 +15,7 @@ const DecisionRouteRetryDelay = 30 * time.Second
 type DecisionRouteObligationStore interface {
 	ListDueDecisionRouteObligations(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
 	DeferDecisionRouteObligation(context.Context, string, time.Time, *runtimefailures.Envelope) error
+	QuarantineDecisionRouteObligation(context.Context, string, time.Time, *runtimefailures.Envelope) error
 	CompleteDecisionRouteObligation(context.Context, string, time.Time) error
 }
 
