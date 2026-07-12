@@ -145,7 +145,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	}
 	if err != nil {
 		status := receiptStatusForAgentFailure(err)
-		agentFailure := runtimefailures.FromError(err, "agent-manager", "process_event.on_event")
+		agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
 		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID(), agentFailure.Failure)
 		am.writeReceipt(ctx, evt.ID(), agent.ID(), status, &agentFailure.Failure)
 		record.Outcome = startupManagerReplayOutcomeDropped

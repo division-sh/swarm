@@ -20,6 +20,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -30,7 +31,26 @@ import (
 	"github.com/google/uuid"
 )
 
-const claudeAttemptProofEventType events.EventType = "claude.attempt.proof.requested"
+const (
+	claudeAttemptProofEventType events.EventType = "claude.attempt.proof.requested"
+	claudeAttemptProofEntityID                   = "11111111-1111-4111-8111-111111111111"
+)
+
+type claudeAttemptProofSurface struct {
+	name         string
+	runtimeMode  runtimesessions.RuntimeMode
+	sessionScope runtimesessions.SessionScope
+	outputFormat string
+}
+
+func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
+	return claudeAttemptProofSurface{
+		name:         "session_json",
+		runtimeMode:  runtimesessions.RuntimeModeSession,
+		sessionScope: runtimesessions.SessionScopeFlow,
+		outputFormat: "json",
+	}
+}
 
 type claudeAttemptProofStore interface {
 	runtimebus.EventStore
@@ -67,7 +87,11 @@ func (*claudeAttemptProofAgent) Subscriptions() []events.EventType {
 func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
 	a.calls.Add(1)
 	ctx = runtimeactors.WithActor(ctx, a.config)
-	ctx = runtimesessions.WithScope(ctx, runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), a.config.FlowPath)
+	scopeKey, err := runtimesessions.DeclaredScopeKey(a.config)
+	if err != nil {
+		return nil, err
+	}
+	ctx = runtimesessions.WithScope(ctx, a.config.ConversationMode, a.config.SessionScope, scopeKey)
 	if a.session == nil {
 		session, err := a.runtime.StartSession(ctx, a.config.ID, "Reply exactly ok.", nil)
 		if err != nil {
@@ -75,7 +99,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, _ events.Event) (
 		}
 		a.session = session
 	}
-	_, err := a.runtime.ContinueSession(ctx, a.session, runtimellm.Message{Role: "user", Content: "Reply exactly ok."})
+	_, err = a.runtime.ContinueSession(ctx, a.session, runtimellm.Message{Role: "user", Content: "Reply exactly ok."})
 	return nil, err
 }
 
@@ -271,6 +295,105 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 	}
 }
 
+func TestClaudeAttemptIdentitySelectedStoreModeAndProcessParity(t *testing.T) {
+	for _, runtimeMode := range []runtimesessions.RuntimeMode{
+		runtimesessions.RuntimeModeTask,
+		runtimesessions.RuntimeModeSession,
+		runtimesessions.RuntimeModeSessionPerEntity,
+	} {
+		for _, outputFormat := range []string{"json", "stream-json"} {
+			surface := claudeAttemptProofSurface{
+				name:         runtimeMode.String() + "_" + outputFormat,
+				runtimeMode:  runtimeMode,
+				outputFormat: outputFormat,
+			}
+			switch runtimeMode {
+			case runtimesessions.RuntimeModeSession:
+				surface.sessionScope = runtimesessions.SessionScopeFlow
+			case runtimesessions.RuntimeModeSessionPerEntity:
+				surface.sessionScope = runtimesessions.SessionScopeEntity
+			}
+			for _, backendName := range []string{"sqlite", "postgres"} {
+				t.Run(surface.name+"/"+backendName, func(t *testing.T) {
+					backend := newClaudeAttemptProofBackend(t, backendName)
+					t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
+					captureDir := t.TempDir()
+					t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_CAPTURE", captureDir)
+					t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE", "success")
+					dockerBin := filepath.Join(t.TempDir(), "docker")
+					writeClaudeAttemptProofDocker(t, dockerBin)
+					calls := &atomic.Int32{}
+					manager, eventBus := newClaudeAttemptProofManager(t, backend, dockerBin, calls, surface)
+					cfg := claudeAttemptProofAgentConfig(surface)
+					if err := manager.SpawnAgent(cfg); err != nil {
+						t.Fatalf("spawn Claude %s proof agent: %v", surface.name, err)
+					}
+					manager.Run(context.Background())
+					t.Cleanup(func() { _ = manager.Shutdown() })
+
+					eventID := publishClaudeAttemptProofEvent(t, eventBus, surface)
+					receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusProcessed, calls)
+					if receipt.RetryCount != 0 || calls.Load() != 1 {
+						t.Fatalf("%s receipt=%#v agent_calls=%d, want one successful invocation", surface.name, receipt, calls.Load())
+					}
+					attempts := loadClaudeAttemptProofAttempts(t, backend)
+					if len(attempts) != 1 || attempts[0].ordinal != 1 || attempts[0].state != string(runtimeeffects.StateSettled) {
+						t.Fatalf("%s attempts=%#v, want one settled selected-store attempt", surface.name, attempts)
+					}
+					if got := readClaudeAttemptProofValue(t, filepath.Join(captureDir, "last_session_id")); got != attempts[0].id {
+						t.Fatalf("%s provider child=%q, want durable attempt %q", surface.name, got, attempts[0].id)
+					}
+					if got := readClaudeAttemptProofValue(t, filepath.Join(captureDir, "last_output_format")); got != outputFormat {
+						t.Fatalf("%s output format=%q, want %q", surface.name, got, outputFormat)
+					}
+					requireClaudeAttemptProofSessionSurface(t, backend, surface, attempts[0].id)
+				})
+			}
+		}
+	}
+}
+
+type claudeAttemptProofChainDepthAgent struct{ id string }
+
+func (a claudeAttemptProofChainDepthAgent) ID() string { return a.id }
+
+func (claudeAttemptProofChainDepthAgent) Type() string { return "claude-attempt-proof-chain-depth" }
+
+func (claudeAttemptProofChainDepthAgent) Subscriptions() []events.EventType {
+	return []events.EventType{claudeAttemptProofEventType}
+}
+
+func (claudeAttemptProofChainDepthAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, runtimeengine.ErrChainDepthExceeded
+}
+
+func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *testing.T) {
+	for _, backendName := range []string{"sqlite", "postgres"} {
+		t.Run(backendName, func(t *testing.T) {
+			backend := newClaudeAttemptProofBackend(t, backendName)
+			eventBus, err := runtimebus.NewEventBus(backend.store)
+			if err != nil {
+				t.Fatalf("new chain-depth proof event bus: %v", err)
+			}
+			manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+				return claudeAttemptProofChainDepthAgent{id: cfg.ID}, nil
+			}, runtimemanager.AgentManagerOptions{LifecycleStore: backend.store, Sessions: backend.sessions}, backend.store)
+			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
+				t.Fatalf("spawn chain-depth proof agent: %v", err)
+			}
+			manager.Run(context.Background())
+			t.Cleanup(func() { _ = manager.Shutdown() })
+
+			eventID := publishClaudeAttemptProofEvent(t, eventBus)
+			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, &atomic.Int32{})
+			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassChainDepthExceeded || receipt.Failure.Detail.Code != "chain_depth_limit" {
+				t.Fatalf("chain-depth receipt=%#v, want canonical direct dead-letter envelope", receipt)
+			}
+			requireClaudeAttemptProofDeliveryFailure(t, backend, eventID, "dead_letter", runtimefailures.ClassChainDepthExceeded, "chain_depth_limit")
+		})
+	}
+}
+
 func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofBackend {
 	t.Helper()
 	switch name {
@@ -302,8 +425,12 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	}
 }
 
-func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBackend, dockerBin string, calls *atomic.Int32) (*runtimemanager.AgentManager, *runtimebus.EventBus) {
+func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBackend, dockerBin string, calls *atomic.Int32, surfaces ...claudeAttemptProofSurface) (*runtimemanager.AgentManager, *runtimebus.EventBus) {
 	t.Helper()
+	surface := defaultClaudeAttemptProofSurface()
+	if len(surfaces) > 0 {
+		surface = surfaces[0]
+	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-attempt-proof-token")
 	eventBus, err := runtimebus.NewEventBus(backend.store)
 	if err != nil {
@@ -312,7 +439,7 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 	cfg := &config.Config{}
 	cfg.Workspace.DockerBin = dockerBin
 	cfg.LLM.ClaudeCLI.Command = "claude"
-	cfg.LLM.ClaudeCLI.OutputFormat = "json"
+	cfg.LLM.ClaudeCLI.OutputFormat = surface.outputFormat
 	runtime := runtimellm.NewClaudeCLIRuntimeWithOptions(
 		cfg,
 		backend.sessions,
@@ -332,18 +459,34 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 	return manager, eventBus
 }
 
-func claudeAttemptProofAgentConfig() runtimeactors.AgentConfig {
-	return runtimeactors.AgentConfig{
-		ID: "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", Mode: "global", Model: "regular",
-		LLMBackend: "claude_cli", ConversationMode: runtimesessions.RuntimeModeSession.String(), SessionScope: runtimesessions.SessionScopeFlow.String(), FlowPath: "proof/inst-1",
+func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtimeactors.AgentConfig {
+	surface := defaultClaudeAttemptProofSurface()
+	if len(surfaces) > 0 {
+		surface = surfaces[0]
 	}
+	cfg := runtimeactors.AgentConfig{
+		ID: "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", Mode: "global", Model: "regular",
+		LLMBackend: "claude_cli", ConversationMode: surface.runtimeMode.String(), SessionScope: surface.sessionScope.String(), FlowPath: "proof/inst-1",
+	}
+	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
+		cfg.EntityID = claudeAttemptProofEntityID
+	}
+	return cfg
 }
 
-func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus) string {
+func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus, surfaces ...claudeAttemptProofSurface) string {
 	t.Helper()
+	surface := defaultClaudeAttemptProofSurface()
+	if len(surfaces) > 0 {
+		surface = surfaces[0]
+	}
 	eventID := uuid.NewString()
-	evt := eventtest.RootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	if err := eventBus.PublishDirect(context.Background(), evt, []string{claudeAttemptProofAgentConfig().ID}); err != nil {
+	envelope := events.EventEnvelope{}
+	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
+		envelope = events.EnvelopeForEntityID(envelope, claudeAttemptProofEntityID)
+	}
+	evt := eventtest.RootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", envelope, time.Now().UTC())
+	if err := eventBus.PublishDirect(context.Background(), evt, []string{claudeAttemptProofAgentConfig(surface).ID}); err != nil {
 		t.Fatalf("publish Claude proof event: %v", err)
 	}
 	return eventID
@@ -428,6 +571,55 @@ func loadClaudeAttemptProofDeliveryReason(t *testing.T, backend claudeAttemptPro
 	return reason
 }
 
+func requireClaudeAttemptProofSessionSurface(t *testing.T, backend claudeAttemptProofBackend, surface claudeAttemptProofSurface, attemptID string) {
+	t.Helper()
+	if surface.runtimeMode == runtimesessions.RuntimeModeTask {
+		query := `SELECT COUNT(*) FROM agent_sessions WHERE agent_id=?`
+		if backend.name == "postgres" {
+			query = `SELECT COUNT(*) FROM agent_sessions WHERE agent_id=$1`
+		}
+		var count int
+		if err := backend.db.QueryRowContext(context.Background(), query, claudeAttemptProofAgentConfig().ID).Scan(&count); err != nil {
+			t.Fatalf("load task-mode session count: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("task mode session rows=%d, want zero", count)
+		}
+		return
+	}
+
+	query := `SELECT runtime_mode, scope, scope_key, COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE agent_id=? AND status='active'`
+	if backend.name == "postgres" {
+		query = `SELECT runtime_mode, scope, scope_key, COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE agent_id=$1 AND status='active'`
+	}
+	var runtimeMode, scope, scopeKey, providerHead string
+	if err := backend.db.QueryRowContext(context.Background(), query, claudeAttemptProofAgentConfig().ID).Scan(&runtimeMode, &scope, &scopeKey, &providerHead); err != nil {
+		t.Fatalf("load %s session surface: %v", surface.name, err)
+	}
+	wantScopeKey := "proof/inst-1"
+	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
+		wantScopeKey = claudeAttemptProofEntityID
+	}
+	if runtimeMode != surface.runtimeMode.String() || scope != surface.sessionScope.String() || scopeKey != wantScopeKey || providerHead != attemptID {
+		t.Fatalf("%s session=(mode=%q scope=%q key=%q head=%q), want (%q %q %q %q)", surface.name, runtimeMode, scope, scopeKey, providerHead, surface.runtimeMode, surface.sessionScope, wantScopeKey, attemptID)
+	}
+}
+
+func requireClaudeAttemptProofDeliveryFailure(t *testing.T, backend claudeAttemptProofBackend, eventID, wantReason string, wantClass runtimefailures.Class, wantCode string) {
+	t.Helper()
+	query := `SELECT COALESCE(reason_code, ''), COALESCE(json_extract(failure, '$.class'), ''), COALESCE(json_extract(failure, '$.detail.code'), '') FROM event_deliveries WHERE event_id=? AND subscriber_id=?`
+	if backend.name == "postgres" {
+		query = `SELECT COALESCE(reason_code, ''), COALESCE(failure->>'class', ''), COALESCE(failure->'detail'->>'code', '') FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`
+	}
+	var reason, class, code string
+	if err := backend.db.QueryRowContext(context.Background(), query, eventID, claudeAttemptProofAgentConfig().ID).Scan(&reason, &class, &code); err != nil {
+		t.Fatalf("load selected-store delivery failure: %v", err)
+	}
+	if reason != wantReason || class != string(wantClass) || code != wantCode {
+		t.Fatalf("delivery failure=(reason=%q class=%q code=%q), want (%q %q %q)", reason, class, code, wantReason, wantClass, wantCode)
+	}
+}
+
 func writeClaudeAttemptProofDocker(t *testing.T, path string) {
 	t.Helper()
 	script := "#!/bin/sh\nSWARM_CLAUDE_ATTEMPT_PROOF_HELPER=1 exec " + strconv.Quote(os.Args[0]) + " -test.run=TestClaudeAttemptProofProcessHelper -- \"$@\"\n"
@@ -455,9 +647,13 @@ func runClaudeAttemptProofProcessHelper() int {
 		return 2
 	}
 	providerSessionID := ""
+	outputFormat := ""
 	for i, arg := range os.Args {
 		if arg == "--session-id" && i+1 < len(os.Args) {
 			providerSessionID = strings.TrimSpace(os.Args[i+1])
+		}
+		if arg == "--output-format" && i+1 < len(os.Args) {
+			outputFormat = strings.TrimSpace(os.Args[i+1])
 		}
 	}
 	if providerSessionID == "" {
@@ -465,6 +661,10 @@ func runClaudeAttemptProofProcessHelper() int {
 		return 2
 	}
 	if err := os.WriteFile(filepath.Join(captureDir, "last_session_id"), []byte(providerSessionID), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if err := os.WriteFile(filepath.Join(captureDir, "last_output_format"), []byte(outputFormat), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
