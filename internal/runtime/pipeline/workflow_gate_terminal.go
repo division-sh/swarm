@@ -41,6 +41,10 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 		if !activation.Supersede(reason, now) {
 			continue
 		}
+		card, err := s.decisionCards.GetDecisionCard(ctx, activation.CardID)
+		if err != nil {
+			return fmt.Errorf("load terminated flow decision card: %w", err)
+		}
 		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return err
 		}
@@ -57,7 +61,7 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 			return err
 		}
 		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, runID, "",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.UTC())
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now.UTC())
 		if err := s.gateEvents.PublishInMutation(ctx, evt); err != nil {
 			return fmt.Errorf("publish terminated flow decision card supersession: %w", err)
 		}

@@ -123,10 +123,14 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 		if pc.decisionCards == nil {
 			return fmt.Errorf("decision card store is required to supersede gate activation %s", activation.ActivationID)
 		}
+		card, err := pc.decisionCards.GetDecisionCard(ctx, activation.CardID)
+		if err != nil {
+			return fmt.Errorf("load decision card %s for supersession: %w", activation.CardID, err)
+		}
 		if err := pc.decisionCards.SupersedeDecisionCardsForStage(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activation.ActivationID, activation.SupersededReason, now); err != nil {
 			return err
 		}
-		if err := pc.publishWorkflowGateSuperseded(ctx, entityID, activation, now); err != nil {
+		if err := pc.publishWorkflowGateSuperseded(ctx, card, activation, now); err != nil {
 			return err
 		}
 	}
@@ -138,16 +142,10 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	return nil
 }
 
-func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, entityID string, activation gateruntime.Activation, now time.Time) error {
+func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, card decisioncard.Card, activation gateruntime.Activation, now time.Time) error {
 	publisher, ok := pc.bus.(workflowGateMutationPublisher)
 	if !ok || publisher == nil {
 		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
-	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" && pc.decisionCards != nil {
-		if card, err := pc.decisionCards.GetDecisionCard(ctx, activation.CardID); err == nil {
-			runID = card.RunID
-		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
@@ -155,8 +153,8 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	if err != nil {
 		return err
 	}
-	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.UTC())
+	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now.UTC())
 	if err := publisher.PublishInMutation(ctx, evt); err != nil {
 		return fmt.Errorf("publish decision card superseded event: %w", err)
 	}

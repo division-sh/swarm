@@ -194,8 +194,12 @@ func platformTableOrder(name string) int {
 		return 102
 	case "decision_card_changes":
 		return 103
-	case "api_idempotency":
+	case "decision_card_route_obligations":
+		return 104
+	case "decision_card_lifecycle_outbox":
 		return 105
+	case "api_idempotency":
+		return 106
 	case "runtime_ingress_state":
 		return 108
 	case "run_control_state":

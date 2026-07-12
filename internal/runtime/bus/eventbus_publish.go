@@ -852,11 +852,17 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 }
 
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
+	if runtimepipeline.IsPipelineReceiptDeferred(publishErr) {
+		_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), publishErr)
+		return
+	}
 	if !shouldPersistPipelineReceipt(true, publishErr) {
 		return
 	}
 	status, failure := pipelineReceiptStatus(ctx, publishErr)
-	_ = eb.markPipelineReceipt(ctx, evt.ID(), status, failure)
+	if err := eb.markPipelineReceipt(ctx, evt.ID(), status, failure); err == nil && evt.Type() == events.EventType("mailbox.card_decided") {
+		_ = eb.completeDecisionRouteObligation(ctx, evt.ID())
+	}
 }
 
 func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {

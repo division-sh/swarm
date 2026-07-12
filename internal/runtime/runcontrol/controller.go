@@ -81,6 +81,10 @@ type QueueReleaser interface {
 	ReleaseRunQueue(context.Context, string, time.Duration, int) (int, error)
 }
 
+type decisionCardLifecycleReleaser interface {
+	ReleaseDecisionCardLifecycleEvents(context.Context, int) (int, error)
+}
+
 type Options struct {
 	Now             func() time.Time
 	ReleaseLookback time.Duration
@@ -128,6 +132,11 @@ func (c *Controller) Stop(ctx context.Context, req TransitionRequest) (Transitio
 	state, err := c.store.StopRunControl(ctx, req)
 	if err != nil {
 		return TransitionResult{}, err
+	}
+	if releaser, ok := c.queue.(decisionCardLifecycleReleaser); ok && releaser != nil {
+		if _, err := releaser.ReleaseDecisionCardLifecycleEvents(ctx, c.releaseLimit); err != nil {
+			return TransitionResult{}, err
+		}
 	}
 	return TransitionResult{
 		RunID:               state.RunID,

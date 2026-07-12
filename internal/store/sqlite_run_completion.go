@@ -235,7 +235,7 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 		endedAt = s.now()
 	}
 	if status != "completed" {
-		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, s.AppendEventTx); err != nil {
+		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false); err != nil {
 			return storerunlifecycle.Snapshot{}, err
 		}
 	}

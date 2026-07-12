@@ -359,6 +359,46 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			if len(cards.supersededFor) != 1 || cards.supersededFor[0] != entityID {
 				t.Fatalf("supersession entity identities = %#v, want canonical %s", cards.supersededFor, entityID)
 			}
+			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cards.created[0].FlowInstance || bus.publishes[0].EntityID() != entityID {
+				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cards.created[0].FlowInstance, entityID)
+			}
+		})
+	}
+}
+
+func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			workflowStore, ctx := tc.open(t)
+			runID := runtimeRunID(ctx)
+			ensureGateLifecycleRun(t, workflowStore, runID)
+			entityID := uuid.NewString()
+			if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: "child/review-1", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID}}); err != nil {
+				t.Fatal(err)
+			}
+			cards := &gateLifecycleCardStore{}
+			bus := &recordingPipelineBus{}
+			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleFingerprint: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+			if err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready"); err != nil {
+				t.Fatal(err)
+			}
+			if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+				if err := workflowStore.MutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+					instance.CurrentState = "operating"
+					return nil
+				}); err != nil {
+					return err
+				}
+				return pc.applyWorkflowGateIntents(txctx, entityID, "awaiting_review", "operating", "review.expired")
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(bus.publishes) != 1 || len(cards.created) != 1 {
+				t.Fatalf("ordinary-exit supersession events = %#v cards = %#v", bus.publishes, cards.created)
+			}
+			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cards.created[0].FlowInstance {
+				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cards.created[0].FlowInstance)
+			}
 		})
 	}
 }

@@ -340,6 +340,13 @@ contract_formats:
           a verdict is decision_committed it fences ordinary, timer, terminal,
           and quiescence exits until that frozen route succeeds; only an open
           activation may be superseded.
+          Every supersession lifecycle fact carries the card's full run,
+          entity, and flow-instance identity. Ordinary and flow exits publish
+          through EventBus inside their selected-store mutation. Run terminal
+          and pre-runtime quiescence mutations persist a lifecycle outbox
+          intent atomically; the matching bundle EventBus later creates route
+          authority, delivery manifests, committed replay scope, dispatch, and
+          the terminal pipeline receipt. Raw events-row append is forbidden.
         snapshot: >
           Card creation evaluates context once and freezes the structured
           snapshot, authored outcome/input schema, effective cadence,
@@ -10513,6 +10520,8 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - activity_attempts
+        - decision_card_lifecycle_outbox
+        - decision_card_route_obligations
         - decision_card_changes
         - decision_card_input_drafts
         - decision_cards
@@ -11100,6 +11109,47 @@ platform_tables:
             created_at TIMESTAMPTZ NOT NULL,
             INDEX idx_decision_card_changes_card (card_id, change_id),
             INDEX idx_decision_card_changes_run (run_id, change_id)
+        );
+    decision_card_route_obligations:
+      description: 'Durable, age-independent retry owner for a committed decision whose frozen route has not completed.
+        The obligation is created atomically with the card verdict, remains pending until EventBus receipt persistence and
+        normal-run convergence both succeed, and is scheduled by attempt count plus next_attempt_at so an unavailable bundle
+        cannot starve newer route work. Generic missing-receipt recovery excludes pending rows owned here.'
+      ddl: |
+        CREATE TABLE decision_card_route_obligations (
+            event_id       UUID PRIMARY KEY,
+            card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
+            run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            status         TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
+            attempt_count  INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TIMESTAMPTZ NOT NULL,
+            last_failure   JSONB,
+            completed_at   TIMESTAMPTZ,
+            created_at     TIMESTAMPTZ NOT NULL,
+            updated_at     TIMESTAMPTZ NOT NULL,
+            CHECK ((status = 'pending' AND completed_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL)),
+            INDEX idx_decision_route_due (status, attempt_count, next_attempt_at, created_at)
+        );
+    decision_card_lifecycle_outbox:
+      description: 'Transactional publication-intent owner for decision-card lifecycle events created by run terminalization
+        and startup quiescence. The run mutation stores full run/entity/flow identity and payload here instead of raw-appending
+        an unroutable events row. The bundle EventBus publishes each deterministic event through normal route planning,
+        delivery-manifest, replay-scope, dispatch, and receipt ownership before completing the intent.'
+      ddl: |
+        CREATE TABLE decision_card_lifecycle_outbox (
+            event_id       UUID PRIMARY KEY,
+            card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
+            run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            bundle_hash    TEXT NOT NULL,
+            event_name     TEXT NOT NULL,
+            payload        JSONB NOT NULL,
+            entity_id      UUID NOT NULL,
+            flow_instance  TEXT NOT NULL,
+            status         TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
+            created_at     TIMESTAMPTZ NOT NULL,
+            completed_at   TIMESTAMPTZ,
+            CHECK ((status = 'pending' AND completed_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL)),
+            INDEX idx_decision_lifecycle_outbox_pending (bundle_hash, status, created_at, event_id)
         );
     api_idempotency:
       description: 'Reusable v1 API idempotency replay store. One row per (method, actor token id, idempotency key). Stores
@@ -21974,10 +22024,15 @@ api_specification:
         acknowledgment-loss retries converge on the same event identity. An
         unavailable pin is classified as retryable
         platform.dependency_unavailable/decision_card_bundle_unavailable,
-        leaves no terminal pipeline receipt, and leaves decision_committed for
-        startup or periodic persisted-pipeline recovery. Recovery replays the
-        frozen route and converges on one routed activation, authored event,
-        delivery manifest, and processed receipt. A competing
+        leaves no terminal pipeline receipt, and leaves decision_committed.
+        The verdict transaction also creates one age-independent
+        decision_card_route_obligations row. That owner, rather than the generic
+        missing-receipt lookback, schedules startup and periodic retries by
+        attempt count and next_attempt_at; pending rows are excluded from the
+        generic scanner so an unavailable pin cannot monopolize its bounded
+        page. Recovery replays the frozen route and settles through one EventBus
+        owner that writes the processed receipt, converges terminal/no-emit run
+        completion, then completes the obligation. A competing
         stage exit may supersede only an open card; exactly one CAS outcome wins.
         Paused dispatch preserves decision_committed and continuation resumes
         routing after continue.

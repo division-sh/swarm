@@ -31,6 +31,14 @@ type persistedPipelineRecoveryPublisher interface {
 	RecoverPersistedPipeline(ctx context.Context, evt events.Event, recipients []string) error
 }
 
+type persistedPipelineRecoverySettler interface {
+	SettleRecoveredPipelineEvent(context.Context, events.Event) error
+}
+
+type decisionCardLifecycleReleaser interface {
+	ReleaseDecisionCardLifecycleEvents(context.Context, int) (int, error)
+}
+
 type recoveryRuntimeLogger interface {
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
 }
@@ -154,12 +162,41 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if limit <= 0 {
 		limit = 500
 	}
+	if releaser, ok := r.bus.(decisionCardLifecycleReleaser); ok && releaser != nil {
+		if _, err := releaser.ReleaseDecisionCardLifecycleEvents(ctx, limit); err != nil {
+			return fmt.Errorf("release decision card lifecycle events: %w", err)
+		}
+	}
 	logger, _ := r.bus.(recoveryRuntimeLogger)
-	eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-window), limit)
+	now := time.Now().UTC()
+	eventsToReplay := make([]events.PersistedReplayEvent, 0, limit)
+	if obligations, ok := r.store.(DecisionRouteObligationStore); ok && obligations != nil {
+		due, err := obligations.ListDueDecisionRouteObligations(ctx, now, limit)
+		if err != nil {
+			return err
+		}
+		eventsToReplay = append(eventsToReplay, due...)
+	}
+	generic, err := replayStore.ListEventsMissingPipelineReceipt(ctx, now.Add(-window), limit)
 	if err != nil {
 		return err
 	}
+	eventsToReplay = append(eventsToReplay, generic...)
 	recorder, _ := r.store.(pipelineReceiptRecorder)
+	settler, _ := r.bus.(persistedPipelineRecoverySettler)
+	_, requiresCanonicalSettlement := r.store.(DecisionRouteObligationStore)
+	settleProcessed := func(evt events.Event) error {
+		if settler != nil {
+			return settler.SettleRecoveredPipelineEvent(ctx, evt)
+		}
+		if recorder == nil {
+			if !requiresCanonicalSettlement {
+				return nil
+			}
+			return fmt.Errorf("missing pipeline recovery settlement owner")
+		}
+		return recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil)
+	}
 	var firstErr error
 	for _, record := range eventsToReplay {
 		evt := record.Event
@@ -217,14 +254,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 					continue
 				}
 				if scope == runtimereplayclaim.CommittedReplayScopeDirect {
-					if recorder == nil {
-						if firstErr == nil {
-							firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID())
-						}
-						_ = lease.Release(ctx)
-						continue
-					}
-					if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil); err != nil {
+					if err := settleProcessed(evt); err != nil {
 						if firstErr == nil {
 							firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 						}
@@ -243,6 +273,12 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		}
 		if replayErr != nil {
 			if IsPipelineReceiptDeferred(replayErr) {
+				if obligations, ok := r.store.(DecisionRouteObligationStore); ok && obligations != nil {
+					failure := runtimefailures.Normalize(replayErr, "pipeline-recovery", "defer_decision_route")
+					if err := obligations.DeferDecisionRouteObligation(ctx, evt.ID(), time.Now().UTC().Add(DecisionRouteRetryDelay), &failure); err != nil && firstErr == nil {
+						firstErr = err
+					}
+				}
 				_ = lease.Release(ctx)
 				continue
 			}
@@ -252,10 +288,8 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			_ = lease.Release(ctx)
 			continue
 		}
-		if recorder != nil {
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil); err != nil && firstErr == nil {
-				firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
-			}
+		if err := settleProcessed(evt); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 		}
 		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, persistedRecipients)
 		_ = lease.Release(ctx)

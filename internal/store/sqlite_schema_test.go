@@ -21,8 +21,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 40 {
-		t.Fatalf("platform table plan count = %d, want 40", len(platformPlans))
+	if len(platformPlans) != 42 {
+		t.Fatalf("platform table plan count = %d, want 42", len(platformPlans))
 	}
 	entityPlans, err := GenerateEntityTableDDLs(runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
