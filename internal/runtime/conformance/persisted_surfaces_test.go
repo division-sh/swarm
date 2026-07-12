@@ -1052,6 +1052,10 @@ func (s conformanceRecoveryFailureEventStore) ClaimPipelineReplay(context.Contex
 	return conformanceRecoveryReplayLease{}, true, nil
 }
 
+func (s conformanceRecoveryFailureEventStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	return s.store.ClaimPipelinePublication(ctx, eventID)
+}
+
 func (conformanceRecoveryFailureEventStore) SupportsPersistedReplay() bool { return true }
 
 type conformanceManagerReplayStore struct {
