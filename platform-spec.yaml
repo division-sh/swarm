@@ -19425,7 +19425,17 @@ cli_specification:
           Human serve boot, readiness, standing-ingress, failure, and shutdown output has one writer:
           serveLifecyclePresenter. Direct log, slog, reporter, and output writers are non-authoritative and MUST NOT emit
           parallel normal terminal presentation. Local foreground `swarm run start` consumes this owner while preserving
-          quiet successful startup and buffered failure replay. Machine/persisted diagnostics remain separate fact owners.
+          quiet successful startup and buffered failure replay. The owner receives distinct successful stdout and diagnostic
+          stderr writers: readiness and clean shutdown render to stdout; warnings, startup/runtime/shutdown failures, and
+          specialized diagnostics render only to stderr. It retains startup failure until all acquired cleanup completes and
+          emits one joined terminal disposition. Machine/persisted diagnostics remain separate fact owners.
+        projection_boundary: >
+          Concise lifecycle wording is projected directly from typed store, workspace, recovery, listener, ingress, and
+          signing facts. Diagnostic detail renderers, raw boot reason codes, capability-subject inventory renderers, catalog
+          generations, policy/authentication field names, hashes, provenance, and implementation bookkeeping MUST NOT decide
+          or leak into the concise author-facing vocabulary. Workspace text uses `docker · agent "<id>" runs in a container`,
+          the no-work recovery outcome uses `clean start`, and standing ingress renders provider webhook URL plus bound/unbound
+          signing-reference state without credential values.
         concise_projection:
           required_facts:
           - bundle/source counts from loaded semantic sources
@@ -19445,6 +19455,12 @@ cli_specification:
           without starting runtime or reading/writing runtime database state.
         boot_progress_sequence:
           total_steps: 22
+          canonical_name_owner: internal/runtime.CanonicalBootProgressName, asserted against this ordered spec sequence
+          rendering_rule: >
+            Explicit verbose presentation buffers boot facts until startup succeeds or fails, coalesces repeated updates by
+            canonical step identity, and renders observed rows once in numeric order. A failed step suppresses later observed
+            rows. Failed verbose startup renders the sequence to stderr; a successful sequence renders to stdout. Runtime
+            producers MUST use the canonical step name for failures as well as successful updates.
           steps:
           - step: 1
             name: process_start

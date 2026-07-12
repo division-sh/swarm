@@ -338,6 +338,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Output = cmd.OutOrStdout()
+			opts.ErrorOutput = cmd.ErrOrStderr()
 			opts.SwarmDir, opts.SwarmDirSet = rootSwarmDirFlag(cmd)
 			code := runServe(ctx, assetCommandRepoRoot(repo), opts)
 			if code != 0 {
@@ -364,7 +365,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs have unavailable bundle source state")
 	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs have unavailable bundle source state")
 	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
-	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Emit the serve boot sequence to stdout as each phase completes")
+	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence after startup succeeds or fails")
 	return cmd
 }
 

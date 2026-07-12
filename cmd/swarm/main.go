@@ -373,6 +373,7 @@ type serveOptions struct {
 	AbandonActiveRuns                bool
 	Verbose                          bool
 	Output                           io.Writer
+	ErrorOutput                      io.Writer
 	LocalRun                         bool
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
@@ -809,9 +810,12 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 }
 
 func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
+	ctx, cancelServe := context.WithCancel(ctx)
+	defer cancelServe()
 	bootStartedAt := time.Now().UTC()
 	runtimeInstanceID := uuid.NewString()
 	presenter := newServeLifecyclePresenter(opts)
+	defer presenter.finish()
 	presenter.boot(1, "process_start", "ok", "")
 	apiAuth, err := resolveServeAPIAuth(repo, opts)
 	if err != nil {
@@ -823,7 +827,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	if apiAuth.UsesDefaultLoopbackToken() {
-		presenter.note("using built-in dev API token on numeric loopback; configure serve.api_token_file before exposing the listener")
+		presenter.recordDefaultAPITokenWarning()
 	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
@@ -903,7 +907,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return
 		}
 		if err := storeFacade.closeWithError(); err != nil {
-			presenter.runtimeFailure("store shutdown", err)
+			presenter.cleanupFailure("store shutdown", err)
 		}
 	}()
 	if stores.SchemaBootstrapper != nil {
@@ -945,7 +949,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return
 		}
 		if err := cleanupLoadedBundleSources(); err != nil {
-			presenter.runtimeFailure("bundle source cleanup", err)
+			presenter.cleanupFailure("bundle source cleanup", err)
 		}
 	}()
 	loadedBundle := loadedBundles[0]
@@ -1003,7 +1007,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			presenter.fail(5, "run_quiescence", err)
 			return 3
 		}
-		presenter.note(fmt.Sprintf("abandoned active work: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount))
+		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recoveryStore := storeFacade.startupRecoveryStore(); recoveryStore != nil {
 		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loadedBundle.contractsRoot, source, mountSources, primaryWorkspaceBackend)
@@ -1029,19 +1033,19 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return 3
 		}
 		if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
-			presenter.note(fmt.Sprintf("recovered unavailable bundles: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
+			presenter.recordRecoveredWork(
 				len(recovery.Cleanup.Runs),
 				len(recovery.Cleanup.Deliveries),
 				len(recovery.Cleanup.Sessions),
 				len(recovery.Cleanup.Timers),
 				len(recovery.StoppedContainers),
 				recovery.Cleanup.PipelineReceiptCount,
-			))
+			)
 		}
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
 	if !opts.RequireBundleMatch {
-		presenter.note("bundle-match admission disabled after startup recovery consumed active-run bundle state")
+		presenter.recordBundleMatchDisabledWarning()
 	}
 	if err := enforceServeBundleMatchAdmissionForHashes(ctx, storeFacade.runBundleAvailabilityStore(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
 		presenter.fail(5, "bundle_match_admission", err)
@@ -1280,8 +1284,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 3
 	}
 	defer projectContextRegistration.Unregister()
-	go serveHTTPServer("api", apiServer, apiListener, presenter.runtimeFailure)
-	go serveHTTPServer("mcp", mcpServer, mcpListener, presenter.runtimeFailure)
+	runtimeFailure := func(subject string, err error) {
+		presenter.runtimeFailure(subject, err)
+		cancelServe()
+	}
+	go serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
+	go serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
 	presenter.recordBootWarnings(bootReport)
 	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 		presenter.fail(22, "ready", err)
