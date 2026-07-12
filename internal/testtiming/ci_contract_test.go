@@ -63,8 +63,19 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 			t.Fatalf("aggregate missing %q", want)
 		}
 	}
-	if workflow.Jobs["required-tests"].Name != "Required test summary" || workflow.Jobs["sqlite-local-dev"].Name != "SQLite local smoke" {
+	if !strings.Contains(workflow.Jobs["required-tests"].Name, "Required test summary") || !strings.Contains(workflow.Jobs["sqlite-local-dev"].Name, "SQLite local smoke") {
 		t.Fatal("stable branch-protection check names drifted")
+	}
+	if !strings.Contains(workflow.Jobs["required-tests"].Name, "Full dispatch summary") || !strings.Contains(workflow.Jobs["sqlite-local-dev"].Name, "Full dispatch SQLite smoke") {
+		t.Fatal("manual dispatch must not emit duplicate required contexts")
+	}
+	for _, step := range []*ciWorkflowStep{producer, aggregate} {
+		if step == nil || !strings.Contains(step.Run, "-assert-execution-sha") || !strings.Contains(step.Run, "git rev-parse HEAD") {
+			t.Fatal("plan-bound consumer does not assert its actual checkout SHA")
+		}
+	}
+	if !strings.Contains(string(raw), "execution_sha=$(git rev-parse HEAD)") || !strings.Contains(string(raw), "ref: ${{ needs.ci-plan.outputs.execution_sha }}") {
+		t.Fatal("workflow does not bind plan and consumer checkouts to the executed SHA")
 	}
 	for _, forbidden := range []string{
 		"go-test-shards.json",
@@ -115,6 +126,7 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		`-f sha="$generated_sha"`,
 		"gh workflow run ci.yml",
 		"human review and normal protection required",
+		`gh pr list --head "$branch"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("publisher contract missing %q", want)
@@ -124,6 +136,9 @@ func TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired(t *testing.T)
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("publisher retains forbidden authority %q", forbidden)
 		}
+	}
+	if strings.Contains(text, `gh pr list --head "division-sh:$branch"`) {
+		t.Fatal("publisher uses unsupported owner-qualified gh pr list head filter")
 	}
 }
 

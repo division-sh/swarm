@@ -35,7 +35,6 @@ type PlanningPolicy struct {
 	TargetSeconds         float64 `yaml:"target_seconds"`
 	MaxShards             int     `yaml:"max_shards"`
 	UnknownPackageSeconds float64 `yaml:"unknown_package_seconds"`
-	MaxImbalance          float64 `yaml:"max_imbalance"`
 }
 
 type ProfilePolicy struct {
@@ -100,9 +99,6 @@ func (p Policy) Validate() error {
 	}
 	if p.Planning.UnknownPackageSeconds <= 0 {
 		problems = append(problems, "planning.unknown_package_seconds must be positive")
-	}
-	if p.Planning.MaxImbalance < 0 || p.Planning.MaxImbalance >= 1 {
-		problems = append(problems, "planning.max_imbalance must be in [0,1)")
 	}
 	for _, pattern := range p.EscalationPaths {
 		if _, err := regexp.Compile(pattern); err != nil {

@@ -240,6 +240,20 @@ func (p RunPlan) Unit(id string) (ProofUnit, error) {
 	return ProofUnit{}, fmt.Errorf("plan unit %q not found", id)
 }
 
+func (p RunPlan) ValidateExecutionSHA(actual string) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	actual = strings.TrimSpace(actual)
+	if actual == "" {
+		return fmt.Errorf("execution SHA must be non-empty")
+	}
+	if actual != p.HeadSHA {
+		return fmt.Errorf("execution SHA %s does not match planned SHA %s", actual, p.HeadSHA)
+	}
+	return nil
+}
+
 func MatrixJSON(plan RunPlan) ([]byte, error) {
 	if err := plan.Validate(); err != nil {
 		return nil, err

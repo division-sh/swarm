@@ -138,7 +138,6 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 			TargetSeconds:         100,
 			MaxShards:             2,
 			UnknownPackageSeconds: 10,
-			MaxImbalance:          0.25,
 		},
 		SpecialPackages: []string{"module/catalog"},
 		Profiles: map[string]testplanning.ProfilePolicy{
