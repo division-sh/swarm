@@ -87,7 +87,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		}
 	}
 	for _, table := range []string{
-		"schema_version",
+		"runtime_store_metadata",
 		"api_idempotency",
 		"runtime_ingress_state",
 		"agents",
@@ -1246,9 +1246,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, controlled_by) VALUES ($1::uuid, 'stopped', 'test')`, runA); err != nil {
 		t.Fatalf("seed run control: %v", err)
-	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO schema_version (platform_version) VALUES ('test') ON CONFLICT (id) DO UPDATE SET platform_version = EXCLUDED.platform_version`); err != nil {
-		t.Fatalf("seed schema version: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO api_idempotency (method, actor_token_id, idempotency_key, request_hash, resource_id, response, expires_at)

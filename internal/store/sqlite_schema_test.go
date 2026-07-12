@@ -589,7 +589,7 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"dead_letters",
 		"runs",
 		"entity_mutations",
-		"schema_version",
+		"runtime_store_metadata",
 	}
 }
 

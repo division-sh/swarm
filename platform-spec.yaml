@@ -10319,7 +10319,7 @@ platform_tables:
       delete_all:
         - runs
       preserve:
-        - schema_version
+        - runtime_store_metadata
         - api_idempotency
         - runtime_ingress_state
         - agents
@@ -11074,19 +11074,20 @@ platform_tables:
       hot_path_cost: 'One extra read (old value) + one insert per field write. The read is a single JSONB field
         extraction from entity_state — sub-millisecond. The insert is append-only with no unique constraints
         on the hot path. Given LLM calls at 1-30 seconds per agent turn, the overhead is negligible.'
-    schema_version:
-      description: 'Platform schema versioning. Tracks which version of the platform DDL has been applied. The platform checks
-        this at boot: if the stored version < current platform version, it applies migrations. Products never read or write
-        this table.'
-      ddl: "CREATE TABLE schema_version (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    platform_version\
-        \  TEXT NOT NULL,\n    applied_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    migration_log     JSONB NOT NULL\
-        \ DEFAULT '[]'\n);"
+    runtime_store_metadata:
+      description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
+        build and exact platform specification created the store; they never decide whether a later build may open it.
+        Products never read or write this table.'
+      ddl: "CREATE TABLE runtime_store_metadata (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    swarm_version\
+        \     TEXT NOT NULL,\n    platform_version  TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL\n);"
   notes:
     product_tables: Product-specific tables (entity fields, custom state) are generated from entities.yaml plus the shared
       type system.
       Those are contract-driven, not listed here.
-    migrations: Platform table schema is versioned with the platform version. The platform generates DDL at boot and applies
-      migrations if the schema version changed. Products never modify platform tables directly.
+    migrations: 'Pre-1.0 selected stores are not migrated or adopted at boot. Boot derives the complete required platform
+      shape from this specification, probes the actual selected-backend catalog before persistent mutation, and accepts only
+      a fresh empty namespace or an exactly compatible store carrying immutable runtime_store_metadata origin evidence.
+      Partial, un-stamped, conflicting, or drifted stores fail closed with backend-specific fresh-store remediation.'
     index_syntax: INDEX declarations are logical — the implementer may use CREATE INDEX statements or database-specific syntax.
       The spec declares intent, not SQL dialect.
   diagnostics_encoding:
@@ -11156,10 +11157,23 @@ platform_tables:
       spend: 'Aggregate from spend_ledger: SELECT SUM(cost_usd) FROM spend_ledger WHERE entity_id = X'
     digest_queries: Digest/reporting code should query entity_state for current metrics and spend_ledger for cost aggregates.
       No entity_metrics table.
-  migration_policy: 'schema_version is a platform table. It survives the legacy SQL deletion. MigrationSpec and ApplyManagedMigrations
-    remain as platform APIs — they apply DDL diffs between platform versions. ApplyMigrationFile is DELETED (no more file-based
-    migrations). The boot sequence: read schema_version → compare to current platform version → generate DDL diff → apply
-    → update schema_version.'
+  migration_policy:
+    status: pre_1_0_no_migration
+    compatibility_authority: actual_selected_backend_catalog_shape
+    origin_evidence: runtime_store_metadata
+    rule: >
+      Origin versions are immutable diagnostic evidence, never a compatibility verdict. Existing selected stores are
+      inspected before any persistent schema or data mutation. A non-empty un-stamped store is not adopted. A stamped store
+      is accepted only when every required table, column type, nullability, default, key, reference, check, and index derived
+      from the current platform plans is compatible. Existing compatible platform schema is not rerun through CREATE, ALTER,
+      UPDATE, DROP, backfill, rebuild, or repair paths. Incompatible stores fail closed; pre-1.0 continuity and managed
+      migrations remain deferred under issue #995.
+    fresh_bootstrap: >
+      Fresh platform creation is backend-serialized and atomically commits the complete platform schema plus exactly one
+      immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
+    generated_node_state: >
+      Contract-generated node-state tables are classified only after platform acceptance. Missing tables may be created;
+      existing incompatible tables fail before node-state mutation.
   test_bootstrap:
     description: After legacy SQL deletion, normal runtime/test bootstrap creates only platform tables plus generated
       node-state tables. Product-specific typed entity table DDL is explicit future/legacy optimization-test input, not

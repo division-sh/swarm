@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/store/platformschema"
 	_ "github.com/lib/pq"
 )
 
@@ -97,74 +96,6 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 func (*PostgresStore) SupportsPersistedReplay() bool { return true }
-
-func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required for schema ddl")
-	}
-	if len(plans) == 0 {
-		return nil
-	}
-	if schemaDDLIncludesPlatformTables(plans) {
-		if err := ensurePostgresCanonicalFailureSchema(ctx, s.DB); err != nil {
-			return fmt.Errorf("migrate canonical runtime failures: %w", err)
-		}
-		if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
-			return fmt.Errorf("ensure platform-table compatibility prerequisites: %w", err)
-		}
-	}
-	if err := platformschema.EnsurePostgresTables(ctx, s.DB, plans, func(plan SchemaTableDDL, cause error) error {
-		return s.outdatedSchemaErrorForPlan(ctx, plan, cause)
-	}); err != nil {
-		return err
-	}
-	if schemaDDLIncludesPlatformTables(plans) {
-		if err := ensurePostgresCanonicalFailureSchema(ctx, s.DB); err != nil {
-			return fmt.Errorf("validate canonical runtime failures: %w", err)
-		}
-		if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
-			return fmt.Errorf("ensure platform-table compatibility aftermath: %w", err)
-		}
-	}
-	return nil
-}
-
-func (s *PostgresStore) outdatedSchemaErrorForPlan(ctx context.Context, plan SchemaTableDDL, cause error) error {
-	if s == nil || s.DB == nil {
-		return nil
-	}
-	tableName := strings.TrimSpace(plan.TableName)
-	if tableName == "" {
-		return nil
-	}
-	expectedColumns := schemaDDLPlanColumnNames(plan)
-	if len(expectedColumns) == 0 {
-		return nil
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil || !catalog.hasTable(tableName) {
-		return nil
-	}
-	missingColumns := make([]string, 0)
-	for _, columnName := range expectedColumns {
-		if !catalog.hasColumns(tableName, columnName) {
-			missingColumns = append(missingColumns, columnName)
-		}
-	}
-	if len(missingColumns) == 0 {
-		return nil
-	}
-	return &OutdatedSchemaError{
-		SchemaKind:     strings.TrimSpace(plan.SchemaKind),
-		TableName:      tableName,
-		MissingColumns: missingColumns,
-		Cause:          cause,
-	}
-}
-
-func schemaDDLIncludesPlatformTables(plans []SchemaTableDDL) bool {
-	return platformschema.IncludesPlatformTables(plans)
-}
 
 func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) error {
 	if err := s.ensurePostgresAgentLifecycleColumns(ctx); err != nil {

@@ -7,9 +7,30 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
+
+func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, swarmVersion, platformVersion string, createdAt time.Time) error {
+	if tx == nil {
+		return fmt.Errorf("postgres bootstrap transaction is required")
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
+		return fmt.Errorf("create pgcrypto for fresh postgres store: %w", err)
+	}
+	for _, plan := range plans {
+		for _, statement := range plan.Statements {
+			if _, err := tx.ExecContext(ctx, strings.TrimSpace(statement)); err != nil {
+				return fmt.Errorf("create postgres %s table %s: %w", plan.SchemaKind, plan.TableName, err)
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, $1, $2, $3)`, swarmVersion, platformVersion, createdAt.UTC()); err != nil {
+		return fmt.Errorf("stamp fresh postgres store origin: %w", err)
+	}
+	return nil
+}
 
 type TableDDL struct {
 	TableName   string
@@ -94,49 +115,6 @@ func IncludesPlatformTables(plans []TableDDL) bool {
 	return false
 }
 
-func EnsurePostgresTables(ctx context.Context, db *sql.DB, plans []TableDDL, mapStatementError func(TableDDL, error) error) error {
-	if db == nil {
-		return fmt.Errorf("postgres store is required for schema ddl")
-	}
-	if len(plans) == 0 {
-		return nil
-	}
-	if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
-		return fmt.Errorf("ensure pgcrypto extension: %w", err)
-	}
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin schema ddl tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	for _, plan := range plans {
-		for _, statement := range plan.Statements {
-			statement = strings.TrimSpace(statement)
-			if statement == "" {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				if mapStatementError != nil {
-					if mapped := mapStatementError(plan, err); mapped != nil {
-						return mapped
-					}
-				}
-				return fmt.Errorf("ensure %s table %s: %w", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName), err)
-			}
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema ddl tx: %w", err)
-	}
-	committed = true
-	return nil
-}
-
 func ExtractTableName(statement string) string {
 	statement = strings.TrimSpace(statement)
 	matches := createTableName.FindStringSubmatch(statement)
@@ -158,7 +136,7 @@ func PlanColumnNames(plan TableDDL) []string {
 
 func platformTableOrder(name string) int {
 	switch strings.TrimSpace(name) {
-	case "schema_version":
+	case "runtime_store_metadata":
 		return 0
 	case "bundles":
 		return 3
