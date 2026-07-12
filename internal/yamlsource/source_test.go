@@ -214,6 +214,52 @@ func TestSnapshotReadOnlyTraversalAndCopiedBytes(t *testing.T) {
 	}
 }
 
+type mutatingNodeTarget struct{}
+
+func (*mutatingNodeTarget) UnmarshalYAML(node *yaml.Node) error {
+	node.Value = "corrupted"
+	node.Tag = "!!str"
+	node.Content = nil
+	node.Alias = nil
+	return nil
+}
+
+func TestSnapshotDecodeDoesNotExposeRetainedNodeToUnmarshalers(t *testing.T) {
+	store := NewStore(Limits{MaxEntries: 8, MaxSourceBytes: 1024})
+	snapshot, err := store.Load([]byte("root:\n  value: pristine\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 24
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			var target mutatingNodeTarget
+			if err := snapshot.Decode(&target); err != nil {
+				t.Errorf("Decode mutating target: %v", err)
+			}
+			if value, ok := snapshot.LookupMapPath("root", "value"); !ok || value.Value() != "pristine" {
+				t.Errorf("retained node changed: value=%q found=%v", value.Value(), ok)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	var decoded map[string]map[string]string
+	if err := snapshot.Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["root"]["value"] != "pristine" {
+		t.Fatalf("fresh decode = %#v", decoded)
+	}
+}
+
 func loadError(store *Store, raw []byte) error {
 	_, err := store.Load(raw)
 	return err

@@ -2,6 +2,8 @@ package semanticview
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -400,6 +402,37 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", filepath.Join(fixture, "nodes.yaml"), 14)
 	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", filepath.Join(fixture, "agents.yaml"), 6)
 	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 8)
+}
+
+type endpointSourceFiles struct {
+	Source
+	nodes map[string]runtimecontracts.ContractItemSource
+}
+
+func (s endpointSourceFiles) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
+	source, ok := s.nodes[nodeID]
+	return source, ok
+}
+
+func TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nodes.yaml")
+	body := fmt.Sprintf("# unique source: %s\nworker-node:\n  event_handlers:\n    work.requested: {}\n", path)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := endpointSourceFiles{
+		Source: endpointCensusFixture(nil),
+		nodes: map[string]runtimecontracts.ContractItemSource{
+			"worker-node": {File: path},
+		},
+	}
+	before := yamlsource.DefaultStats()
+	census := BuildAuthoredEventEndpointCensus(source)
+	after := yamlsource.DefaultStats()
+	if delta := after.ParseCount - before.ParseCount; delta != 1 {
+		t.Fatalf("endpoint census canonical-owner parse delta = %d, want 1", delta)
+	}
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "worker-node", "", "work.requested", path, 4)
 }
 
 func assertEndpointSourceLine(t *testing.T, endpoints []AuthoredEventEndpoint, kind EventEndpointKind, nodeID, agentID, eventType, sourceFile string, sourceLine int) {
