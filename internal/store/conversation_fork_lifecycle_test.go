@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -401,6 +403,69 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	var paramErr *EntityReadParamError
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
 		t.Fatalf("deleted fork chat error = %v, want fork_id invalid params", err)
+	}
+}
+
+func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	s := &PostgresStore{DB: db}
+	ctx := context.Background()
+	now := activeConversationForkTestClock()
+	source := seedConversationForkSource(t, db, now)
+	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+		SourceSessionID: source.sessionID,
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		CreatedBy:       "actor-token",
+		Now:             now,
+	})
+	if err != nil {
+		t.Fatalf("CreateOperatorConversationFork: %v", err)
+	}
+	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{ForkID: fork.ForkID, Now: now.Add(time.Second)})
+	if err != nil {
+		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
+	}
+
+	const count = 4
+	indexes := make(chan int, count)
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
+				ForkID:       fork.ForkID,
+				Message:      "concurrent fork chat",
+				ActorTokenID: "actor-token",
+				Execution: ConversationForkChatExecution{
+					AssistantMessage: "concurrent result",
+					AvailableTools:   prepared.AvailableTools,
+				},
+				Now: now.Add(time.Duration(i+2) * time.Second),
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			indexes <- result.Turn.TurnIndex
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("RecordOperatorConversationForkChat concurrent: %v", err)
+	}
+	close(indexes)
+	got := make([]int, 0, count)
+	for index := range indexes {
+		got = append(got, index)
+	}
+	sort.Ints(got)
+	for i, index := range got {
+		if want := i + 1; index != want {
+			t.Fatalf("turn indexes = %v, want adjacent 1..%d", got, count)
+		}
 	}
 }
 

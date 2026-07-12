@@ -4523,7 +4523,7 @@ engine:
         - startup recovery
         - run-stalled read
         - runtime contexts
-        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume a read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume a lifecycle capability so read promotion cannot silently enable unproven mutation.
+        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume the read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume the lifecycle capability. Both capabilities are selected for Postgres and local/dev SQLite through one shared fork semantic owner with backend-local transaction adapters.
       - name: workspace_and_process_db_capabilities
         owner: cmd/swarm workspace lifecycle and process health construction
         capabilities:
@@ -4577,7 +4577,7 @@ engine:
       - dependency: dashboard SQL readers and local PostgresStore wrappers
         classification: producer-facing raw/concrete escapes to classify and migrate under #1401/#1402 unless independently gated
       - dependency: ConversationForkReadStore and ConversationForkLifecycleStore
-        classification: segregated optional capabilities; fork read availability must not imply fork lifecycle/chat/delete availability
+        classification: segregated selected capabilities backed by one shared semantic owner; read availability does not imply lifecycle mutation, while Postgres and local/dev SQLite explicitly wire both roles
       - dependency: selected-contract run.fork PostgresStore internals
         classification: optional product capability with current concrete escape; migrate under #1401/#1403 or a run-fork child
       - dependency: RunRuntimeMutation, RunEventMutation, RunPipelineMutation, and backend-local direct transaction helpers
@@ -4851,18 +4851,19 @@ engine:
       conversation_fork:
         method: conversation.fork
         selected_capability: ConversationForkLifecycle
-        postgres_support: supported through the Postgres conversation fork lifecycle owner
-        sqlite_support: unsupported; SQLite may expose read-only conversation fork capability separately, but lifecycle mutation remains absent until separately promoted
+        postgres_support: supported through the shared conversation fork semantic owner and Postgres transaction/locking adapter
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and SQLiteRuntimeStore.RunRuntimeMutation; production multi-writer SQLite remains unsupported
       conversation_fork_chat:
         method: conversation.fork_chat
         selected_capability: ConversationForkLifecycle plus ForkChatExecutor
-        postgres_support: supported through the Postgres conversation fork lifecycle owner with separately admitted fork-chat execution
-        sqlite_support: unsupported; SQLite omits conversation fork lifecycle mutation and must not enable fork chat through read capability wiring
+        postgres_support: supported through the shared conversation fork semantic owner, Postgres transaction/locking adapter, and separately admitted fork-chat execution
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner, SQLiteRuntimeStore.RunRuntimeMutation, and the same separately admitted fork-chat execution; production multi-writer SQLite remains unsupported
+        turn_allocation_concurrency: Postgres acquires a fork-scoped session advisory lock before opening the existing serializable transaction and row lock; SQLite serializes the mutation through SQLiteRuntimeStore.RunRuntimeMutation. Both adapters allocate unique adjacent fork-local turn indexes without handler retries.
       conversation_fork_delete:
         method: conversation.fork_delete
         selected_capability: ConversationForkLifecycle
-        postgres_support: supported through the Postgres conversation fork lifecycle owner
-        sqlite_support: unsupported; SQLite omits conversation fork lifecycle deletion and must fail closed
+        postgres_support: supported through the shared conversation fork semantic owner and Postgres transaction adapter
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and SQLiteRuntimeStore.RunRuntimeMutation; production multi-writer SQLite remains unsupported
     raw_sql_runtime_consumer_boundary_for_sqlite:
       runtime_sql_handle_for_sqlite: omitted
       rule: >
@@ -27333,7 +27334,12 @@ api_specification:
         execute the source agent through the forkchat sandbox executor, provides
         fork-snapshot read tools, and records only sandbox-observed requested
         side-effecting tools as stubbed fork-local results under
-        ConversationForkSandboxPolicy. It does not write agent_turns, events,
+        ConversationForkSandboxPolicy. The forkchat executor owns the synthetic
+        actor and resolves it through the canonical regular model alias so every
+        admitted provider backend receives an explicit model selection. The
+        executor classifies provider execution as operator infrastructure rather
+        than a managed-agent lifecycle generation; it MUST NOT fabricate a live
+        agent lifecycle token. It does not write agent_turns, events,
         runtime logs, mailbox rows, run commands, or dashboard conversation rows
         by default.
       scope:

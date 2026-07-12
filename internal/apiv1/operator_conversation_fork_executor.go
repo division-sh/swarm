@@ -9,7 +9,9 @@ import (
 
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -37,6 +39,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", prepared.Fork.ForkID)
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerOperatorInfrastructure)
 	resp, err := conv.Step(ctx, message)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
@@ -58,6 +61,7 @@ func conversationForkChatActor(prepared store.ConversationForkChatPrepared) runt
 		ID:               strings.TrimSpace(prepared.Fork.SourceAgentID),
 		Type:             "forkchat",
 		Role:             "forkchat",
+		Model:            llmselection.ModelAliasRegular,
 		ConversationMode: sessions.RuntimeModeTask.String(),
 		SessionScope:     "",
 		Tools:            append([]string(nil), prepared.AvailableTools...),

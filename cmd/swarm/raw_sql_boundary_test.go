@@ -23,6 +23,7 @@ const (
 type rawSQLBoundaryEntry struct {
 	Classification rawSQLBoundaryClassification
 	Issue          int
+	SpecRef        string
 	Reason         string
 }
 
@@ -197,17 +198,17 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		},
 		"internal/runtime/runforkexecution/activation_gate.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1239,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract run.fork activation is a spec-classified optional Postgres-backed product seam until promoted behind selected owners",
 		},
 		"internal/runtime/runforkexecution/execution.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1239,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
 		},
 		"internal/runtime/runforkexecution/runtime_container.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1239,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains a spec-classified optional product split",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
@@ -404,8 +405,8 @@ func classifyRawSQLBoundaryMatches(matches map[string][]string, ledger map[strin
 		if entry.Classification == "" {
 			failures = append(failures, path+" classification is empty")
 		}
-		if entry.Issue == 0 {
-			failures = append(failures, path+" classification is missing tracker issue")
+		if entry.Issue == 0 && strings.TrimSpace(entry.SpecRef) == "" {
+			failures = append(failures, path+" classification is missing tracker issue or governing spec ref")
 		}
 		if strings.TrimSpace(entry.Reason) == "" {
 			failures = append(failures, path+" classification reason is empty")

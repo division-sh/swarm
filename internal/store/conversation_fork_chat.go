@@ -92,9 +92,22 @@ type ConversationForkChatExecution struct {
 }
 
 func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context, req ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error) {
-	if s == nil || s.DB == nil {
-		return ConversationForkChatPrepared{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return ConversationForkChatPrepared{}, err
 	}
+	return owner.prepareOperatorConversationForkChat(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Context, req ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return ConversationForkChatPrepared{}, err
+	}
+	return owner.prepareOperatorConversationForkChat(ctx, req)
+}
+
+func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.Context, req ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error) {
 	forkID, err := normalizeUUIDParam(req.ForkID, "fork_id")
 	if err != nil {
 		return ConversationForkChatPrepared{}, err
@@ -108,7 +121,7 @@ func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context,
 	if err != nil {
 		return ConversationForkChatPrepared{}, err
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	catalog, err := s.schemaColumnCatalog(ctx)
 	if err != nil {
 		return ConversationForkChatPrepared{}, err
 	}
@@ -116,42 +129,48 @@ func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context,
 		return ConversationForkChatPrepared{}, err
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return ConversationForkChatPrepared{}, fmt.Errorf("begin conversation fork chat prepare: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var prepared ConversationForkChatPrepared
+	err = s.runForkMutation(ctx, forkID, true, func(txctx context.Context, tx *sql.Tx) error {
+		fork, err := loadActiveConversationForkForChat(txctx, s, tx, forkID, now)
+		if err != nil {
+			return err
 		}
-	}()
-
-	fork, err := loadActiveConversationForkForChat(ctx, tx, forkID, now)
+		snapshot, err := ensureConversationForkSnapshot(txctx, s, tx, fork, now)
+		if err != nil {
+			return err
+		}
+		policy := defaultConversationForkSandboxPolicy()
+		prepared = ConversationForkChatPrepared{
+			Fork:           fork,
+			Snapshot:       snapshot,
+			SandboxPolicy:  policy,
+			AvailableTools: conversationForkSandboxAvailableTools(policy),
+		}
+		return nil
+	})
 	if err != nil {
-		return ConversationForkChatPrepared{}, err
+		return ConversationForkChatPrepared{}, fmt.Errorf("prepare conversation fork chat: %w", err)
 	}
-	snapshot, err := ensureConversationForkSnapshot(ctx, tx, fork, now)
-	if err != nil {
-		return ConversationForkChatPrepared{}, err
-	}
-	policy := defaultConversationForkSandboxPolicy()
-	if err := tx.Commit(); err != nil {
-		return ConversationForkChatPrepared{}, fmt.Errorf("commit conversation fork chat prepare: %w", err)
-	}
-	committed = true
-	return ConversationForkChatPrepared{
-		Fork:           fork,
-		Snapshot:       snapshot,
-		SandboxPolicy:  policy,
-		AvailableTools: conversationForkSandboxAvailableTools(policy),
-	}, nil
+	return prepared, nil
 }
 
 func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, req ConversationForkChatRecordRequest) (ConversationForkChatResult, error) {
-	if s == nil || s.DB == nil {
-		return ConversationForkChatResult{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return ConversationForkChatResult{}, err
 	}
+	return owner.recordOperatorConversationForkChat(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Context, req ConversationForkChatRecordRequest) (ConversationForkChatResult, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return ConversationForkChatResult{}, err
+	}
+	return owner.recordOperatorConversationForkChat(ctx, req)
+}
+
+func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Context, req ConversationForkChatRecordRequest) (ConversationForkChatResult, error) {
 	forkID, err := normalizeUUIDParam(req.ForkID, "fork_id")
 	if err != nil {
 		return ConversationForkChatResult{}, err
@@ -178,7 +197,7 @@ func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, 
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	catalog, err := s.schemaColumnCatalog(ctx)
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
@@ -186,53 +205,41 @@ func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, 
 		return ConversationForkChatResult{}, err
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return ConversationForkChatResult{}, fmt.Errorf("begin conversation fork chat record: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var result ConversationForkChatResult
+	err = s.runForkMutation(ctx, forkID, true, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := loadActiveConversationForkForChat(txctx, s, tx, forkID, now); err != nil {
+			return err
 		}
-	}()
-
-	if _, err := loadActiveConversationForkForChat(ctx, tx, forkID, now); err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	snapshot, err := loadConversationForkSnapshot(ctx, tx, forkID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ConversationForkChatResult{}, &EntityReadParamError{Field: "fork_id", Reason: "forkchat snapshot is unavailable"}
-	}
+		snapshot, err := loadConversationForkSnapshot(txctx, s, tx, forkID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return &EntityReadParamError{Field: "fork_id", Reason: "forkchat snapshot is unavailable"}
+		}
+		if err != nil {
+			return err
+		}
+		policy := defaultConversationForkSandboxPolicy()
+		if len(execution.AvailableTools) == 0 {
+			execution.AvailableTools = conversationForkSandboxAvailableTools(policy)
+		}
+		requestPayload, err := conversationForkChatRequestPayload(message, snapshot, execution.AvailableTools)
+		if err != nil {
+			return err
+		}
+		responsePayload, err := conversationForkChatResponsePayload(execution, policy)
+		if err != nil {
+			return err
+		}
+		turn, err := insertConversationForkTurn(txctx, s, tx, forkID, actorTokenID, message, execution, requestPayload, responsePayload, policy, now)
+		if err != nil {
+			return err
+		}
+		result = ConversationForkChatResult{ForkID: forkID, Turn: turn, Snapshot: snapshot, SandboxPolicy: policy}
+		return nil
+	})
 	if err != nil {
-		return ConversationForkChatResult{}, err
+		return ConversationForkChatResult{}, fmt.Errorf("record conversation fork chat: %w", err)
 	}
-	policy := defaultConversationForkSandboxPolicy()
-	if len(execution.AvailableTools) == 0 {
-		execution.AvailableTools = conversationForkSandboxAvailableTools(policy)
-	}
-	requestPayload, err := conversationForkChatRequestPayload(message, snapshot, execution.AvailableTools)
-	if err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	responsePayload, err := conversationForkChatResponsePayload(execution, policy)
-	if err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	turn, err := insertConversationForkTurn(ctx, tx, forkID, actorTokenID, message, execution, requestPayload, responsePayload, policy, now)
-	if err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ConversationForkChatResult{}, fmt.Errorf("commit conversation fork chat record: %w", err)
-	}
-	committed = true
-	return ConversationForkChatResult{
-		ForkID:        forkID,
-		Turn:          turn,
-		Snapshot:      snapshot,
-		SandboxPolicy: policy,
-	}, nil
+	return result, nil
 }
 
 func requireConversationForkChatCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -254,16 +261,15 @@ func requireConversationForkChatCapabilities(caps StoreSchemaCapabilities, catal
 	return nil
 }
 
-func loadActiveConversationForkForChat(ctx context.Context, tx *sql.Tx, forkID string, now time.Time) (OperatorConversationForkSession, error) {
-	row := tx.QueryRowContext(ctx, `
+func loadActiveConversationForkForChat(ctx context.Context, owner conversationForkStore, tx *sql.Tx, forkID string, now time.Time) (OperatorConversationForkSession, error) {
+	row := owner.queryRow(ctx, tx, `
 		SELECT
-			fork_id::text, source_session_id::text, COALESCE(source_run_id::text, ''),
+			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, fork_point_kind, fork_point_turn_index,
-			COALESCE(fork_point_turn_id::text, ''), COALESCE(fork_point_event_id::text, ''),
+			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
 		FROM conversation_forks
-		WHERE fork_id = $1::uuid
-		FOR UPDATE
+		WHERE fork_id = ?`+owner.forUpdate()+`
 	`, forkID)
 	item, err := scanConversationForkSession(row, now)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -278,19 +284,19 @@ func loadActiveConversationForkForChat(ctx context.Context, tx *sql.Tx, forkID s
 	return item, nil
 }
 
-func ensureConversationForkSnapshot(ctx context.Context, tx *sql.Tx, fork OperatorConversationForkSession, now time.Time) (ConversationForkSnapshot, error) {
-	snapshot, err := loadConversationForkSnapshot(ctx, tx, fork.ForkID)
+func ensureConversationForkSnapshot(ctx context.Context, owner conversationForkStore, tx *sql.Tx, fork OperatorConversationForkSession, now time.Time) (ConversationForkSnapshot, error) {
+	snapshot, err := loadConversationForkSnapshot(ctx, owner, tx, fork.ForkID)
 	if err == nil {
 		return snapshot, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return ConversationForkSnapshot{}, err
 	}
-	sourceTurn, err := loadConversationForkSourceTurn(ctx, tx, fork)
+	sourceTurn, err := loadConversationForkSourceTurn(ctx, owner, tx, fork)
 	if err != nil {
 		return ConversationForkSnapshot{}, err
 	}
-	entities, err := loadConversationForkEntitySnapshot(ctx, tx, fork)
+	entities, err := loadConversationForkEntitySnapshot(ctx, owner, tx, fork)
 	if err != nil {
 		return ConversationForkSnapshot{}, err
 	}
@@ -312,18 +318,18 @@ func ensureConversationForkSnapshot(ctx context.Context, tx *sql.Tx, fork Operat
 	if err != nil {
 		return ConversationForkSnapshot{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := owner.exec(ctx, tx, `
 		INSERT INTO conversation_fork_snapshots (
 			fork_id, source_session_id, source_run_id, source_agent_id,
 			fork_point_turn_id, fork_point_turn_index, fork_point_selected_at,
 			source_turn, entity_snapshot, snapshot_owner, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, nullif($3, '')::uuid, $4,
-			$5::uuid, $6, $7,
-			$8::jsonb, $9::jsonb, $10, $11
+			?, ?, ?, ?,
+			?, ?, ?,
+			?, ?, ?, ?
 		)
-	`, snapshot.ForkID, snapshot.SourceSessionID, snapshot.SourceRunID, snapshot.SourceAgentID,
+	`, snapshot.ForkID, snapshot.SourceSessionID, nullableConversationForkID(snapshot.SourceRunID), snapshot.SourceAgentID,
 		sourceTurn.TurnID, sourceTurn.TurnIndex, sourceTurn.SelectedAt,
 		string(sourceTurnJSON), string(entitySnapshotJSON), snapshot.SnapshotOwner, snapshot.CreatedAt); err != nil {
 		return ConversationForkSnapshot{}, fmt.Errorf("insert conversation fork snapshot: %w", err)
@@ -331,18 +337,19 @@ func ensureConversationForkSnapshot(ctx context.Context, tx *sql.Tx, fork Operat
 	return snapshot, nil
 }
 
-func loadConversationForkSnapshot(ctx context.Context, tx *sql.Tx, forkID string) (ConversationForkSnapshot, error) {
-	row := tx.QueryRowContext(ctx, `
+func loadConversationForkSnapshot(ctx context.Context, owner conversationForkStore, tx *sql.Tx, forkID string) (ConversationForkSnapshot, error) {
+	row := owner.queryRow(ctx, tx, `
 		SELECT
-			fork_id::text, source_session_id::text, COALESCE(source_run_id::text, ''),
+			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, source_turn, entity_snapshot, snapshot_owner, created_at
 		FROM conversation_fork_snapshots
-		WHERE fork_id = $1::uuid
+		WHERE fork_id = ?
 	`, forkID)
 	var out ConversationForkSnapshot
 	var sourceTurnRaw []byte
 	var entitiesRaw []byte
-	if err := row.Scan(&out.ForkID, &out.SourceSessionID, &out.SourceRunID, &out.SourceAgentID, &sourceTurnRaw, &entitiesRaw, &out.SnapshotOwner, &out.CreatedAt); err != nil {
+	var createdAt conversationForkTimeValue
+	if err := row.Scan(&out.ForkID, &out.SourceSessionID, &out.SourceRunID, &out.SourceAgentID, &sourceTurnRaw, &entitiesRaw, &out.SnapshotOwner, &createdAt); err != nil {
 		return ConversationForkSnapshot{}, err
 	}
 	if err := json.Unmarshal(sourceTurnRaw, &out.SourceTurn); err != nil {
@@ -354,26 +361,27 @@ func loadConversationForkSnapshot(ctx context.Context, tx *sql.Tx, forkID string
 	if out.EntitySnapshot == nil {
 		out.EntitySnapshot = []ConversationForkEntitySnapshot{}
 	}
-	out.CreatedAt = out.CreatedAt.UTC()
+	out.CreatedAt = createdAt.Time
 	return out, nil
 }
 
-func loadConversationForkSourceTurn(ctx context.Context, tx *sql.Tx, fork OperatorConversationForkSession) (ConversationForkSourceTurn, error) {
-	row := tx.QueryRowContext(ctx, `
+func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkStore, tx *sql.Tx, fork OperatorConversationForkSession) (ConversationForkSourceTurn, error) {
+	row := owner.queryRow(ctx, tx, `
 		SELECT
-			turn_id::text,
-			COALESCE(request_payload, '{}'::jsonb),
-			COALESCE(response_payload, '{}'::jsonb),
-			COALESCE(tool_calls, '[]'::jsonb),
-			COALESCE(available_tools, '[]'::jsonb),
+			CAST(turn_id AS TEXT),
+			COALESCE(request_payload, '{}'),
+			COALESCE(response_payload, '{}'),
+			COALESCE(tool_calls, '[]'),
+			COALESCE(available_tools, '[]'),
 			created_at
 		FROM agent_turns
-		WHERE session_id = $1::uuid
-		  AND turn_id = $2::uuid
+		WHERE session_id = ?
+		  AND turn_id = ?
 	`, fork.SourceSessionID, fork.ForkPoint.TurnID)
 	var out ConversationForkSourceTurn
 	var requestRaw, responseRaw, toolCallsRaw, availableToolsRaw []byte
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &availableToolsRaw, &out.CreatedAt); err != nil {
+	var createdAt conversationForkTimeValue
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &availableToolsRaw, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ConversationForkSourceTurn{}, &EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
@@ -381,7 +389,7 @@ func loadConversationForkSourceTurn(ctx context.Context, tx *sql.Tx, fork Operat
 	}
 	out.TurnIndex = fork.ForkPoint.TurnIndex
 	out.SelectedAt = fork.ForkPoint.SelectedAt
-	out.CreatedAt = out.CreatedAt.UTC()
+	out.CreatedAt = createdAt.Time
 	out.RequestPayload = cloneRawMessage(requestRaw)
 	out.ResponsePayload = cloneRawMessage(responseRaw)
 	out.ToolCalls = cloneRawMessage(toolCallsRaw)
@@ -389,15 +397,15 @@ func loadConversationForkSourceTurn(ctx context.Context, tx *sql.Tx, fork Operat
 	return out, nil
 }
 
-func loadConversationForkEntitySnapshot(ctx context.Context, tx *sql.Tx, fork OperatorConversationForkSession) ([]ConversationForkEntitySnapshot, error) {
+func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationForkStore, tx *sql.Tx, fork OperatorConversationForkSession) ([]ConversationForkEntitySnapshot, error) {
 	if strings.TrimSpace(fork.SourceRunID) == "" {
 		return []ConversationForkEntitySnapshot{}, nil
 	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT entity_id::text, field, new_value, created_at
+	rows, err := owner.query(ctx, tx, `
+		SELECT CAST(entity_id AS TEXT), field, new_value, created_at
 		FROM entity_mutations
-		WHERE run_id = $1::uuid
-		  AND created_at <= $2::timestamptz
+		WHERE run_id = ?
+		  AND created_at <= ?
 		ORDER BY entity_id ASC, created_at ASC, mutation_id ASC
 	`, fork.SourceRunID, fork.ForkPoint.SelectedAt)
 	if err != nil {
@@ -415,7 +423,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, tx *sql.Tx, fork Op
 	for rows.Next() {
 		var entityID, field string
 		var raw []byte
-		var createdAt time.Time
+		var createdAt conversationForkTimeValue
 		if err := rows.Scan(&entityID, &field, &raw, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan conversation fork entity mutation: %w", err)
 		}
@@ -430,7 +438,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, tx *sql.Tx, fork Op
 		}
 		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
 			ProjectionMutation: mutationlog.ProjectionMutation{Field: field, NewValue: value},
-			CreatedAt:          createdAt.UTC(),
+			CreatedAt:          createdAt.Time,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -470,6 +478,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, tx *sql.Tx, fork Op
 
 func insertConversationForkTurn(
 	ctx context.Context,
+	owner conversationForkStore,
 	tx *sql.Tx,
 	forkID string,
 	actorTokenID string,
@@ -481,10 +490,10 @@ func insertConversationForkTurn(
 	now time.Time,
 ) (OperatorConversationTurn, error) {
 	var nextIndex int
-	if err := tx.QueryRowContext(ctx, `
+	if err := owner.queryRow(ctx, tx, `
 		SELECT COALESCE(MAX(turn_index), 0) + 1
 		FROM conversation_fork_turns
-		WHERE fork_id = $1::uuid
+		WHERE fork_id = ?
 	`, forkID).Scan(&nextIndex); err != nil {
 		return OperatorConversationTurn{}, fmt.Errorf("allocate conversation fork turn index: %w", err)
 	}
@@ -497,19 +506,19 @@ func insertConversationForkTurn(
 		return OperatorConversationTurn{}, err
 	}
 	var turn OperatorConversationTurn
-	var createdAt time.Time
-	if err := tx.QueryRowContext(ctx, `
+	var createdAt conversationForkTimeValue
+	if err := owner.queryRow(ctx, tx, `
 		INSERT INTO conversation_fork_turns (
 			fork_id, turn_index, actor_token_id, message, assistant_message,
 			request_payload, response_payload, tool_calls, sandbox_policy,
 			snapshot_owner, created_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, $4, $5,
-			$6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb,
-			$10, $11
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, ?
 		)
-		RETURNING fork_turn_id::text, created_at
+		RETURNING CAST(fork_turn_id AS TEXT), created_at
 	`, forkID, nextIndex, actorTokenID, message, execution.AssistantMessage,
 		string(requestPayload), string(responsePayload), string(toolCallsJSON), string(policyJSON),
 		ConversationForkChatSnapshotOwner, now).Scan(&turn.TurnID, &createdAt); err != nil {
@@ -523,19 +532,19 @@ func insertConversationForkTurn(
 	turn.TurnBlocks = conversationForkSandboxTurnBlocks(execution)
 	turn.ParseOK = true
 	turn.LatencyMS = 0
-	turn.CreatedAt = createdAt.UTC()
+	turn.CreatedAt = createdAt.Time
 	turn.AssistantVisibleOutput = execution.AssistantMessage
 	return turn, nil
 }
 
-func loadConversationForkTurns(ctx context.Context, db *sql.DB, forkID string) ([]OperatorConversationTurn, error) {
-	rows, err := db.QueryContext(ctx, `
+func loadConversationForkTurns(ctx context.Context, owner conversationForkStore, db *sql.DB, forkID string) ([]OperatorConversationTurn, error) {
+	rows, err := owner.query(ctx, db, `
 		SELECT
-			fork_turn_id::text, turn_index,
+			CAST(fork_turn_id AS TEXT), turn_index,
 			request_payload, response_payload, tool_calls,
 			assistant_message, created_at
 		FROM conversation_fork_turns
-		WHERE fork_id = $1::uuid
+		WHERE fork_id = ?
 		ORDER BY turn_index ASC, created_at ASC, fork_turn_id ASC
 	`, forkID)
 	if err != nil {
@@ -547,7 +556,7 @@ func loadConversationForkTurns(ctx context.Context, db *sql.DB, forkID string) (
 		var turn OperatorConversationTurn
 		var requestRaw, responseRaw, toolCallsRaw []byte
 		var assistant string
-		var createdAt time.Time
+		var createdAt conversationForkTimeValue
 		if err := rows.Scan(&turn.TurnID, &turn.TurnIndex, &requestRaw, &responseRaw, &toolCallsRaw, &assistant, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan conversation fork turn: %w", err)
 		}
@@ -568,7 +577,7 @@ func loadConversationForkTurns(ctx context.Context, db *sql.DB, forkID string) (
 			ToolResults:      turn.ToolResults,
 		})
 		turn.ParseOK = true
-		turn.CreatedAt = createdAt.UTC()
+		turn.CreatedAt = createdAt.Time
 		turn.AssistantVisibleOutput = assistant
 		turns = append(turns, turn)
 	}

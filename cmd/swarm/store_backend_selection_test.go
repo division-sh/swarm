@@ -422,15 +422,19 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.BundleCatalog == nil {
 		t.Fatal("sqlite apiCapabilities missing BundleCatalog pure operator-read owner")
 	}
+	if apiCaps.ConversationForks == nil {
+		t.Fatal("sqlite apiCapabilities missing ConversationForks read owner")
+	}
+	if apiCaps.ConversationForkLifecycle == nil {
+		t.Fatal("sqlite apiCapabilities missing ConversationForkLifecycle mutation owner")
+	}
 	classifiedOut := map[string]any{
-		"ConversationForks":         apiCaps.ConversationForks,
-		"ConversationForkLifecycle": apiCaps.ConversationForkLifecycle,
-		"BundleDelete":              apiCaps.BundleDelete,
-		"RunForkAvailability":       apiCaps.RunForkAvailability,
-		"RunFork":                   apiCaps.RunFork,
-		"ResetCoordinator":          apiCaps.ResetCoordinator,
-		"ResetQuiescer":             apiCaps.ResetQuiescer,
-		"ResetCleaner":              apiCaps.ResetCleaner,
+		"BundleDelete":        apiCaps.BundleDelete,
+		"RunForkAvailability": apiCaps.RunForkAvailability,
+		"RunFork":             apiCaps.RunFork,
+		"ResetCoordinator":    apiCaps.ResetCoordinator,
+		"ResetQuiescer":       apiCaps.ResetQuiescer,
+		"ResetCleaner":        apiCaps.ResetCleaner,
 	}
 	for name, capability := range classifiedOut {
 		if capability != nil {
@@ -549,8 +553,8 @@ func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *
 				t.Fatalf("sqlite selected operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly: %s", entry.Name, entry.Reason)
 			}
 		case "split_with_issue_ref", "different_semantic_concept_with_proof", "postgres_only_with_spec_ref":
-			if entry.Issue == 0 {
-				t.Fatalf("selected operator-read construction capability %s classification %s missing issue", entry.Name, entry.Classification)
+			if entry.Issue == 0 && strings.TrimSpace(entry.SpecRef) == "" {
+				t.Fatalf("selected operator-read construction capability %s classification %s missing issue or governing spec ref", entry.Name, entry.Classification)
 			}
 			if entry.RequiresPostgresBaseline && !postgresConfigured {
 				t.Fatalf("classified optional capability %s no longer has a postgres baseline; update construction-parity classification: %s", entry.Name, entry.Reason)
@@ -573,6 +577,7 @@ type selectedOperatorReadConstructionCapabilityEntry struct {
 	Name                     string
 	Classification           string
 	Issue                    int
+	SpecRef                  string
 	RequiresPostgresBaseline bool
 	Reason                   string
 }
@@ -587,15 +592,15 @@ func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadCo
 		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
 		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
 		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
-		{Name: "BundleDelete", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "bundle.delete is a spec-classified Postgres-only mutating/destructive bundle lifecycle capability, not operator-read parity"},
-		{Name: "ConversationForks", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "conversation.fork_list/view now consume a read-only fork capability; SQLite read parity remains a local-dev parity split until a real SQLite read owner is promoted"},
-		{Name: "ConversationForkLifecycle", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "conversation.fork/fork_chat/fork_delete are spec-classified Postgres-only mutating fork lifecycle capabilities split from operator-read parity"},
-		{Name: "RunForkAvailability", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "run.fork availability is a spec-classified Postgres-only product/mutating lifecycle seam split from operator reads"},
-		{Name: "RunFork", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "run.fork execution is a spec-classified Postgres-only product/mutating lifecycle seam split from operator reads"},
-		{Name: "RuntimeContexts", Classification: "split_with_issue_ref", Issue: 1239, Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
-		{Name: "ResetCoordinator", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset coordinator remains split from operator-read parity"},
-		{Name: "ResetQuiescer", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset quiescer remains split from operator-read parity"},
-		{Name: "ResetCleaner", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset cleaner remains split from operator-read parity"},
+		{Name: "BundleDelete", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete", RequiresPostgresBaseline: true, Reason: "bundle.delete is a spec-classified Postgres-only mutating/destructive bundle lifecycle capability, not operator-read parity"},
+		{Name: "ConversationForks", Classification: "wired_both", Reason: "conversation.fork_list/view consume the shared fork semantic owner on SQLite and Postgres"},
+		{Name: "ConversationForkLifecycle", Classification: "wired_both", Reason: "conversation.fork/fork_chat/fork_delete consume the shared fork semantic owner with backend-local mutation adapters"},
+		{Name: "RunForkAvailability", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork availability is a spec-classified Postgres-only product/mutating lifecycle seam"},
+		{Name: "RunFork", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork execution is a spec-classified Postgres-only product/mutating lifecycle seam"},
+		{Name: "RuntimeContexts", Classification: "different_semantic_concept_with_proof", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_store_facade", Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
+		{Name: "ResetCoordinator", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset coordinator is a spec-classified Postgres-only product capability"},
+		{Name: "ResetQuiescer", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset quiescer is a spec-classified Postgres-only product capability"},
+		{Name: "ResetCleaner", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset cleaner is a spec-classified Postgres-only product capability"},
 	}
 }
 

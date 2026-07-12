@@ -33,12 +33,6 @@ policy:
     as selected-backend parity proof. Non-HTTP subscription/protocol methods must
     be classified explicitly rather than omitted.
 active_trackers:
-  - kind: github_issue
-    issue: 1239
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-  - kind: github_issue
-    issue: 1927
-    watchlist: runtime_operations.shutdown_and_runtime_lifecycle
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -255,29 +249,33 @@ mutating_api_parity_ledger:
       - {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}
       - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: conversation.fork
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
-    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: conversation_fork_lifecycle
     proof_refs:
-      - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
-      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
+      - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle}
+    notes: >
+      Shared served proof covers real /v1/rpc creation, selector/TTL lineage,
+      normal idempotency replay/conflict, and selected SQLite/Postgres stores.
   - method: conversation.fork_chat
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
-    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork_chat
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: conversation_fork_chat_lifecycle
     proof_refs:
-      - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
-      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
+      - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle}
+    notes: >
+      Shared served proof uses an admitted API-backed deterministic executor and
+      verifies immutable snapshot, fork-local transcript, sandboxed tool effects,
+      normal replay/conflict, and settlement on both selected stores.
   - method: conversation.fork_delete
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
-    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork_delete
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: conversation_fork_delete_lifecycle
     proof_refs:
-      - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
-      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
+      - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle}
+    notes: >
+      Shared served proof verifies soft deletion, already-deleted behavior,
+      normal keyed replay, active-list filtering, and settlement on both stores.
   - method: test.setup_entities
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -369,23 +367,25 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.fork_list
-    classification: split_with_issue_ref
-    split_issue: 1239
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: tracker, issue: 1239, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreConversationForkLifecycleParity}
+      - {kind: go_test, name: TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete}
     notes: >
-      conversation.fork_list now consumes a read-only fork capability segregated
-      from fork/fork_chat/fork_delete lifecycle mutation; SQLite read-owner
-      parity remains split until local-dev fork read support is promoted.
+      The segregated read capability consumes the shared semantic owner on both
+      selected stores; served proof covers active filtering and pagination.
   - method: conversation.fork_view
-    classification: split_with_issue_ref
-    split_issue: 1239
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: tracker, issue: 1239, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreConversationForkLifecycleParity}
+      - {kind: go_test, name: TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation}
     notes: >
-      conversation.fork_view now consumes a read-only fork capability segregated
-      from fork/fork_chat/fork_delete lifecycle mutation; SQLite read-owner
-      parity remains split until local-dev fork read support is promoted.
+      The segregated read capability consumes the shared semantic owner on both
+      selected stores; served proof covers fork-local transcript projection.
   - method: conversation.get
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
@@ -640,9 +640,6 @@ rows:
         name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
       - kind: go_test
         name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
-      - kind: tracker
-        issue: 1239
-        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
     notes: >
       This row records the explicit-Postgres counterpart without making Postgres
       startup a required Cartesian duplicate of every fast SQLite run row.
@@ -720,7 +717,7 @@ rows:
       SQLite and Postgres run headers, lifecycle/debug owners, API run reads,
       builder summaries, and CLI status consumers to canonical run-scoped
       entity_state. This row consumes that closed proof without claiming the
-      broader #1239 parent tail is closed.
+      backend-portability parent remains open.
 
   - id: event_publish_api
     surface: /v1/rpc event.publish create-new/idempotent publication against SQLite and Postgres
@@ -1002,27 +999,6 @@ rows:
       exact-once mutation-log fixture is no longer a valid public-surface proof;
       the supported proof is fail-closed admission before runtime startup.
 
-  - id: remaining_openrpc_selected_backend_tail
-    surface: remaining supported OpenRPC methods without selected-backend public-surface classification
-    classification: split_to_existing_issue
-    tier: future_parent_tail
-    split_issue: 1239
-    backends: [default_sqlite, explicit_postgres]
-    store_owners:
-      - internal/apiv1/testdata/openrpc_compliance_matrix.yaml
-      - future selected-backend public-surface rows
-    proof_dimensions: [split_tracker, openrpc_publication]
-    proof_refs:
-      - kind: artifact
-        path: internal/apiv1/testdata/openrpc_compliance_matrix.yaml
-      - kind: tracker
-        issue: 1239
-        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-    notes: >
-      The existing OpenRPC matrix remains authoritative for method publication,
-      schema, and transport proof. Backend support for every method remains a
-      parent-tail classification task, not first-slice behavior repair.
-
   - id: bundle_hash_catalog_boot_postgres_only
     surface: DB-loaded swarm serve --bundle-hash catalog boot
     classification: different_semantic_concept_with_proof
@@ -1032,15 +1008,12 @@ rows:
     store_owners:
       - platform-spec.yaml runtime_store_backend_selection
       - Postgres bundle catalog boot owner
-    proof_dimensions: [backend_selection, fail_closed, split_tracker]
+    proof_dimensions: [backend_selection, fail_closed]
     proof_refs:
       - kind: go_test
         name: TestCLI_ServeBundleHashValidationAndSerialScope
       - kind: artifact
         path: platform-spec.yaml
-      - kind: tracker
-        issue: 1239
-        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
     notes: >
       SQLite local/dev runtime support does not promote DB-loaded persisted
       bundle catalog boot. The executable proof covers `serve --bundle-hash ...
