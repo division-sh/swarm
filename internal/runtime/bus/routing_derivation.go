@@ -28,6 +28,8 @@ type RouteTable struct {
 	rootInputRoutes   map[string][]Subscriber
 	patterns          []routePattern
 	eventPath         map[string]struct{}
+	authoredEventPath map[string]struct{}
+	authoredScopes    map[string]struct{}
 	templates         map[string]routeFlowTemplate
 	instances         map[string]struct{}
 	instanceScope     map[string]string
@@ -126,7 +128,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if routeProjectScopeOwnedByTemplateFlow(source, owningFlowID) {
 			continue
 		}
-		rt.addEventPathsLocked(basePath, localEvents)
+		rt.addAuthoredEventPathsLocked(basePath, localEvents)
 		rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Agents)
 		rt.addNodePatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Nodes)
 	}
@@ -144,7 +146,10 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			}
 			continue
 		}
-		rt.addEventPathsLocked(flowPath, localEvents)
+		if flowPath != "" {
+			rt.authoredScopes[flowPath] = struct{}{}
+		}
+		rt.addAuthoredEventPathsLocked(flowPath, localEvents)
 		rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Agents)
 		rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
 	}
@@ -236,8 +241,11 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	if _, exists := rt.instances[instancePath]; exists {
 		return nil
 	}
+	templateScope := eventidentity.Normalize(identity.ScopeKey)
+	if collision := rt.flowInstanceRouteCollisionLocked(templateScope, instancePath); collision != "" {
+		return fmt.Errorf("flow-instance route %q collides with authored canonical identity %q", instancePath, collision)
+	}
 
-	templateScope := strings.TrimSpace(identity.ScopeKey)
 	if templateDef, ok := rt.templates[templateScope]; ok {
 		rt.instances[instancePath] = struct{}{}
 		rt.instanceScope[instancePath] = templateScope
@@ -416,6 +424,8 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		routes:            make(map[string][]Subscriber),
 		rootInputRoutes:   make(map[string][]Subscriber),
 		eventPath:         make(map[string]struct{}),
+		authoredEventPath: make(map[string]struct{}),
+		authoredScopes:    make(map[string]struct{}),
 		templates:         make(map[string]routeFlowTemplate),
 		instances:         make(map[string]struct{}),
 		instanceScope:     make(map[string]string),
@@ -542,6 +552,48 @@ func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[strin
 		added = append(added, absolute)
 	}
 	return added
+}
+
+func (rt *RouteTable) addAuthoredEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
+	added := rt.addEventPathsLocked(basePath, localEvents)
+	for _, eventType := range added {
+		rt.authoredEventPath[eventType] = struct{}{}
+	}
+	return added
+}
+
+func (rt *RouteTable) flowInstanceRouteCollisionLocked(templateScope, instancePath string) string {
+	templateScope = eventidentity.Normalize(templateScope)
+	instancePath = eventidentity.Normalize(instancePath)
+	if templateScope == "" || instancePath == "" {
+		return ""
+	}
+	for _, scopePath := range sortedStringKeys(rt.authoredScopes) {
+		scopePath = eventidentity.Normalize(scopePath)
+		switch {
+		case instancePath == scopePath:
+			return scopePath
+		case strings.HasPrefix(scopePath, instancePath+"/"):
+			return scopePath
+		case strings.HasPrefix(instancePath, scopePath+"/") && templateScope != scopePath && !strings.HasPrefix(templateScope, scopePath+"/"):
+			return scopePath
+		}
+	}
+	for _, eventPath := range sortedStringKeys(rt.authoredEventPath) {
+		if routeCanonicalPathsOverlap(instancePath, eventPath) {
+			return eventPath
+		}
+	}
+	return ""
+}
+
+func routeCanonicalPathsOverlap(left, right string) bool {
+	left = eventidentity.Normalize(left)
+	right = eventidentity.Normalize(right)
+	if left == "" || right == "" {
+		return false
+	}
+	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
 func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, agents map[string]runtimecontracts.AgentRegistryEntry) {

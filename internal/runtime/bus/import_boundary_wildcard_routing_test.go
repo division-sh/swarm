@@ -167,6 +167,27 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 	if grantPattern == nil || grantPattern.EventPattern != "producer/task.done" || grantPattern.SourceTemplatePath != "producer" || grantPattern.SourceLocalEvent != "task.done" {
 		t.Fatalf("template grant resolution = %#v, want static proof witness with explicit source-template provenance", resolution)
 	}
+	directRoutes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable direct collision proof: %v", err)
+	}
+	directSibling := runtimeflowidentity.DeriveRoute("producer", "inst-direct")
+	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directSibling}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute direct sibling: %v", err)
+	}
+	directCollision := runtimeflowidentity.DeriveRoute("producer", "child")
+	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directCollision}); err == nil || !strings.Contains(err.Error(), "collides with authored canonical identity") {
+		t.Fatalf("AddFlowInstanceRoute direct collision error = %v, want fail-closed canonical collision", err)
+	}
+	if directRoutes.HasFlowInstanceRoute(directCollision) {
+		t.Fatal("direct colliding instance route was installed")
+	}
+	if got := directRoutes.Resolve("producer/child/task.done"); len(got) != 0 {
+		t.Fatalf("direct static descendant route after rejected collision = %#v, want unchanged authority", got)
+	}
+	if got := directRoutes.Resolve("producer/inst-direct/task.done"); len(got) != 1 || got[0].ID != "worker-listener" {
+		t.Fatalf("direct sibling route after rejected collision = %#v, want existing route unchanged", got)
+	}
 
 	for _, tc := range []struct {
 		name     string
@@ -217,6 +238,32 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			}
 			if got := eb.RouteTable().Resolve("producer/child/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve static descendant after materialization = %#v, want lifecycle provenance isolation", got)
+			}
+			collisionIdentity := runtimeflowidentity.DeriveRoute("producer", "child")
+			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: collisionIdentity}); err == nil || !strings.Contains(err.Error(), "collides with authored canonical identity") {
+				t.Fatalf("AddFlowInstanceRoute canonical collision error = %v, want fail closed", err)
+			}
+			if eb.RouteTable().HasFlowInstanceRoute(collisionIdentity) {
+				t.Fatal("colliding EventBus instance route was installed")
+			}
+			staticEvent := eventtest.RootIngress("evt-static-descendant-"+strings.ReplaceAll(tc.name, " ", "-"), "producer/child/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			staticPlan, err := eb.CheckPublishRecipientPlan(context.Background(), staticEvent)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan static descendant: %v", err)
+			}
+			for _, recipient := range staticPlan.RoutedRecipients {
+				if recipient.ID == "worker-listener" {
+					t.Fatalf("static descendant recipient plan = %#v, rejected collision must not add observer authority", staticPlan)
+				}
+			}
+			if err := eb.Publish(context.Background(), staticEvent); err != nil {
+				t.Fatalf("Publish static descendant: %v", err)
+			}
+			if got := store.deliveries[staticEvent.ID()]; len(got) != 0 {
+				t.Fatalf("static descendant persisted deliveries = %#v, want none after rejected collision", got)
+			}
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].ID != "worker-listener" {
+				t.Fatalf("existing sibling route after rejected collision = %#v, want unchanged authority", got)
 			}
 
 			evt := eventtest.RootIngress("evt-template-grant-"+strings.ReplaceAll(tc.name, " ", "-"), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
