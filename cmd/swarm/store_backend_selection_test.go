@@ -668,9 +668,9 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		Config: &config.Config{},
 		Stores: runtimeStores,
 		Options: runtime.RuntimeOptions{
-			SelfCheck:               true,
-			WorkflowModule:          stubWorkflowModule{source: semanticview.Wrap(bundle)},
-			LLMRuntime:              storeBackendSelectionNoopLLMRuntime{},
+			SelfCheck:              true,
+			WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
+			LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
 			ProviderTriggerCatalog: testProviderTriggerCatalog(t),
 		},
 	})
