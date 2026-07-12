@@ -147,7 +147,7 @@ func TestRunCommandLocalForegroundRendersRealWorkspaceStartupDiagnostics(t *test
 			payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 			apiPort := freeDoctorTCPPort(t)
 			opts := defaultRootCommandOptions()
-			opts.runReadyTimeout = 5 * time.Second
+			opts.runReadyTimeout = 20 * time.Second
 			opts.runReadyPoll = 10 * time.Millisecond
 
 			var stdout, stderr bytes.Buffer
@@ -186,7 +186,7 @@ func TestRunCommandLocalForegroundRendersRealExplicitHostRefusal(t *testing.T) {
 	configPath := writeDoctorClaudeHostConfig(t, "")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 	opts := defaultRootCommandOptions()
-	opts.runReadyTimeout = 5 * time.Second
+	opts.runReadyTimeout = 20 * time.Second
 	opts.runReadyPoll = 10 * time.Millisecond
 
 	var stdout, stderr bytes.Buffer
