@@ -4349,6 +4349,8 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 	}
 	payloadItems := json.RawMessage(`{"items":[{"id":"item-b"},{"id":"item-a"},{"id":"item-b"}]}`)
 	wantItemOrder := []string{"item-b", "item-a", "item-b"}
+	fixedEmitNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
+	wantFirstEmitAt := fixedEmitNow.Truncate(persistedEmitTimeResolution)
 	state := func() StateSnapshot {
 		return testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{})
 	}
@@ -4365,6 +4367,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				Dispatcher:          stubDispatcher{},
 				PayloadShaper:       stubPayloadShaper{},
 				TransitionValidator: transition,
+				EmitNow:             func() time.Time { return fixedEmitNow },
 			}, nil)
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
@@ -4405,6 +4408,9 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				}
 				if got := emitted["item_index"]; got != float64(index) {
 					t.Fatalf("emit %d item_index = %#v, want %d", index, got, index)
+				}
+				if got, want := intent.Event.CreatedAt(), wantFirstEmitAt.Add(time.Duration(index)*persistedEmitTimeResolution); !got.Equal(want) {
+					t.Fatalf("emit %d created_at = %s, want persistence-safe %s", index, got, want)
 				}
 			}
 			if got := result.NextState; got != "dispatched" {

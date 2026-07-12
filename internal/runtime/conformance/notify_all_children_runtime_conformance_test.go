@@ -63,9 +63,10 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			ctx := context.Background()
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
+			fixedEngineNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-			runtime := newNotifyAllChildrenRuntime(t, backend, db, source)
+			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
 
 			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
@@ -100,6 +101,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			})
 			orderedItems := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, orderedNotifyID)
 			assertNotifyAllChildrenItemSequence(t, orderedItems, orderedMembership)
+			assertNotifyAllChildrenDistinctItemTimestamps(t, ctx, backend, db, runID, orderedNotifyID, len(orderedMembership))
 			for index, item := range orderedItems {
 				routes, err := backend.ListEventDeliveryRoutes(ctx, item.ID)
 				if err != nil {
@@ -185,7 +187,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			originalA := items["acct-a"]
 			deleteNotifyAllChildrenReceipts(t, ctx, backend, db, originalA)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
-			restarted := newNotifyAllChildrenRuntime(t, backend, db, source)
+			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
 			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-24*time.Hour), 20)
 			if err != nil {
 				t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
@@ -216,7 +218,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 	}
 }
 
-func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, db *sql.DB, source semanticview.Source) notifyAllChildrenRuntime {
+func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, db *sql.DB, source semanticview.Source, engineNow func() time.Time) notifyAllChildrenRuntime {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
@@ -278,6 +280,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		EventReceiptsCapability: func(context.Context) (bool, error) {
 			return true, nil
 		},
+		TestEngineEmitNow: engineNow,
 	})
 	return notifyAllChildrenRuntime{bus: eventBus, manager: manager}
 }
@@ -394,6 +397,21 @@ func assertNotifyAllChildrenItemSequence(t *testing.T, items []notifyAllChildren
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("persisted fan-out item sequence = %#v, want %#v with order and duplicates preserved", got, want)
+	}
+}
+
+func assertNotifyAllChildrenDistinctItemTimestamps(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string, want int) {
+	t.Helper()
+	query := `SELECT COUNT(DISTINCT created_at) FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT COUNT(DISTINCT created_at) FROM events WHERE run_id = ? AND event_name = ? AND source_event_id = ?`
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, query, runID, "portfolio/account.notify.requested", sourceEventID).Scan(&count); err != nil {
+		t.Fatalf("count distinct persisted fan-out timestamps: %v", err)
+	}
+	if count != want {
+		t.Fatalf("distinct persisted fan-out timestamps = %d, want %d from equal engine clock ticks", count, want)
 	}
 }
 
