@@ -92,11 +92,43 @@ func TestRunPlanRejectsWrongDigestAndDuplicatePackage(t *testing.T) {
 	}
 }
 
+func TestRunPlanRejectsWrongExecutionSHA(t *testing.T) {
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "full", "executed-sha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.ValidateExecutionSHA("executed-sha"); err != nil {
+		t.Fatalf("matching execution SHA: %v", err)
+	}
+	if err := plan.ValidateExecutionSHA("different-sha"); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("wrong execution SHA error = %v", err)
+	}
+}
+
+func TestNightlyProfileRunsFormerExtrasExactlyOnceAsBroadPackages(t *testing.T) {
+	packages := []string{"module/catalog", "module/python", "module/fork"}
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileNightly, "nightly", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := map[string][]string{}
+	for _, unit := range plan.Units {
+		for _, pkg := range unit.Packages {
+			owners[pkg] = append(owners[pkg], unit.ID)
+		}
+	}
+	for _, pkg := range []string{"module/python", "module/fork"} {
+		if len(owners[pkg]) != 1 || !strings.HasPrefix(owners[pkg][0], "broad-") {
+			t.Fatalf("nightly package %s owners = %v, want one broad unit", pkg, owners[pkg])
+		}
+	}
+}
+
 func TestLoadersFailClosedOnUnknownFields(t *testing.T) {
 	policyYAML := `
 version: 1
 module: module
-planning: {target_seconds: 10, max_shards: 2, unknown_package_seconds: 3, max_imbalance: 0.2}
+planning: {target_seconds: 10, max_shards: 2, unknown_package_seconds: 3}
 escalation_paths: []
 special_packages: []
 profiles:
@@ -164,7 +196,6 @@ func testPolicy() Policy {
 			TargetSeconds:         200,
 			MaxShards:             4,
 			UnknownPackageSeconds: 30,
-			MaxImbalance:          0.25,
 		},
 		EscalationPaths: []string{`^internal/runtime/conformance/`},
 		SpecialPackages: []string{"module/catalog"},

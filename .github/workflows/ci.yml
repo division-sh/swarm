@@ -28,6 +28,7 @@ jobs:
       proof_matrix: ${{ steps.plan.outputs.proof_matrix }}
       profile: ${{ steps.plan.outputs.profile }}
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
+      execution_sha: ${{ steps.plan.outputs.execution_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,16 +46,19 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FORCED_PROFILE: ${{ inputs.profile }}
         run: |
           set -euo pipefail
           mkdir -p test-results
+          execution_sha=$(git rev-parse HEAD)
+          test "$execution_sha" = "$EVENT_SHA"
           go list ./... > test-results/go-packages.txt
           : > test-results/changed-files.txt
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > test-results/changed-files.txt
+            git diff --name-only "$BASE_SHA" "$PR_HEAD_SHA" > test-results/changed-files.txt
           fi
 
           profile_args=()
@@ -68,7 +72,7 @@ jobs:
             -packages test-results/go-packages.txt \
             -changed-files test-results/changed-files.txt \
             -event "$EVENT_NAME" \
-            -head-sha "$HEAD_SHA" \
+            -head-sha "$execution_sha" \
             -plan test-results/proof-plan.json \
             -matrix test-results/proof-matrix.json \
             -markdown test-results/proof-plan.md \
@@ -77,6 +81,7 @@ jobs:
           echo "proof_matrix=$(jq -c . test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "execution_sha=$execution_sha" >> "$GITHUB_OUTPUT"
           cat test-results/proof-plan.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload proof plan
@@ -115,7 +120,7 @@ jobs:
         run: go vet ./...
 
   sqlite-local-dev:
-    name: SQLite local smoke
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -150,6 +155,8 @@ jobs:
       matrix: ${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -182,6 +189,8 @@ jobs:
           set -euo pipefail
           mkdir -p test-results/evidence
           plan=test-results/plan/proof-plan.json
+          go run ./cmd/swarm-test-timing -assert-execution-sha \
+            -plan "$plan" -execution-sha "$(git rev-parse HEAD)"
           unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
           mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
           test_pattern=$(jq -r '.run // empty' <<<"$unit")
@@ -291,6 +300,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -311,6 +322,8 @@ jobs:
       - name: Evaluate complete plan-bound evidence
         if: always()
         run: |
+          go run ./cmd/swarm-test-timing -assert-execution-sha \
+            -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           go run ./cmd/swarm-test-timing -evaluate-budget \
             -plan test-results/plan/proof-plan.json \
             -policy .github/test-timing-budgets.yaml \
@@ -330,7 +343,7 @@ jobs:
           if-no-files-found: warn
 
   required-tests:
-    name: Required test summary
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
     needs: [ci-plan, static-checks, sqlite-local-dev, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
@@ -380,6 +393,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
@@ -396,8 +410,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SOURCE_RUN_ID: github-actions-${{ github.run_id }}
+          EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
         run: |
           set -euo pipefail
+          go run ./cmd/swarm-test-timing -assert-execution-sha \
+            -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           result=$(go run ./cmd/swarm-test-timing -update-weight-model \
             -plan test-results/plan/proof-plan.json \
             -evidence-root test-results/evidence \
@@ -422,10 +439,10 @@ jobs:
           trap cleanup_staging EXIT
           if gh api "repos/division-sh/swarm/git/ref/$staging_ref" >/dev/null 2>&1; then
             gh api --method PATCH "repos/division-sh/swarm/git/refs/$staging_ref" \
-              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              -f sha="$EXECUTION_SHA" -F force=true >/dev/null
           else
             gh api --method POST repos/division-sh/swarm/git/refs \
-              -f ref="refs/$staging_ref" -f sha="$GITHUB_SHA" >/dev/null
+              -f ref="refs/$staging_ref" -f sha="$EXECUTION_SHA" >/dev/null
           fi
           blob_sha=$(gh api "repos/division-sh/swarm/contents/.github/test-timing-weights.json?ref=$staging_branch" --jq .sha)
           content=$(base64 < .github/test-timing-weights.json | tr -d '\n')
@@ -442,7 +459,7 @@ jobs:
           cleanup_staging
           trap - EXIT
 
-          pr=$(gh pr list --head "division-sh:$branch" --base master --state open --json number --jq '.[0].number // empty')
+          pr=$(gh pr list --head "$branch" --base master --state open --json number --jq '.[0].number // empty')
           if [ -z "$pr" ]; then
             gh pr create --base master --head "$branch" \
               --title "[automation][issue #1967] Refresh CI timing weights" \

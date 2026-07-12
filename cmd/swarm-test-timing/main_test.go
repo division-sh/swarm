@@ -79,6 +79,21 @@ func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 	}
 }
 
+func TestAssertExecutionSHARejectsDifferentCheckout(t *testing.T) {
+	dir := t.TempDir()
+	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	planPath := filepath.Join(dir, "plan.json")
+	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "executed-sha"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(config{assertExecution: true, planPath: planPath, executionSHA: "executed-sha"}); err != nil {
+		t.Fatalf("matching checkout: %v", err)
+	}
+	if err := run(config{assertExecution: true, planPath: planPath, executionSHA: "different-sha"}); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("wrong checkout error = %v", err)
+	}
+}
+
 func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 	dir := t.TempDir()
 	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
@@ -138,7 +153,7 @@ func writePlannerFixtures(t *testing.T, dir string) (string, string, string) {
 	policy := `
 version: 1
 module: module
-planning: {target_seconds: 100, max_shards: 2, unknown_package_seconds: 10, max_imbalance: 0.25}
+planning: {target_seconds: 100, max_shards: 2, unknown_package_seconds: 10}
 escalation_paths: ['^internal/runtime/conformance/']
 special_packages: [module/catalog]
 profiles:
