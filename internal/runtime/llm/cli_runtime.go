@@ -446,15 +446,12 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			}
 		}
 		if projectionErr != nil {
-			return nil, projectionErr
+			return nil, errors.Join(err, projectionErr)
 		}
 		return nil, err
 	}
 	if err := validateCLIResponseToolCallsForTurn(actor, s.Tools, resp); err != nil {
-		failure := runtimefailures.FromError(err, "claude-cli-adapter", "validate_tool_calls")
-		if settleErr := attempt.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure.Failure, map[string]any{"provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
-			return nil, settleErr
-		}
+		err = settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "validate_tool_calls", map[string]any{"provider_session_id": strings.TrimSpace(resp.SessionID)})
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:     s.AgentID,
 			RuntimeMode: resolved.RuntimeMode.String(),
@@ -472,17 +469,13 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			Failure:     agentTurnFailure(err, "claude_cli_tool_validation"),
 		}, resp))
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
-			return nil, projectionErr
+			return nil, errors.Join(err, projectionErr)
 		}
 		return nil, err
 	}
 	if returnedSessionID := strings.TrimSpace(resp.SessionID); returnedSessionID != childSessionID {
 		err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_provider_child_identity_mismatch", "claude-cli-adapter", "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
-		failure := runtimefailures.FromError(err, "claude-cli-adapter", "validate_response")
-		if settleErr := attempt.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure.Failure, map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
-			return nil, settleErr
-		}
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
 	}
 
 	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
@@ -514,12 +507,12 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "project_provider_turn", map[string]any{"provider_session_id": childSessionID})
 	}
 	settlementEvidence := map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw), "provider_session_id": childSessionID}
 	if resolved.Stateless {
 		if err := attempt.Succeed(ctx, settlementEvidence); err != nil {
-			return nil, err
+			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_turn", settlementEvidence)
 		}
 	} else if differentOwner {
 		if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, resolved.Scope, lease.LockOwner, childSessionID, resolved.ScopeKey); err != nil {
@@ -530,7 +523,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	} else {
 		if lease == nil {
-			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
+			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
+			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_head", settlementEvidence)
 		}
 		if err := attempt.SucceedAndPromoteProviderHead(ctx, runtimeeffects.ProviderHeadSettlement{
 			Settlement: runtimeeffects.Settlement{Evidence: settlementEvidence},
@@ -538,7 +532,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			ScopeKey: resolved.ScopeKey, LockOwner: lease.LockOwner,
 			ExpectedProviderHead: confirmedHead, NewProviderHead: childSessionID,
 		}); err != nil {
-			return nil, err
+			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_head", settlementEvidence)
 		}
 	}
 	s.Messages = append(s.Messages, message, resp.Message)

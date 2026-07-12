@@ -687,7 +687,7 @@ func managerReceiptReasonCode(status runtimemanager.ReceiptStatus) string {
 	case runtimemanager.ReceiptStatusTerminal:
 		return "terminal_failure"
 	case runtimemanager.ReceiptStatusDeadLetter:
-		return "retry_exhausted"
+		return "dead_letter"
 	case runtimemanager.ReceiptStatusError:
 		return "handler_failure"
 	default:

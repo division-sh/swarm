@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -250,6 +251,7 @@ type Settlement struct {
 
 type ProviderHeadSettlement struct {
 	Settlement
+	Token                LifecycleToken
 	AgentID              string
 	RuntimeMode          string
 	SessionID            string
@@ -448,6 +450,7 @@ func (h *Handle) SucceedAndPromoteProviderHead(ctx context.Context, settlement P
 	}
 	settlement.OperationID = h.attempt.OperationID
 	settlement.AttemptID = h.attempt.AttemptID
+	settlement.Token = h.attempt.Token
 	settlement.State = StateSettled
 	if settlement.Now.IsZero() {
 		settlement.Now = time.Now().UTC()
@@ -474,7 +477,7 @@ func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Cl
 		failure = &envelope
 	}
 	if err := h.Settle(ctx, state, failure, attributes); err != nil {
-		return err
+		return errors.Join(failureErr, err)
 	}
 	return failureErr
 }

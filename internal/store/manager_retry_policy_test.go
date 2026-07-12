@@ -150,6 +150,29 @@ func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *test
 	}
 }
 
+func TestUpsertEventReceipt_DirectDeadLetterIsNotRetryExhaustion_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.direct_dead_letter_delivery")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
+		t.Fatalf("insert delivery: %v", err)
+	}
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "agent-manager", "process_event", nil), "agent-manager", "process_event")
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusDeadLetter, &failure); err != nil {
+		t.Fatalf("upsert direct dead letter: %v", err)
+	}
+	var status, reason, failureCode string
+	var retries int
+	if err := pg.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count, failure->'detail'->>'code' FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`, evt.ID(), agentID).Scan(&status, &reason, &retries, &failureCode); err != nil {
+		t.Fatalf("load direct dead-letter delivery: %v", err)
+	}
+	if status != "dead_letter" || reason != "dead_letter" || retries != 0 || failureCode != failure.Detail.Code {
+		t.Fatalf("direct dead-letter status=%s reason=%s retries=%d failure=%s", status, reason, retries, failureCode)
+	}
+}
+
 func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()

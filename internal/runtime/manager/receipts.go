@@ -144,9 +144,10 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		return eventProcessResult{record: record}
 	}
 	if err != nil {
+		status := receiptStatusForAgentFailure(err)
 		agentFailure := runtimefailures.FromError(err, "agent-manager", "process_event.on_event")
 		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID(), agentFailure.Failure)
-		am.writeReceipt(ctx, evt.ID(), agent.ID(), receiptStatusForAgentFailure(agentFailure), &agentFailure.Failure)
+		am.writeReceipt(ctx, evt.ID(), agent.ID(), status, &agentFailure.Failure)
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.Failure = runtimefailures.CloneEnvelope(&agentFailure.Failure)
@@ -543,10 +544,17 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agent
 	case ReceiptStatusDeadLetter:
 		detail["delivery_state"] = string(runtimedelivery.StateExhausted)
 		detail["delivery_transition"] = string(runtimedelivery.StateExhausted)
-		detail["delivery_previous_state"] = string(runtimedelivery.StateRetrying)
-		detail["delivery_reason"] = "retry_exhausted"
-		detail["delivery_terminal_outcome"] = "retry_exhausted"
-		entry.Message = "Delivery entered exhausted state"
+		if requestedStatus == ReceiptStatusDeadLetter {
+			detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
+			detail["delivery_reason"] = "dead_letter"
+			detail["delivery_terminal_outcome"] = "dead_letter"
+			entry.Message = "Delivery entered dead-letter state"
+		} else {
+			detail["delivery_previous_state"] = string(runtimedelivery.StateRetrying)
+			detail["delivery_reason"] = "retry_exhausted"
+			detail["delivery_terminal_outcome"] = "retry_exhausted"
+			entry.Message = "Delivery entered exhausted state"
+		}
 		if receipt.Failure != nil {
 			detail["failure"] = *receipt.Failure
 		}

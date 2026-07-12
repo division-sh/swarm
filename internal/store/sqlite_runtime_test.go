@@ -1428,6 +1428,30 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 	}
 }
 
+func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	evt := eventtest.PersistedProjection(eventID, events.EventType("test.direct_dead_letter"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("persist direct dead-letter delivery: %v", err)
+	}
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "agent-manager", "process_event", nil), "agent-manager", "process_event")
+	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusDeadLetter, &failure); err != nil {
+		t.Fatalf("write direct dead-letter receipt: %v", err)
+	}
+	var status, reason, failureCode string
+	var retryCount int
+	if err := store.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count, json_extract(failure, '$.detail.code') FROM event_deliveries WHERE event_id=? AND subscriber_id='agent-1'`, eventID).Scan(&status, &reason, &retryCount, &failureCode); err != nil {
+		t.Fatalf("load direct dead-letter delivery: %v", err)
+	}
+	if status != "dead_letter" || reason != "dead_letter" || retryCount != 0 || failureCode != failure.Detail.Code {
+		t.Fatalf("direct dead-letter status=%s reason=%s retries=%d failure=%s", status, reason, retryCount, failureCode)
+	}
+}
+
 func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

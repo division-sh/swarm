@@ -4915,7 +4915,9 @@ engine:
             continued turns resume the selected-store confirmed provider head and fork into a fresh attempt-owned child.
           - A missing confirmed Claude provider head is never reconstructed from the platform session ID. Provider response
             settlement and reusable confirmed-head promotion commit through one selected-store transaction before mutable
-            conversation projections advance.
+            conversation projections advance. That transaction locks and revalidates the attempt lifecycle token against the
+            durable agent cell and requires the selected session lease to remain owned and unexpired before the confirmed head
+            may advance. Superseded generations and expired leases leave both the attempt settlement and provider head unchanged.
         response_normalization:
           rules:
           - Provider responses must normalize assistant messages and tool calls into the platform response model.
@@ -27816,9 +27818,14 @@ managed_external_effect_authority:
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
     success: Correlated known success settles the same attempt exactly once with immutable evidence.
-    prelaunch_failure: Proven zero-effect rejection is terminal for the attempt. Claude CLI may admit a later ordinal only when the canonical returned failure disposition is retry and the delivery retry budget permits another invocation.
+    prelaunch_failure: Every failure before cmd.Start, including target resolution, admission, command construction, pipe setup,
+      monitor setup, and exact cmd.Start rejection, settles the authorized attempt terminal_failure with canonical evidence.
+      Claude CLI may admit a later ordinal only when the canonical returned failure disposition is retry and the delivery retry
+      budget permits another invocation.
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
-    postlaunch_write_or_unknown_failure: platform.outcome_uncertain with an adapter-specific detail; automatic redispatch is forbidden.
+    postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
+      mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
+      adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
     mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.

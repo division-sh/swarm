@@ -1190,7 +1190,15 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		if am.isAuthBreakerTripped() {
 			return summary, nil
 		}
-		result := am.processEventDetailed(ctx, agent, evt)
+		eventCtx := ctx
+		if _, running := am.lifecycle.token(agentID); running {
+			var bindErr error
+			eventCtx, bindErr = am.lifecycle.effectContext(ctx, agentID)
+			if bindErr != nil {
+				return summary, bindErr
+			}
+		}
+		result := am.processEventDetailed(eventCtx, agent, evt)
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
 			logStartupManagerReplayAftermath(ctx, am.bus, result.record)

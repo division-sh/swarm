@@ -501,6 +501,7 @@ seam_families:
     classification: valid_consumer
     paths:
       - platform-spec.yaml
+      - cmd/swarm/claude_attempt_identity_test.go
       - internal/apiv1/openrpc_mutating_runtime_test.go
       - internal/apiv1/operator_event_replay.go
       - internal/apiv1/operator_event_replay_test.go
