@@ -135,6 +135,33 @@ type DockerManager struct {
 	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
 }
 
+type PrerequisiteError struct {
+	Problem     string
+	Remediation string
+	Cause       error
+}
+
+func (e *PrerequisiteError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := "workspace prerequisite failed: " + strings.TrimSpace(e.Problem)
+	if remediation := strings.TrimSpace(e.Remediation); remediation != "" {
+		message += "; " + remediation
+	}
+	if e.Cause != nil {
+		message += ": " + e.Cause.Error()
+	}
+	return message
+}
+
+func (e *PrerequisiteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 const workspaceOrphanKillScript = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
@@ -165,6 +192,31 @@ func (m *DockerManager) SetConfig(cfg DockerConfig) {
 		return
 	}
 	m.cfg = cfg
+}
+
+func (m *DockerManager) DockerBin() string {
+	if m == nil {
+		return defaultDockerBin
+	}
+	if dockerBin := strings.TrimSpace(m.cfg.DockerBin); dockerBin != "" {
+		return dockerBin
+	}
+	return defaultDockerBin
+}
+
+func DockerInfoCommand(dockerBin string) string {
+	dockerBin = strings.TrimSpace(dockerBin)
+	if dockerBin == "" {
+		dockerBin = defaultDockerBin
+	}
+	return shellCommandToken(dockerBin) + " info"
+}
+
+func shellCommandToken(value string) string {
+	if !strings.ContainsAny(value, " \t\n'\"\\$`!&|;()<>*?[]{}") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (m *DockerManager) SetSemanticSource(source semanticview.Source) {
@@ -769,7 +821,11 @@ func (m *DockerManager) standardMountArgs() []string {
 
 func (m *DockerManager) ensureDockerAvailable(ctx context.Context) error {
 	if _, err := m.RunDocker(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: docker is not available: %w", err)
+		return &PrerequisiteError{
+			Problem:     fmt.Sprintf("Docker is not reachable via %q", m.DockerBin()),
+			Remediation: fmt.Sprintf("Start the Docker daemon, then verify with `%s`", DockerInfoCommand(m.DockerBin())),
+			Cause:       err,
+		}
 	}
 	return nil
 }
@@ -791,10 +847,17 @@ func (m *DockerManager) ensureWorkspaceNetwork(ctx context.Context) error {
 func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 	image := strings.TrimSpace(m.cfg.WorkspaceImage)
 	if image == "" {
-		return fmt.Errorf("workspace prerequisite failed: workspace image is required")
+		return &PrerequisiteError{
+			Problem:     "workspace image is required",
+			Remediation: "Set `workspace.image`, then run `swarm workspace build --backend claude_cli` before startup",
+		}
 	}
 	if _, err := m.RunDocker(ctx, "image", "inspect", image); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: workspace image %s is not available; build or pull the image before startup, or set workspace.image to an available image: %w", image, err)
+		return &PrerequisiteError{
+			Problem:     fmt.Sprintf("workspace image %q is not available", image),
+			Remediation: "Run `swarm workspace build --backend claude_cli` before startup",
+			Cause:       err,
+		}
 	}
 	return nil
 }

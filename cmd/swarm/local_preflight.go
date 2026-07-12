@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -130,7 +131,14 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	workspaceBackend, err := decideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
 	if err != nil {
-		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities")
+		message := err.Error()
+		remediation := "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities"
+		var decisionErr *workspaceBackendDecisionError
+		if errors.As(err, &decisionErr) {
+			message = decisionErr.Problem
+			remediation = decisionErr.Remediation
+		}
+		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
 		return report.finalize()
 	}
 	status := localPreflightStatusOK
@@ -388,12 +396,19 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 		return
 	}
 	if err := dockerManager.CheckDockerAvailable(ctx); err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "start Docker, set workspace.docker_bin in swarm.yaml, or pass --docker-bin to `swarm workspace build`")
+		message, remediation := workspacePrerequisiteDiagnostic(err, fmt.Sprintf("Start the Docker daemon, then verify with `%s`", workspace.DockerInfoCommand(dockerManager.DockerBin())))
+		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
+		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", localPreflightSeverityInfo, localPreflightStatusSkipped, "workspace image was not checked because Docker is unreachable", remediation)
+		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", localPreflightSeverityInfo, localPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image was not measured", remediation)
+		return
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "docker_available", localPreflightSeverityInfo, localPreflightStatusOK, "Docker is reachable", "")
 	}
 	if err := dockerManager.CheckWorkspaceImageAvailable(ctx); err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "run `swarm workspace build --backend claude_cli`, pull the configured workspace image, or set workspace.image")
+		message, remediation := workspacePrerequisiteDiagnostic(err, "Run `swarm workspace build --backend claude_cli` before startup")
+		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
+		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", localPreflightSeverityInfo, localPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image is unavailable", remediation)
+		return
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_available", localPreflightSeverityInfo, localPreflightStatusOK, "workspace image is available", "")
 	}
@@ -402,6 +417,19 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_available", localPreflightSeverityInfo, localPreflightStatusOK, "workspace image can execute the configured Claude CLI command", "")
 	}
+}
+
+func workspacePrerequisiteDiagnostic(err error, fallbackRemediation string) (string, string) {
+	message := err.Error()
+	remediation := strings.TrimSpace(fallbackRemediation)
+	var prerequisiteErr *workspace.PrerequisiteError
+	if errors.As(err, &prerequisiteErr) {
+		message = prerequisiteErr.Problem
+		if strings.TrimSpace(prerequisiteErr.Remediation) != "" {
+			remediation = prerequisiteErr.Remediation
+		}
+	}
+	return message, remediation
 }
 
 func loadLocalPreflightSource(repo string, paths cliContractPlatformSpecPaths) (semanticview.Source, string, error) {

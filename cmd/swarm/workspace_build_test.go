@@ -185,7 +185,7 @@ func TestWorkspaceBuildClaudeCLIFailsOnUnavailableDocker(t *testing.T) {
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{"Docker is not available", "--docker-bin"} {
+	for _, want := range []string{"Docker is not reachable", missingDocker + " info"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
@@ -227,6 +227,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 				BuildPlanRule        string         `yaml:"build_plan_rule"`
 				BuildProfile         map[string]any `yaml:"claude_cli_build_profile"`
 				ImageTargetRule      string         `yaml:"image_target_rule"`
+				DockerBinRule        string         `yaml:"docker_bin_rule"`
 				ValidationRule       string         `yaml:"validation_rule"`
 				ConsumerBoundaries   []string       `yaml:"consumer_boundaries"`
 			} `yaml:"local_workspace_image_build_authority"`
@@ -262,6 +263,11 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 	for _, want := range []string{"workspace.image", "swarm-workspace:latest", "--image"} {
 		if !strings.Contains(owner.ImageTargetRule, want) {
 			t.Fatalf("image target rule missing %q:\n%s", want, owner.ImageTargetRule)
+		}
+	}
+	for _, want := range []string{"workspace.docker_bin", "<configured-docker-bin> info", "MUST NOT substitute"} {
+		if !strings.Contains(owner.DockerBinRule, want) {
+			t.Fatalf("Docker binary rule missing %q:\n%s", want, owner.DockerBinRule)
 		}
 	}
 	for _, want := range []string{"temporary image tag", "command -v", "--version", "lookup alone are insufficient"} {

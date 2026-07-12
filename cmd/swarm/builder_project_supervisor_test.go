@@ -1232,9 +1232,12 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailure
 			wantErr:   "workspace validation failed: workspace image is required",
 		},
 		{
-			name:      "ensure prereqs",
-			lifecycle: stubWorkspaceLifecycle{prereqErr: errors.New("docker unavailable")},
-			wantErr:   "docker unavailable",
+			name: "ensure prereqs preserves typed recovery",
+			lifecycle: stubWorkspaceLifecycle{prereqErr: &workspace.PrerequisiteError{
+				Problem:     `Docker is not reachable via "/opt/docker"`,
+				Remediation: "Start the Docker daemon, then verify with `/opt/docker info`",
+			}},
+			wantErr: "/opt/docker info",
 		},
 		{
 			name:      "ensure system workspaces",

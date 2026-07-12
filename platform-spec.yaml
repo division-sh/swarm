@@ -14491,6 +14491,14 @@ workspace_model:
       the resolved workspace image before creating workspaces and fail closed with an actionable diagnostic when the image is
       absent. Production runtime code MUST NOT build a missing workspace image from source-checkout `Dockerfile.workspace`, use
       `runtime.Caller` / Go source paths as a runtime asset root, or walk for `go.mod` to recover build material.
+    recovery_diagnostics:
+      docker_daemon: >
+        A failed Docker daemon probe MUST name the configured Docker binary and prescribe the portable verification command
+        `<configured-docker-bin> info`. It MUST NOT guess an environment-specific daemon launcher.
+      workspace_image: >
+        A missing configured workspace image MUST prescribe the exact local recovery command
+        `swarm workspace build --backend claude_cli`. It MUST NOT advertise pulling a release image until the release-image
+        authority publishes one.
     mount_source_rule: >
       Host sources for `/data` and `/opt/swarm/contracts` MUST come from `workspace_model.data_source_authority`,
       explicit deployment configuration, config/CLI path resolution, or an already selected workflow/project
@@ -14533,6 +14541,8 @@ workspace_model:
     docker_bin_rule: >
       The command MUST use `--docker-bin` when provided, otherwise `workspace.docker_bin` from an explicit config when
       provided, otherwise the built-in `docker` default. `SWARM_DOCKER_BIN` is retired and MUST NOT be read as a fallback.
+      When the daemon probe fails, the diagnostic MUST name the selected binary and prescribe
+      `<configured-docker-bin> info`; it MUST NOT substitute a default binary or guess a daemon launcher.
     validation_rule: >
       The command MUST build into a temporary image tag first and MUST NOT publish/replace the configured runtime image
       tag until validation passes. After build, the command MUST validate the temporary image by running a harmless
@@ -14634,6 +14644,12 @@ workspace_model:
           Any agent whose effective backend spawns a local process (`claude_cli`) or that is granted an exec-class capability
           such as `native_tools.bash` requires Docker by default. The first slice is coarse any-exec => Docker; per-agent
           backend selection remains split.
+    capability_reason_rule: >
+      Backend selection MUST retain typed capability reasons for each relevant agent and capability. Rendering those facts as
+      text is a projection; remediation logic MUST NOT parse rendered reason strings. A Claude-only host refusal may offer
+      `llm.backend: anthropic` as a complete Docker-free alternative. If native bash or another exec-class tool remains, the
+      diagnostic MUST name every remaining exec reason and MUST NOT present an API-backend switch alone as sufficient; host
+      execution also requires the explicit unsafe authorization `workspace.allow_exec_on_host: true`.
     decision_table:
       - contents: no declared agents
         backend: none
@@ -16618,6 +16634,11 @@ cli_specification:
         contract-required secrets consume `tool_model.credential_store` / `swarm secrets check`; Docker/image/workspace CLI
         capability consumes the workspace lifecycle owner; listener and gateway validation consume the serve startup/listener
         owners. Doctor-only or run-only duplicate interpreters are non-authoritative.
+      dependency_reporting_rule: >
+        Workspace prerequisite findings MUST preserve dependency truth. If the Docker daemon probe fails, configured-image and
+        CLI-in-image findings are `skipped`/not measured and MUST NOT emit derivative blockers. If the configured-image probe
+        fails, the CLI-in-image finding is `skipped`/not measured. Text and JSON render the same finding statuses and the
+        upstream blocker carries the exact recovery command from `workspace_model.runtime_image_packaging`.
       split_tail:
       - '#1566 workspace image build/validation path remains split; this owner may report a missing/unusable image but must not build one.'
       - '#1567 API connection discovery and .swarm/connection.* remain split.'
