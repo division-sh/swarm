@@ -83,7 +83,10 @@ func sqliteRenderCreateTable(statement string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	lines := splitSchemaDefinitionLines(matches[2])
+	lines, err := splitSchemaDefinitionLines(matches[2])
+	if err != nil {
+		return "", err
+	}
 	if len(lines) == 0 {
 		return "", fmt.Errorf("CREATE TABLE %s has no schema lines", tableName)
 	}
@@ -414,16 +417,8 @@ func rejectSQLiteUnsupportedConstructs(statement string) error {
 	return nil
 }
 
-func splitSchemaDefinitionLines(body string) []string {
-	lines := strings.Split(body, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(strings.TrimSuffix(line, ","))
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
+func splitSchemaDefinitionLines(body string) ([]string, error) {
+	return splitTopLevelComma(body)
 }
 
 func splitColumnTypeAndClauses(rest string) (string, string) {
