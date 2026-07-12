@@ -101,7 +101,16 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 			t.Fatalf("lookup %q = %#v, want loaded new generation", alias, lookup)
 		}
 	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), newCatalog.GenerationID(), 2)
+	subjects := manager.CapabilitySubjects()
+	assertRuntimeAdmissionSubjectGeneration(t, subjects, newCatalog.GenerationID(), 2)
+	for _, subject := range subjects {
+		if subject.Applicability != "effective" || subject.TriggerAdmission == nil {
+			continue
+		}
+		if subject.TriggerAdmission.Pack == nil || subject.TriggerAdmission.Pack.ManifestHash != strings.Repeat("b", 64) {
+			t.Fatalf("effective subject retained stale pack identity: %#v", subject)
+		}
+	}
 }
 
 func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutation(t *testing.T) {
