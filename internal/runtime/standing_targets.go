@@ -286,6 +286,25 @@ func EffectiveStandingIngressCapabilitySubjects(source semanticview.Source, cata
 	return packs.NormalizeSubjects(subjects)
 }
 
+// ProviderTriggerCapabilitySubjects is the canonical installed-plus-effective
+// trigger projection for contract verification surfaces.
+func ProviderTriggerCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
+	var subjects []packs.Subject
+	if catalog != nil {
+		installed, err := catalog.InstalledCapabilitySubjects()
+		if err != nil {
+			return nil, err
+		}
+		subjects = append(subjects, installed...)
+	}
+	effective, err := EffectiveStandingIngressCapabilitySubjects(source, catalog)
+	if err != nil {
+		return nil, err
+	}
+	subjects = append(subjects, effective...)
+	return packs.NormalizeSubjects(subjects)
+}
+
 func standingDeclarationLocation(pkg runtimecontracts.LoadedProjectPackage, flowID string) string {
 	path := strings.TrimSpace(pkg.Paths.PackageFile)
 	if path == "" {

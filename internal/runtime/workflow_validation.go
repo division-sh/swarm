@@ -127,9 +127,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		result.BootReport.Add(finding)
 	}
 	result.BootReport.Sort()
-	result.CapabilitySubjects, err = EffectiveStandingIngressCapabilitySubjects(source, opts.ProviderTriggerCatalog)
+	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(source, opts.ProviderTriggerCatalog)
 	if err != nil {
-		return result, fmt.Errorf("standing ingress capability projection failed: %w", err)
+		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}
 
 	return result, nil
