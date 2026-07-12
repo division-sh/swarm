@@ -73,6 +73,7 @@ func BuildWorkflowStageTopology(
 					To:            strings.TrimSpace(carrier.AdvancesTo),
 					Source:        edgeSource,
 					NodeID:        strings.TrimSpace(transition.NodeID),
+					HandlerEvent:  strings.TrimSpace(transition.EventType),
 					EventType:     eventType,
 					LoopID:        loopID,
 					LoopOperation: loopKind,
@@ -96,6 +97,7 @@ func BuildWorkflowStageTopology(
 				To:            strings.TrimSpace(plan.Escape.AdvancesTo),
 				Source:        "loop.escape",
 				NodeID:        strings.TrimSpace(operation.NodeID),
+				HandlerEvent:  strings.TrimSpace(operation.HandlerEvent),
 				EventType:     strings.TrimSpace(operation.HandlerEvent),
 				LoopID:        strings.TrimSpace(plan.ID),
 				LoopOperation: LoopOperationRepeat,
@@ -154,6 +156,20 @@ func (t WorkflowStageTopology) HandlerStages(nodeID, eventType string) []string 
 		}
 	}
 	return nil
+}
+
+func (t WorkflowStageTopology) HandlerTargets(nodeID, handlerEvent string) []string {
+	nodeID, handlerEvent = strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
+	targets := map[string]struct{}{}
+	for _, edge := range t.Edges {
+		if strings.TrimSpace(edge.NodeID) != nodeID || strings.TrimSpace(edge.HandlerEvent) != handlerEvent {
+			continue
+		}
+		if target := strings.TrimSpace(edge.To); target != "" {
+			targets[target] = struct{}{}
+		}
+	}
+	return sortedStringSet(targets)
 }
 
 func BindWorkflowLoopRegions(plans []WorkflowLoopPlan, topologies map[string]WorkflowStageTopology) []WorkflowLoopPlan {
@@ -228,7 +244,7 @@ func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvance
 }
 
 func topologyEdgeSortKey(edge WorkflowStageTopologyEdge) string {
-	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.NodeID, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After}, "\x00")
+	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.NodeID, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After}, "\x00")
 }
 
 func normalizedStringSet(values []string) map[string]struct{} {

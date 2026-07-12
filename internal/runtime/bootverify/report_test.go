@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2642,16 +2643,11 @@ stages:
 }
 
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      on_complete:
+        - condition: "true"
+          advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition:  "true",
-		AdvancesTo: "review",
-	}}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2661,16 +2657,12 @@ func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      rules:
+        - id: review
+          condition: "true"
+          advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition:  "true",
-		AdvancesTo: "review",
-	}}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2680,18 +2672,14 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnWhenAccumulateOnCompleteBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      accumulate:
+        expected_from: payload.entity_id
+        threshold: 1
+        on_complete:
+          - condition: "true"
+            advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{
-			Condition:  "true",
-			AdvancesTo: "review",
-		}},
-	}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2701,20 +2689,15 @@ func TestRun_DoesNotWarnWhenAccumulateOnCompleteBranchReachesDeclaredState(t *te
 }
 
 func TestRun_DoesNotWarnWhenAccumulateOnTimeoutBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      accumulate:
+        expected_from: payload.entity_id
+        completion: timeout
+        timeout_ms: 1000
+        on_timeout:
+          condition: "true"
+          advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{
-		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
-		TimeoutMS:  1000,
-		OnTimeout: &runtimecontracts.HandlerRuleEntry{
-			Condition:  "true",
-			AdvancesTo: "review",
-		},
-	}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2747,20 +2730,15 @@ func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidAccumulateTimeoutTarg
 }
 
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      rules:
+        - id: review
+          condition: "true"
+          advances_to: review
+        - id: invalid
+          condition: "true"
+          advances_to: bogus_state`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition:  "true",
-		AdvancesTo: "review",
-	}}
-	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition:  "true",
-		AdvancesTo: "bogus_state",
-	}}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -6832,24 +6810,18 @@ func TestRun_AllowsTimerCancelStateReachableFromEventStartContext(t *testing.T) 
 }
 
 func TestTimerReachabilityConsumesAccumulatorTransitionCarriers(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
+	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
+      accumulate:
+        expected_from: payload.entity_id
+        completion: timeout
+        timeout_ms: 1000
+        on_complete:
+          - condition: "true"
+            advances_to: review
+        on_timeout:
+          condition: "true"
+          advances_to: active`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{
-		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
-		TimeoutMS:  1000,
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{
-			Condition:  "true",
-			AdvancesTo: "review",
-		}},
-		OnTimeout: &runtimecontracts.HandlerRuleEntry{
-			Condition:  "true",
-			AdvancesTo: "active",
-		},
-	}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
 
 	source := semanticview.Wrap(bundle)
 	declaredStates := map[string]struct{}{"waiting": {}, "active": {}, "review": {}, "done": {}}
@@ -6857,14 +6829,14 @@ func TestTimerReachabilityConsumesAccumulatorTransitionCarriers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseStartTrigger: %v", err)
 	}
-	activationStates := timerActivationStates(source, runtimecontracts.WorkflowTimerContract{FlowID: "support"}, trigger, "waiting", declaredStates)
+	activationStates := timerActivationStates(source, runtimecontracts.WorkflowTimerContract{FlowID: "support"}, trigger, declaredStates)
 	for _, want := range []string{"active", "review"} {
 		if _, ok := activationStates[want]; !ok {
 			t.Fatalf("timer activation states = %#v, want accumulator carrier target %s", activationStates, want)
 		}
 	}
 
-	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{FlowID: "support", Event: "timer.reminder"}, "waiting", declaredStates)
+	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{FlowID: "support", Event: "timer.reminder"})
 	if _, ok := edges["waiting"]["review"]; !ok {
 		t.Fatalf("timer cancel graph edges = %#v, want accumulator on_complete edge to review", edges)
 	}
@@ -7685,6 +7657,10 @@ consumer-node:
 }
 
 func writeStateReachabilityFixture(t *testing.T) string {
+	return writeStateReachabilityFixtureWithClosedHandler(t, "      advances_to: done")
+}
+
+func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler string) string {
 	t.Helper()
 	root := t.TempDir()
 
@@ -7719,7 +7695,7 @@ ticket.opened:
 ticket.closed:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), fmt.Sprintf(`
 support-node:
   id: support-node
   execution_type: system_node
@@ -7731,8 +7707,8 @@ support-node:
       create_entity: true
       advances_to: active
     ticket.closed:
-      advances_to: done
-`)
+%s
+`, closedHandler))
 
 	return root
 }

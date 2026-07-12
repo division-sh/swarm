@@ -1184,38 +1184,7 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 		return wave1ParsedFieldNode{}, fmt.Errorf("unsupported %s yaml node kind %d", opts.Context, node.Kind)
 	}
 
-	allowed := map[string]struct{}{
-		"type":        {},
-		"description": {},
-		"pattern":     {},
-		"length":      {},
-		"range":       {},
-		"equal_to":    {},
-	}
-	if opts.AllowInitial {
-		allowed["initial"] = struct{}{}
-	}
-	if opts.AllowImmutable {
-		allowed["immutable"] = struct{}{}
-	}
-	if opts.AllowIndexed {
-		allowed["indexed"] = struct{}{}
-	}
-	if opts.AllowUnusedReason {
-		allowed["_unused_reason"] = struct{}{}
-	}
-	if opts.AllowUnusedReaderReason {
-		allowed["_unused_reader_reason"] = struct{}{}
-	}
-	if opts.AllowMaterializeFrom {
-		allowed["materialize_from"] = struct{}{}
-	}
-	if opts.AllowProject {
-		allowed["project"] = struct{}{}
-	}
-	if opts.AllowCitation {
-		allowed["citation"] = struct{}{}
-	}
+	allowed := wave1FieldNodeAllowedKeys(opts)
 
 	var field wave1ParsedFieldNode
 	var listOf string
@@ -1357,6 +1326,69 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reader_reason must be at least 10 characters", opts.Context)
 	}
 	return field, nil
+}
+
+func wave1FieldNodeAllowedKeys(opts wave1FieldNodeOptions) map[string]struct{} {
+	allowed := map[string]struct{}{
+		"type":        {},
+		"description": {},
+		"pattern":     {},
+		"length":      {},
+		"range":       {},
+		"equal_to":    {},
+	}
+	if opts.AllowInitial {
+		allowed["initial"] = struct{}{}
+	}
+	if opts.AllowImmutable {
+		allowed["immutable"] = struct{}{}
+	}
+	if opts.AllowIndexed {
+		allowed["indexed"] = struct{}{}
+	}
+	if opts.AllowUnusedReason {
+		allowed["_unused_reason"] = struct{}{}
+	}
+	if opts.AllowUnusedReaderReason {
+		allowed["_unused_reader_reason"] = struct{}{}
+	}
+	if opts.AllowMaterializeFrom {
+		allowed["materialize_from"] = struct{}{}
+	}
+	if opts.AllowProject {
+		allowed["project"] = struct{}{}
+	}
+	if opts.AllowCitation {
+		allowed["citation"] = struct{}{}
+	}
+	return allowed
+}
+
+func wave1FieldNodeSupportsKey(opts wave1FieldNodeOptions, key string) bool {
+	if strings.TrimSpace(key) == "of" {
+		return true
+	}
+	_, ok := wave1FieldNodeAllowedKeys(opts)[strings.TrimSpace(key)]
+	return ok
+}
+
+func eventPayloadNodeIsRetiredNestedBlock(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	if hasAnyYAMLMappingKey(node, "properties", "fields", "shape", "required") {
+		return true
+	}
+	hasType := hasYAMLMappingKey(node, "type")
+	opts := wave1FieldNodeOptions{Context: "event payload field", AllowCitation: true}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" || wave1FieldNodeSupportsKey(opts, key) {
+			continue
+		}
+		return !hasType
+	}
+	return false
 }
 
 func decodeSchemaRefinementPattern(node *yaml.Node) (string, error) {
@@ -1576,7 +1608,7 @@ func buildFlatEventPayloadSpec(node *yaml.Node) (EventPayloadSpec, error) {
 			continue
 		}
 		switch key {
-		case "description", "swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "payload", "required":
+		case "description", "swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "required":
 			continue
 		}
 		var field EventFieldSpec

@@ -8,15 +8,7 @@ import (
 )
 
 func hasYAMLMappingKey(node *yaml.Node, key string) bool {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if strings.TrimSpace(node.Content[i].Value) == key {
-			return true
-		}
-	}
-	return false
+	return yamlMappingValue(node, key) != nil
 }
 
 func hasAnyYAMLMappingKey(node *yaml.Node, keys ...string) bool {

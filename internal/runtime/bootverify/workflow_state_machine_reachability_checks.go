@@ -36,7 +36,7 @@ func (c *checkerContext) stateReachability() []Finding {
 			continue
 		}
 
-		reachable := authoredReachableStates(c.source, flowID, initial, declaredStates)
+		reachable := authoredReachableStates(c.source, flowID, initial)
 		unreachable := make(map[string]struct{}, len(declaredStates))
 		for state := range declaredStates {
 			if _, ok := reachable[state]; ok {
@@ -60,7 +60,7 @@ func (c *checkerContext) stateReachability() []Finding {
 		}
 		for _, state := range sortedSetKeys(unreachable) {
 			message := fmt.Sprintf(
-				"flow %s declares %s %s but no transition path from %s %s reaches %s in the authored handler graph.\n\nReachable states: %s\nUnreachable states: %s",
+				"flow %s declares %s %s but no transition path from %s %s reaches %s in the authored transition graph.\n\nReachable states: %s\nUnreachable states: %s",
 				validationFlowLabel(flowID),
 				declaredNoun,
 				state,
@@ -98,12 +98,12 @@ func (c *checkerContext) stateReachability() []Finding {
 	return c.stateReachabilityFindings
 }
 
-func authoredReachableStates(source semanticview.Source, flowID, initial string, declaredStates map[string]struct{}) map[string]struct{} {
+func authoredReachableStates(source semanticview.Source, flowID, initial string) map[string]struct{} {
 	flowID = strings.TrimSpace(flowID)
 	initial = strings.TrimSpace(initial)
 
 	reachable := map[string]struct{}{initial: {}}
-	edges := authoredStateGraphEdges(source, flowID, initial, declaredStates)
+	edges := workflowStageGraphEdges(source, flowID, nil)
 	queue := []string{initial}
 	for len(queue) > 0 {
 		state := strings.TrimSpace(queue[0])
@@ -119,72 +119,28 @@ func authoredReachableStates(source semanticview.Source, flowID, initial string,
 	return reachable
 }
 
-func authoredStateGraphEdges(source semanticview.Source, flowID, initial string, declaredStates map[string]struct{}) map[string]map[string]struct{} {
-	return authoredStateGraphEdgesFiltered(source, flowID, initial, declaredStates, nil)
-}
-
-func authoredStateGraphEdgesFiltered(
+func workflowStageGraphEdges(
 	source semanticview.Source,
-	flowID, initial string,
-	declaredStates map[string]struct{},
-	includeHandler func(nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) bool,
+	flowID string,
+	include func(runtimecontracts.WorkflowStageTopologyEdge) bool,
 ) map[string]map[string]struct{} {
-	edges := make(map[string]map[string]struct{}, len(declaredStates))
-	nonTerminalStates := authoredNonTerminalStates(source, flowID, declaredStates)
-	for nodeID, node := range source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" || strings.TrimSpace(nodeFlowID(source, nodeID)) != flowID {
+	edges := map[string]map[string]struct{}{}
+	topology, ok := semanticview.WorkflowStageTopology(source, strings.TrimSpace(flowID))
+	if !ok {
+		return edges
+	}
+	for _, edge := range topology.Edges {
+		if include != nil && !include(edge) {
 			continue
 		}
-		for eventType, handler := range node.EventHandlers {
-			eventType = strings.TrimSpace(eventType)
-			if includeHandler != nil && !includeHandler(nodeID, eventType, handler) {
-				continue
-			}
-			sources := authoredHandlerSourceStates(initial, nonTerminalStates, handler)
-			for _, target := range authoredReachabilityTargets(handler) {
-				target = strings.TrimSpace(target)
-				if target == "" {
-					continue
-				}
-				if _, ok := declaredStates[target]; !ok {
-					continue
-				}
-				for _, sourceState := range sources {
-					sourceState = strings.TrimSpace(sourceState)
-					if sourceState == "" {
-						continue
-					}
-					if edges[sourceState] == nil {
-						edges[sourceState] = map[string]struct{}{}
-					}
-					edges[sourceState][target] = struct{}{}
-				}
-			}
+		from, to := strings.TrimSpace(edge.From), strings.TrimSpace(edge.To)
+		if from == "" || to == "" {
+			continue
 		}
+		if edges[from] == nil {
+			edges[from] = map[string]struct{}{}
+		}
+		edges[from][to] = struct{}{}
 	}
 	return edges
-}
-
-func authoredReachabilityTargets(handler runtimecontracts.SystemNodeEventHandler) []string {
-	return runtimecontracts.HandlerAdvanceTargets(handler)
-}
-
-func authoredNonTerminalStates(source semanticview.Source, flowID string, declaredStates map[string]struct{}) []string {
-	terminalStates := stringSet(source.FlowTerminalStages(flowID))
-	out := make([]string, 0, len(declaredStates))
-	for _, state := range sortedSetKeys(declaredStates) {
-		if _, ok := terminalStates[state]; ok {
-			continue
-		}
-		out = append(out, state)
-	}
-	return out
-}
-
-func authoredHandlerSourceStates(initial string, nonTerminalStates []string, handler runtimecontracts.SystemNodeEventHandler) []string {
-	if handler.CreateEntity {
-		return []string{strings.TrimSpace(initial)}
-	}
-	return append([]string{}, nonTerminalStates...)
 }

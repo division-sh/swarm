@@ -900,7 +900,7 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	if hasYAMLMappingKey(node, "payload") {
+	if payloadNode := yamlMappingValue(node, "payload"); eventPayloadNodeIsRetiredNestedBlock(payloadNode) {
 		return fmt.Errorf("RETIRED: nested events.yaml payload blocks are no longer supported; move payload fields to the event top level")
 	}
 	if err := rejectRetiredEventMetadataFields(node); err != nil {
@@ -929,7 +929,6 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		RuntimeHandling    string                 `yaml:"runtime_handling"`
 		OwningNode         string                 `yaml:"owning_node"`
 		DeliveryChannel    yaml.Node              `yaml:"delivery_channel"`
-		Payload            yaml.Node              `yaml:"payload"`
 		Required           []string               `yaml:"required"`
 	}
 	if err := node.Decode(&aux); err != nil {
