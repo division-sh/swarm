@@ -401,12 +401,15 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 		return fmt.Errorf("begin postgres human task decision: %w", err)
 	}
 	postCommitActions := make([]func(), 0, 4)
+	rollbackActions := make([]func(), 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback()
+			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		}
 	}()
 	row, err := s.loadMailboxV1RowTx(txctx, tx, rec.TaskID, true)
