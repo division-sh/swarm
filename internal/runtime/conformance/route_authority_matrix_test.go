@@ -151,8 +151,7 @@ func TestRouteAuthorityMatrixRejectsStaleReferences(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			matrix := base
-			matrix.Rows = append([]routeAuthorityMatrixRow(nil), base.Rows...)
+			matrix := cloneRouteAuthorityMatrix(base)
 			tc.mutate(&matrix)
 			problems := validateRouteAuthorityMatrix(root, matrix, ctx)
 			if !routeAuthorityProblemsContain(problems, tc.want) {
@@ -175,11 +174,24 @@ func loadRouteAuthorityMatrix(t *testing.T, root string) routeAuthorityMatrix {
 	return matrix
 }
 
+func cloneRouteAuthorityMatrix(in routeAuthorityMatrix) routeAuthorityMatrix {
+	out := in
+	out.ActiveTrackers = append([]routeAuthorityActiveTracker(nil), in.ActiveTrackers...)
+	out.Rows = append([]routeAuthorityMatrixRow(nil), in.Rows...)
+	for i := range out.Rows {
+		out.Rows[i].ProofDimensions = append([]string(nil), in.Rows[i].ProofDimensions...)
+		out.Rows[i].InvalidAuthority = append([]string(nil), in.Rows[i].InvalidAuthority...)
+		out.Rows[i].OwnerRefs = append([]routeAuthorityProofRef(nil), in.Rows[i].OwnerRefs...)
+		out.Rows[i].ProofRefs = append([]routeAuthorityProofRef(nil), in.Rows[i].ProofRefs...)
+	}
+	return out
+}
+
 func newRouteAuthorityValidationContext(t *testing.T, root string, matrix routeAuthorityMatrix) routeAuthorityValidationContext {
 	t.Helper()
 	return routeAuthorityValidationContext{
 		openRPCMethods: loadMatrixOpenRPCMethods(t, filepath.Join(root, matrix.Source.OpenRPCArtifact)),
-		goTests:        collectGoTestNames(t, root),
+		goTests:        conformanceGoTestNames(t, root),
 	}
 }
 

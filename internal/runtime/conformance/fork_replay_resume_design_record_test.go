@@ -87,7 +87,7 @@ func TestForkReplayResumeDesignRecordCoversBoundedModel(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	record := loadForkReplayResumeDesignRecord(t, root)
 	ctx := forkReplayResumeValidationContext{
-		goTests: collectGoTestNames(t, root),
+		goTests: conformanceGoTestNames(t, root),
 	}
 	if problems := validateForkReplayResumeDesignRecord(root, record, ctx); len(problems) > 0 {
 		t.Fatalf("fork replay/resume design record validation failed:\n- %s", strings.Join(problems, "\n- "))
@@ -98,7 +98,7 @@ func TestForkReplayResumeDesignRecordRejectsStaleOrUnmappedClaims(t *testing.T) 
 	root := conformanceRepoRoot(t)
 	base := loadForkReplayResumeDesignRecord(t, root)
 	ctx := forkReplayResumeValidationContext{
-		goTests: collectGoTestNames(t, root),
+		goTests: conformanceGoTestNames(t, root),
 	}
 	tests := []struct {
 		name   string
@@ -154,8 +154,7 @@ func TestForkReplayResumeDesignRecordRejectsStaleOrUnmappedClaims(t *testing.T) 
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			record := base
-			record.Rows = append([]forkReplayResumeDesignRow(nil), base.Rows...)
+			record := cloneForkReplayResumeDesignRecord(base)
 			tc.mutate(&record)
 			problems := validateForkReplayResumeDesignRecord(root, record, ctx)
 			if !routeAuthorityProblemsContain(problems, tc.want) {
@@ -180,6 +179,20 @@ func loadForkReplayResumeDesignRecord(t *testing.T, root string) forkReplayResum
 		t.Fatalf("parse fork replay/resume design record: %v", err)
 	}
 	return record
+}
+
+func cloneForkReplayResumeDesignRecord(in forkReplayResumeDesignRecord) forkReplayResumeDesignRecord {
+	out := in
+	out.StaleLanguagePolicy.ForbiddenPhrases = append([]string(nil), in.StaleLanguagePolicy.ForbiddenPhrases...)
+	out.StaleLanguagePolicy.ForbiddenPublicReadbackKeys = append([]string(nil), in.StaleLanguagePolicy.ForbiddenPublicReadbackKeys...)
+	out.StaleLanguagePolicy.LegacyIdentifierSentinels = append([]forkReplayResumeLegacyIdentifier(nil), in.StaleLanguagePolicy.LegacyIdentifierSentinels...)
+	out.Successors = append([]forkReplayResumeSuccessor(nil), in.Successors...)
+	out.Rows = append([]forkReplayResumeDesignRow(nil), in.Rows...)
+	for i := range out.Rows {
+		out.Rows[i].BlockerCodes = append([]string(nil), in.Rows[i].BlockerCodes...)
+		out.Rows[i].ProofRefs = append([]forkReplayResumeProofRef(nil), in.Rows[i].ProofRefs...)
+	}
+	return out
 }
 
 func validateForkReplayResumeDesignRecord(root string, record forkReplayResumeDesignRecord, ctx forkReplayResumeValidationContext) []string {

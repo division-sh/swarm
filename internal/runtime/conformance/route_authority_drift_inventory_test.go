@@ -84,14 +84,14 @@ type routeAuthorityDriftRepoFile struct {
 }
 
 type routeAuthorityDriftValidationCorpus struct {
-	Files         []routeAuthorityDriftRepoFile
-	MatchesByExpr map[string][]string
+	snapshot *conformanceRepoSnapshot
+	overlays map[string][]byte
 }
 
 func TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	inventory := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
 	if problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory); len(problems) > 0 {
 		t.Fatalf("route authority drift inventory validation failed:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -100,7 +100,7 @@ func TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions(t *testing.T
 func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	base := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
 
 	tests := []struct {
 		name   string
@@ -170,10 +170,7 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			inventory := base
-			inventory.SearchDimensions = append([]routeAuthorityDriftSearchDimension(nil), base.SearchDimensions...)
-			inventory.SeamFamilies = append([]routeAuthorityDriftSeamFamily(nil), base.SeamFamilies...)
-			inventory.GuardrailProposals = append([]routeAuthorityDriftGuardrail(nil), base.GuardrailProposals...)
+			inventory := cloneRouteAuthorityDriftInventory(base)
 			tc.mutate(&inventory)
 			problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
 			if !routeAuthorityProblemsContain(problems, tc.want) {
@@ -186,8 +183,7 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 func TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	inventory := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
-	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root).withFile(routeAuthorityDriftRepoFile{
 		Path: "internal/runtime/bus/untracked_route_authority.go",
 		Raw:  []byte("package bus\n\nfunc untracked(plan ConnectRoutePlan) { _ = plan }\n"),
 	})
@@ -202,9 +198,8 @@ func TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer(t *tes
 func TestRouteAuthorityDriftInventoryRejectsDimensionMismatchClassification(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	inventory := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
 	const path = "internal/runtime/bus/misclassified_route_authority.go"
-	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root).withFile(routeAuthorityDriftRepoFile{
 		Path: path,
 		Raw:  []byte("package bus\n\nfunc misclassified(plan ConnectRoutePlan) { _ = plan }\n"),
 	})
@@ -221,8 +216,7 @@ func TestRouteAuthorityDriftInventoryRejectsDimensionMismatchClassification(t *t
 func TestRouteAuthorityDriftInventoryRejectsUnclassifiedDirectDeliveryPath(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	inventory := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
-	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root).withFile(routeAuthorityDriftRepoFile{
 		Path: "internal/runtime/bus/untracked_direct_delivery.go",
 		Raw:  []byte("package bus\n\nfunc (b *bus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error { return nil }\n"),
 	})
@@ -247,8 +241,30 @@ func loadRouteAuthorityDriftInventory(t *testing.T, root string) routeAuthorityD
 	return inventory
 }
 
-func validateRouteAuthorityDriftInventory(root string, inventory routeAuthorityDriftInventory) []string {
-	corpus := routeAuthorityDriftNewValidationCorpus(root)
+func cloneRouteAuthorityDriftInventory(in routeAuthorityDriftInventory) routeAuthorityDriftInventory {
+	out := in
+	out.ImplementationIssues = append([]int(nil), in.ImplementationIssues...)
+	out.ParentIssues = append([]int(nil), in.ParentIssues...)
+	out.SearchDimensions = append([]routeAuthorityDriftSearchDimension(nil), in.SearchDimensions...)
+	for i := range out.SearchDimensions {
+		out.SearchDimensions[i].RequiredPaths = append([]string(nil), in.SearchDimensions[i].RequiredPaths...)
+	}
+	out.SeamFamilies = append([]routeAuthorityDriftSeamFamily(nil), in.SeamFamilies...)
+	for i := range out.SeamFamilies {
+		out.SeamFamilies[i].Paths = append([]string(nil), in.SeamFamilies[i].Paths...)
+		out.SeamFamilies[i].SearchDimensions = append([]string(nil), in.SeamFamilies[i].SearchDimensions...)
+		out.SeamFamilies[i].InvalidAuthority = append([]string(nil), in.SeamFamilies[i].InvalidAuthority...)
+	}
+	out.GuardrailProposals = append([]routeAuthorityDriftGuardrail(nil), in.GuardrailProposals...)
+	for i := range out.GuardrailProposals {
+		out.GuardrailProposals[i].Prevents = append([]string(nil), in.GuardrailProposals[i].Prevents...)
+	}
+	return out
+}
+
+func validateRouteAuthorityDriftInventory(t *testing.T, root string, inventory routeAuthorityDriftInventory) []string {
+	t.Helper()
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
 	return validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
 }
 
@@ -290,7 +306,7 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 			problems = append(problems, fmt.Sprintf("search_dimension %s appears more than once", id))
 		}
 		dimensionsByID[id] = dimension
-		problems = append(problems, validateRouteAuthorityDriftSearchDimension(root, corpus, dimension)...)
+		problems = append(problems, validateRouteAuthorityDriftSearchDimension(corpus, dimension)...)
 	}
 	for _, id := range requiredRouteAuthorityDriftSearchDimensions() {
 		if _, ok := dimensionsByID[id]; !ok {
@@ -428,7 +444,7 @@ func validateRouteAuthorityDriftSources(root string, source routeAuthorityDriftI
 	return problems
 }
 
-func validateRouteAuthorityDriftSearchDimension(root string, corpus *routeAuthorityDriftValidationCorpus, dimension routeAuthorityDriftSearchDimension) []string {
+func validateRouteAuthorityDriftSearchDimension(corpus *routeAuthorityDriftValidationCorpus, dimension routeAuthorityDriftSearchDimension) []string {
 	var problems []string
 	id := strings.TrimSpace(dimension.ID)
 	pattern := strings.TrimSpace(dimension.Pattern)
@@ -451,7 +467,12 @@ func validateRouteAuthorityDriftSearchDimension(root string, corpus *routeAuthor
 			problems = append(problems, fmt.Sprintf("%s required_path missing", id))
 			continue
 		}
-		if !routeAuthorityDriftPathMatches(root, path, re) {
+		matches, err := routeAuthorityDriftPathMatches(corpus, path, re)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s required_path %s unavailable: %v", id, path, err))
+			continue
+		}
+		if !matches {
 			problems = append(problems, fmt.Sprintf("%s required_path %s does not match pattern", id, path))
 		}
 	}
@@ -534,87 +555,59 @@ func validateRouteAuthorityDriftGuardrails(root string, guardrails []routeAuthor
 	return problems
 }
 
-func routeAuthorityDriftNewValidationCorpus(root string) *routeAuthorityDriftValidationCorpus {
+func routeAuthorityDriftNewValidationCorpus(t *testing.T, root string) *routeAuthorityDriftValidationCorpus {
+	t.Helper()
 	return &routeAuthorityDriftValidationCorpus{
-		Files:         routeAuthorityDriftRepoFiles(root),
-		MatchesByExpr: map[string][]string{},
+		snapshot: mustConformanceRepoSnapshot(t, root),
+		overlays: map[string][]byte{},
 	}
 }
 
-func routeAuthorityDriftRepoFiles(root string) []routeAuthorityDriftRepoFile {
-	var files []routeAuthorityDriftRepoFile
-	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", "vendor", "node_modules", "tmp", "test-results":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !routeAuthorityDriftScannableFile(path) {
-			return nil
-		}
-		if rel, err := filepath.Rel(root, path); err == nil {
-			relPath := filepath.ToSlash(rel)
-			if routeAuthorityDriftSelfAuditFile(relPath) {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			files = append(files, routeAuthorityDriftRepoFile{Path: relPath, Raw: raw})
-		}
-		return nil
-	})
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Path < files[j].Path
-	})
-	return files
+func (c *routeAuthorityDriftValidationCorpus) withFile(file routeAuthorityDriftRepoFile) *routeAuthorityDriftValidationCorpus {
+	overlays := make(map[string][]byte, len(c.overlays)+1)
+	for path, raw := range c.overlays {
+		overlays[path] = append([]byte(nil), raw...)
+	}
+	overlays[filepath.ToSlash(filepath.Clean(file.Path))] = append([]byte(nil), file.Raw...)
+	return &routeAuthorityDriftValidationCorpus{snapshot: c.snapshot, overlays: overlays}
 }
 
 func routeAuthorityDriftMatchingFiles(corpus *routeAuthorityDriftValidationCorpus, pattern string, re *regexp.Regexp) []string {
-	if matches, ok := corpus.MatchesByExpr[pattern]; ok {
-		return matches
-	}
 	var matches []string
-	for _, file := range corpus.Files {
-		if re.Match(file.Raw) {
-			matches = append(matches, file.Path)
+	for _, path := range corpus.snapshot.matchingFiles(pattern, re) {
+		if routeAuthorityDriftSelfAuditFile(path) {
+			continue
+		}
+		if _, replaced := corpus.overlays[path]; !replaced {
+			matches = append(matches, path)
+		}
+	}
+	for path, raw := range corpus.overlays {
+		if !routeAuthorityDriftSelfAuditFile(path) && re.Match(raw) {
+			matches = append(matches, path)
 		}
 	}
 	sort.Strings(matches)
-	corpus.MatchesByExpr[pattern] = matches
 	return matches
 }
 
 func routeAuthorityDriftSelfAuditFile(path string) bool {
 	switch path {
-	case routeAuthorityDriftInventoryPath, "internal/runtime/conformance/route_authority_drift_inventory_test.go":
+	case routeAuthorityDriftInventoryPath,
+		"internal/runtime/conformance/repo_validation_snapshot_test.go",
+		"internal/runtime/conformance/route_authority_drift_inventory_test.go":
 		return true
 	default:
 		return false
 	}
 }
 
-func routeAuthorityDriftPathMatches(root, path string, re *regexp.Regexp) bool {
-	raw, err := os.ReadFile(filepath.Join(root, filepath.Clean(path)))
-	if err != nil {
-		return false
+func routeAuthorityDriftPathMatches(corpus *routeAuthorityDriftValidationCorpus, path string, re *regexp.Regexp) (bool, error) {
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if raw, ok := corpus.overlays[cleaned]; ok {
+		return re.Match(raw), nil
 	}
-	return re.Match(raw)
-}
-
-func routeAuthorityDriftScannableFile(path string) bool {
-	switch filepath.Ext(path) {
-	case ".go", ".yaml", ".yml", ".json", ".md":
-		return true
-	default:
-		return false
-	}
+	return corpus.snapshot.pathMatches(cleaned, re.String(), re)
 }
 
 func routeAuthorityDriftSearchDimensionByID(t *testing.T, inventory *routeAuthorityDriftInventory, id string) *routeAuthorityDriftSearchDimension {
