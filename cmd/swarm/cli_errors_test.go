@@ -143,8 +143,8 @@ func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
 		{
 			name:     "undeclared",
 			reason:   "not_declared_root_input",
-			declared: []string{"z.event", "a.event", "z.event"},
-			routable: []string{"z.event", "a.event"},
+			declared: []string{"a.event", "z.event"},
+			routable: []string{"a.event", "z.event"},
 			want: []string{
 				`ERROR: event "missing.event" is not a declared root input.`,
 				"A root input is an event declared in the root flow's `pins.inputs.events`.",
@@ -160,18 +160,22 @@ func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
 			declared: []string{"waiting.event"},
 			routable: []string{},
 			want: []string{
-				`ERROR: root input "missing.event" has no runtime route.`,
+				`ERROR: root input "waiting.event" has no runtime route.`,
 				"Declared root inputs: waiting.event.",
 				"Routable root inputs: none.",
-				`Connect "missing.event" to a runtime handler`,
+				`Connect "waiting.event" to a runtime handler`,
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			eventName := "missing.event"
+			if tc.reason == "declared_root_input_not_routable" {
+				eventName = "waiting.event"
+			}
 			data, err := json.Marshal(map[string]any{
 				"code": "EVENT_NOT_DECLARED",
 				"details": map[string]any{
-					"event_name":      "missing.event",
+					"event_name":      eventName,
 					"reason":          tc.reason,
 					"declared_events": tc.declared,
 					"routable_events": tc.routable,
@@ -196,30 +200,71 @@ func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
 }
 
 func TestCLIRootInputDiagnosticRequiresCompleteServerOwnedDomains(t *testing.T) {
-	for _, details := range []map[string]any{
-		{
+	for _, tc := range []struct {
+		name    string
+		details map[string]any
+	}{
+		{name: "missing declared domain", details: map[string]any{
 			"event_name":      "missing.event",
 			"reason":          "not_declared_root_input",
 			"routable_events": []string{},
-		},
-		{
+		}},
+		{name: "null routable domain", details: map[string]any{
 			"event_name":      "missing.event",
 			"reason":          "not_declared_root_input",
 			"declared_events": []string{},
 			"routable_events": nil,
-		},
+		}},
+		{name: "blank domain entries", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{""},
+			"routable_events": []string{""},
+		}},
+		{name: "noncanonical whitespace", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{" declared.event "},
+			"routable_events": []string{},
+		}},
+		{name: "unsorted domain", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{"z.event", "a.event"},
+			"routable_events": []string{},
+		}},
+		{name: "duplicate domain entry", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{"a.event", "a.event"},
+			"routable_events": []string{},
+		}},
+		{name: "routable not declared", details: map[string]any{
+			"event_name":      "missing.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{},
+			"routable_events": []string{"other.event"},
+		}},
+		{name: "reason contradicts domain", details: map[string]any{
+			"event_name":      "declared.event",
+			"reason":          "not_declared_root_input",
+			"declared_events": []string{"declared.event"},
+			"routable_events": []string{},
+		}},
 	} {
-		data, err := json.Marshal(map[string]any{
-			"code":    "EVENT_NOT_DECLARED",
-			"details": details,
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{
+				"code":    "EVENT_NOT_DECLARED",
+				"details": tc.details,
+			})
+			if err != nil {
+				t.Fatalf("marshal diagnostic: %v", err)
+			}
+			got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
+			if strings.Contains(got, "A root input is") || strings.Contains(got, "Routable root inputs: none") {
+				t.Fatalf("incomplete server facts entered root-input renderer: %q", got)
+			}
 		})
-		if err != nil {
-			t.Fatalf("marshal diagnostic: %v", err)
-		}
-		got := formatCLIAPIError(&jsonRPCError{Code: -32003, Message: "Application error: EVENT_NOT_DECLARED", Data: data})
-		if strings.Contains(got, "A root input is") || strings.Contains(got, "Routable root inputs: none") {
-			t.Fatalf("incomplete server facts entered root-input renderer: %q", got)
-		}
 	}
 }
 

@@ -16631,7 +16631,9 @@ cli_specification:
             `declared_root_input_not_routable` MUST consume the server-owned root-input facts. Human output defines a
             root input as an event declared in the root flow's `pins.inputs.events`, renders the declared and routable
             domains with `none` for an empty domain, and gives a contract-field remediation. CLI and Builder consumers
-            MUST NOT reload contracts, infer the domains independently, or flatten the structured facts to raw error text.
+            MUST NOT reload contracts, infer the domains independently, normalize malformed server facts, or flatten the
+            structured facts to raw error text. The CLI renders `none` only from an explicit canonical empty array; missing,
+            null, non-canonical, or reason-inconsistent domains fall back to the generic application-error rendering.
         exit_code_taxonomy:
           success: 0
           unexpected_or_internal_failure: 1
