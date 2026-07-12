@@ -316,6 +316,7 @@ func (s *Service) Close(ctx context.Context) error {
 }
 
 func (r *ServiceRegistry) RunCreator(ctx context.Context, leaseID string, creatorFD uintptr) error {
+	restrictCreatorProcessFileMode()
 	if err := r.initialize(); err != nil {
 		return err
 	}

@@ -14,6 +14,8 @@ import (
 
 func validateCreatorProcessSupport() error { return nil }
 
+func restrictCreatorProcessFileMode() {}
+
 func creatorProcessCommand(executable, stateRoot, leaseID string, creator *fileLock) (*exec.Cmd, error) {
 	handle := windows.Handle(creator.File().Fd())
 	if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
