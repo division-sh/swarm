@@ -307,10 +307,7 @@ func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqli
 		t.Fatalf("create release SQLite store: %v", err)
 	}
 	ctx := context.Background()
-	if err := sqliteStore.EnsureSchemaTables(ctx, plans); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("initialize release SQLite store: %v", err)
-	}
+	bootstrapSQLiteSchemaForTest(t, ctx, sqliteStore, plans)
 	seedProviderTriggerSmokeRuntime(t, runtimecorrelation.WithRunID(ctx, "76000000-0000-0000-0000-000000000001"), sqliteStore,
 		"76000000-0000-0000-0000-000000000001", "76000000-0000-0000-0000-000000000002", "release-stripe", "stripe-customer", "stripe", "stripe-release-secret", "release-stripe-agent")
 	seedProviderTriggerSmokeRuntime(t, runtimecorrelation.WithRunID(ctx, "76000000-0000-0000-0000-000000000003"), sqliteStore,

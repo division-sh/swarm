@@ -885,7 +885,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "sqlite schema bootstrap",
-			path:           rx(`^internal/store/(sqlite_schema|agent_lifecycle_schema|platformschema/platformschema)\.go$`),
+			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|agent_lifecycle_schema|platformschema/platformschema)\.go$`),
 			kinds:          allPrimitiveKinds(),
 			classification: classDifferentConcept,
 			reason:         "schema/bootstrap owns dialect DDL and PRAGMA behavior, split from selected runtime mutation writers",

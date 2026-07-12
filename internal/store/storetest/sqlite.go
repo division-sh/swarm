@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -44,8 +45,15 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 			t.Fatalf("close sqlite runtime store: %v", err)
 		}
 	})
-	if err := sqliteStore.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
+	if err := sqliteStore.BootstrapSchema(ctx, store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin: store.RuntimeStoreOrigin{
+			SwarmVersion:    "storetest",
+			PlatformVersion: platformSpec.Platform.Version,
+			CreatedAt:       time.Now().UTC(),
+		},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)

@@ -49,7 +49,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "reply_contexts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "reply_contexts.run_id", DeleteOrderGroup: 4},
 		{Table: "events", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "events.run_id", DeleteOrderGroup: 5},
 		{Table: "runs", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "runs.run_id cleanup set", DeleteOrderGroup: 6},
-		{Table: "schema_version", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "schema/migration state", PreservationProof: "must survive destructive runtime cleanup"},
+		{Table: "runtime_store_metadata", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable runtime store creation origin", PreservationProof: "must survive destructive runtime cleanup unchanged"},
 		{Table: "api_idempotency", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "API idempotency/auth-like state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "runtime_ingress_state", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "singleton runtime ingress owner", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "agents", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "agent registry/config state", PreservationProof: "must survive destructive runtime cleanup"},

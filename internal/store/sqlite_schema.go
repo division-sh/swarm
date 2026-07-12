@@ -26,6 +26,13 @@ type SQLiteSchemaStore struct {
 
 const sqliteDriverBusyTimeoutMillis = 50
 
+var sqliteSchemaBootstrapLocks sync.Map
+
+func sqliteSchemaBootstrapMutex(path string) *sync.Mutex {
+	value, _ := sqliteSchemaBootstrapLocks.LoadOrStore(filepath.Clean(path), &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
 func NewSQLiteSchemaStore(path string) (*SQLiteSchemaStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -67,7 +74,6 @@ func sqliteFileDSN(path string) string {
 	q := u.Query()
 	q.Add("_pragma", "foreign_keys(ON)")
 	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteDriverBusyTimeoutMillis))
-	q.Add("_pragma", "journal_mode(WAL)")
 	u.RawQuery = q.Encode()
 	return u.String()
 }
@@ -109,78 +115,6 @@ func (s *SQLiteSchemaStore) configure(ctx context.Context) error {
 		return fmt.Errorf("configure sqlite busy timeout: %w", err)
 	}
 	return s.DB.PingContext(ctx)
-}
-
-func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite schema store is required for schema ddl")
-	}
-	if len(plans) == 0 {
-		return nil
-	}
-	if schemaDDLIncludesPlatformTables(plans) {
-		if err := ensureSQLiteCanonicalFailureSchema(ctx, s.DB); err != nil {
-			return fmt.Errorf("migrate sqlite canonical runtime failures: %w", err)
-		}
-	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin sqlite schema ddl tx: %w", err)
-	}
-	committed := false
-	agentStatements := []string{}
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	for _, plan := range plans {
-		statements, err := SQLiteStatementsForPlan(plan)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(plan.TableName) == "agents" {
-			agentStatements = append(agentStatements, statements...)
-		}
-		for _, statement := range statements {
-			statement = strings.TrimSpace(statement)
-			if statement == "" {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("ensure sqlite %s table %s: %w", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName), err)
-			}
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite schema ddl tx: %w", err)
-	}
-	committed = true
-	if schemaDDLIncludesPlatformTables(plans) {
-		if err := ensureSQLiteCanonicalFailureSchema(ctx, s.DB); err != nil {
-			return fmt.Errorf("validate sqlite canonical runtime failures: %w", err)
-		}
-	}
-	if len(agentStatements) > 0 {
-		if err := s.ensureSQLiteAgentLLMBackendProfiles(ctx, agentStatements); err != nil {
-			return err
-		}
-		if err := s.ensureSQLiteAgentModelAliases(ctx); err != nil {
-			return err
-		}
-		if err := s.ensureSQLiteAgentLifecycleColumns(ctx); err != nil {
-			return err
-		}
-	}
-	if err := s.ensureSQLiteMailboxDeferredUntil(ctx); err != nil {
-		return err
-	}
-	if err := s.ensureSQLiteReplyContextColumns(ctx); err != nil {
-		return err
-	}
-	_, err = s.BindSchemaCapabilities(ctx)
-	return err
 }
 
 func (s *SQLiteSchemaStore) ensureSQLiteReplyContextColumns(ctx context.Context) error {

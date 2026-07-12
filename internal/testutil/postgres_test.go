@@ -75,7 +75,7 @@ func assertStartPostgresSchema(t *testing.T, db *sql.DB, wantVersion string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	for _, table := range []string{"schema_version", "bundles", "runs", "events", "event_receipts", "timers"} {
+	for _, table := range []string{"runtime_store_metadata", "bundles", "runs", "events", "event_receipts", "timers"} {
 		var exists bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
 			t.Fatalf("check table %s: %v", table, err)
@@ -86,10 +86,10 @@ func assertStartPostgresSchema(t *testing.T, db *sql.DB, wantVersion string) {
 	}
 
 	var gotVersion string
-	if err := db.QueryRowContext(ctx, `SELECT platform_version FROM schema_version WHERE id = 1`).Scan(&gotVersion); err != nil {
-		t.Fatalf("read schema_version: %v", err)
+	if err := db.QueryRowContext(ctx, `SELECT platform_version FROM runtime_store_metadata WHERE id = 1`).Scan(&gotVersion); err != nil {
+		t.Fatalf("read runtime_store_metadata: %v", err)
 	}
 	if gotVersion != wantVersion {
-		t.Fatalf("schema_version platform_version = %q, want %q", gotVersion, wantVersion)
+		t.Fatalf("runtime_store_metadata platform_version = %q, want %q", gotVersion, wantVersion)
 	}
 }

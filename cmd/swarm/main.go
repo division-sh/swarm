@@ -2665,11 +2665,14 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	if err != nil {
 		return "", fmt.Errorf("state_schema tables: %w", err)
 	}
-	plans := append([]store.SchemaTableDDL{}, platformPlans...)
-	plans = append(plans, statePlans...)
-	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
+	request, err := schemaBootstrapRequest(bundle.Platform, platformPlans, statePlans)
+	if err != nil {
 		return "", err
 	}
+	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
+		return "", err
+	}
+	plans := append(append([]store.SchemaTableDDL{}, platformPlans...), statePlans...)
 	return summarizeServeSchemaPlans(plans, verbose), nil
 }
 
@@ -2685,7 +2688,11 @@ func initializeServePlatformStateStores(ctx context.Context, stores storeBundle,
 	if err != nil {
 		return "", fmt.Errorf("platform-owned tables: %w", err)
 	}
-	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
+	request, err := schemaBootstrapRequest(spec, plans, nil)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
 		return "", err
 	}
 	return summarizeServeSchemaPlans(plans, verbose), nil
@@ -2703,11 +2710,27 @@ func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBu
 	return summaries, nil
 }
 
-func ensureServeSchemaTables(ctx context.Context, stores storeBundle, plans []store.SchemaTableDDL) error {
+func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans, statePlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
+	metadata, err := resolveLocalVersionMetadata()
+	if err != nil {
+		return store.SchemaBootstrapRequest{}, fmt.Errorf("resolve schema bootstrap build identity: %w", err)
+	}
+	return store.SchemaBootstrapRequest{
+		PlatformPlans: platformPlans,
+		StatePlans:    statePlans,
+		Origin: store.RuntimeStoreOrigin{
+			SwarmVersion:    metadata.BinaryVersion,
+			PlatformVersion: strings.TrimSpace(spec.Platform.Version),
+			CreatedAt:       time.Now().UTC(),
+		},
+	}, nil
+}
+
+func ensureServeSchemaTables(ctx context.Context, stores storeBundle, request store.SchemaBootstrapRequest) error {
 	if stores.SchemaBootstrapper == nil {
 		return nil
 	}
-	if err := stores.SchemaBootstrapper.EnsureSchemaTables(ctx, plans); err != nil {
+	if err := stores.SchemaBootstrapper.BootstrapSchema(ctx, request); err != nil {
 		return err
 	}
 	if err := rebindServePostgresSchemaCapabilities(ctx, stores); err != nil {

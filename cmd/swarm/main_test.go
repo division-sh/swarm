@@ -10297,6 +10297,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
+		StoreModeSet:       true,
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
@@ -10327,8 +10328,8 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	})
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, conversation_mode)
-		VALUES ('agent-a', 'operator', 'default', 'task')
+		INSERT INTO agents (agent_id, role, model, conversation_mode, runtime_descriptor)
+		VALUES ('agent-a', 'operator', 'default', 'task', '{"type":"default"}'::jsonb)
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -10378,6 +10379,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
+		StoreModeSet:       true,
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
@@ -10428,10 +10430,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}
-	if err := sqliteStore.EnsureSchemaTables(context.Background(), plans); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("EnsureSchemaTables: %v", err)
-	}
+	bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC)
 	runID := uuid.NewString()
@@ -14589,7 +14588,7 @@ func captureServeSchemaPlanSummary(t *testing.T, plans []store.SchemaTableDDL, v
 
 type recordingSchemaBootstrapper struct{}
 
-func (recordingSchemaBootstrapper) EnsureSchemaTables(context.Context, []store.SchemaTableDDL) error {
+func (recordingSchemaBootstrapper) BootstrapSchema(context.Context, store.SchemaBootstrapRequest) error {
 	return nil
 }
 
@@ -14601,8 +14600,9 @@ type capturingSchemaBootstrapper struct {
 	plans []store.SchemaTableDDL
 }
 
-func (c *capturingSchemaBootstrapper) EnsureSchemaTables(_ context.Context, plans []store.SchemaTableDDL) error {
-	c.plans = append([]store.SchemaTableDDL{}, plans...)
+func (c *capturingSchemaBootstrapper) BootstrapSchema(_ context.Context, request store.SchemaBootstrapRequest) error {
+	c.plans = append([]store.SchemaTableDDL{}, request.PlatformPlans...)
+	c.plans = append(c.plans, request.StatePlans...)
 	return nil
 }
 

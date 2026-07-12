@@ -508,8 +508,11 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 			t.Fatalf("close sqlite runtime store: %v", err)
 		}
 	})
-	if err := sqliteStore.EnsureSchemaTables(unmanagedToolTestContext(), plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
+	if err := sqliteStore.BootstrapSchema(unmanagedToolTestContext(), store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin:        store.RuntimeStoreOrigin{SwarmVersion: "tools-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
 	}
 	return sqliteStore
 }

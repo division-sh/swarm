@@ -411,9 +411,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 			t.Fatalf("new SQLite runtime store: %v", err)
 		}
 		t.Cleanup(func() { _ = sqliteStore.Close() })
-		if err := sqliteStore.EnsureSchemaTables(context.Background(), plans); err != nil {
-			t.Fatalf("ensure SQLite runtime schema: %v", err)
-		}
+		bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
 		return claudeAttemptProofBackend{name: name, store: sqliteStore, db: sqliteStore.DB, sessions: sqliteStore}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)

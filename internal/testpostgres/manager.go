@@ -707,14 +707,18 @@ func initializeDatabase(ctx context.Context, db *sql.DB, role string, spec runti
 			return fmt.Errorf("initialize postgres template statement %q: %w", stmt, err)
 		}
 	}
-	if err := platformschema.EnsurePostgresTables(ctx, db, plans, nil); err != nil {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin platform bootstrap: %w", err)
+	}
+	if err := platformschema.BootstrapFreshPostgres(ctx, tx, plans, "test-harness", spec.Platform.Version, time.Now().UTC()); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("bootstrap platform tables: %w", err)
 	}
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO schema_version (id, platform_version, applied_at)
-		VALUES (1, $1, now())
-		ON CONFLICT (id) DO UPDATE SET platform_version=EXCLUDED.platform_version, applied_at=EXCLUDED.applied_at`, spec.Platform.Version)
-	return err
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit platform bootstrap: %w", err)
+	}
+	return nil
 }
 
 func inspectSession(ctx context.Context, db *sql.DB) (string, string, error) {

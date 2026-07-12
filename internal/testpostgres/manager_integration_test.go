@@ -59,7 +59,7 @@ func TestTemplateDigestUsesCanonicalGeneratedSchema(t *testing.T) {
 	changed := append([]platformschema.TableDDL(nil), plans...)
 	changed[0] = plans[0]
 	changed[0].Statements = append([]string(nil), plans[0].Statements...)
-	changed[0].Statements[0] += "\nALTER TABLE schema_version ADD COLUMN digest_probe text"
+	changed[0].Statements[0] += "\nALTER TABLE runtime_store_metadata ADD COLUMN digest_probe text"
 	third, err := templateDigest(changed, spec.Platform.Version, "role", "server", "version")
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestManagerLifecycleSupportedRepresentations(t *testing.T) {
 				t.Fatal(err)
 			}
 			var version string
-			if err := sandbox.DB.QueryRowContext(ctx, `SELECT platform_version FROM schema_version WHERE id=1`).Scan(&version); err != nil {
+			if err := sandbox.DB.QueryRowContext(ctx, `SELECT platform_version FROM runtime_store_metadata WHERE id=1`).Scan(&version); err != nil {
 				t.Fatalf("canonical schema missing: %v", err)
 			}
 			if err := sandbox.Release(ctx); err != nil {
@@ -119,9 +119,9 @@ func TestManagerLifecycleSupportedRepresentations(t *testing.T) {
 				t.Fatal(err)
 			}
 			var table *string
-			err = empty.DB.QueryRowContext(ctx, `SELECT to_regclass('public.schema_version')::text`).Scan(&table)
+			err = empty.DB.QueryRowContext(ctx, `SELECT to_regclass('public.runtime_store_metadata')::text`).Scan(&table)
 			if err != nil || table != nil {
-				t.Fatalf("empty sandbox schema_version = %v, err=%v", table, err)
+				t.Fatalf("empty sandbox runtime_store_metadata = %v, err=%v", table, err)
 			}
 			if err := empty.Release(ctx); err != nil {
 				t.Fatal(err)

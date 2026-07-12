@@ -122,8 +122,11 @@ func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 			t.Fatalf("close sqlite runtime store: %v", err)
 		}
 	})
-	if err := sqliteStore.EnsureSchemaTables(context.Background(), plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
+	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin:        store.RuntimeStoreOrigin{SwarmVersion: "engine-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
 	}
 	return sqliteStore
 }
