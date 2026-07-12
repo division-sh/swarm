@@ -877,7 +877,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		{
 			name:           "decision card transactional helpers",
 			path:           rx(`^internal/store/decision_cards\.go$`),
-			function:       rx(`^(insertDecisionCard|decideDecisionCard|deferDecisionCard|beginDecisionCardInput|updateDecisionCardDraftStatus|expireAndReplaceDecisionCardDrafts|supersedeDecisionCardsForStage|supersedeDecisionCardsForRun)$`),
+			function:       rx(`^(insertDecisionCard|decideDecisionCard|deferDecisionCard|beginDecisionCardInput|updateDecisionCardDraftStatus|transitionDecisionCardDrafts|supersedeDecisionCardsForStage|supersedeDecisionCardsForRun|supersedeRunGateActivations)$`),
 			kinds:          kinds(primitiveRead, primitiveWrite),
 			classification: classActiveTxHelper,
 			reason:         "decision-card helpers write only through a selected-store or workflow pipeline transaction supplied by their canonical mutation owner",

@@ -199,6 +199,9 @@ func (g *FlowStageGateDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("stage gate must be a mapping")
 	}
+	if err := validateUniqueNormalizedMappingKeys(node, "stage gate"); err != nil {
+		return err
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if _, ok := stageGateFieldOptions[key]; !ok {
@@ -233,9 +236,11 @@ func (g *FlowStageGateDeclaration) UnmarshalYAML(node *yaml.Node) error {
 			}
 			out.Context = contextFields
 		case "outcomes":
-			if err := value.Decode(&out.Outcomes); err != nil {
+			outcomes, err := decodeStageGateOutcomes(value)
+			if err != nil {
 				return err
 			}
+			out.Outcomes = outcomes
 		}
 	}
 	out.Decision = strings.TrimSpace(out.Decision)
@@ -268,20 +273,43 @@ func (o *FlowStageGateOutcomeDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return fmt.Errorf("stage gate outcome must be a mapping")
 	}
+	if err := validateUniqueNormalizedMappingKeys(node, "stage gate outcome"); err != nil {
+		return err
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if _, ok := stageGateOutcomeFieldOptions[key]; !ok {
 			return NewUndefinedFieldDiagnostic("stage gate outcome", key, stageGateOutcomeFieldOptions)
 		}
 	}
-	type alias FlowStageGateOutcomeDeclaration
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
+	var out FlowStageGateOutcomeDeclaration
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "label":
+			if err := value.Decode(&out.Label); err != nil {
+				return err
+			}
+		case "input":
+			fields, err := decodeStageGateInputFields(value)
+			if err != nil {
+				return err
+			}
+			out.Input = fields
+		case "advances_to":
+			if err := value.Decode(&out.AdvancesTo); err != nil {
+				return err
+			}
+		case "emit":
+			if err := value.Decode(&out.Emit); err != nil {
+				return err
+			}
+		}
 	}
 	out.Label = strings.TrimSpace(out.Label)
 	out.AdvancesTo = strings.TrimSpace(out.AdvancesTo)
-	*o = FlowStageGateOutcomeDeclaration(out)
+	*o = out
 	return nil
 }
 
@@ -291,6 +319,9 @@ func (f *WorkflowGateInputField) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if node == nil || node.Kind != yaml.MappingNode {
 		return fmt.Errorf("stage gate input field must be a mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "stage gate input field"); err != nil {
+		return err
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
@@ -310,6 +341,69 @@ func (f *WorkflowGateInputField) UnmarshalYAML(node *yaml.Node) error {
 	out.Type = normalized
 	out.Label = strings.TrimSpace(out.Label)
 	*f = WorkflowGateInputField(out)
+	return nil
+}
+
+func decodeStageGateOutcomes(node *yaml.Node) (map[string]FlowStageGateOutcomeDeclaration, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("stage gate outcomes must be a mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "stage gate outcomes"); err != nil {
+		return nil, err
+	}
+	out := make(map[string]FlowStageGateOutcomeDeclaration, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			return nil, fmt.Errorf("stage gate outcomes contains an empty verdict")
+		}
+		var outcome FlowStageGateOutcomeDeclaration
+		if err := node.Content[i+1].Decode(&outcome); err != nil {
+			return nil, fmt.Errorf("stage gate outcome %s: %w", key, err)
+		}
+		out[key] = outcome
+	}
+	return out, nil
+}
+
+func decodeStageGateInputFields(node *yaml.Node) (map[string]WorkflowGateInputField, error) {
+	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("stage gate input must be a mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "stage gate input"); err != nil {
+		return nil, err
+	}
+	out := make(map[string]WorkflowGateInputField, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			return nil, fmt.Errorf("stage gate input contains an empty field name")
+		}
+		var field WorkflowGateInputField
+		if err := node.Content[i+1].Decode(&field); err != nil {
+			return nil, fmt.Errorf("stage gate input %s: %w", key, err)
+		}
+		out[key] = field
+	}
+	return out, nil
+}
+
+func validateUniqueNormalizedMappingKeys(node *yaml.Node, label string) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	seen := map[string]string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		raw := node.Content[i].Value
+		normalized := strings.TrimSpace(raw)
+		if previous, ok := seen[normalized]; ok {
+			return fmt.Errorf("%s contains duplicate normalized key %q (from %q and %q)", label, normalized, previous, raw)
+		}
+		seen[normalized] = raw
+	}
 	return nil
 }
 

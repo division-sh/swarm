@@ -38,6 +38,9 @@ func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtime
 	if len(item.Context) == 0 {
 		item.Context = []byte("{}")
 	}
+	if err := validateGenericMailboxNotice(item.Type, item.Context); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(item.ReplyContextID) == "" {
 		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	}

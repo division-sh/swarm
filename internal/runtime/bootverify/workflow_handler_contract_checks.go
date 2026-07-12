@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -144,6 +145,17 @@ func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, eviden
 			}
 			if action.Mailbox.Summary.IsZero() {
 				findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox_write is missing mailbox.summary"))
+			}
+			itemType := ""
+			if action.Mailbox.ItemType.HasLiteralValue() {
+				itemType = fmt.Sprint(action.Mailbox.ItemType.Literal)
+			}
+			payload := make(map[string]any, len(action.Mailbox.Payload))
+			for field := range action.Mailbox.Payload {
+				payload[field] = nil
+			}
+			if err := decisioncard.ValidateNoticeShape(itemType, payload); err != nil {
+				findings = append(findings, handlerActionFinding(nodeID, eventContext, err.Error()))
 			}
 		}
 	}

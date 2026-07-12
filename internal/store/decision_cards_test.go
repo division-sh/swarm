@@ -2,13 +2,18 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -75,7 +80,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ListDecisionCardChanges: %v", err)
 			}
-			if len(changes) != 3 || changes[0].ChangeType != decisioncard.ChangeCreated || changes[2].ChangeType != decisioncard.ChangeDecided {
+			if len(changes) != 4 || changes[0].ChangeType != decisioncard.ChangeCreated || changes[2].ChangeType != decisioncard.ChangeDraftConsumed || changes[3].ChangeType != decisioncard.ChangeDecided {
 				t.Fatalf("changes = %#v", changes)
 			}
 		})
@@ -161,6 +166,211 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 				t.Fatalf("decide superseded card error = %v", err)
 			}
 		})
+	}
+}
+
+func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
+			card := newDecisionCardTestCard(t, runID, now)
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			first, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now, TTL: 5 * time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now.Add(time.Minute), TTL: 5 * time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.InputDraftID == second.InputDraftID {
+				t.Fatal("replacement reused draft identity")
+			}
+			expirer, ok := cardStore.(interface {
+				ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
+			})
+			if !ok {
+				t.Fatal("decision-card store lacks durable draft expiry owner")
+			}
+			if count, err := expirer.ExpireDecisionCardInputDrafts(ctx, now.Add(7*time.Minute)); err != nil || count != 1 {
+				t.Fatalf("ExpireDecisionCardInputDrafts = %d, %v", count, err)
+			}
+			if _, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-b", Now: now.Add(8 * time.Minute), TTL: 5 * time.Minute}); err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.SupersedeDecisionCardsForStage(ctx, runID, card.EntityID, card.StageActivationID, "timer_fired", now.Add(9*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 50})
+			if err != nil {
+				t.Fatal(err)
+			}
+			counts := map[string]int{}
+			for _, change := range changes {
+				counts[change.ChangeType]++
+			}
+			if counts[decisioncard.ChangeDraftCancelled] != 2 || counts[decisioncard.ChangeDraftExpired] != 1 || counts[decisioncard.ChangeSuperseded] != 1 {
+				t.Fatalf("draft lifecycle changes = %#v; all closures must be cursor-visible", counts)
+			}
+		})
+	}
+}
+
+func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
+			entityID := uuid.NewString()
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			card := newDecisionCardTestCard(t, runID, now)
+			card.CardID, card.EntityID, card.FlowInstance, card.FlowID = activation.CardID, entityID, "launch/review", "launch"
+			card.StageActivationID, card.Stage, card.DecisionID, card.BundleHash = activation.ActivationID, activation.Stage, activation.DecisionID, activation.BundleHash
+			card, err = decisioncard.New(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
+			if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "cancelled", now.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
+			if err != nil || loaded.Status != decisioncard.StatusSuperseded {
+				t.Fatalf("terminal card = %#v, %v", loaded, err)
+			}
+			stored := loadDecisionCardGateActivation(t, db, postgres, runID, entityID)
+			if stored.Status != gateruntime.StatusSuperseded {
+				t.Fatalf("terminal activation = %#v", stored)
+			}
+		})
+
+		t.Run(backend+"/committed_verdict_blocks_terminalization", func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
+			entityID := uuid.NewString()
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decisionEventID := uuid.NewString()
+			if err := activation.CommitDecision(decisionEventID, now.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			card := newDecisionCardTestCard(t, runID, now)
+			card.CardID, card.EntityID, card.FlowInstance, card.FlowID = activation.CardID, entityID, "launch/review", "launch"
+			card.StageActivationID, card.Stage, card.DecisionID, card.BundleHash = activation.ActivationID, activation.Stage, activation.DecisionID, activation.BundleHash
+			card, err = decisioncard.New(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
+			if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "cancelled", now.Add(2*time.Minute)); err == nil {
+				t.Fatal("run terminalization discarded a committed verdict")
+			}
+			stored := loadDecisionCardGateActivation(t, db, postgres, runID, entityID)
+			if stored.Status != gateruntime.StatusDecisionCommitted {
+				t.Fatalf("blocked terminal activation = %#v", stored)
+			}
+			var status string
+			query := `SELECT status FROM runs WHERE run_id = ?`
+			if postgres {
+				query = `SELECT status FROM runs WHERE run_id = $1::uuid`
+			}
+			if err := db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil || status != "running" {
+				t.Fatalf("blocked terminal run status = %q, %v", status, err)
+			}
+		})
+	}
+}
+
+func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool) {
+	t.Helper()
+	switch store := cards.(type) {
+	case *PostgresStore:
+		return store.DB, true
+	case *SQLiteRuntimeStore:
+		return store.DB, false
+	default:
+		t.Fatalf("unexpected decision card store %T", cards)
+		return nil, false
+	}
+}
+
+func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, entityID string, activation gateruntime.Activation, now time.Time) {
+	t.Helper()
+	buckets := map[string]map[string]any{}
+	if err := gateruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	accumulator, err := json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}', '{}', ?, 1, ?, ?, ?)`
+	args := []any{runID, entityID, string(accumulator), now, now, now}
+	if postgres {
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}'::jsonb, '{}'::jsonb, $3::jsonb, 1, $4, $5, $6)`
+	}
+	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, runID, entityID string) gateruntime.Activation {
+	t.Helper()
+	query := `SELECT accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	if postgres {
+		query = `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+	}
+	var raw any
+	if err := db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	accumulator, err := toolDecodeJSONMap(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, accumulator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil || len(activations) != 1 {
+		t.Fatalf("gate activations = %#v, %v", activations, err)
+	}
+	return activations[0]
+}
+
+func markDecisionCardRunTerminal(ctx context.Context, cards decisioncard.Store, runID, status string, now time.Time) (any, error) {
+	switch store := cards.(type) {
+	case *PostgresStore:
+		return store.MarkRunTerminal(ctx, runID, status, nil, now)
+	case *SQLiteRuntimeStore:
+		return store.MarkRunTerminal(ctx, runID, status, nil, now)
+	default:
+		return nil, fmt.Errorf("unexpected decision card store %T", cards)
 	}
 }
 

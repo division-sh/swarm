@@ -217,6 +217,10 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
+	var pendingCards int
+	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE entity_id = ? AND status = 'pending' AND decision_id = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
+	}
 	var entityEvents, wrongRunEvents int
 	if err := sqliteStore.DB.QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
@@ -401,6 +405,10 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
+	}
+	var pendingCards int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE entity_id = $1::uuid AND status = 'pending' AND decision_id = 'standing_review'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
 	if err := db.QueryRow(`
@@ -674,8 +682,16 @@ flows:
 		"nodes.yaml":  "{}\n",
 		"flows/telegram-ingress/schema.yaml": `name: telegram-ingress
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active:
+    initial: true
+    gate:
+      decision: standing_review
+      outcomes:
+        keep:
+          advances_to: done
+  done:
+    terminal: true
 pins:
   inputs:
     events:
@@ -751,6 +767,15 @@ pins:
             cel: payload.chat_id
           text:
             cel: payload.text
+telegram-outcome-observer:
+  id: telegram-outcome-observer
+  execution_type: system_node
+  subscribes_to: [telegram-chat.telegram_send_message.succeeded, telegram-chat.telegram_send_message.failed]
+  event_handlers:
+    telegram-chat.telegram_send_message.succeeded:
+      advances_to: active
+    telegram-chat.telegram_send_message.failed:
+      advances_to: done
 `,
 		"flows/telegram-chat/tools.yaml": fmt.Sprintf(`telegram.send_message:
   category: provider_connector

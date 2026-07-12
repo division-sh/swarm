@@ -68,6 +68,7 @@ type PipelineCoordinator struct {
 	managedCredentials      runtimemanagedcredentials.Store
 	artifactRoot            string
 	bundleFingerprint       string
+	decisionCardCadence     decisioncard.CadencePolicy
 
 	testSubscribeHook                func()
 	testEntityStateHook              func(entityID, state string)
@@ -93,6 +94,7 @@ type PipelineCoordinatorOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ArtifactRoot                     string
 	BundleFingerprint                string
+	DecisionCardCadence              decisioncard.CadencePolicy
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
@@ -137,6 +139,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		managedCredentials:               opts.ManagedCredentials,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
+		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		testLifecycleProbe:               opts.TestLifecycleProbe,
@@ -217,7 +220,30 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 	}
 }
 
-func (pc *PipelineCoordinator) RunMaintenance(context.Context) {}
+func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
+	expiry, ok := pc.decisionCards.(interface {
+		ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
+	})
+	if !ok || expiry == nil {
+		return
+	}
+	run := func() {
+		if _, err := expiry.ExpireDecisionCardInputDrafts(ctx, time.Now().UTC()); err != nil {
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_decision_card_input_drafts", "", "", runtimeWorkflowID, "", nil, err)
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
 	if pc == nil {

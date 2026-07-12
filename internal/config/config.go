@@ -28,9 +28,13 @@ type Config struct {
 }
 
 type RuntimeConfig struct {
-	MaxConcurrentAgents int           `yaml:"max_concurrent_agents"`
-	EventPollInterval   time.Duration `yaml:"event_poll_interval"`
-	RecoveryOnStartup   bool          `yaml:"recovery_on_startup"`
+	MaxConcurrentAgents          int           `yaml:"max_concurrent_agents"`
+	EventPollInterval            time.Duration `yaml:"event_poll_interval"`
+	RecoveryOnStartup            bool          `yaml:"recovery_on_startup"`
+	DecisionCardFirstReminder    time.Duration `yaml:"decision_card_first_reminder"`
+	DecisionCardUrgency          time.Duration `yaml:"decision_card_urgency"`
+	DecisionCardReminderInterval time.Duration `yaml:"decision_card_reminder_interval"`
+	DecisionCardInputDraftTTL    time.Duration `yaml:"decision_card_input_draft_ttl"`
 }
 
 type ProviderTriggersConfig struct {
@@ -240,6 +244,9 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validate(backendOverride string) error {
+	if err := c.validateDecisionCardCadence(); err != nil {
+		return err
+	}
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
@@ -299,6 +306,34 @@ func (c *Config) validate(backendOverride string) error {
 	}
 	if c.LLM.Session.RotateOnParseFailures <= 0 {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
+	}
+	return nil
+}
+
+func (c *Config) validateDecisionCardCadence() error {
+	values := []struct {
+		name  string
+		value time.Duration
+		def   time.Duration
+	}{
+		{"runtime.decision_card_first_reminder", c.Runtime.DecisionCardFirstReminder, 4 * time.Hour},
+		{"runtime.decision_card_urgency", c.Runtime.DecisionCardUrgency, 24 * time.Hour},
+		{"runtime.decision_card_reminder_interval", c.Runtime.DecisionCardReminderInterval, 24 * time.Hour},
+		{"runtime.decision_card_input_draft_ttl", c.Runtime.DecisionCardInputDraftTTL, 15 * time.Minute},
+	}
+	for i := range values {
+		if values[i].value < 0 {
+			return fmt.Errorf("%s must be > 0", values[i].name)
+		}
+		if values[i].value == 0 {
+			values[i].value = values[i].def
+		}
+	}
+	if values[1].value < values[0].value {
+		return errors.New("runtime.decision_card_urgency must not precede runtime.decision_card_first_reminder")
+	}
+	if values[3].value > values[2].value {
+		return errors.New("runtime.decision_card_input_draft_ttl must not exceed runtime.decision_card_reminder_interval")
 	}
 	return nil
 }

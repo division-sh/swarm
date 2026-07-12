@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -41,6 +42,9 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	if len(item.Context) == 0 {
 		item.Context = []byte("{}")
 	}
+	if err := validateGenericMailboxNotice(item.Type, item.Context); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(item.ReplyContextID) == "" {
 		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	}
@@ -51,6 +55,14 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 		return item.ID, nil
 	}
 	return "", unsupportedSchemaCapability("mailbox", caps.Mailbox)
+}
+
+func validateGenericMailboxNotice(itemType string, raw []byte) error {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return fmt.Errorf("mailbox context must be a JSON object: %w", err)
+	}
+	return decisioncard.ValidateNoticeShape(itemType, payload)
 }
 
 func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {

@@ -10729,7 +10729,8 @@
               "superseded",
               "input_draft_started",
               "input_draft_cancelled",
-              "input_draft_expired"
+              "input_draft_expired",
+              "input_draft_consumed"
             ],
             "type": "string"
           },

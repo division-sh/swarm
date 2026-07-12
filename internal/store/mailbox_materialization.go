@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
@@ -130,6 +131,13 @@ func normalizeMailboxWriteMaterialization(item runtimepipeline.MailboxWriteMater
 	}
 	if !json.Valid(item.Payload) {
 		return item, fmt.Errorf("mailbox_write payload must be valid JSON")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		return item, fmt.Errorf("mailbox_write payload must be a JSON object: %w", err)
+	}
+	if err := decisioncard.ValidateNoticeShape(item.ItemType, payload); err != nil {
+		return item, err
 	}
 	derivedScope := "global"
 	switch {

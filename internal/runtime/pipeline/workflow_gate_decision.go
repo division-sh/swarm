@@ -37,27 +37,28 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 	if !ok {
 		return nil, fmt.Errorf("card verdict %s is absent from the frozen outcome plan", card.Verdict)
 	}
-	if err := pc.routeWorkflowGateDecision(ctx, card, evt, outcome); err != nil {
-		return nil, err
+	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
+		return nil, fmt.Errorf("decision card bundle %s is unavailable under current bundle %s; frozen route remains committed", card.BundleHash, current)
 	}
-	emitted, err := pc.workflowGateOutcomeEvents(card, evt, outcome)
+	emitted, err := workflowGateOutcomeEvent(card, evt, outcome)
 	if err != nil {
 		return nil, err
 	}
-	return emitted, nil
+	if err := pc.routeWorkflowGateDecision(ctx, card, evt, outcome, emitted); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
-func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan) error {
+func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan, emitted *events.Event) error {
 	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if err := pc.workflowStore.RequireGateRouteAdmitted(txctx, card.RunID); err != nil {
 			return err
 		}
 		currentStage := ""
+		alreadyRouted := false
 		if err := pc.workflowStore.MutateE(txctx, card.EntityID, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
-			if currentStage != card.Stage {
-				return fmt.Errorf("decision card stage is no longer current")
-			}
 			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 			if err != nil {
 				return err
@@ -65,6 +66,16 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			activation, found, err := gateruntime.Load(carrier.StateBuckets, card.FlowID, card.DecisionID)
 			if err != nil {
 				return err
+			}
+			if found && activation.ActivationID == card.StageActivationID && activation.CardID == card.CardID && activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == evt.ID() {
+				if currentStage != strings.TrimSpace(outcome.AdvancesTo) {
+					return fmt.Errorf("routed decision card state does not match its frozen outcome")
+				}
+				alreadyRouted = true
+				return nil
+			}
+			if currentStage != card.Stage {
+				return fmt.Errorf("decision card stage is no longer current")
 			}
 			if !found || activation.ActivationID != card.StageActivationID || activation.CardID != card.CardID {
 				return fmt.Errorf("decision card activation is no longer authoritative")
@@ -84,6 +95,9 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		}); err != nil {
 			return err
 		}
+		if alreadyRouted {
+			return nil
+		}
 		pc.notifyTestEntityStateUpdated(card.EntityID, outcome.AdvancesTo)
 		if err := pc.reconcileWorkflowStageTimers(txctx, card.EntityID, currentStage, outcome.AdvancesTo, evt.ID()); err != nil {
 			return err
@@ -91,11 +105,23 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		if err := pc.applyWorkflowJoinIntents(txctx, card.EntityID, currentStage, outcome.AdvancesTo); err != nil {
 			return err
 		}
-		return pc.applyWorkflowGateIntents(txctx, card.EntityID, currentStage, outcome.AdvancesTo, evt.ID())
+		if err := pc.applyWorkflowGateIntents(txctx, card.EntityID, currentStage, outcome.AdvancesTo, evt.ID()); err != nil {
+			return err
+		}
+		if emitted != nil {
+			publisher, ok := pc.bus.(workflowGateMutationPublisher)
+			if !ok || publisher == nil {
+				return fmt.Errorf("transactional event publisher is required for gate outcome")
+			}
+			if err := publisher.PublishInMutation(txctx, *emitted); err != nil {
+				return fmt.Errorf("publish frozen gate outcome: %w", err)
+			}
+		}
+		return nil
 	})
 }
 
-func (pc *PipelineCoordinator) workflowGateOutcomeEvents(card decisioncard.Card, parent events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan) ([]events.Event, error) {
+func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan) (*events.Event, error) {
 	if outcome.Emit.Empty() || strings.TrimSpace(outcome.Emit.Event) == "" {
 		return nil, nil
 	}
@@ -112,12 +138,14 @@ func (pc *PipelineCoordinator) workflowGateOutcomeEvents(card decisioncard.Card,
 		return nil, err
 	}
 	eventType := strings.TrimSpace(outcome.Emit.Event)
-	if pc.SemanticSource() != nil {
-		eventType = pc.SemanticSource().ResolveFlowEventReference(card.FlowID, eventType)
-	}
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance)
-	produced := events.NewChildEvent(uuid.NewString(), events.EventType(eventType), runtimeWorkflowID, "", raw, parent.ChainDepth()+1, parent, envelope, time.Now().UTC())
-	return []events.Event{produced}, nil
+	identity := strings.Join([]string{card.CardID, card.DecisionEventID, card.Verdict, eventType}, "\x00")
+	createdAt := card.DecidedAt
+	if createdAt.IsZero() {
+		createdAt = parent.CreatedAt()
+	}
+	produced := events.NewChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), runtimeWorkflowID, "", raw, parent.ChainDepth()+1, parent, envelope, createdAt.UTC())
+	return &produced, nil
 }
 
 func decisionCardEmissionValue(expression runtimecontracts.ExpressionValue, fields map[string]any) (any, error) {
