@@ -1285,7 +1285,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	go serveHTTPServer("mcp", mcpServer, mcpListener)
 	defer shutdownHTTPServer("mcp", mcpServer)
 	defer shutdownHTTPServer("api", apiServer)
-	logBootWarnings(bootReport)
+	logBootWarnings(bootReport, opts.Output)
 	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
@@ -1305,7 +1305,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, apiListener.Addr(), mcpListener.Addr())
-	logReadyStandingIngress(runtimeContextManager, apiListener.Addr())
+	logReadyStandingIngress(runtimeContextManager, apiListener.Addr(), opts.Output)
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -1346,7 +1346,7 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 	return planned, nil
 }
 
-func logReadyStandingIngress(manager *runtime.RuntimeContextManager, apiAddr net.Addr) {
+func logReadyStandingIngress(manager *runtime.RuntimeContextManager, apiAddr net.Addr, out io.Writer) {
 	if manager == nil || apiAddr == nil {
 		return
 	}
@@ -1354,7 +1354,11 @@ func logReadyStandingIngress(manager *runtime.RuntimeContextManager, apiAddr net
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
 			continue
 		}
-		log.Printf("standing ingress admitted: api_base_url=http://%s %s", apiAddr.String(), packs.RenderSubject(subject, false))
+		message := fmt.Sprintf("standing ingress admitted: api_base_url=http://%s %s", apiAddr.String(), packs.RenderSubject(subject, false))
+		log.Print(message)
+		if out != nil {
+			fmt.Fprintln(out, message)
+		}
 	}
 }
 
@@ -1565,7 +1569,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		return cliExitValidation
 	} else {
 		source := semanticview.Wrap(bundle)
-		validationOpts, err := verifyWorkflowContractValidationOptions(repo, source)
+		validationOpts, err := verifyWorkflowContractValidationOptions(repo, opts.configPath, source)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: configure validation: %v\n", err)
@@ -2219,7 +2223,7 @@ func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Sour
 	return runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 }
 
-func verifyWorkflowContractValidationOptions(repo string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
+func verifyWorkflowContractValidationOptions(repo, configPath string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
@@ -2230,7 +2234,7 @@ func verifyWorkflowContractValidationOptions(repo string, source semanticview.So
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
 	opts.ManagedCredentials = managedCredentialStore
-	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
+	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
 	}
@@ -2241,23 +2245,12 @@ func verifyWorkflowContractValidationOptions(repo string, source semanticview.So
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
 	opts.ModelAliases = configResult.Config.LLM.Models
-	providerPacks, err := loadVerifyProviderTriggerPacks(repo, configResult, sourceHasStandingIngress(source))
+	providerPacks, err := loadConfiguredProviderTriggerPacks(repo, configResult)
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
 	}
 	opts.ProviderTriggerCatalog = providerPacks.Catalog
 	return opts, nil
-}
-
-func sourceHasStandingIngress(source semanticview.Source) bool {
-	for _, scope := range semanticview.ProjectScopes(source) {
-		for _, ref := range scope.Manifest.Flows {
-			if ref.HasStandingActivation() && ref.Ingress != nil {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func writeVerifyFindings(out io.Writer, findings []runtimebootverify.Finding, blocking bool) {
@@ -2925,7 +2918,7 @@ func serveBootBundleLoadDetail(fingerprint string, source semanticview.Source) s
 	return fmt.Sprintf("%s, %s", fingerprint, serveBootRegistryDetail(source))
 }
 
-func logBootWarnings(report runtimebootverify.Report) {
+func logBootWarnings(report runtimebootverify.Report, out io.Writer) {
 	warningCounts := make(map[string]int, len(report.Findings))
 	for _, finding := range report.Warnings() {
 		warningCounts[strings.TrimSpace(finding.CheckID)]++
@@ -2938,6 +2931,9 @@ func logBootWarnings(report runtimebootverify.Report) {
 	}
 	for _, finding := range report.Warnings() {
 		slog.Warn("swarm boot validation warning", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
+		if out != nil {
+			fmt.Fprintln(out, runtimebootverify.FormatSurfaceFinding(finding, false))
+		}
 	}
 }
 

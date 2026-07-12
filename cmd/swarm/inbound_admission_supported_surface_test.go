@@ -36,23 +36,52 @@ func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testin
 	}
 }
 
-func TestVerifyProjectsInstalledTriggersWithoutStandingIngress(t *testing.T) {
+func TestVerifyRejectsAmbientCheckoutProviderTriggerInventory(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
+	opts.platformSpecPath = filepath.Join(repoRoot(), defaultPlatformSpecPath)
+	var errors []string
+	for _, repo := range []string{repoRoot(), t.TempDir()} {
+		var out, errOut bytes.Buffer
+		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code == 0 {
+			t.Fatalf("verify unexpectedly admitted ambient inventory for repo %q:\n%s", repo, out.String())
+		}
+		if out.Len() != 0 {
+			t.Fatalf("verify repo %q projected capabilities without configured inventory:\n%s", repo, out.String())
+		}
+		if !strings.Contains(errOut.String(), "provider_triggers.packs.platform_dirs is required") {
+			t.Fatalf("verify repo %q error omitted configured inventory requirement:\n%s", repo, errOut.String())
+		}
+		errors = append(errors, errOut.String())
+	}
+	if errors[0] != errors[1] {
+		t.Fatalf("identical configuration changed meaning by checkout presence:\ncheckout: %s\nempty repo: %s", errors[0], errors[1])
+	}
+}
+
+func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
+	root := writeVerifyLintEvidenceFixture(t)
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.platformSpecPath = filepath.Join(repoRoot(), defaultPlatformSpecPath)
+	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"), platformDirs, externalDirs)
+	emptyRepo := t.TempDir()
 	var textOut, textErr bytes.Buffer
-	if code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &textOut, &textErr); code != 0 {
+	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &textOut, &textErr); code != 0 {
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
+	for _, provider := range []string{"acme_public", "github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
 		if !strings.Contains(textOut.String(), "provider trigger pack provider."+provider+" AVAILABLE") {
 			t.Fatalf("verify text omitted installed %s trigger:\n%s", provider, textOut.String())
 		}
 	}
 	opts.output.asJSON = true
 	var jsonOut, jsonErr bytes.Buffer
-	if code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &jsonOut, &jsonErr); code != 0 {
+	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &jsonOut, &jsonErr); code != 0 {
 		t.Fatalf("verify JSON exit=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 	}
 	result := decodeOutputJSON[verifyCommandResult](t, jsonOut.String())
@@ -62,8 +91,81 @@ func TestVerifyProjectsInstalledTriggersWithoutStandingIngress(t *testing.T) {
 			installed++
 		}
 	}
-	if installed != 8 {
-		t.Fatalf("verify installed trigger subjects=%d, want 8: %#v", installed, result.CapabilitySubjects)
+	if installed != 9 {
+		t.Fatalf("verify installed trigger subjects=%d, want 9: %#v", installed, result.CapabilitySubjects)
+	}
+}
+
+func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = writeInboundAdmissionPolicyMatrixFixture(t)
+	opts.platformSpecPath = filepath.Join(repoRoot(), defaultPlatformSpecPath)
+	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"), platformDirs, externalDirs)
+	emptyRepo := t.TempDir()
+
+	var textOut, textErr bytes.Buffer
+	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &textOut, &textErr); code != 0 {
+		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
+	}
+	if got := strings.Count(textErr.String(), "inbound_unsigned_webhook"); got != 1 {
+		t.Fatalf("verify text unsigned warning count=%d, want 1:\n%s", got, textErr.String())
+	}
+	for _, want := range []string{`provider "partner_open" accepts unsigned webhooks`, "add admission.acknowledge: unsigned_webhook"} {
+		if !strings.Contains(textErr.String(), want) {
+			t.Fatalf("verify text warning omitted %q:\n%s", want, textErr.String())
+		}
+	}
+	if strings.Contains(textErr.String(), `provider "partner_ack" accepts unsigned webhooks`) {
+		t.Fatalf("verify text did not suppress acknowledged warning:\n%s", textErr.String())
+	}
+
+	opts.output.asJSON = true
+	var jsonOut, jsonErr bytes.Buffer
+	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &jsonOut, &jsonErr); code != 0 {
+		t.Fatalf("verify JSON exit=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
+	}
+	if jsonErr.Len() != 0 {
+		t.Fatalf("verify JSON stderr=%s, want empty", jsonErr.String())
+	}
+	result := decodeOutputJSON[verifyCommandResult](t, jsonOut.String())
+	unsignedWarnings := 0
+	for _, warning := range result.Warnings {
+		if warning.CheckID != "inbound_unsigned_webhook" {
+			continue
+		}
+		unsignedWarnings++
+		if !strings.Contains(warning.Message, `provider "partner_open" accepts unsigned webhooks`) || warning.Remediation != "add admission.acknowledge: unsigned_webhook to confirm this intentional public endpoint" {
+			t.Fatalf("verify JSON unsigned warning=%#v", warning)
+		}
+	}
+	if unsignedWarnings != 1 {
+		t.Fatalf("verify JSON unsigned warnings=%d, want 1: %#v", unsignedWarnings, result.Warnings)
+	}
+
+	readback := map[string]packs.Subject{}
+	installed, effective := 0, 0
+	for _, subject := range result.CapabilitySubjects {
+		switch subject.Applicability {
+		case "installed":
+			installed++
+		case "effective":
+			effective++
+			readback[subject.Provider] = subject
+		}
+	}
+	if installed != 9 || effective != 6 {
+		t.Fatalf("verify subject multiplicity installed=%d effective=%d", installed, effective)
+	}
+	for _, provider := range []string{"partner_open", "partner_ack"} {
+		subject, ok := readback[provider]
+		if !ok || subject.TriggerAdmission == nil || subject.TriggerAdmission.PolicySource != "raw_declaration" || subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" {
+			t.Fatalf("verify %s readback=%#v", provider, subject)
+		}
+		if rendered := packs.RenderSubject(subject, false); !strings.Contains(textOut.String(), rendered) {
+			t.Fatalf("verify text/JSON readback diverged for %s:\nwant %s\ntext:\n%s", provider, rendered, textOut.String())
+		}
 	}
 }
 
@@ -274,6 +376,31 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
+	serveOutput := process.outputString()
+	var unsignedWarningLine string
+	for _, line := range strings.Split(serveOutput, "\n") {
+		if strings.Contains(line, "[WARN] inbound_unsigned_webhook") {
+			if unsignedWarningLine != "" {
+				t.Fatalf("serve emitted duplicate unsigned warning:\n%s", serveOutput)
+			}
+			unsignedWarningLine = line
+		}
+	}
+	if unsignedWarningLine == "" || !strings.Contains(unsignedWarningLine, `provider "partner_open" accepts unsigned webhooks`) || strings.Contains(unsignedWarningLine, "partner_ack") || !strings.Contains(serveOutput, "remediation: add admission.acknowledge: unsigned_webhook") {
+		t.Fatalf("serve unsigned warning line=%q\noutput:\n%s", unsignedWarningLine, serveOutput)
+	}
+	for _, provider := range []string{"partner_open", "partner_ack"} {
+		found := false
+		for _, line := range strings.Split(serveOutput, "\n") {
+			if strings.Contains(line, "standing ingress admitted:") && strings.Contains(line, ":matrix:"+provider+" ") && strings.Contains(line, "request_authentication=UNAUTHENTICATED") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("serve readback omitted %s UNAUTHENTICATED truth:\n%s", provider, serveOutput)
+		}
+	}
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 
 	tests := []struct {

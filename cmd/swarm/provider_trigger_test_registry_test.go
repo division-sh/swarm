@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -23,11 +24,11 @@ func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot 
 
 func testProviderTriggerPackDirs(t *testing.T) []string {
 	t.Helper()
-	root := filepath.Join("..", "..", "packs", "provider-triggers")
-	root, err := filepath.Abs(root)
-	if err != nil {
-		t.Fatalf("resolve provider trigger pack root: %v", err)
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve provider trigger test fixture source path")
 	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "packs", "provider-triggers"))
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatalf("read provider trigger pack root: %v", err)
@@ -61,4 +62,11 @@ func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) s
 		lines = append(lines, fmt.Sprintf("      - %q", dir))
 	}
 	return strings.TrimRight(configText, "\n") + "\n" + strings.Join(lines, "\n") + "\n"
+}
+
+func writeTestVerifyRuntimeConfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "verify-runtime.yaml")
+	writeRuntimeConfigText(t, path, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: anthropic\n"))
+	return path
 }
