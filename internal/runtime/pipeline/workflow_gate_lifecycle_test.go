@@ -13,6 +13,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -297,6 +298,14 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", json.RawMessage(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.DecidedAt)
 			if _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err == nil {
 				t.Fatal("decision routed under an unavailable bundle pin")
+			} else {
+				if !IsPipelineReceiptDeferred(err) {
+					t.Fatalf("bundle-pin error = %T %v, want recoverable pipeline deferral", err, err)
+				}
+				failure := runtimefailures.Normalize(err, runtimeWorkflowID, "route_gate_decision")
+				if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "decision_card_bundle_unavailable" || !failure.Retryable {
+					t.Fatalf("bundle-pin failure = %#v, want retryable dependency-unavailable classification", failure)
+				}
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 		})

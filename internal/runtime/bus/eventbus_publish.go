@@ -30,7 +30,7 @@ func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
 	if !persisted {
 		return false
 	}
-	return !errors.Is(publishErr, errAuthoritativeDeliveryIncomplete)
+	return !errors.Is(publishErr, errAuthoritativeDeliveryIncomplete) && !runtimepipeline.IsPipelineReceiptDeferred(publishErr)
 }
 
 func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, *runtimefailures.Envelope) {
@@ -852,6 +852,9 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 }
 
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
+	if !shouldPersistPipelineReceipt(true, publishErr) {
+		return
+	}
 	status, failure := pipelineReceiptStatus(ctx, publishErr)
 	_ = eb.markPipelineReceipt(ctx, evt.ID(), status, failure)
 }
@@ -897,6 +900,9 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	for _, it := range interceptors {
 		pass, out, err := it.Intercept(ctx, evt)
 		if err != nil {
+			if runtimepipeline.IsPipelineReceiptDeferred(err) {
+				return true, nil, err
+			}
 			return true, nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
 				"event_id": evt.ID(), "event_type": string(evt.Type()),
 			}, err)
@@ -1615,6 +1621,12 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 // persisted agent manifest plus the authoritative committed replay scope.
 func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
 	return eb.publishPersistedRecipients(ctx, evt, recipients, false)
+}
+
+// RecoverPersistedPipeline replays the complete pipeline for an event whose
+// terminal pipeline receipt was never written.
+func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, evt events.Event, recipients []string) error {
+	return eb.publishPersistedRecipients(ctx, evt, recipients, true)
 }
 
 func (eb *EventBus) ReleasePendingPersistedDeliveriesForEvent(ctx context.Context, evt events.Event) error {

@@ -27,6 +27,10 @@ type Publisher interface {
 	PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error
 }
 
+type persistedPipelineRecoveryPublisher interface {
+	RecoverPersistedPipeline(ctx context.Context, evt events.Event, recipients []string) error
+}
+
 type recoveryRuntimeLogger interface {
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
 }
@@ -231,9 +235,19 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 				}
 			}
 		}
-		if err := r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients); err != nil {
+		var replayErr error
+		if recoveryBus, ok := r.bus.(persistedPipelineRecoveryPublisher); ok && recoveryBus != nil {
+			replayErr = recoveryBus.RecoverPersistedPipeline(ctx, evt, persistedRecipients)
+		} else {
+			replayErr = r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients)
+		}
+		if replayErr != nil {
+			if IsPipelineReceiptDeferred(replayErr) {
+				_ = lease.Release(ctx)
+				continue
+			}
 			if firstErr == nil {
-				firstErr = fmt.Errorf("replay event %s: %w", evt.ID(), err)
+				firstErr = fmt.Errorf("replay event %s: %w", evt.ID(), replayErr)
 			}
 			_ = lease.Release(ctx)
 			continue

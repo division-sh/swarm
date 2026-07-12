@@ -21972,7 +21972,12 @@ api_specification:
         The routed activation, stage/timer/join/gate mutations, deterministic
         authored outcome event, and its delivery manifest commit in one mutation;
         acknowledgment-loss retries converge on the same event identity. An
-        unavailable pin leaves decision_committed for later recovery. A competing
+        unavailable pin is classified as retryable
+        platform.dependency_unavailable/decision_card_bundle_unavailable,
+        leaves no terminal pipeline receipt, and leaves decision_committed for
+        startup or periodic persisted-pipeline recovery. Recovery replays the
+        frozen route and converges on one routed activation, authored event,
+        delivery manifest, and processed receipt. A competing
         stage exit may supersede only an open card; exactly one CAS outcome wins.
         Paused dispatch preserves decision_committed and continuation resumes
         routing after continue.
