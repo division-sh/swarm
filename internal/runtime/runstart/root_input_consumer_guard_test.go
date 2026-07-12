@@ -1,10 +1,12 @@
 package runstart
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -13,18 +15,89 @@ import (
 	"testing"
 )
 
+var auditedRootInputConsumers = []string{
+	"internal/apiv1/operator_event_publish.go:validateEventPublication",
+	"internal/builder/handler_rpc.go:dispatchRPC",
+}
+
+var rootInputProjectionRequirements = map[string]string{
+	"internal/apiv1/operator_event_publish.go:validateEventPublication":  "rootInputApplicationError",
+	"internal/apiv1/operator_event_publish.go:rootInputApplicationError": "AsRootInputValidationError",
+	"internal/builder/handler_rpc.go:dispatchRPC":                        "AsRootInputValidationError",
+}
+
 func TestValidateInputEventsConsumersAreExhaustivelyRegistered(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve current test file")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", ".."))
+	consumerCalls, err := scanRootInputConsumers(repoRoot)
+	if err != nil {
+		t.Fatalf("scan ValidateInputEvents consumers: %v", err)
+	}
+	if err := checkRootInputConsumerAudit(consumerCalls); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateInputEventsConsumerGuardRejectsCommandCaller(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeGuardFixture := func(relative, source string) {
+		t.Helper()
+		path := filepath.Join(repoRoot, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create fixture directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+	}
+	writeGuardFixture("internal/apiv1/operator_event_publish.go", `package apiv1
+func validateEventPublication() {
+	runstart.ValidateInputEvents()
+	rootInputApplicationError()
+}
+func rootInputApplicationError() { runstart.AsRootInputValidationError() }
+`)
+	writeGuardFixture("internal/builder/handler_rpc.go", `package builder
+func dispatchRPC() {
+	runstart.ValidateInputEvents()
+	runstart.AsRootInputValidationError()
+}
+`)
+	writeGuardFixture("cmd/swarm/synthetic.go", `package main
+func syntheticCommandConsumer() { runstart.ValidateInputEvents() }
+`)
+
+	consumerCalls, err := scanRootInputConsumers(repoRoot)
+	if err != nil {
+		t.Fatalf("scan fixture consumers: %v", err)
+	}
+	err = checkRootInputConsumerAudit(consumerCalls)
+	if err == nil || !strings.Contains(err.Error(), "cmd/swarm/synthetic.go:syntheticCommandConsumer") {
+		t.Fatalf("guard error = %v, want unregistered command consumer", err)
+	}
+}
+
+func scanRootInputConsumers(repoRoot string) (map[string]map[string]bool, error) {
 	consumerCalls := make(map[string]map[string]bool)
-	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	excludedDirectories := map[string]bool{
+		".git":     true,
+		"testdata": true,
+		"vendor":   true,
+	}
+	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if entry.IsDir() {
+			if path != repoRoot && excludedDirectories[entry.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
@@ -62,8 +135,12 @@ func TestValidateInputEventsConsumersAreExhaustivelyRegistered(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("scan ValidateInputEvents consumers: %v", err)
+		return nil, err
 	}
+	return consumerCalls, nil
+}
+
+func checkRootInputConsumerAudit(consumerCalls map[string]map[string]bool) error {
 	consumers := make([]string, 0, len(consumerCalls))
 	for consumer := range consumerCalls {
 		if consumer != "internal/apiv1/operator_event_publish.go:rootInputApplicationError" {
@@ -71,21 +148,13 @@ func TestValidateInputEventsConsumersAreExhaustivelyRegistered(t *testing.T) {
 		}
 	}
 	sort.Strings(consumers)
-	want := []string{
-		"internal/apiv1/operator_event_publish.go:validateEventPublication",
-		"internal/builder/handler_rpc.go:dispatchRPC",
+	if !reflect.DeepEqual(consumers, auditedRootInputConsumers) {
+		return fmt.Errorf("ValidateInputEvents consumers = %#v, want audited registry %#v; classify and preserve typed root-input facts before adding a consumer", consumers, auditedRootInputConsumers)
 	}
-	if !reflect.DeepEqual(consumers, want) {
-		t.Fatalf("ValidateInputEvents consumers = %#v, want audited registry %#v; classify and preserve typed root-input facts before adding a consumer", consumers, want)
-	}
-	projectionRequirements := map[string]string{
-		"internal/apiv1/operator_event_publish.go:validateEventPublication":  "rootInputApplicationError",
-		"internal/apiv1/operator_event_publish.go:rootInputApplicationError": "AsRootInputValidationError",
-		"internal/builder/handler_rpc.go:dispatchRPC":                        "AsRootInputValidationError",
-	}
-	for consumer, requiredCall := range projectionRequirements {
+	for consumer, requiredCall := range rootInputProjectionRequirements {
 		if !consumerCalls[consumer][requiredCall] {
-			t.Errorf("%s must call %s so typed root-input facts cannot be flattened", consumer, requiredCall)
+			return fmt.Errorf("%s must call %s so typed root-input facts cannot be flattened", consumer, requiredCall)
 		}
 	}
+	return nil
 }

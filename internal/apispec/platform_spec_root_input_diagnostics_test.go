@@ -15,6 +15,8 @@ func TestPlatformSpecOwnsRootInputRejectionDiagnostics(t *testing.T) {
 		"pins.inputs.events",
 		"none",
 		"MUST NOT reload contracts",
+		"non-canonical",
+		"reason-inconsistent",
 	} {
 		assertScalarContains(t, rendering, want)
 	}

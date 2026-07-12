@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -167,12 +166,18 @@ func cliRootInputDiagnosticParts(err error) (cliRootInputDiagnostic, bool) {
 	if data.Details.DeclaredEvents == nil || data.Details.RoutableEvents == nil {
 		return cliRootInputDiagnostic{}, false
 	}
+	declaredEvents := *data.Details.DeclaredEvents
+	routableEvents := *data.Details.RoutableEvents
+	if !validCanonicalCLIStringDomain(declaredEvents) || !validCanonicalCLIStringDomain(routableEvents) ||
+		!validCLIRootInputFacts(eventName, reason, declaredEvents, routableEvents) {
+		return cliRootInputDiagnostic{}, false
+	}
 	return cliRootInputDiagnostic{
 		leaf:           rpcErr,
 		eventName:      eventName,
 		reason:         reason,
-		declaredEvents: normalizeCLIStringDomain(*data.Details.DeclaredEvents),
-		routableEvents: normalizeCLIStringDomain(*data.Details.RoutableEvents),
+		declaredEvents: append([]string{}, declaredEvents...),
+		routableEvents: append([]string{}, routableEvents...),
 	}, true
 }
 
@@ -193,26 +198,41 @@ func formatCLIRootInputDiagnostic(err error, diagnostic cliRootInputDiagnostic) 
 	}, "\n")
 }
 
-func normalizeCLIStringDomain(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
+func validCanonicalCLIStringDomain(values []string) bool {
+	for i, value := range values {
+		if value == "" || value != strings.TrimSpace(value) {
+			return false
 		}
-		if _, ok := seen[value]; ok {
-			continue
+		if i > 0 && values[i-1] >= value {
+			return false
 		}
-		seen[value] = struct{}{}
-		out = append(out, value)
 	}
-	sort.Strings(out)
-	return out
+	return true
+}
+
+func validCLIRootInputFacts(eventName string, reason runtimerunstart.RootInputValidationReason, declaredEvents, routableEvents []string) bool {
+	declared := make(map[string]bool, len(declaredEvents))
+	for _, event := range declaredEvents {
+		declared[event] = true
+	}
+	routable := make(map[string]bool, len(routableEvents))
+	for _, event := range routableEvents {
+		if !declared[event] {
+			return false
+		}
+		routable[event] = true
+	}
+	switch reason {
+	case runtimerunstart.RootInputNotDeclared:
+		return !declared[eventName]
+	case runtimerunstart.RootInputNotRoutable:
+		return declared[eventName] && !routable[eventName]
+	default:
+		return false
+	}
 }
 
 func formatCLIStringDomain(values []string) string {
-	values = normalizeCLIStringDomain(values)
 	if len(values) == 0 {
 		return "none"
 	}
