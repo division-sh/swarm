@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/slack
+        receive_https_route: /webhooks/{alias}/slack
         verify_secret: webhook_signing.slack
         emit_events:
             - inbound.slack.{event_type}

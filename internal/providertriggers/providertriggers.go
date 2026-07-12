@@ -387,7 +387,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 	}
 	return packs.Capabilities{
 		Can: packs.CanCapabilities{
-			ReceiveHTTPSRoute:    "/webhooks/{entity}/" + provider,
+			ReceiveHTTPSRoute:    "/webhooks/{alias}/" + provider,
 			VerifySecret:         verifySecret,
 			EmitEvents:           []string{eventName},
 			PersistDedupeMarkers: true,

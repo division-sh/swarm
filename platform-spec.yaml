@@ -7658,7 +7658,7 @@ tool_model:
       acknowledgement timing, and redacted readback semantics explicit for configured providers.
     scope:
     - manual/declarative webhook registration for configured provider triggers
-    - served `/webhooks/{entity}/{provider}` route mounted on the supported API listener
+    - served `/webhooks/{alias}/{provider}` route mounted on the supported API listener, where alias resolves one declared standing ingress target
     - selected runtime store wiring through `runtime.Stores.InboundStore`
     - verified first-party provider-trigger pack loading through the same envelope path future external packs must use
     - provider-specific signature policy and signing-secret lookup
@@ -7672,12 +7672,13 @@ tool_model:
     - broad provider-catalog expansion outside explicitly selected provider children
     - DB connectors, AWS SigV4/AssumeRole, non-HTTP, or native connector auth
     existing_gateway_owner: >
-      `internal/runtime/inbound.go` remains the generic HTTP ingress executor for `/webhooks/{entity}/{provider}`. It
-      consumes `runtime_ingress.queueable_ingress.inbound.webhook`, delegates configured-provider interpretation to the
+      `cmd/swarm.runtimeProcessInboundHandler` owns the supported `/webhooks/{alias}/{provider}` route and resolves alias plus
+      provider through the loaded `RuntimeContextManager` standing-target registry. `internal/runtime/inbound.go` remains the
+      generic HTTP ingress executor only after that exact target is resolved. It consumes
+      `runtime_ingress.queueable_ingress.inbound.webhook`, delegates configured-provider interpretation to the
       provider-trigger manifest interpreter, persists the inbound dedupe marker before publish for delivery callbacks, and
       publishes the normalized root ingress event returned by the manifest interpreter. Provider manifests may also return
-      an authenticated response-only result when the provider protocol requires a challenge response that is not a
-      delivery.
+      an authenticated response-only result when the provider protocol requires a challenge response that is not a delivery.
     manifest_interpreter_owner: >
       `internal/providertriggers` is the configured-provider manifest interpreter and canonical owner for first-class
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
@@ -7808,7 +7809,7 @@ tool_model:
       - provider setup/teardown, OAuth, connector tools, or provider action calls
       - arbitrary code/WASM before provider-trigger admission
     manifest_vocabulary:
-      provider: normalized provider token matched from `/webhooks/{entity}/{provider}`
+      provider: normalized provider token matched from `/webhooks/{alias}/{provider}` after alias resolves exactly one loaded standing ingress target
       payload_object_required: fail closed when the decoded request payload is not a JSON object
       payload_source: >
         Source for the provider payload embedded in the published normalized event. The default `payload` uses the decoded
@@ -7853,10 +7854,14 @@ tool_model:
         Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
         only when they generalize a provider family; recipe count should grow sublinearly as provider coverage expands.
     secret_binding: >
-      The first-slice signing-secret binding is `flow_instances.config.secrets.webhook_signing.<provider>`, where
-      `<provider>` is the normalized provider token. Secret values are never returned by webhook responses or readback
-      surfaces. Production deployments may replace the backing config storage with an external vault reference while
-      preserving the same semantic binding.
+      `package.yaml flows[].ingress.providers[].signing_secret` is the canonical target-scoped credential-reference owner.
+      The value names one deployment credential-store entry; package and flow-instance data never carry the secret value.
+      `webhook_signing.<provider>` is the built-in pack requirement naming convention, not an inferred default or override of
+      an explicitly declared signing_secret reference. Runtime admission resolves the selected target's declared reference
+      through the deployment credential store and fails closed before signature verification, dedupe persistence, or publish
+      when it is unbound. Flow-instance config and provider-specific runtime readers are non-authoritative. Secret values are
+      never returned by webhook responses or readback surfaces; an external vault may back the deployment credential store
+      without changing this semantic boundary.
     configured_provider_manifests:
     - provider: github
       signature: >

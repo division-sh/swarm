@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/typeform
+        receive_https_route: /webhooks/{alias}/typeform
         verify_secret: webhook_signing.typeform
         emit_events:
             - inbound.typeform

@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/telegram
+        receive_https_route: /webhooks/{alias}/telegram
         verify_secret: webhook_signing.telegram
         emit_events:
             - inbound.telegram
