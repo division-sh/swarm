@@ -954,8 +954,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	primaryWorkspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, source)
 	if err != nil {
-		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
+		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 			writeWorkspaceBackendDecisionFailure(out, "serve", err)
+			return true
 		})
 		return 3
 	}
@@ -963,8 +964,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
-			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) {
+			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {
 				writeLocalPreflightText(out, preflight)
+				return true
 			})
 			return 3
 		}
@@ -1090,8 +1092,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		workspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
-			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
+			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 				writeWorkspaceBackendDecisionFailure(out, "serve", err)
+				return true
 			})
 			return 3
 		}
@@ -1122,8 +1125,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			RequireBundleScopeName: len(loadedBundles) > 1,
 		})
 		if err != nil {
-			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
-				writeWorkspacePrerequisiteFailure(out, "serve", err)
+			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
+				return writeWorkspacePrerequisiteFailure(out, "serve", err)
 			})
 			return 1
 		}

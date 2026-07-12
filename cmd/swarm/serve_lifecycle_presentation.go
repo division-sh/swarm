@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"sort"
@@ -135,7 +136,7 @@ func (p *serveLifecyclePresenter) fail(step int, name string, err error) {
 	p.failWithDiagnostic(step, name, err, nil)
 }
 
-func (p *serveLifecyclePresenter) failWithDiagnostic(step int, name string, err error, render func(io.Writer)) {
+func (p *serveLifecyclePresenter) failWithDiagnostic(step int, name string, err error, render func(io.Writer) bool) {
 	if p == nil || err == nil {
 		return
 	}
@@ -158,9 +159,12 @@ func (p *serveLifecyclePresenter) failWithDiagnostic(step int, name string, err 
 		p.writeBootEventLocked(event)
 	}
 	if render != nil {
-		p.writeFailureContextLocked()
-		render(p.out)
-		return
+		var rendered bytes.Buffer
+		if render(&rendered) {
+			p.writeFailureContextLocked()
+			_, _ = io.Copy(p.out, &rendered)
+			return
+		}
 	}
 	if !p.verbose {
 		p.writeFailureLocked(event.Name, event.Detail)
