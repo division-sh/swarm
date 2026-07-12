@@ -2868,7 +2868,9 @@ handler_specification:
       sub_fields:
         items_from: string — source collection at exactly one declared top-level payload.* or entity.* field.
           Nested paths are unsupported in this slice and fail closed until the schema owner can prove the complete
-          terminal path is itself a collection.
+          terminal path is itself a collection. A missing event catalog entry, primary entity contract, or declared
+          source field is a hard load error even when identity is explicitly authored; identity never authorizes an
+          unresolved collection source.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
           `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
         identity: optional expression over the item alias that declares the stable per-item key. For a statically

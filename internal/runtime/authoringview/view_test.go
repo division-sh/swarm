@@ -281,6 +281,16 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 
 func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"order.accepted": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"line_items": {Type: "[LineItem]"},
+				}},
+			},
+		},
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"LineItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+		}},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{
 				Declared: true,
@@ -309,6 +319,13 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 				},
 			},
 		},
+	}
+	effective, err := bundle.ResolveFanOutEffectiveSemantics("", "order.accepted", *bundle.Nodes["dispatcher"].EventHandlers["order.accepted"].FanOut)
+	if err != nil {
+		t.Fatalf("ResolveFanOutEffectiveSemantics: %v", err)
+	}
+	if effective.Identity != "line_item.id" {
+		t.Fatalf("effective fan-out identity = %q, want line_item.id", effective.Identity)
 	}
 
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})

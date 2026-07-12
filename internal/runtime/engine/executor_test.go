@@ -33,6 +33,18 @@ func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 }
 
+func fanOutPayloadSource(eventTypes ...string) semanticview.Source {
+	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventTypes))
+	for _, eventType := range eventTypes {
+		events[eventType] = runtimecontracts.EventCatalogEntry{
+			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"items": {Type: "[json]"},
+			}},
+		}
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Events: events})
+}
+
 func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runtimecontracts.PolicyModule) {
 	t.Helper()
 	root := t.TempDir()
@@ -293,6 +305,11 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffolded": {},
+			"repo_scaffold.repo_scaffolded": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"items": {Type: "[json]"},
+				}},
+			},
 		},
 	}
 	repo := runtimecontracts.FlowContractView{
@@ -304,7 +321,11 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"repo_scaffold.repo_scaffolded": {},
+			"repo_scaffold.repo_scaffolded": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"items": {Type: "[json]"},
+				}},
+			},
 		},
 	}
 	operating := runtimecontracts.FlowContractView{
@@ -339,6 +360,13 @@ func sourceWithPolicy(values map[string]any) semanticview.Source {
 
 func stubSourceWithRootEntityContract() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"items": {Type: "[json]"},
+				}},
+			},
+		},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"Analysis": {
@@ -4119,7 +4147,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 
 func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        fanOutPayloadSource("task.completed"),
 		StateRepo:     stubStateRepo{},
 		TxRunner:      stubRunner{},
 		Locker:        stubLocker{},
@@ -4181,7 +4209,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 
 func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        fanOutPayloadSource("task.completed"),
 		StateRepo:     stubStateRepo{},
 		TxRunner:      stubRunner{},
 		Locker:        stubLocker{},
@@ -4305,7 +4333,7 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 
 	newSpec := func(maxItems int) *runtimecontracts.FanOutSpec {
 		return &runtimecontracts.FanOutSpec{
-			ItemsFrom:   "entity.items",
+			ItemsFrom:   "payload.items",
 			As:          "line_item",
 			Identity:    "line_item.id",
 			MaxItems:    maxItems,
@@ -4319,20 +4347,16 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 			},
 		}
 	}
+	payloadItems := json.RawMessage(`{"items":[{"id":"item-a"},{"id":"item-b"}]}`)
 	state := func() StateSnapshot {
-		return testStateSnapshot("ready", map[string]any{
-			"items": []any{
-				map[string]any{"id": "item-a"},
-				map[string]any{"id": "item-b"},
-			},
-		}, nil, map[string]map[string]any{})
+		return testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{})
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			transition := &recordingTransitionValidator{}
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:              stubSource(),
+				Source:              fanOutPayloadSource("batch.ready"),
 				StateRepo:           stubStateRepo{},
 				TxRunner:            stubRunner{},
 				Locker:              stubLocker{},
@@ -4346,7 +4370,14 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 			}
 			payload := tc.payload
 			if len(payload) == 0 {
-				payload = json.RawMessage(`{}`)
+				payload = payloadItems
+			} else {
+				var timerPayload map[string]any
+				if err := json.Unmarshal(payload, &timerPayload); err != nil {
+					t.Fatalf("decode timer payload: %v", err)
+				}
+				timerPayload["items"] = []any{map[string]any{"id": "item-a"}, map[string]any{"id": "item-b"}}
+				payload, _ = json.Marshal(timerPayload)
 			}
 			result, err := exec.Execute(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
@@ -5486,7 +5517,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 
 func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
+		Source:     fanOutPayloadSource("task.completed"),
 		StateRepo:  stubStateRepo{},
 		TxRunner:   stubRunner{},
 		Locker:     stubLocker{},
@@ -5564,7 +5595,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 
 func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        fanOutPayloadSource("batch.submitted"),
 		StateRepo:     stubStateRepo{},
 		TxRunner:      stubRunner{},
 		Locker:        stubLocker{},

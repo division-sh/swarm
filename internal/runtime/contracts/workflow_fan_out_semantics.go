@@ -70,16 +70,13 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(flowID, eventTy
 		return FanOutEffectiveSemantics{}, err
 	}
 
-	collectionType, found, err := b.resolveFanOutCollectionType(flowID, eventType, itemsPath)
+	collectionType, err := b.resolveFanOutCollectionType(flowID, eventType, itemsPath)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
 	}
-	itemType := ResolvedCatalogType{Kind: CatalogTypeDynamic}
-	if found {
-		itemType, err = resolveFanOutCollectionItemType(collectionType)
-		if err != nil {
-			return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q %w", strings.TrimSpace(spec.ItemsFrom), err)
-		}
+	itemType, err := resolveFanOutCollectionItemType(collectionType)
+	if err != nil {
+		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q %w", strings.TrimSpace(spec.ItemsFrom), err)
 	}
 
 	identity := strings.TrimSpace(spec.Identity)
@@ -110,37 +107,39 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(flowID, eventTy
 	}, nil
 }
 
-func (b *WorkflowContractBundle) resolveFanOutCollectionType(flowID, eventType string, path paths.Path) (CatalogTypeReference, bool, error) {
+func (b *WorkflowContractBundle) resolveFanOutCollectionType(flowID, eventType string, path paths.Path) (CatalogTypeReference, error) {
 	if b == nil {
-		return CatalogTypeReference{}, false, nil
+		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from requires a loaded contract bundle")
 	}
 	field := strings.TrimSpace(path.Segments[0])
 	switch path.Root {
 	case paths.RootPayload:
 		ref, ok := ResolveEventFieldType(b, flowID, eventType, field)
 		if !ok {
-			if entry, _, exists := b.ResolveFlowEventCatalogEntry(flowID, eventType); exists && len(entry.Payload.Properties) > 0 {
-				return CatalogTypeReference{}, false, fmt.Errorf("fan_out.items_from references undeclared payload field %s", field)
-			}
-			return CatalogTypeReference{}, false, nil
+			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared payload field %s for event %s in flow %s", field, defaultFanOutEventLabel(eventType), defaultPrimaryEntityFlowLabel(flowID))
 		}
-		return ref, true, nil
+		return ref, nil
 	case paths.RootEntity:
 		primary, err := b.ResolveFlowPrimaryEntity(flowID)
 		if err != nil {
-			if _, hasSchema := b.FlowSchemaByID(flowID); !hasSchema {
-				return CatalogTypeReference{}, false, nil
-			}
-			return CatalogTypeReference{}, false, fmt.Errorf("fan_out.items_from references entity but flow %s has no primary entity contract: %w", defaultPrimaryEntityFlowLabel(flowID), err)
+			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references entity but flow %s has no primary entity contract: %w", defaultPrimaryEntityFlowLabel(flowID), err)
 		}
 		decl, ok := primary.Contract.Fields[field]
 		if !ok {
-			return CatalogTypeReference{}, false, fmt.Errorf("fan_out.items_from references undeclared entity field %s", field)
+			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared entity field %s", field)
 		}
-		return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}, true, nil
+		return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}, nil
 	default:
-		return CatalogTypeReference{}, false, fmt.Errorf("fan_out.items_from must use payload or entity scope")
+		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from must use payload or entity scope")
 	}
+}
+
+func defaultFanOutEventLabel(eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return "<unknown>"
+	}
+	return eventType
 }
 
 func resolveFanOutCollectionItemType(ref CatalogTypeReference) (ResolvedCatalogType, error) {

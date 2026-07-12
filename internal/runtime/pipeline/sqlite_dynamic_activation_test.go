@@ -172,6 +172,18 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*reviewFlow},
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"component_scaffold.batch_requested": {
+						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+							"components": {Type: "[json]"},
+						}},
+					},
+					"component_scaffold.spawn_requested": {
+						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+							"component_id": {Type: "text"},
+						}},
+					},
+				},
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"review": reviewFlow,
