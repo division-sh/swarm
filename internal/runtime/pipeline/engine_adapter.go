@@ -551,6 +551,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
 		TargetDescriptors:   pipelineEngineTargetDescriptorLoader(pc),
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
+		EmitNow:             pc.testEngineEmitNow,
 		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
 }

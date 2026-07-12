@@ -71,6 +71,7 @@ type PipelineCoordinator struct {
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	testLifecycleProbe               runtimelifecycleprobe.Observer
+	testEngineEmitNow                func() time.Time
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -92,6 +93,7 @@ type PipelineCoordinatorOptions struct {
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
+	TestEngineEmitNow                func() time.Time
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -129,6 +131,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		testLifecycleProbe:               opts.TestLifecycleProbe,
+		testEngineEmitNow:                opts.TestEngineEmitNow,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 }

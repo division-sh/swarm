@@ -215,6 +215,8 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	assertScalarValue(t, mustYAMLPath(t, fanOut, "effective_semantics", "canonical_owner"), "contracts.WorkflowContractBundle.ResolveFanOutEffectiveSemantics")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "declared list order")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "never sorts or deduplicates")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "exact microsecond precision")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "event_id is never an order owner")
 	if !sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "engine") ||
 		!sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "authoring_view") {
 		t.Fatal("fan_out effective semantics must name runtime and authoring consumers")

@@ -108,6 +108,7 @@ type executionFrame struct {
 	ruleDataWritesApplied     bool
 	projectionApplied         bool
 	transitionApplied         bool
+	lastEmitCreatedAt         time.Time
 	joinResultType            runtimecontracts.CatalogTypeReference
 	loopPlan                  *runtimecontracts.WorkflowLoopPlan
 	loopActivation            *loopruntime.Activation
@@ -3286,13 +3287,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	if err != nil {
 		return EmitIntent{}, err
 	}
-	createdAt := time.Now().UTC()
-	if n := len(frame.result.EmitIntents); n > 0 {
-		last := frame.result.EmitIntents[n-1].Event.CreatedAt()
-		if !last.IsZero() && !createdAt.After(last) {
-			createdAt = last.Add(time.Nanosecond)
-		}
-	}
+	createdAt := nextPersistenceSafeEmitTime(e.emitNow(), frame.lastEmitCreatedAt)
 	sourceRoute := emitSourceRoute(frame)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
@@ -3318,11 +3313,35 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		resolution.Envelope,
 		createdAt,
 	)
+	frame.lastEmitCreatedAt = createdAt
 	return EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID()),
 	}, nil
+}
+
+const persistedEmitTimeResolution = time.Microsecond
+
+func (e *Executor) emitNow() time.Time {
+	if e != nil && e.deps.EmitNow != nil {
+		if now := e.deps.EmitNow(); !now.IsZero() {
+			return now.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
+	now = now.UTC().Truncate(persistedEmitTimeResolution)
+	if previous.IsZero() {
+		return now
+	}
+	previous = previous.UTC().Truncate(persistedEmitTimeResolution)
+	if !now.After(previous) {
+		return previous.Add(persistedEmitTimeResolution)
+	}
+	return now
 }
 
 func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, sourceRoute events.RouteIdentity, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -136,5 +137,6 @@ type RuntimeDependencies struct {
 	PayloadShaper       PayloadShaper
 	TargetDescriptors   TargetDescriptorLoader
 	TransitionValidator TransitionValidator
+	EmitNow             func() time.Time
 	MaxChainDepth       int
 }
