@@ -159,7 +159,11 @@ func addStatementToShape(shape *schemaShape, statement string) error {
 	if matches := compatCreateTablePattern.FindStringSubmatch(statement); len(matches) == 3 {
 		tableName := strings.Trim(matches[1], `"`)
 		table := schemaTableShape{Columns: map[string]schemaColumnShape{}, Indexes: map[string]string{}}
-		for _, line := range splitSchemaDefinitionLines(matches[2]) {
+		definitions, err := splitSchemaDefinitionLines(matches[2])
+		if err != nil {
+			return err
+		}
+		for _, line := range definitions {
 			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimSuffix(line, ",")), ","))
 			if line == "" {
 				continue

@@ -488,6 +488,28 @@ func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.
 	}
 }
 
+func TestSQLiteStatementsForPlanAcceptsMultilineTableConstraint(t *testing.T) {
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "multiline_check",
+		SchemaKind: "test",
+		Statements: []string{`CREATE TABLE IF NOT EXISTS multiline_check (
+    id UUID PRIMARY KEY,
+    status TEXT NOT NULL,
+    completed_at TIMESTAMPTZ,
+    CHECK (
+        (status = 'pending' AND completed_at IS NULL)
+        OR (status = 'completed' AND completed_at IS NOT NULL)
+    )
+)`},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], "OR (status = 'completed'") {
+		t.Fatalf("rendered statements = %#v, want intact multiline check", statements)
+	}
+}
+
 func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "uuid-defaults.db"))
