@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -41,24 +42,51 @@ type serveLifecycleReadyFacts struct {
 	Standing    []serveLifecycleIngressFact
 }
 
+type serveLifecycleNoticeKind string
+
+const (
+	serveLifecycleNoticeAbandonedWork serveLifecycleNoticeKind = "abandoned_work"
+	serveLifecycleNoticeRecoveredWork serveLifecycleNoticeKind = "recovered_work"
+)
+
+type serveLifecycleNotice struct {
+	Kind             serveLifecycleNoticeKind
+	Runs             int
+	Deliveries       int
+	Sessions         int
+	Timers           int
+	Containers       int
+	PipelineReceipts int
+}
+
 // serveLifecyclePresenter is the sole human presentation owner for serve
 // boot, readiness, standing ingress, and shutdown facts.
 type serveLifecyclePresenter struct {
 	mu sync.Mutex
 
 	out     io.Writer
+	errOut  io.Writer
 	dev     bool
 	verbose bool
 
-	bootEvents map[int]runtime.BootProgressEvent
-	store      *storebackend.Selection
-	workspaces []serveLifecycleWorkspaceFact
-	warnings   []runtimebootverify.Finding
-	notes      []string
+	bootEvents       map[int]runtime.BootProgressEvent
+	store            *storebackend.Selection
+	workspaces       []serveLifecycleWorkspaceFact
+	warnings         []runtimebootverify.Finding
+	operatorWarnings []string
+	notices          []serveLifecycleNotice
 
-	ready         bool
-	failed        bool
-	runtimeFailed bool
+	ready              bool
+	failed             bool
+	failure            *runtime.BootProgressEvent
+	failureDiagnostic  string
+	cleanupErr         error
+	runtimeFailureErr  error
+	runtimeFailureName string
+	shutdownErr        error
+	warningsWritten    bool
+	bootWritten        bool
+	terminalWritten    bool
 }
 
 func newServeLifecyclePresenter(opts serveOptions) *serveLifecyclePresenter {
@@ -66,8 +94,13 @@ func newServeLifecyclePresenter(opts serveOptions) *serveLifecyclePresenter {
 	if out == nil {
 		out = io.Discard
 	}
+	errOut := opts.ErrorOutput
+	if errOut == nil {
+		errOut = out
+	}
 	return &serveLifecyclePresenter{
 		out:        out,
+		errOut:     errOut,
 		dev:        opts.Dev,
 		verbose:    opts.Verbose,
 		bootEvents: map[int]runtime.BootProgressEvent{},
@@ -117,15 +150,8 @@ func (p *serveLifecyclePresenter) observeBoot(event runtime.BootProgressEvent) {
 			return
 		}
 		p.failed = true
-		if p.verbose {
-			p.writeBootEventLocked(event)
-		} else {
-			p.writeFailureLocked(event.Name, event.Detail)
-		}
-		return
-	}
-	if p.verbose {
-		p.writeBootEventLocked(event)
+		copy := event
+		p.failure = &copy
 	}
 }
 
@@ -155,36 +181,29 @@ func (p *serveLifecyclePresenter) failWithDiagnostic(step int, name string, err 
 		At:     time.Now().UTC(),
 	}
 	p.bootEvents[step] = event
-	if p.verbose {
-		p.writeBootEventLocked(event)
-	}
+	copy := event
+	p.failure = &copy
 	if render != nil {
 		var rendered bytes.Buffer
 		if render(&rendered) {
-			p.writeFailureContextLocked()
-			_, _ = io.Copy(p.out, &rendered)
-			return
+			p.failureDiagnostic = rendered.String()
 		}
 	}
-	if !p.verbose {
-		p.writeFailureLocked(event.Name, event.Detail)
-	}
-	p.writeFailureContextLocked()
 }
 
-func (p *serveLifecyclePresenter) writeFailureContextLocked() {
+func (p *serveLifecyclePresenter) writeFailureContextLocked(out io.Writer) {
 	if !p.verbose && p.store != nil {
 		if p.store.Backend == storebackend.BackendSQLite {
-			fmt.Fprintf(p.out, "  store                      sqlite · %s\n", strings.TrimSpace(p.store.SQLitePath))
+			fmt.Fprintf(out, "  store                      sqlite · %s\n", strings.TrimSpace(p.store.SQLitePath))
 		} else {
-			fmt.Fprintf(p.out, "  store                      %s · path not applicable\n", p.store.Backend.String())
+			fmt.Fprintf(out, "  store                      %s · path not applicable\n", p.store.Backend.String())
 		}
 	}
 	for _, detail := range p.workspaceDetailsLocked() {
 		if detail == "not required" {
 			continue
 		}
-		fmt.Fprintf(p.out, "  workspace                  %s\n", detail)
+		fmt.Fprintf(out, "  workspace                  %s\n", detail)
 	}
 }
 
@@ -216,15 +235,45 @@ func (p *serveLifecyclePresenter) recordWorkspace(bundle string, decision worksp
 		Bundle:   strings.TrimSpace(bundle),
 		Decision: decision,
 	})
+	if decision.UnsafeHost {
+		p.operatorWarnings = append(p.operatorWarnings, "host workspace lets agents execute on this machine")
+	}
 }
 
-func (p *serveLifecyclePresenter) note(message string) {
-	if p == nil || strings.TrimSpace(message) == "" {
+func (p *serveLifecyclePresenter) recordDefaultAPITokenWarning() {
+	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.notes = append(p.notes, strings.TrimSpace(message))
+	p.operatorWarnings = append(p.operatorWarnings, "using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener")
+}
+
+func (p *serveLifecyclePresenter) recordBundleMatchDisabledWarning() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.operatorWarnings = append(p.operatorWarnings, "bundle matching is disabled for this startup")
+}
+
+func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipelineReceipts int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeAbandonedWork, Runs: runs, Deliveries: deliveries, PipelineReceipts: pipelineReceipts})
+}
+
+func (p *serveLifecyclePresenter) recordRecoveredWork(runs, deliveries, sessions, timers, containers, pipelineReceipts int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeRecoveredWork, Runs: runs, Deliveries: deliveries, Sessions: sessions, Timers: timers, Containers: containers, PipelineReceipts: pipelineReceipts})
 }
 
 func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Report) {
@@ -249,6 +298,7 @@ func (p *serveLifecyclePresenter) readyPresentation(facts serveLifecycleReadyFac
 	if !p.verbose {
 		p.writeConciseReadyLocked(facts)
 	} else {
+		p.writeBootEventsLocked(p.out, runtime.BootProgressTotalSteps)
 		p.writeResolvedFactsLocked(facts)
 	}
 	p.writeWarningsLocked()
@@ -260,8 +310,19 @@ func (p *serveLifecyclePresenter) runtimeFailure(subject string, err error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.runtimeFailed = true
-	fmt.Fprintf(p.out, "runtime failed · %s · %s\n", displayServeLifecycleName(subject), strings.TrimSpace(err.Error()))
+	if p.runtimeFailureErr == nil {
+		p.runtimeFailureName = displayServeLifecycleName(subject)
+	}
+	p.runtimeFailureErr = errors.Join(p.runtimeFailureErr, err)
+}
+
+func (p *serveLifecyclePresenter) cleanupFailure(subject string, err error) {
+	if p == nil || err == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cleanupErr = errors.Join(p.cleanupErr, fmt.Errorf("%s: %w", displayServeLifecycleName(subject), err))
 }
 
 func (p *serveLifecyclePresenter) shutdown(err error) {
@@ -270,33 +331,113 @@ func (p *serveLifecyclePresenter) shutdown(err error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.ready {
-		return
-	}
 	if err != nil {
-		fmt.Fprintf(p.out, "shutdown · failed · %s\n", strings.TrimSpace(err.Error()))
-		return
+		if p.ready {
+			p.shutdownErr = errors.Join(p.shutdownErr, err)
+		} else {
+			p.cleanupErr = errors.Join(p.cleanupErr, err)
+		}
 	}
-	if p.runtimeFailed {
-		return
-	}
-	fmt.Fprintln(p.out, "shutdown · complete")
 }
 
-func (p *serveLifecyclePresenter) writeBootEventLocked(event runtime.BootProgressEvent) {
+func (p *serveLifecyclePresenter) finish() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.terminalWritten {
+		return
+	}
+	p.terminalWritten = true
+	p.writeWarningsLocked()
+
+	if p.failed {
+		if p.verbose {
+			failureStep := runtime.BootProgressTotalSteps
+			if p.failure != nil && p.failure.Step > 0 {
+				failureStep = p.failure.Step
+			}
+			p.writeBootEventsLocked(p.errOut, failureStep)
+		}
+		if p.failureDiagnostic != "" {
+			p.writeFailureContextLocked(p.errOut)
+			_, _ = io.WriteString(p.errOut, p.failureDiagnostic)
+			p.writeCleanupContextLocked()
+			return
+		}
+		name := "startup"
+		var primary error
+		if p.failure != nil {
+			name = p.failure.Name
+			if strings.TrimSpace(p.failure.Detail) != "" {
+				primary = errors.New(strings.TrimSpace(p.failure.Detail))
+			}
+		}
+		p.writeFailureLocked(p.errOut, name, errors.Join(primary, p.runtimeFailureErr, p.cleanupErr))
+		p.writeFailureContextLocked(p.errOut)
+		return
+	}
+	if p.runtimeFailureErr != nil {
+		detail := serveLifecycleErrorDetail(errors.Join(p.runtimeFailureErr, p.shutdownErr, p.cleanupErr))
+		fmt.Fprintf(p.errOut, "ERROR: runtime failed · %s", p.runtimeFailureName)
+		if detail != "" {
+			fmt.Fprintf(p.errOut, " · %s", detail)
+		}
+		fmt.Fprintln(p.errOut)
+		return
+	}
+	if p.ready {
+		if err := errors.Join(p.shutdownErr, p.cleanupErr); err != nil {
+			fmt.Fprintf(p.errOut, "ERROR: shutdown · failed · %s\n", serveLifecycleErrorDetail(err))
+			return
+		}
+		fmt.Fprintln(p.out, "shutdown · complete")
+		return
+	}
+	if p.cleanupErr != nil {
+		fmt.Fprintf(p.errOut, "ERROR: serve failed · cleanup · %s\n", serveLifecycleErrorDetail(p.cleanupErr))
+	}
+}
+
+func (p *serveLifecyclePresenter) writeBootEventsLocked(out io.Writer, throughStep int) {
+	if p.bootWritten {
+		return
+	}
+	p.bootWritten = true
+	for step := 1; step <= throughStep && step <= runtime.BootProgressTotalSteps; step++ {
+		event, ok := p.bootEvents[step]
+		if !ok {
+			continue
+		}
+		event.Step = step
+		if canonical := runtime.CanonicalBootProgressName(step); canonical != "" {
+			event.Name = canonical
+		}
+		p.writeBootEventLocked(out, event)
+	}
+}
+
+func (p *serveLifecyclePresenter) writeBootEventLocked(out io.Writer, event runtime.BootProgressEvent) {
 	detail := strings.TrimSpace(event.Detail)
 	if detail != "" {
 		detail = "  (" + detail + ")"
 	}
-	fmt.Fprintf(p.out, "[%d/%d] %-34s %s%s\n", event.Step, runtime.BootProgressTotalSteps, event.Name, event.Status, detail)
+	fmt.Fprintf(out, "[%d/%d] %-34s %s%s\n", event.Step, runtime.BootProgressTotalSteps, event.Name, event.Status, detail)
 }
 
-func (p *serveLifecyclePresenter) writeFailureLocked(name, detail string) {
-	fmt.Fprintf(p.out, "serve failed · %s", displayServeLifecycleName(name))
-	if strings.TrimSpace(detail) != "" {
-		fmt.Fprintf(p.out, " · %s", strings.TrimSpace(detail))
+func (p *serveLifecyclePresenter) writeFailureLocked(out io.Writer, name string, err error) {
+	fmt.Fprintf(out, "ERROR: serve failed · %s", displayServeLifecycleName(name))
+	if detail := serveLifecycleErrorDetail(err); detail != "" {
+		fmt.Fprintf(out, " · %s", detail)
 	}
-	fmt.Fprintln(p.out)
+	fmt.Fprintln(out)
+}
+
+func (p *serveLifecyclePresenter) writeCleanupContextLocked() {
+	if detail := serveLifecycleErrorDetail(errors.Join(p.runtimeFailureErr, p.cleanupErr)); detail != "" {
+		fmt.Fprintf(p.errOut, "  cleanup                    %s\n", detail)
+	}
 }
 
 func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleReadyFacts) {
@@ -346,8 +487,8 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 	}
 	fmt.Fprintln(p.out)
 	fmt.Fprintf(p.out, "  listeners                  api %s · mcp %s\n", strings.TrimSpace(facts.APIListener), strings.TrimSpace(facts.MCPListener))
-	for _, note := range serveUniqueSortedStrings(p.notes) {
-		fmt.Fprintf(p.out, "  note                       %s\n", note)
+	for _, notice := range p.notices {
+		fmt.Fprintf(p.out, "  recovery action            %s\n", serveLifecycleNoticeDetail(notice))
 	}
 	if p.verbose {
 		p.writeStandingIngressLocked(facts.Standing)
@@ -358,7 +499,7 @@ func (p *serveLifecyclePresenter) workspaceDetailsLocked() []string {
 	seen := map[string]struct{}{}
 	details := make([]string, 0, len(p.workspaces))
 	for _, fact := range p.workspaces {
-		detail := workspaceBackendDecisionDetail(fact.Decision)
+		detail := serveLifecycleWorkspaceDetail(fact.Decision)
 		if fact.Bundle != "" && len(p.workspaces) > 1 {
 			detail = fact.Bundle + " · " + detail
 		}
@@ -378,13 +519,26 @@ func (p *serveLifecyclePresenter) workspaceDetailsLocked() []string {
 func (p *serveLifecyclePresenter) recoveryDetailLocked() (string, string) {
 	event, ok := p.bootEvents[7]
 	if !ok {
+		return "clean start", ""
+	}
+	switch strings.TrimSpace(event.Detail) {
+	case "recovery_disabled_no_persisted_work", "recovery_enabled_no_persisted_work", "no_active_run":
+		return "clean start", ""
+	case "recovery_enabled_with_persisted_work":
+		return "restored persisted work", ""
+	case "recovery_disabled_with_manager_snapshot_work":
+		return "started without manager replay", ""
+	}
+	switch strings.ToLower(strings.TrimSpace(event.Status)) {
+	case "clean_start":
+		return "clean start", ""
+	case "degraded":
+		return "completed with warnings", ""
+	case "skipped":
+		return "not required", ""
+	default:
 		return "complete", ""
 	}
-	status := strings.TrimSpace(event.Status)
-	if status == "" {
-		status = "complete"
-	}
-	return status, strings.TrimSpace(event.Detail)
 }
 
 func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecycleIngressFact) {
@@ -404,9 +558,6 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 	})
 	for _, fact := range sorted {
 		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+" webhook", strings.TrimSpace(fact.URL))
-		if strings.TrimSpace(fact.Subject.ID) != "" {
-			fmt.Fprintf(p.out, "  standing ingress admitted: %s\n", packs.RenderSubject(fact.Subject, false))
-		}
 		if strings.TrimSpace(fact.SigningSecret) == "" {
 			continue
 		}
@@ -419,8 +570,15 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 }
 
 func (p *serveLifecyclePresenter) writeWarningsLocked() {
+	if p.warningsWritten {
+		return
+	}
+	p.warningsWritten = true
+	for _, warning := range serveUniqueSortedStrings(p.operatorWarnings) {
+		fmt.Fprintf(p.errOut, "WARNING: %s\n", warning)
+	}
 	for _, finding := range p.warnings {
-		fmt.Fprintln(p.out, runtimebootverify.FormatTypedDiagnosticFinding(runtimebootverify.TypedDiagnosticFinding{
+		fmt.Fprintln(p.errOut, runtimebootverify.FormatTypedDiagnosticFinding(runtimebootverify.TypedDiagnosticFinding{
 			CheckID:     strings.TrimSpace(finding.CheckID),
 			Severity:    strings.TrimSpace(finding.Severity),
 			Location:    strings.TrimSpace(finding.Location),
@@ -429,6 +587,68 @@ func (p *serveLifecyclePresenter) writeWarningsLocked() {
 			Evidence:    append([]string(nil), finding.Evidence...),
 		}, false))
 	}
+}
+
+func serveLifecycleWorkspaceDetail(decision workspaceBackendSelection) string {
+	if decision.NoWorkspace || strings.TrimSpace(decision.Backend) == workspaceBackendNone {
+		return "not required"
+	}
+	backend := strings.TrimSpace(decision.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	agents := make([]string, 0, len(decision.Reasons))
+	for _, reason := range decision.Reasons {
+		if agent := strings.TrimSpace(reason.AgentID); agent != "" {
+			agents = append(agents, agent)
+		}
+	}
+	agents = serveUniqueSortedStrings(agents)
+	subject := "agent work"
+	verb := "runs"
+	if len(agents) == 1 {
+		subject = fmt.Sprintf("agent %q", agents[0])
+	} else if len(agents) > 1 {
+		subject = fmt.Sprintf("%d agents", len(agents))
+		verb = "run"
+	}
+	switch backend {
+	case "docker":
+		container := "a container"
+		if len(agents) > 1 {
+			container = "containers"
+		}
+		return fmt.Sprintf("docker · %s %s in %s", subject, verb, container)
+	case "host":
+		return fmt.Sprintf("host · %s %s on this machine", subject, verb)
+	default:
+		return backend
+	}
+}
+
+func serveLifecycleNoticeDetail(notice serveLifecycleNotice) string {
+	switch notice.Kind {
+	case serveLifecycleNoticeAbandonedWork:
+		return fmt.Sprintf("abandoned %d runs, %d deliveries, %d pipeline receipts", notice.Runs, notice.Deliveries, notice.PipelineReceipts)
+	case serveLifecycleNoticeRecoveredWork:
+		return fmt.Sprintf("recovered %d runs, %d deliveries, %d sessions, %d timers, %d containers, %d pipeline receipts", notice.Runs, notice.Deliveries, notice.Sessions, notice.Timers, notice.Containers, notice.PipelineReceipts)
+	default:
+		return "completed"
+	}
+}
+
+func serveLifecycleErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func displayServeLifecycleName(value string) string {

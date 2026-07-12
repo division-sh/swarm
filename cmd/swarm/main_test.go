@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -3393,12 +3394,161 @@ func TestServeLifecyclePresenterProjectsBootFactsByMode(t *testing.T) {
 	}
 
 	var verbose bytes.Buffer
-	newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &verbose}).boot(1, "process_start", "ok", "contracts=contracts")
+	verbosePresenter := newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &verbose})
+	verbosePresenter.boot(1, "process_start", "ok", "contracts=contracts")
+	if verbose.Len() != 0 {
+		t.Fatalf("verbose presenter emitted uncommitted startup facts = %q", verbose.String())
+	}
+	verbosePresenter.fail(2, "config_load", errors.New("invalid config"))
+	verbosePresenter.finish()
 	out := verbose.String()
-	for _, want := range []string{"[1/22]", "process_start", "ok", "contracts=contracts"} {
+	for _, want := range []string{"[1/22]", "process_start", "ok", "contracts=contracts", "[2/22]", "config_load", "FAILED"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("verbose output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
+	tests := []struct {
+		name           string
+		run            func(*serveLifecyclePresenter)
+		code           int
+		wantStderr     string
+		wantStdout     string
+		startupFailure bool
+	}{
+		{
+			name: "generic startup failure", code: 1, wantStderr: "ERROR: serve failed · config load · missing config", startupFailure: true,
+			run: func(p *serveLifecyclePresenter) { p.fail(2, "config_load", errors.New("missing config")) },
+		},
+		{
+			name: "specialized startup failure", code: 3, wantStderr: "[BLOCKER] workspace_prerequisite", startupFailure: true,
+			run: func(p *serveLifecyclePresenter) {
+				p.failWithDiagnostic(5, "runtime_context", errors.New("workspace unavailable"), func(out io.Writer) bool {
+					fmt.Fprintln(out, "[BLOCKER] workspace_prerequisite: workspace unavailable")
+					return true
+				})
+			},
+		},
+		{
+			name: "listener failure", code: 3, wantStderr: "ERROR: serve failed · http listener bind · address already in use", startupFailure: true,
+			run: func(p *serveLifecyclePresenter) {
+				p.fail(20, "http_listener_bind", errors.New("address already in use"))
+			},
+		},
+		{
+			name: "boot warning", code: 0, wantStderr: "WARNING: using the built-in development API token", wantStdout: "ready in",
+			run: func(p *serveLifecyclePresenter) {
+				p.recordDefaultAPITokenWarning()
+				p.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+				p.shutdown(nil)
+			},
+		},
+		{
+			name: "runtime failure", code: 1, wantStderr: "ERROR: runtime failed · api server · accept failed", wantStdout: "ready in",
+			run: func(p *serveLifecyclePresenter) {
+				p.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+				p.runtimeFailure("api server", errors.New("accept failed"))
+				p.shutdown(nil)
+			},
+		},
+		{
+			name: "failed shutdown", code: 1, wantStderr: "ERROR: shutdown · failed · drain timed out", wantStdout: "ready in",
+			run: func(p *serveLifecyclePresenter) {
+				p.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+				p.shutdown(errors.New("drain timed out"))
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+				presenter := newServeLifecyclePresenter(serveOpts)
+				test.run(presenter)
+				presenter.finish()
+				return test.code
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve"}, &stdout, &stderr, opts)
+			if code != test.code {
+				t.Fatalf("code = %d, want %d\nstdout=%s\nstderr=%s", code, test.code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), test.wantStderr) {
+				t.Fatalf("stderr missing %q:\n%s", test.wantStderr, stderr.String())
+			}
+			if test.wantStdout != "" && !strings.Contains(stdout.String(), test.wantStdout) {
+				t.Fatalf("stdout missing %q:\n%s", test.wantStdout, stdout.String())
+			}
+			if test.startupFailure && stdout.Len() != 0 {
+				t.Fatalf("startup failure contaminated stdout: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestCLI_ServeMissingPlatformSpecWritesOnlyStderr(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var stdout, stderr bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "missing-platform-spec.yaml")
+	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "missing-spec.sqlite"), nil)
+	code := executeRootCommand(context.Background(), repoRoot(), []string{
+		"serve",
+		"--config", configPath,
+		"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		"--platform-spec", missing,
+		"--store", "sqlite",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("serve code = 0, want startup failure\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("missing platform spec contaminated stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "ERROR: serve failed") || !strings.Contains(stderr.String(), "missing-platform-spec.yaml") {
+		t.Fatalf("missing platform spec stderr is incomplete:\n%s", stderr.String())
+	}
+}
+
+func TestRunServeRuntimeJoinsEarlyStartupAndStoreCleanupFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	mock.ExpectClose().WillReturnError(errors.New("close journal"))
+
+	oldBuildStores := buildStoresForServe
+	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config) (storeBundle, error) {
+		return storeBundle{SQLDB: db}, nil
+	}
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+
+	var stdout, stderr bytes.Buffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "unused.sqlite"), nil),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "sqlite",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		RequireBundleMatch: false,
+		Output:             &stdout,
+		ErrorOutput:        &stderr,
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want startup failure\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("close expectation: %v", err)
+	}
+	text := stderr.String()
+	if strings.Count(text, "ERROR:") != 1 || !strings.Contains(text, "close journal") {
+		t.Fatalf("startup and store cleanup did not produce one joined terminal failure:\n%s", text)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("early startup failure contaminated stdout: %q", stdout.String())
 	}
 }
 
@@ -9673,7 +9823,7 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if !strings.Contains(serve.outputString(), "workspace backend: none") {
+	if !strings.Contains(serve.outputString(), "workspace                  not required") {
 		t.Fatalf("serve output missing no-workspace decision:\n%s", serve.outputString())
 	}
 	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "Docker is not reachable") {
@@ -9708,7 +9858,7 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 	output := serve.outputString()
-	if !strings.Contains(output, "workspace backend: host") {
+	if !strings.Contains(output, "workspace                  host · agent work runs on this machine") {
 		t.Fatalf("serve output missing host workspace decision for API-backed agent:\n%s", output)
 	}
 	if strings.Contains(strings.ToLower(output), "docker is not reachable") {
@@ -9742,7 +9892,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		t.Fatalf("runServeRuntime code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
 	}
 	output := out.String()
-	for _, want := range []string{"[5/22] runtime_context", "workspace backend: docker", "native_tools.bash", "Docker is not reachable", missingDocker + " info"} {
+	for _, want := range []string{"[5/22] startup_ownership_lease", "workspace                  docker · agent \"native-bash-worker\" runs in a container", "Docker is not reachable", missingDocker + " info"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)
 		}
@@ -9882,7 +10032,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
 	}
 	for _, want := range []string{
-		"[5/22] runtime_context",
+		"[5/22] startup_ownership_lease",
 		"artifact repo root startup validation failed",
 		rootFile,
 		"SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>",
@@ -9927,7 +10077,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
 	}
 	for _, want := range []string{
-		"[5/22] runtime_context",
+		"[5/22] startup_ownership_lease",
 		"artifact repo root startup validation failed",
 		artifactRoot,
 		reposFile,
@@ -10182,7 +10332,7 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
 	}
 	for _, want := range []string{
-		"[5/22] runtime_context",
+		"[5/22] startup_ownership_lease",
 		`duplicate runtime context agent_id "shared-worker"`,
 		firstHash,
 		secondHash,
@@ -10276,7 +10426,7 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 	}
 	for _, want := range []string{
 		"[4/22] bundle_load",
-		"[5/22] runtime_context",
+		"[5/22] startup_ownership_lease",
 		"multi-context swarm serve --bundle-hash",
 		"llm.backend=claude_cli",
 		"ToolGatewayBinding",
@@ -15028,7 +15178,7 @@ func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envNam
 	}
 	for _, want := range []string{
 		"config_load",
-		"serve_admission",
+		"serve admission",
 		envName,
 		"retired",
 		"unset " + envName,

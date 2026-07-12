@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"gopkg.in/yaml.v3"
@@ -30,7 +31,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		SQLitePath:       "/tmp/project/.swarm/stores/dev.db",
 		SQLitePathSource: storebackend.SourceProjectDefault,
 	})
-	presenter.recordWorkspace("bundle-a", workspaceBackendSelection{Backend: workspace.BackendDocker})
+	presenter.recordWorkspace("bundle-a", workspaceBackendSelection{Backend: workspace.BackendDocker, Reasons: []workspaceCapabilityReason{{Kind: workspaceReasonClaudeCLI, AgentID: "phrase-completer"}}})
 	presenter.readyPresentation(serveLifecycleReadyFacts{
 		ProjectName: "tg-chat",
 		BundleCount: 1,
@@ -46,14 +47,15 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		},
 	})
 	presenter.shutdown(nil)
+	presenter.finish()
 
 	text := out.String()
 	for _, want := range []string{
 		"swarm serve --dev · tg-chat",
 		"ready · 2 flows · 1 agent · 15 tools",
 		"store                      sqlite · /tmp/project/.swarm/stores/dev.db",
-		"workspace                  workspace backend: docker",
-		"recovery                   clean_start · no_active_run",
+		"workspace                  docker · agent \"phrase-completer\" runs in a container",
+		"recovery                   clean start",
 		"listeners                  api 127.0.0.1:8081 · mcp 127.0.0.1:8082",
 		"ready in 871ms",
 		"github webhook",
@@ -128,6 +130,7 @@ func TestServeLifecyclePresenterFailureNeverPrintsReadiness(t *testing.T) {
 	presenter.fail(20, "http_listener_bind", errors.New("address already in use"))
 	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "must-not-render"})
 	presenter.shutdown(nil)
+	presenter.finish()
 
 	text := out.String()
 	if !strings.Contains(text, "serve failed · http listener bind · address already in use") {
@@ -146,6 +149,7 @@ func TestServeLifecyclePresenterUnhandledDiagnosticFallsBackToGenericFailure(t *
 	presenter.failWithDiagnostic(5, "runtime_context", errors.New("construct runtime graph"), func(io.Writer) bool {
 		return false
 	})
+	presenter.finish()
 
 	text := out.String()
 	if !strings.Contains(text, "serve failed · runtime context · construct runtime graph") {
@@ -161,6 +165,7 @@ func TestServeLifecyclePresenterRendersZeroIngressAndShutdownFailure(t *testing.
 	presenter := newServeLifecyclePresenter(serveOptions{Output: &out})
 	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "empty", ReadyAfter: time.Millisecond})
 	presenter.shutdown(errors.New("runtime drain timed out; dev container cleanup failed"))
+	presenter.finish()
 
 	text := out.String()
 	for _, want := range []string{"standing ingress           none configured", "shutdown · failed · runtime drain timed out; dev container cleanup failed"} {
@@ -176,6 +181,7 @@ func TestServeLifecyclePresenterDoesNotContradictRuntimeFailureWithCleanShutdown
 	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
 	presenter.runtimeFailure("api server", errors.New("accept failed"))
 	presenter.shutdown(nil)
+	presenter.finish()
 
 	text := out.String()
 	if !strings.Contains(text, "runtime failed · api server · accept failed") {
@@ -183,6 +189,87 @@ func TestServeLifecyclePresenterDoesNotContradictRuntimeFailureWithCleanShutdown
 	}
 	if strings.Contains(text, "shutdown · complete") {
 		t.Fatalf("runtime failure was contradicted by clean shutdown:\n%s", text)
+	}
+}
+
+func TestServeLifecyclePresenterFailureUsesDiagnosticChannel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &stdout, ErrorOutput: &stderr})
+	presenter.fail(20, "http_listener_bind", errors.New("address already in use"))
+	presenter.finish()
+
+	if stdout.Len() != 0 {
+		t.Fatalf("failure contaminated stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "ERROR: serve failed · http listener bind · address already in use") {
+		t.Fatalf("stderr missing canonical failure:\n%s", stderr.String())
+	}
+}
+
+func TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &stdout, ErrorOutput: &stderr})
+	presenter.fail(4, "bundle_load", errors.New("bundle validation failed"))
+	presenter.cleanupFailure("bundle source cleanup", errors.New("remove bundle tempdir"))
+	presenter.cleanupFailure("store shutdown", errors.New("close journal"))
+	presenter.finish()
+
+	text := stderr.String()
+	if strings.Count(text, "ERROR:") != 1 || strings.Count(text, "serve failed") != 1 {
+		t.Fatalf("failure rendered more than one terminal disposition:\n%s", text)
+	}
+	for _, want := range []string{"bundle validation failed", "bundle source cleanup: remove bundle tempdir", "store shutdown: close journal"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("joined failure missing %q:\n%s", want, text)
+		}
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("joined failure contaminated stdout: %q", stdout.String())
+	}
+}
+
+func TestServeLifecyclePresenterVerboseFailureCoalescesCanonicalSequence(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &stdout, ErrorOutput: &stderr})
+	presenter.boot(1, "process_start", "ok", "")
+	presenter.boot(18, "boot_self_check_optional", "ok", "subscribed")
+	presenter.boot(19, "platform_boot_event_published", "ok", "event-id")
+	presenter.boot(18, "boot_self_check_optional", "FAILED", "self-check timed out")
+	presenter.finish()
+
+	if stdout.Len() != 0 {
+		t.Fatalf("failed verbose startup contaminated stdout: %q", stdout.String())
+	}
+	rows := parseServeBootProgressRows(t, stderr.String())
+	if len(rows) != 2 || rows[0].Step != 1 || rows[1].Step != 18 || rows[1].Name != "boot_self_check_optional" {
+		t.Fatalf("coalesced rows = %#v, want canonical steps 1 and 18\n%s", rows, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "platform_boot_event_published") || strings.Count(stderr.String(), "boot_self_check_optional") != 1 {
+		t.Fatalf("verbose failure retained a later or duplicate step:\n%s", stderr.String())
+	}
+}
+
+func TestServeLifecyclePresenterPreservesWarningsOnLateStartupFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &stdout, ErrorOutput: &stderr})
+	report := runtimebootverify.Report{}
+	report.Add(runtimebootverify.Finding{
+		CheckID:     "unsigned_webhook",
+		Severity:    runtimebootverify.SeveritySemanticDriftWarn,
+		Location:    "telegram",
+		Message:     "telegram accepts unsigned webhooks",
+		Remediation: "configure webhook signing",
+	})
+	presenter.recordBootWarnings(report)
+	presenter.fail(22, "ready", errors.New("start runtime contexts"))
+	presenter.finish()
+
+	text := stderr.String()
+	if strings.Count(text, "[WARN]") != 1 || !strings.Contains(text, "telegram accepts unsigned webhooks") || !strings.Contains(text, "serve failed · ready") {
+		t.Fatalf("late failure did not retain exactly one warning and terminal failure:\n%s", text)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("late failure contaminated stdout: %q", stdout.String())
 	}
 }
 
@@ -279,6 +366,16 @@ func TestServeLifecycleOwnerRejectsParallelTerminalWriters(t *testing.T) {
 			}
 		}
 	}
+
+	presenterSource, err := os.ReadFile(filepath.Join(repoRoot(), "cmd", "swarm", "serve_lifecycle_presentation.go"))
+	if err != nil {
+		t.Fatalf("read serve lifecycle presenter: %v", err)
+	}
+	for _, forbidden := range []string{"workspaceBackendDecisionDetail(", "packs.RenderSubject("} {
+		if strings.Contains(string(presenterSource), forbidden) {
+			t.Errorf("serve lifecycle presenter delegates author-facing semantics through %s", forbidden)
+		}
+	}
 }
 
 func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T) {
@@ -287,10 +384,15 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 			CommandCatalog struct {
 				Serve struct {
 					Boot struct {
-						CanonicalOwner string `yaml:"canonical_presentation_owner"`
-						Rule           string `yaml:"rule"`
-						OutputBoundary string `yaml:"output_boundary"`
-						SchemaDetail   string `yaml:"schema_inventory_detail"`
+						CanonicalOwner     string `yaml:"canonical_presentation_owner"`
+						Rule               string `yaml:"rule"`
+						OutputBoundary     string `yaml:"output_boundary"`
+						ProjectionBoundary string `yaml:"projection_boundary"`
+						SchemaDetail       string `yaml:"schema_inventory_detail"`
+						BootProgress       struct {
+							CanonicalNameOwner string `yaml:"canonical_name_owner"`
+							RenderingRule      string `yaml:"rendering_rule"`
+						} `yaml:"boot_progress_sequence"`
 					} `yaml:"boot_observability"`
 				} `yaml:"serve"`
 				Doctor struct {
@@ -322,10 +424,23 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 			t.Fatalf("boot rule missing %q: %s", want, boot.Rule)
 		}
 	}
-	for _, want := range []string{"one writer", "Direct log", "Local foreground `swarm run start`", "buffered failure replay"} {
+	for _, want := range []string{"one writer", "Direct log", "Local foreground `swarm run start`", "buffered failure replay", "stdout", "stderr", "one joined terminal disposition"} {
 		if !strings.Contains(boot.OutputBoundary, want) {
 			t.Fatalf("boot output boundary missing %q: %s", want, boot.OutputBoundary)
 		}
+	}
+	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound"} {
+		if !strings.Contains(boot.ProjectionBoundary, want) {
+			t.Fatalf("boot projection boundary missing %q: %s", want, boot.ProjectionBoundary)
+		}
+	}
+	for _, want := range []string{"coalesces repeated updates", "numeric order", "stderr", "canonical step name"} {
+		if !strings.Contains(boot.BootProgress.RenderingRule, want) {
+			t.Fatalf("boot rendering rule missing %q: %s", want, boot.BootProgress.RenderingRule)
+		}
+	}
+	if !strings.Contains(boot.BootProgress.CanonicalNameOwner, "runtime.CanonicalBootProgressName") {
+		t.Fatalf("boot canonical name owner is incomplete: %s", boot.BootProgress.CanonicalNameOwner)
 	}
 	for _, want := range []string{"Default, dev, explicit verbose", "MUST NOT render per-table", "doctor.schema_inventory"} {
 		if !strings.Contains(boot.SchemaDetail, want) {

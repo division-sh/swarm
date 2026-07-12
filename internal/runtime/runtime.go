@@ -119,6 +119,39 @@ type validatedRuntimeDeps struct {
 }
 
 const BootProgressTotalSteps = 22
+
+var canonicalBootProgressNames = [...]string{
+	"process_start",
+	"config_load",
+	"db_connection",
+	"bundle_load",
+	"startup_ownership_lease",
+	"recovery_snapshot_inspection",
+	"recovery_decision",
+	"pipeline_maintenance",
+	"system_nodes_start",
+	"schedule_restoration",
+	"manager_recovery_if_enabled",
+	"outbox_sweeper",
+	"static_agents_bootstrap",
+	"flow_required_agents",
+	"workspace_validation_and_system_containers",
+	"mcp_tool_validation",
+	"manager_event_loop_start",
+	"boot_self_check_optional",
+	"platform_boot_event_published",
+	"http_listener_bind",
+	"health_endpoints_respond",
+	"ready",
+}
+
+func CanonicalBootProgressName(step int) string {
+	if step < 1 || step > len(canonicalBootProgressNames) {
+		return ""
+	}
+	return canonicalBootProgressNames[step-1]
+}
+
 const DefaultShutdownGrace = runtimemanager.DefaultShutdownGrace
 
 type ShutdownOptions struct {
@@ -180,6 +213,9 @@ type Runtime struct {
 func (rt *Runtime) emitBootProgress(step int, name, status, detail string) {
 	if rt == nil || rt.Options.BootProgress == nil {
 		return
+	}
+	if canonical := CanonicalBootProgressName(step); canonical != "" {
+		name = canonical
 	}
 	rt.Options.BootProgress(BootProgressEvent{
 		Step:   step,
@@ -1006,7 +1042,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 
 	if rt.Pipeline != nil {
 		if _, err := rt.Pipeline.RepairContractEntityTypes(ctx); err != nil {
-			rt.emitBootProgress(8, "entity_type_contract_repair", "FAILED", err.Error())
+			rt.emitBootProgress(8, "pipeline_maintenance", "FAILED", err.Error())
 			return fmt.Errorf("repair contract entity types: %w", err)
 		}
 		rt.backgroundActive.Add(1)

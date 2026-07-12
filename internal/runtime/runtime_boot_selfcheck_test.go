@@ -3,12 +3,15 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type bootSelfCheckDescriptorStore struct {
@@ -16,6 +19,45 @@ type bootSelfCheckDescriptorStore struct {
 	descriptors []runtimebus.ActiveAgentDescriptor
 	deliveries  []string
 	events      []events.Event
+}
+
+func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery("SELECT").WillReturnError(context.DeadlineExceeded)
+
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	store := &bootSelfCheckDescriptorStore{}
+	progress := []BootProgressEvent{}
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+		EventStore: store,
+	}, Options: RuntimeOptions{
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+		BootProgress: func(evt BootProgressEvent) {
+			progress = append(progress, evt)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{Module: module})
+	if err := rt.Start(context.Background()); err == nil {
+		t.Fatal("Start error = nil, want pipeline maintenance failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+	if len(progress) == 0 {
+		t.Fatal("boot progress is empty")
+	}
+	got := progress[len(progress)-1]
+	if got.Step != 8 || got.Name != "pipeline_maintenance" || !strings.EqualFold(got.Status, "failed") {
+		t.Fatalf("pipeline failure progress = %#v, want canonical step 8 pipeline_maintenance failed", got)
+	}
 }
 
 func (s *bootSelfCheckDescriptorStore) AppendEvent(_ context.Context, evt events.Event) error {

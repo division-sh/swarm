@@ -44,9 +44,8 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 	}
 	output := serve.outputString()
 	for _, want := range []string{
-		"workspace backend: host",
-		"native_tools.bash",
-		"UNSAFE: grants the agent execution on this machine",
+		"workspace                  host · agent \"native-bash-worker\" runs on this machine",
+		"WARNING: host workspace lets agents execute on this machine",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)

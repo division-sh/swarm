@@ -392,9 +392,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	for _, provider := range []string{"partner_open", "partner_ack"} {
 		found := false
 		for _, line := range strings.Split(serveOutput, "\n") {
-			if strings.Contains(line, "standing ingress admitted:") && strings.Contains(line, ":matrix:"+provider+" ") && strings.Contains(line, "request_authentication=UNAUTHENTICATED") {
+			if strings.Contains(line, provider+" webhook") {
 				found = true
 				break
+			}
+		}
+		for _, forbidden := range []string{"request_authentication=", "catalog_generation=", "manifest_hash=", "policy_source=", "provenance=", "source_path=", "standing ingress admitted:"} {
+			if strings.Contains(serveOutput, forbidden) {
+				t.Fatalf("serve output leaked diagnostic field %q:\n%s", forbidden, serveOutput)
 			}
 		}
 		if !found {

@@ -1051,7 +1051,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	if code != cliExitRuntime {
 		t.Fatalf("runServeRuntime code = %d, want %d\noutput:\n%s", code, cliExitRuntime, out.String())
 	}
-	if !strings.Contains(out.String(), "local_preflight") || !strings.Contains(out.String(), "missing_backend_credential") {
+	if !strings.Contains(out.String(), "claude_cli preflight: failed") || !strings.Contains(out.String(), "missing_backend_credential") {
 		t.Fatalf("serve output missing shared local preflight failure:\n%s", out.String())
 	}
 	for _, want := range []string{"db_connection", "bundle_load", "workspace backend: docker"} {
