@@ -64,6 +64,7 @@ type EventBus struct {
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
+	inFlightEventIDs            map[string]int
 }
 
 type PublishRecipientPlan struct {
@@ -177,6 +178,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
+		inFlightEventIDs:            make(map[string]int),
 	}
 	eb.rebuildRoutePlanners()
 	return eb, nil
@@ -387,6 +389,7 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
+	eb.inFlightEventIDs = make(map[string]int)
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {
 		return err
@@ -395,6 +398,53 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.rebuildRoutePlanners()
 	eb.inFlightPublishes.Store(0)
 	return nil
+}
+
+func (eb *EventBus) beginEventPublish(eventID string) {
+	if eb == nil {
+		return
+	}
+	eb.inFlightPublishes.Add(1)
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return
+	}
+	eb.mu.Lock()
+	if eb.inFlightEventIDs == nil {
+		eb.inFlightEventIDs = make(map[string]int)
+	}
+	eb.inFlightEventIDs[eventID]++
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) endEventPublish(eventID string) {
+	if eb == nil {
+		return
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID != "" {
+		eb.mu.Lock()
+		if count := eb.inFlightEventIDs[eventID]; count <= 1 {
+			delete(eb.inFlightEventIDs, eventID)
+		} else {
+			eb.inFlightEventIDs[eventID] = count - 1
+		}
+		eb.mu.Unlock()
+	}
+	eb.inFlightPublishes.Add(-1)
+}
+
+func (eb *EventBus) eventPublishInFlight(eventID string) bool {
+	if eb == nil {
+		return false
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.inFlightEventIDs[eventID] > 0
 }
 
 func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
