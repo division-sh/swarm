@@ -123,7 +123,35 @@ func expectedSchemaShape(plans []SchemaTableDDL, dialect SchemaDialect) (schemaS
 			}
 		}
 	}
+	if dialect == SchemaDialectPostgres {
+		normalizeExpectedPostgresSerialColumns(&shape)
+	}
 	return shape, nil
+}
+
+func normalizeExpectedPostgresSerialColumns(shape *schemaShape) {
+	if shape == nil {
+		return
+	}
+	for tableName, table := range shape.Tables {
+		for columnName, column := range table.Columns {
+			var storageType string
+			switch column.Type {
+			case "smallserial":
+				storageType = "smallint"
+			case "serial":
+				storageType = "integer"
+			case "bigserial":
+				storageType = "bigint"
+			default:
+				continue
+			}
+			column.Type = storageType
+			column.Default = normalizeDefault(fmt.Sprintf("nextval('%s_%s_seq')", tableName, columnName))
+			table.Columns[columnName] = column
+		}
+		shape.Tables[tableName] = table
+	}
 }
 
 func addStatementToShape(shape *schemaShape, statement string) error {
