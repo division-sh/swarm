@@ -146,6 +146,35 @@ func deferDecisionRouteObligation(ctx context.Context, db decisionCardSQL, event
 	return err
 }
 
+func (s *PostgresStore) QuarantineDecisionRouteObligation(ctx context.Context, eventID string, quarantinedAt time.Time, failure *runtimefailures.Envelope) error {
+	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, eventID, "error", failure); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(txctx, `UPDATE decision_card_route_obligations
+			SET status = 'quarantined', quarantined_at = $2, last_failure = $3, updated_at = $2
+			WHERE event_id = $1 AND status = 'pending'`, strings.TrimSpace(eventID), quarantinedAt.UTC(), storedDecisionRouteFailure(failure))
+		return err
+	})
+}
+
+func (s *SQLiteRuntimeStore) QuarantineDecisionRouteObligation(ctx context.Context, eventID string, quarantinedAt time.Time, failure *runtimefailures.Envelope) error {
+	return s.runDecisionCardMutation(ctx, "sqlite quarantine decision route obligation", func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, eventID, "error", failure); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(txctx, `UPDATE decision_card_route_obligations
+			SET status = 'quarantined', quarantined_at = ?, last_failure = ?, updated_at = ?
+			WHERE event_id = ? AND status = 'pending'`, quarantinedAt.UTC(), storedDecisionRouteFailure(failure), quarantinedAt.UTC(), strings.TrimSpace(eventID))
+		return err
+	})
+}
+
+func storedDecisionRouteFailure(failure *runtimefailures.Envelope) string {
+	raw, _ := json.Marshal(failure)
+	return string(raw)
+}
+
 func (s *PostgresStore) CompleteDecisionRouteObligation(ctx context.Context, eventID string, completedAt time.Time) error {
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(txctx, `UPDATE decision_card_route_obligations SET status = 'completed', completed_at = $2, updated_at = $2 WHERE event_id = $1 AND status = 'pending'`, strings.TrimSpace(eventID), completedAt.UTC())

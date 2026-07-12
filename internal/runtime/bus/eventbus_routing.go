@@ -659,6 +659,21 @@ func (eb *EventBus) SettleRecoveredPipelineEvent(ctx context.Context, evt events
 	return nil
 }
 
+// QuarantineRecoveredPipelineEvent atomically records a terminal pipeline
+// receipt and removes a non-retryable decision route from the due queue.
+func (eb *EventBus) QuarantineRecoveredPipelineEvent(ctx context.Context, evt events.Event, cause error) error {
+	failure := runtimefailures.Normalize(cause, "eventbus", "quarantine_decision_route")
+	obligations, ok := eb.store.(runtimepipeline.DecisionRouteObligationStore)
+	if !ok || obligations == nil {
+		return errors.New("decision route obligation store is required for quarantine")
+	}
+	if err := obligations.QuarantineDecisionRouteObligation(ctx, evt.ID(), time.Now().UTC(), &failure); err != nil {
+		return err
+	}
+	eb.logRuntime(ctx, "error", "Decision route was quarantined after a non-retryable failure", "eventbus", "decision_route_quarantined", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, nil, &failure, 0)
+	return nil
+}
+
 func (eb *EventBus) completeDecisionRouteObligation(ctx context.Context, eventID string) error {
 	obligations, ok := eb.store.(runtimepipeline.DecisionRouteObligationStore)
 	if !ok || obligations == nil {

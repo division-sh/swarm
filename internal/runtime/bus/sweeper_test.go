@@ -72,6 +72,10 @@ func (s *sweeperTestStore) ClaimPipelineReplay(_ context.Context, eventID string
 	return sweeperClaimLease{store: s, eventID: eventID}, true, nil
 }
 
+func (s *sweeperTestStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	return s.ClaimPipelineReplay(ctx, eventID)
+}
+
 func (s *sweeperMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
 func (s *sweeperMissingClaimStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil

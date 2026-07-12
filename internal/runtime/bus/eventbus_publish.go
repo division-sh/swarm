@@ -189,6 +189,11 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 	eb.beginEventPublish(evt.ID())
 	defer eb.endEventPublish(evt.ID())
+	publicationClaim, err := eb.claimPipelinePublication(ictx, evt.ID())
+	if err != nil {
+		return err
+	}
+	defer publicationClaim.Release(ictx)
 	if replayed, err := eb.publishCommittedReplayIfPresent(ictx, evt); replayed || err != nil {
 		return err
 	}
@@ -320,9 +325,21 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	}
 	eb.beginEventPublish(evt.ID())
 	defer eb.endEventPublish(evt.ID())
+	publicationClaim, err := eb.claimPipelinePublication(ictx, evt.ID())
+	if err != nil {
+		return err
+	}
+	claimTransferred := false
+	defer func() {
+		if !claimTransferred {
+			publicationClaim.Release(ictx)
+		}
+	}()
 
 	if mutationRunner, ok := eb.store.(EventMutationRunner); ok && mutationRunner != nil {
-		return eb.publishAcknowledgedTransactional(ictx, evt, start, mutationRunner)
+		transferred, err := eb.publishAcknowledgedTransactional(ictx, evt, start, mutationRunner, publicationClaim)
+		claimTransferred = transferred
+		return err
 	}
 	if _, ok := eb.store.(TransactionalEventStore); ok {
 		return errors.New("typed event mutation runner is required for transactional acknowledged publish")
@@ -351,7 +368,8 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
 		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 	}
-	eb.dispatchCommittedPublishAsync(ictx, evt, plan)
+	eb.dispatchCommittedPublishAsync(ictx, evt, plan, publicationClaim)
+	claimTransferred = true
 	return nil
 }
 
@@ -385,6 +403,14 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 		return errors.New("typed event mutation context is required")
 	}
 	txctx := WithEventMutationContext(ictx, mutation)
+	publicationClaim, err := eb.claimPipelinePublication(txctx, evt.ID())
+	if err != nil {
+		return err
+	}
+	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func() { publicationClaim.Release(txctx) }) {
+		publicationClaim.Release(txctx)
+		return errors.New("event mutation rollback actions are required for pipeline publication claim")
+	}
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
 	if err := mutation.AppendEvent(txctx, evt); err != nil {
@@ -416,20 +442,27 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 		if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
 			return err
 		}
+		if publicationClaim != nil && !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() { publicationClaim.Release(txctx) }) {
+			return errors.New("event mutation post-commit actions are required for pipeline publication claim")
+		}
 		return nil
 	}
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
 		return err
 	} else if reason != "" {
 		eb.logDispatchQueued(txctx, reason, evt, len(inboundPlan.RecipientIDs()), false, true)
+		if publicationClaim != nil && !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() { publicationClaim.Release(txctx) }) {
+			return errors.New("event mutation post-commit actions are required for pipeline publication claim")
+		}
 		return nil
 	}
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
 		dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx))
 		if acknowledgedInboundMutation(txctx) {
-			eb.dispatchCommittedPublishAsync(dispatchCtx, evt, inboundPlan)
+			eb.dispatchCommittedPublishAsync(dispatchCtx, evt, inboundPlan, publicationClaim)
 			return
 		}
+		defer publicationClaim.Release(dispatchCtx)
 		eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
 	}) {
 		return errors.New("event mutation post-commit actions are required")
@@ -437,7 +470,7 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 	return nil
 }
 
-func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -445,6 +478,7 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 	eb.beginEventPublish(evt.ID())
 	go func() {
 		defer eb.endEventPublish(evt.ID())
+		defer publicationClaim.Release(dispatchCtx)
 		eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
 	}()
 }
@@ -784,10 +818,11 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	evt events.Event,
 	start time.Time,
 	runner EventMutationRunner,
-) error {
+	publicationClaim *pipelinePublicationClaim,
+) (bool, error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
+		return false, err
 	}
 	var inboundPlan RoutePlan
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
@@ -833,22 +868,22 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 		}
 		return nil
 	}); err != nil {
-		return err
+		return false, err
 	}
 	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 	if targetFailure {
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		eb.recordCommittedPublishConvergence(ctx, evt)
-		return nil
+		return false, nil
 	}
 	if dispatchQueued {
 		eb.logDispatchQueued(ctx, queueReason, evt, len(inboundPlan.RecipientIDs()), false, true)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		eb.recordCommittedPublishConvergence(ctx, evt)
-		return nil
+		return false, nil
 	}
-	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
-	return nil
+	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan, publicationClaim)
+	return true, nil
 }
 
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {

@@ -53,6 +53,17 @@ type gateRecoveryFairnessInterceptor struct {
 	deferred map[string]struct{}
 }
 
+type gateRecoveryPoisonInterceptor struct {
+	poisonEventID string
+}
+
+func (i gateRecoveryPoisonInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+	if evt.ID() != i.poisonEventID {
+		return true, nil, nil
+	}
+	return false, nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "decision_route_fixture_invalid", "test", "poison_route", nil)
+}
+
 func (i gateRecoveryFairnessInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
 	if _, ok := i.deferred[evt.ID()]; !ok {
 		return true, nil, nil
@@ -116,6 +127,67 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			assertGateRecoveryProcessedReceipt(t, selected, newEventID)
 			if got := gateRecoveryPipelineReceiptCount(t, selected, firstGateRecoveryEventID(deferred)); got != 0 {
 				t.Fatalf("deferred retry receipt count = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			runID := uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
+			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
+			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 1 {
+				t.Fatalf("poison route sweep recovered = %d, %v; want 1, nil", got, err)
+			}
+			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
+			if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", got, err)
+			}
+		})
+	}
+}
+
+func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			runID := uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
+			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
+			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovery := runtimepipeline.NewRecoveryManagerWith(selected.events, bus)
+			if err := recovery.Recover(context.Background()); err != nil {
+				t.Fatalf("startup poison route recovery: %v", err)
+			}
+			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
+			if err := recovery.Recover(context.Background()); err != nil {
+				t.Fatalf("second startup poison route recovery: %v", err)
 			}
 		})
 	}
@@ -476,6 +548,33 @@ func assertGateRecoveryProcessedReceipt(t *testing.T, tc gateRecoveryStoreCase, 
 	}
 	if outcome != "success" || reason != "pipeline_persisted" {
 		t.Fatalf("final pipeline receipt = %s/%s, want success/pipeline_persisted", outcome, reason)
+	}
+}
+
+func assertGateRecoveryObligationStatus(t *testing.T, tc gateRecoveryStoreCase, eventID, want string) {
+	t.Helper()
+	query := `SELECT status FROM decision_card_route_obligations WHERE event_id = ?`
+	if tc.postgres {
+		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
+	}
+	var got string
+	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&got); err != nil || got != want {
+		t.Fatalf("decision route obligation status = %q, %v; want %q", got, err, want)
+	}
+}
+
+func assertGateRecoveryErrorReceipt(t *testing.T, tc gateRecoveryStoreCase, eventID, wantReason string) {
+	t.Helper()
+	query := `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+	if tc.postgres {
+		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+	}
+	var outcome, reason string
+	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&outcome, &reason); err != nil {
+		t.Fatalf("load quarantined pipeline receipt: %v", err)
+	}
+	if outcome != "dead_letter" || reason != wantReason {
+		t.Fatalf("quarantined pipeline receipt = %s/%s, want dead_letter/%s", outcome, reason, wantReason)
 	}
 }
 

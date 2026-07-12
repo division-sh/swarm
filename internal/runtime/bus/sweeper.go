@@ -259,8 +259,12 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, replaySto
 			continue
 		}
 		if err != nil {
+			if quarantineErr := eb.QuarantineRecoveredPipelineEvent(ctx, evt, err); quarantineErr != nil {
+				_ = lease.Release(ctx)
+				return recovered, quarantineErr
+			}
 			_ = lease.Release(ctx)
-			return recovered, err
+			continue
 		}
 		if err := eb.SettleRecoveredPipelineEvent(ctx, evt); err != nil {
 			_ = lease.Release(ctx)

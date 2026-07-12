@@ -114,6 +114,10 @@ func (s *targetRouteMemoryStore) ClaimPipelineReplay(_ context.Context, eventID 
 	return targetRouteMemoryLease{store: s, eventID: eventID}, true, nil
 }
 
+func (s *targetRouteMemoryStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	return s.ClaimPipelineReplay(ctx, eventID)
+}
+
 type targetRouteMemoryLease struct {
 	store   *targetRouteMemoryStore
 	eventID string

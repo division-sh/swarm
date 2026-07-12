@@ -35,6 +35,10 @@ type persistedPipelineRecoverySettler interface {
 	SettleRecoveredPipelineEvent(context.Context, events.Event) error
 }
 
+type persistedPipelineRecoveryQuarantiner interface {
+	QuarantineRecoveredPipelineEvent(context.Context, events.Event, error) error
+}
+
 type decisionCardLifecycleReleaser interface {
 	ReleaseDecisionCardLifecycleEvents(context.Context, int) (int, error)
 }
@@ -170,12 +174,16 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	logger, _ := r.bus.(recoveryRuntimeLogger)
 	now := time.Now().UTC()
 	eventsToReplay := make([]events.PersistedReplayEvent, 0, limit)
+	decisionRouteIDs := make(map[string]struct{})
 	if obligations, ok := r.store.(DecisionRouteObligationStore); ok && obligations != nil {
 		due, err := obligations.ListDueDecisionRouteObligations(ctx, now, limit)
 		if err != nil {
 			return err
 		}
 		eventsToReplay = append(eventsToReplay, due...)
+		for _, record := range due {
+			decisionRouteIDs[strings.TrimSpace(record.Event.ID())] = struct{}{}
+		}
 	}
 	generic, err := replayStore.ListEventsMissingPipelineReceipt(ctx, now.Add(-window), limit)
 	if err != nil {
@@ -184,6 +192,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	eventsToReplay = append(eventsToReplay, generic...)
 	recorder, _ := r.store.(pipelineReceiptRecorder)
 	settler, _ := r.bus.(persistedPipelineRecoverySettler)
+	quarantiner, _ := r.bus.(persistedPipelineRecoveryQuarantiner)
 	_, requiresCanonicalSettlement := r.store.(DecisionRouteObligationStore)
 	settleProcessed := func(evt events.Event) error {
 		if settler != nil {
@@ -196,6 +205,20 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			return fmt.Errorf("missing pipeline recovery settlement owner")
 		}
 		return recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil)
+	}
+	quarantineRoute := func(evt events.Event, cause error) (bool, error) {
+		if _, ok := decisionRouteIDs[strings.TrimSpace(evt.ID())]; !ok {
+			return false, nil
+		}
+		if quarantiner == nil {
+			return true, fmt.Errorf("missing decision route quarantine owner")
+		}
+		if err := quarantiner.QuarantineRecoveredPipelineEvent(ctx, evt, cause); err != nil {
+			return true, err
+		}
+		failure := runtimefailures.Normalize(cause, "pipeline-recovery", "quarantine_decision_route")
+		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
+		return true, nil
 	}
 	var firstErr error
 	for _, record := range eventsToReplay {
@@ -219,6 +242,13 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		}
 		if record.ReplayFailure != nil {
 			failure := *runtimefailures.CloneEnvelope(record.ReplayFailure)
+			if owned, err := quarantineRoute(evt, runtimefailures.FromEnvelope(failure)); owned {
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+				_ = lease.Release(ctx)
+				continue
+			}
 			if recorder == nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: missing pipeline receipt recorder", evt.ID())
@@ -237,6 +267,13 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		}
 		persistedRecipients, err := r.store.ListEventDeliveryRecipients(ctx, evt.ID())
 		if err != nil {
+			if owned, quarantineErr := quarantineRoute(evt, err); owned {
+				if quarantineErr != nil && firstErr == nil {
+					firstErr = quarantineErr
+				}
+				_ = lease.Release(ctx)
+				continue
+			}
 			if firstErr == nil {
 				firstErr = fmt.Errorf("load persisted recipients for replay event %s: %w", evt.ID(), err)
 			}
@@ -247,6 +284,13 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			if scopeReader, ok := r.store.(runtimereplayclaim.ScopeReader); ok && scopeReader != nil {
 				scope, err := scopeReader.LoadCommittedReplayScope(ctx, evt.ID())
 				if err != nil {
+					if owned, quarantineErr := quarantineRoute(evt, err); owned {
+						if quarantineErr != nil && firstErr == nil {
+							firstErr = quarantineErr
+						}
+						_ = lease.Release(ctx)
+						continue
+					}
 					if firstErr == nil {
 						firstErr = fmt.Errorf("load committed replay scope for replay event %s: %w", evt.ID(), err)
 					}
@@ -278,6 +322,13 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 					if err := obligations.DeferDecisionRouteObligation(ctx, evt.ID(), time.Now().UTC().Add(DecisionRouteRetryDelay), &failure); err != nil && firstErr == nil {
 						firstErr = err
 					}
+				}
+				_ = lease.Release(ctx)
+				continue
+			}
+			if owned, quarantineErr := quarantineRoute(evt, replayErr); owned {
+				if quarantineErr != nil && firstErr == nil {
+					firstErr = quarantineErr
 				}
 				_ = lease.Release(ctx)
 				continue

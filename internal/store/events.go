@@ -471,6 +471,14 @@ func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string)
 	return lease, true, nil
 }
 
+func (s *PostgresStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, false, fmt.Errorf("event_id is required")
+	}
+	return acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+}
+
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -1296,7 +1304,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		  AND e.created_at >= $1
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
-			WHERE o.event_id = e.event_id AND o.status = 'pending'
+			WHERE o.event_id = e.event_id AND o.status <> 'completed'
 		  )
 		  AND %s
 		ORDER BY e.created_at ASC
@@ -1382,7 +1390,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 		  AND e.created_at >= $2
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
-			WHERE o.event_id = e.event_id AND o.status = 'pending'
+			WHERE o.event_id = e.event_id AND o.status <> 'completed'
 		  )
 		  AND %s
 		ORDER BY e.created_at ASC

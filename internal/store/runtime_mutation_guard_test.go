@@ -806,7 +806,7 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 	switch site.Function {
 	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
-	case "CompleteDecisionRouteObligation", "CompleteDecisionCardLifecycleEvent":
+	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation", "CompleteDecisionCardLifecycleEvent":
 		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true
 	case "BeginEventTx":
 		if site.Kind == primitiveBegin {
