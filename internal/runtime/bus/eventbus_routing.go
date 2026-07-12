@@ -647,6 +647,40 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status str
 	return nil
 }
 
+// SettleRecoveredPipelineEvent keeps startup and periodic recovery on the same
+// receipt, run-convergence, and route-obligation completion owner.
+func (eb *EventBus) SettleRecoveredPipelineEvent(ctx context.Context, evt events.Event) error {
+	if err := eb.markPipelineReceipt(ctx, evt.ID(), "processed", nil); err != nil {
+		return err
+	}
+	if evt.Type() == events.EventType("mailbox.card_decided") {
+		return eb.completeDecisionRouteObligation(ctx, evt.ID())
+	}
+	return nil
+}
+
+func (eb *EventBus) completeDecisionRouteObligation(ctx context.Context, eventID string) error {
+	obligations, ok := eb.store.(runtimepipeline.DecisionRouteObligationStore)
+	if !ok || obligations == nil {
+		return nil
+	}
+	if err := obligations.CompleteDecisionRouteObligation(ctx, eventID, time.Now().UTC()); err != nil {
+		canonical := eventBusDependencyFailure(err, "decision_route_obligation_complete_failed", "complete_decision_route_obligation")
+		eb.logRuntime(ctx, "error", "Completing the decision route obligation failed", "eventbus", "decision_route_obligation_complete_failed", eventID, "", "", "", "", nil, nil, canonical, 0)
+		return runtimefailures.FromEnvelope(*canonical)
+	}
+	return nil
+}
+
+func (eb *EventBus) deferDecisionRouteObligation(ctx context.Context, eventID string, cause error) error {
+	obligations, ok := eb.store.(runtimepipeline.DecisionRouteObligationStore)
+	if !ok || obligations == nil {
+		return nil
+	}
+	failure := runtimefailures.Normalize(cause, "eventbus", "defer_decision_route")
+	return obligations.DeferDecisionRouteObligation(ctx, eventID, time.Now().UTC().Add(runtimepipeline.DecisionRouteRetryDelay), &failure)
+}
+
 func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt events.Event, expected, delivered, missing, timedOut []string, cause error) error {
 	detail := map[string]any{
 		"expected_recipients":  expected,

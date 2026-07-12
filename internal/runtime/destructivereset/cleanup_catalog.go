@@ -30,6 +30,8 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "run_fork_selected_contract_route_recoveries", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id|fork_event_id -> events.run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_selected_contract_bindings", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id|fork_event_id -> events.run_id", DeleteOrderGroup: 2},
 		{Table: "activity_attempts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "activity_attempts.run_id", DeleteOrderGroup: 3},
+		{Table: "decision_card_lifecycle_outbox", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_lifecycle_outbox.run_id", DeleteOrderGroup: 1},
+		{Table: "decision_card_route_obligations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_route_obligations.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_card_changes", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_changes.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_card_input_drafts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_input_drafts.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_cards", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_cards.run_id", DeleteOrderGroup: 2},

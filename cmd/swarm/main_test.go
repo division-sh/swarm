@@ -62,7 +62,6 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"gopkg.in/yaml.v3"
 )
 
 type delayedRunStatusAgent struct {
@@ -6068,7 +6067,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, "operating/component_scaffold.spawn_requested", "component-scaffold")
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", "component-scaffold")
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
@@ -8516,6 +8515,27 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
+}
+
+func requireServedRunStatusWithDebug(t *testing.T, endpoint string, db *sql.DB, backend, runID, want string) {
+	t.Helper()
+	var last string
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for time.Now().Before(deadline) {
+		var result struct {
+			Run struct {
+				RunID  string `json:"run_id"`
+				Status string `json:"status"`
+			} `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
+		last = result.Run.Status
+		if result.Run.RunID == runID && result.Run.Status == want {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
 func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, want string) {

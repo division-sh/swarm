@@ -1294,6 +1294,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
 		  AND e.created_at >= $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM decision_card_route_obligations o
+			WHERE o.event_id = e.event_id AND o.status = 'pending'
+		  )
 		  AND %s
 		ORDER BY e.created_at ASC
 		LIMIT $%d
@@ -1376,6 +1380,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 		WHERE r.event_id IS NULL
 		  AND e.run_id = $1::uuid
 		  AND e.created_at >= $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM decision_card_route_obligations o
+			WHERE o.event_id = e.event_id AND o.status = 'pending'
+		  )
 		  AND %s
 		ORDER BY e.created_at ASC
 		LIMIT $%d
@@ -1631,7 +1639,7 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	}
 	defer func() { _ = tx.Rollback() }()
 	if status != "completed" {
-		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, true, s.AppendEventTx); err != nil {
+		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, true); err != nil {
 			return runtimebus.RunLifecycleSnapshot{}, err
 		}
 	}

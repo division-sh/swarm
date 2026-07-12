@@ -10,10 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -255,6 +258,46 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			stored := loadDecisionCardGateActivation(t, db, postgres, runID, entityID)
 			if stored.Status != gateruntime.StatusSuperseded {
 				t.Fatalf("terminal activation = %#v", stored)
+			}
+			eventStore, ok := cardStore.(runtimebus.EventStore)
+			if !ok {
+				t.Fatalf("decision card store %T is not an EventBus store", cardStore)
+			}
+			bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{BundleFingerprint: card.BundleHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const subscriber = "decision-card-lifecycle-recorder"
+			bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: subscriber})
+			deliveries := bus.Subscribe(subscriber, events.EventType("mailbox.card_superseded"))
+			t.Cleanup(func() { bus.Unsubscribe(subscriber) })
+			if released, err := bus.ReleaseDecisionCardLifecycleEvents(ctx, 10); err != nil || released != 1 {
+				t.Fatalf("release lifecycle outbox = %d, %v", released, err)
+			}
+			waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			if err := bus.WaitForQuiescence(waitCtx); err != nil {
+				t.Fatal(err)
+			}
+			var lifecycle events.Event
+			select {
+			case lifecycle = <-deliveries:
+			case <-waitCtx.Done():
+				t.Fatal("timed out waiting for run supersession lifecycle event")
+			}
+			if lifecycle.RunID() != runID || lifecycle.EntityID() != entityID || lifecycle.FlowInstance() != card.FlowInstance {
+				t.Fatalf("lifecycle identity = run:%q entity:%q flow:%q", lifecycle.RunID(), lifecycle.EntityID(), lifecycle.FlowInstance())
+			}
+			recipients, err := eventStore.ListEventDeliveryRecipients(ctx, lifecycle.ID())
+			if err != nil || len(recipients) != 1 || recipients[0] != subscriber {
+				t.Fatalf("lifecycle recipients = %#v, %v", recipients, err)
+			}
+			scopeReader, ok := cardStore.(runtimereplayclaim.ScopeReader)
+			if !ok {
+				t.Fatalf("decision card store %T lacks replay scope reader", cardStore)
+			}
+			if scope, err := scopeReader.LoadCommittedReplayScope(ctx, lifecycle.ID()); err != nil || scope != runtimereplayclaim.CommittedReplayScopeSubscribed {
+				t.Fatalf("lifecycle replay scope = %q, %v", scope, err)
 			}
 		})
 

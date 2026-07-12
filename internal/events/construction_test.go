@@ -18,6 +18,7 @@ type eventConstructorCallsite struct {
 }
 
 var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
+	{Path: "internal/store/decision_card_route_obligations.go", Scope: "scanDecisionRouteObligationEvents"}:                             1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptSpec"}:                                     1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptForRunSpec"}:                               1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsWithPendingDeliveriesForRunSpec"}:                                1,

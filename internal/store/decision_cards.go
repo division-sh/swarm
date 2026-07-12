@@ -400,6 +400,9 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
+	if err := insertDecisionRouteObligation(ctx, tx, card, now, postgres); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, nil
 }
 
@@ -744,19 +747,17 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 
 func (s *PostgresStore) SupersedeDecisionCardsForRun(ctx context.Context, runID, reason string, now time.Time) error {
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, true, s.AppendEventTx)
+		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForRun(ctx context.Context, runID, reason string, now time.Time) error {
 	return s.runDecisionCardMutation(ctx, "sqlite supersede run decision cards", func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, false, s.AppendEventTx)
+		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, false)
 	})
 }
 
-type decisionCardEventAppender func(context.Context, *sql.Tx, events.Event) error
-
-func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool, appendEvent decisionCardEventAppender) error {
+func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
 	now = now.UTC()
@@ -810,9 +811,6 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		if _, err := appendDecisionCardChange(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
 		}
-		if appendEvent == nil {
-			return fmt.Errorf("decision card supersession event appender is required")
-		}
 		payload, err := json.Marshal(map[string]any{
 			"card_id": card.CardID, "stage_activation_id": card.StageActivationID, "reason": reason,
 		})
@@ -821,8 +819,8 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		}
 		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
 			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now)
-		if err := appendEvent(ctx, tx, evt); err != nil {
-			return fmt.Errorf("append run decision card supersession event: %w", err)
+		if err := insertDecisionCardLifecycleOutbox(ctx, tx, card, evt, postgres); err != nil {
+			return fmt.Errorf("queue run decision card supersession event: %w", err)
 		}
 	}
 	_, err = transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{runID: runID}, now, false, postgres)

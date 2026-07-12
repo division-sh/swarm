@@ -806,6 +806,8 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 	switch site.Function {
 	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
+	case "CompleteDecisionRouteObligation", "CompleteDecisionCardLifecycleEvent":
+		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true
 	case "BeginEventTx":
 		if site.Kind == primitiveBegin {
 			return classSplitLegacy, "legacy TransactionalEventStore fallback; production SQLite publish uses RunEventMutation", true
@@ -881,6 +883,29 @@ func runtimeWriterRules() []runtimeWriterRule {
 			kinds:          kinds(primitiveRead, primitiveWrite),
 			classification: classActiveTxHelper,
 			reason:         "decision-card helpers write only through a selected-store or workflow pipeline transaction supplied by their canonical mutation owner",
+		},
+		{
+			name:           "decision card obligation transactional helpers",
+			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
+			function:       rx(`^(insertDecisionRouteObligation|deferDecisionRouteObligation|insertDecisionCardLifecycleOutbox)$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "decision-card route and lifecycle obligations write only inside their selected-store mutation owners",
+		},
+		{
+			name:           "decision card obligation selected-store owners",
+			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
+			receiver:       rx(`^SQLiteRuntimeStore$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "SQLite decision-card obligation mutations consume the canonical serialized decision-card mutation boundary",
+		},
+		{
+			name:           "decision card obligation readers",
+			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
+			kinds:          kinds(primitiveRead),
+			classification: classDifferentConcept,
+			reason:         "decision-card obligation due/pending scans are read-only recovery surfaces",
 		},
 		{
 			name:           "managed external effect attempt admission",

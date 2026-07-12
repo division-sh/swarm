@@ -413,6 +413,10 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
 		  AND `+where+`
+		  AND NOT EXISTS (
+			SELECT 1 FROM decision_card_route_obligations o
+			WHERE o.event_id = e.event_id AND o.status = 'pending'
+		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		ORDER BY e.created_at ASC, e.event_id ASC
 		LIMIT ?
