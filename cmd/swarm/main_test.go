@@ -33,6 +33,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -4375,6 +4376,15 @@ func TestServedParityHarnessTestSetupEntitiesLifecycle(t *testing.T) {
 	servedparity.Run(t, scenario, runServedTestSetupEntitiesBackendProof)
 }
 
+func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
+	scenarios := []servedparity.Scenario{
+		servedparity.MustScenario(servedparity.ScenarioConversationForkLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioConversationForkChatLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioConversationForkDeleteLifecycle),
+	}
+	servedparity.RunScenarioGroup(t, scenarios, runServedConversationForkBackendProof)
+}
+
 func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite)
 	cases := []struct {
@@ -4411,29 +4421,6 @@ func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 				"idempotency_key": "issue-1386-sqlite-runtime-nuke",
 			},
 		},
-		{
-			method: "conversation.fork",
-			params: map[string]any{
-				"source_session_id": uuid.NewString(),
-				"fork_point":        map[string]any{"kind": "turn", "turn_index": 1},
-				"idempotency_key":   "issue-1386-sqlite-conversation-fork",
-			},
-		},
-		{
-			method: "conversation.fork_chat",
-			params: map[string]any{
-				"fork_id":         uuid.NewString(),
-				"message":         "inspect fork",
-				"idempotency_key": "issue-1386-sqlite-conversation-fork-chat",
-			},
-		},
-		{
-			method: "conversation.fork_delete",
-			params: map[string]any{
-				"fork_id":         uuid.NewString(),
-				"idempotency_key": "issue-1386-sqlite-conversation-fork-delete",
-			},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(strings.ReplaceAll(tc.method, ".", "_"), func(t *testing.T) {
@@ -4451,6 +4438,12 @@ type servedControlProofRuntime struct {
 	Backend    string
 	BundleHash string
 	Probe      *lifecycletest.Probe
+}
+
+type servedConversationForkProofRuntime struct {
+	servedControlProofRuntime
+	Credentials *runtimecredentials.FileStore
+	LLMRequests *atomic.Int32
 }
 
 func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
@@ -4674,6 +4667,423 @@ func runServedTestSetupEntitiesBackendProof(t *testing.T, backend servedparity.B
 	t.Helper()
 	rt := startServedTestSetupEntitiesProofRuntime(t, backend)
 	runServedTestSetupEntitiesLifecycleProof(t, rt)
+}
+
+func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedConversationForkProofRuntime(t, backend)
+	runServedConversationForkLifecycleProof(t, rt)
+}
+
+func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend) servedConversationForkProofRuntime {
+	t.Helper()
+	requests := &atomic.Int32{}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var body struct {
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		hasToolResult := false
+		for _, message := range body.Messages {
+			if message.Role == "tool" {
+				hasToolResult = true
+				break
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if hasToolResult {
+			_, _ = w.Write([]byte(`{"model":"gpt-compatible","choices":[{"message":{"role":"assistant","content":"snapshot inspected; requested event remained sandboxed"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"gpt-compatible","choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"snapshot-read","type":"function","function":{"name":"fork_snapshot_read_entities","arguments":"{}"}},{"id":"event-stub","type":"function","function":{"name":"emit_event","arguments":"{\"event_name\":\"forkchat.note\"}"}}]}}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	credentials, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("create forkchat proof credential store: %v", err)
+	}
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+
+	start := func(configPath string, opts serveOptions) servedControlProofRuntime {
+		oldBuildStores := buildStoresForServe
+		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		var servedDB *sql.DB
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				servedDB = stores.SQLDB
+			}
+			return stores, err
+		}
+		opts.ConfigPath = configPath
+		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		opts.ContractsPath = contractsPath
+		opts.PlatformSpecPath = defaultPlatformSpecPath
+		opts.APIListenAddr = "127.0.0.1:0"
+		opts.MCPListenAddr = "127.0.0.1:0"
+		opts.SelfCheck = true
+		opts.RequireBundleMatch = false
+		opts.NoRequireBundleMatch = true
+		opts.Verbose = true
+		opts.TestLLMRuntime = runtimellm.NoopRuntime{}
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+		if servedDB == nil {
+			t.Fatal("served conversation fork SQLDB is required")
+		}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath)}
+	}
+
+	var rt servedControlProofRuntime
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		unsetStoreSelectorEnv(t)
+		stubServeRuntimeWorkspaceLifecycle(t)
+		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		configPath := writeServedConversationForkConfig(t, storebackend.BackendSQLite.String(), sqlitePath, provider.URL)
+		rt = start(configPath, serveOptions{})
+		rt.Backend = "sqlite"
+	case servedparity.BackendExplicitPostgres:
+		_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		configPath := writeServedConversationForkConfig(t, storebackend.BackendPostgres.String(), "", provider.URL)
+		rt = start(configPath, serveOptions{StoreMode: "postgres", StoreModeSet: true})
+		rt.Backend = "postgres"
+	default:
+		t.Fatalf("unknown conversation fork served parity backend %q", backend)
+	}
+	return servedConversationForkProofRuntime{servedControlProofRuntime: rt, Credentials: credentials, LLMRequests: requests}
+}
+
+func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, providerURL string) string {
+	t.Helper()
+	lines := []string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+		"store:",
+		"  backend: " + backend,
+	}
+	if sqlitePath != "" {
+		lines = append(lines, "  sqlite:", "    path: "+sqlitePath)
+	}
+	lines = append(lines,
+		"llm:",
+		"  backend: openai_compatible",
+		"  openai_compatible:",
+		"    base_url: "+providerURL,
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	)
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	text := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatalf("write conversation fork served config: %v", err)
+	}
+	return path
+}
+
+type servedConversationForkSource struct {
+	RunID     string
+	AgentID   string
+	SessionID string
+	Turn1ID   string
+	Turn2ID   string
+	Event1ID  string
+	Event2ID  string
+	EntityID  string
+	Turn1At   time.Time
+	Turn2At   time.Time
+}
+
+func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversationForkProofRuntime) {
+	t.Helper()
+	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "thing.unhandled",
+		"bundle_hash":     rt.BundleHash,
+		"payload":         map[string]any{"note": "conversation-fork"},
+		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
+	})
+	if !initial.NewRunCreated || initial.RunID == "" {
+		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
+	}
+	fixture := seedServedConversationForkSource(t, rt.DB, rt.Backend, initial.RunID)
+	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
+
+	create := func(selector map[string]any, key string) struct {
+		Fork                store.OperatorConversationForkSession `json:"fork"`
+		IdempotencyReplayed bool                                  `json:"idempotency_replayed"`
+	} {
+		params := map[string]any{"source_session_id": fixture.SessionID, "fork_point": selector}
+		if key != "" {
+			params["idempotency_key"] = key
+		}
+		var result struct {
+			Fork                store.OperatorConversationForkSession `json:"fork"`
+			IdempotencyReplayed bool                                  `json:"idempotency_replayed"`
+		}
+		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork", params, &result)
+		return result
+	}
+
+	turnKey := keyPrefix + "-turn"
+	turnFork := create(map[string]any{"kind": "turn", "turn_index": 1}, turnKey)
+	if turnFork.Fork.SourceRunID != fixture.RunID || turnFork.Fork.SourceAgentID != fixture.AgentID || turnFork.Fork.ForkPoint.TurnID != fixture.Turn1ID || turnFork.Fork.State != "active" {
+		t.Fatalf("%s turn fork = %#v", rt.Backend, turnFork)
+	}
+	if got := turnFork.Fork.ExpiresAt.Sub(turnFork.Fork.CreatedAt); got != store.ConversationForkLifecycleTTL {
+		t.Fatalf("%s fork TTL = %s, want %s", rt.Backend, got, store.ConversationForkLifecycleTTL)
+	}
+	turnReplay := create(map[string]any{"kind": "turn", "turn_index": 1}, turnKey)
+	if !turnReplay.IdempotencyReplayed || turnReplay.Fork.ForkID != turnFork.Fork.ForkID {
+		t.Fatalf("%s turn fork replay = %#v", rt.Backend, turnReplay)
+	}
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork", map[string]any{
+		"source_session_id": fixture.SessionID,
+		"fork_point":        map[string]any{"kind": "turn", "turn_index": 2},
+		"idempotency_key":   turnKey,
+	})
+	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
+		t.Fatalf("%s fork conflict = %#v", rt.Backend, conflict.Data)
+	}
+
+	eventFork := create(map[string]any{"kind": "event", "event_id": fixture.Event2ID}, keyPrefix+"-event")
+	if eventFork.Fork.ForkPoint.TurnIndex != 2 || eventFork.Fork.ForkPoint.TurnID != fixture.Turn2ID || eventFork.Fork.ForkPoint.EventID != fixture.Event2ID {
+		t.Fatalf("%s event fork point = %#v", rt.Backend, eventFork.Fork.ForkPoint)
+	}
+	at := fixture.Turn1At.Add(30 * time.Second)
+	timeFork := create(map[string]any{"kind": "time", "at": at.Format(time.RFC3339Nano)}, "")
+	keylessDuplicate := create(map[string]any{"kind": "time", "at": at.Format(time.RFC3339Nano)}, "")
+	if timeFork.Fork.ForkPoint.TurnID != fixture.Turn1ID || keylessDuplicate.Fork.ForkID == timeFork.Fork.ForkID {
+		t.Fatalf("%s keyless time forks = first:%#v second:%#v", rt.Backend, timeFork, keylessDuplicate)
+	}
+
+	var page1 store.ConversationForkListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 2}, &page1)
+	if len(page1.Forks) != 2 || page1.NextCursor == "" {
+		t.Fatalf("%s fork list page1 = %#v", rt.Backend, page1)
+	}
+	var page2 store.ConversationForkListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 2, "cursor": page1.NextCursor}, &page2)
+	if len(page2.Forks) != 2 || page2.NextCursor != "" {
+		t.Fatalf("%s fork list page2 = %#v", rt.Backend, page2)
+	}
+
+	prelaunch := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork_chat", map[string]any{
+		"fork_id":         turnFork.Fork.ForkID,
+		"message":         "reject before provider launch",
+		"idempotency_key": keyPrefix + "-prelaunch",
+	})
+	if prelaunch == nil || rt.LLMRequests.Load() != 0 {
+		t.Fatalf("%s prelaunch rejection = %#v requests=%d, want error before HTTP launch", rt.Backend, prelaunch, rt.LLMRequests.Load())
+	}
+	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_snapshots", turnFork.Fork.ForkID, 1)
+	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_turns", turnFork.Fork.ForkID, 0)
+	if err := rt.Credentials.Set(context.Background(), "OPENAI_COMPATIBLE_API_KEY", "forkchat-proof-key"); err != nil {
+		t.Fatalf("set forkchat proof credential: %v", err)
+	}
+
+	countsBefore := servedConversationForkLiveCounts(t, rt.DB, rt.Backend, fixture.RunID)
+	chatKey := keyPrefix + "-chat"
+	chatParams := map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "inspect snapshot and try emit_event", "idempotency_key": chatKey}
+	var chat store.ConversationForkChatResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_chat", chatParams, &chat)
+	if chat.IdempotencyReplayed || chat.Turn.TurnIndex != 1 || chat.Snapshot.SourceTurn.TurnID != fixture.Turn1ID {
+		t.Fatalf("%s fork chat = %#v", rt.Backend, chat)
+	}
+	if len(chat.Snapshot.EntitySnapshot) != 1 || chat.Snapshot.EntitySnapshot[0].CurrentState != "draft" || chat.Snapshot.EntitySnapshot[0].Fields["name"] != "Before" {
+		t.Fatalf("%s immutable fork snapshot = %#v", rt.Backend, chat.Snapshot.EntitySnapshot)
+	}
+	if rt.LLMRequests.Load() != 2 {
+		t.Fatalf("%s fork chat provider requests = %d, want tool round plus answer", rt.Backend, rt.LLMRequests.Load())
+	}
+	var sawSnapshotRead, sawEventStub bool
+	for _, call := range chat.Turn.ToolCalls {
+		var result map[string]any
+		if err := json.Unmarshal(call.Result, &result); err != nil {
+			t.Fatalf("decode %s fork tool result: %v", rt.Backend, err)
+		}
+		switch call.Name {
+		case "fork_snapshot_read_entities":
+			sawSnapshotRead = result["status"] == "read_from_snapshot" && result["snapshot_owner"] == store.ConversationForkChatSnapshotOwner
+		case "emit_event":
+			sawEventStub = result["status"] == "stubbed" && result["live_mutation"] == false
+		}
+	}
+	if !sawSnapshotRead || !sawEventStub {
+		t.Fatalf("%s fork chat tool calls = %#v", rt.Backend, chat.Turn.ToolCalls)
+	}
+	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_snapshots", turnFork.Fork.ForkID, 1)
+	if after := servedConversationForkLiveCounts(t, rt.DB, rt.Backend, fixture.RunID); after != countsBefore {
+		t.Fatalf("%s fork chat live counts changed from %#v to %#v", rt.Backend, countsBefore, after)
+	}
+	var chatReplay store.ConversationForkChatResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_chat", chatParams, &chatReplay)
+	if !chatReplay.IdempotencyReplayed || chatReplay.Turn.TurnID != chat.Turn.TurnID || rt.LLMRequests.Load() != 2 {
+		t.Fatalf("%s fork chat replay = %#v requests=%d", rt.Backend, chatReplay, rt.LLMRequests.Load())
+	}
+	chatConflict := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork_chat", map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "different", "idempotency_key": chatKey})
+	if chatConflict.Data["code"] != apiv1.IdempotencyConflictCode {
+		t.Fatalf("%s fork chat conflict = %#v", rt.Backend, chatConflict.Data)
+	}
+
+	var viewed store.OperatorConversationForkSession
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_view", map[string]any{"fork_id": turnFork.Fork.ForkID}, &viewed)
+	if len(viewed.Turns) != 1 || viewed.Turns[0].TurnID != chat.Turn.TurnID {
+		t.Fatalf("%s fork view = %#v", rt.Backend, viewed)
+	}
+
+	setServedConversationForkExpiry(t, rt.DB, rt.Backend, eventFork.Fork.ForkID, time.Now().UTC().Add(-time.Minute))
+	var expired store.OperatorConversationForkSession
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_view", map[string]any{"fork_id": eventFork.Fork.ForkID}, &expired)
+	if expired.State != "expired" {
+		t.Fatalf("%s expired fork state = %q", rt.Backend, expired.State)
+	}
+
+	deleteKey := keyPrefix + "-delete"
+	var deleted struct {
+		OK                  bool   `json:"ok"`
+		ForkID              string `json:"fork_id"`
+		Deleted             bool   `json:"deleted"`
+		AlreadyDeleted      bool   `json:"already_deleted"`
+		IdempotencyReplayed bool   `json:"idempotency_replayed"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_delete", map[string]any{"fork_id": turnFork.Fork.ForkID, "idempotency_key": deleteKey}, &deleted)
+	if !deleted.OK || !deleted.Deleted || deleted.AlreadyDeleted || deleted.IdempotencyReplayed {
+		t.Fatalf("%s fork delete = %#v", rt.Backend, deleted)
+	}
+	var deleteReplay = deleted
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_delete", map[string]any{"fork_id": turnFork.Fork.ForkID, "idempotency_key": deleteKey}, &deleteReplay)
+	if !deleteReplay.IdempotencyReplayed || !deleteReplay.Deleted {
+		t.Fatalf("%s fork delete replay = %#v", rt.Backend, deleteReplay)
+	}
+	var alreadyDeleted = deleted
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_delete", map[string]any{"fork_id": turnFork.Fork.ForkID, "idempotency_key": keyPrefix + "-delete-again"}, &alreadyDeleted)
+	if alreadyDeleted.Deleted || !alreadyDeleted.AlreadyDeleted || alreadyDeleted.IdempotencyReplayed {
+		t.Fatalf("%s new-key fork delete = %#v", rt.Backend, alreadyDeleted)
+	}
+	chatDeleted := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork_chat", map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "after delete"})
+	if chatDeleted.Code == 0 {
+		t.Fatalf("%s deleted fork chat unexpectedly succeeded", rt.Backend)
+	}
+	var active store.ConversationForkListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 20}, &active)
+	for _, item := range active.Forks {
+		if item.ForkID == turnFork.Fork.ForkID || item.ForkID == eventFork.Fork.ForkID {
+			t.Fatalf("%s inactive fork survived active list: %#v", rt.Backend, active.Forks)
+		}
+	}
+
+	for _, scenarioID := range []string{servedparity.ScenarioConversationForkLifecycle, servedparity.ScenarioConversationForkChatLifecycle, servedparity.ScenarioConversationForkDeleteLifecycle} {
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+	}
+}
+
+func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID string) servedConversationForkSource {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Second)
+	fixture := servedConversationForkSource{
+		RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(),
+		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
+		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
+	}
+	ctx := context.Background()
+	var statements []struct {
+		query string
+		args  []any
+	}
+	switch backend {
+	case "postgres":
+		statements = []struct {
+			query string
+			args  []any
+		}{
+			{`INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ($1, 'researcher', 'gpt-compatible', 'session')`, []any{fixture.AgentID}},
+			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'global', 'global', 'session', 'active', $4, $4)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute)}},
+			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,'session','global',$5::uuid,'task.ready',true,$6),($7::uuid,$2::uuid,$3,$4::uuid,'session','global',$8::uuid,'task.done',true,$9)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
+			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'current_state',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'current_state','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
+		}
+	case "sqlite":
+		statements = []struct {
+			query string
+			args  []any
+		}{
+			{`INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES (?, 'researcher', 'gpt-compatible', 'session')`, []any{fixture.AgentID}},
+			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at) VALUES (?, ?, ?, 'global', 'global', 'session', 'active', ?, ?)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
+			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES (?,?,?,?,'session','global',?,'task.ready',true,?),(?,?,?,?,'session','global',?,'task.done',true,?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
+			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'current_state',NULL,'"draft"','platform','test',?),(?,?,'name',NULL,'"Before"','platform','test',?),(?,?,'current_state','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
+		}
+	default:
+		t.Fatalf("unknown conversation fork proof backend %q", backend)
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed %s conversation fork source: %v\n%s", backend, err, statement.query)
+		}
+	}
+	return fixture
+}
+
+type servedConversationForkCounts struct {
+	Runs      int
+	Events    int
+	Mailbox   int
+	Mutations int
+}
+
+func servedConversationForkLiveCounts(t *testing.T, db *sql.DB, backend, runID string) servedConversationForkCounts {
+	t.Helper()
+	ctx := context.Background()
+	count := func(query string, args ...any) int {
+		var value int
+		if err := db.QueryRowContext(ctx, query, args...).Scan(&value); err != nil {
+			t.Fatalf("%s conversation fork count: %v", backend, err)
+		}
+		return value
+	}
+	if backend == "postgres" {
+		return servedConversationForkCounts{Runs: count(`SELECT COUNT(*) FROM runs`), Events: count(`SELECT COUNT(*) FROM events`), Mailbox: count(`SELECT COUNT(*) FROM mailbox`), Mutations: count(`SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, runID)}
+	}
+	return servedConversationForkCounts{Runs: count(`SELECT COUNT(*) FROM runs`), Events: count(`SELECT COUNT(*) FROM events`), Mailbox: count(`SELECT COUNT(*) FROM mailbox`), Mutations: count(`SELECT COUNT(*) FROM entity_mutations WHERE run_id = ?`, runID)}
+}
+
+func requireServedConversationForkRowCount(t *testing.T, db *sql.DB, backend, table, forkID string, want int) {
+	t.Helper()
+	placeholder := "?"
+	if backend == "postgres" {
+		placeholder = "$1::uuid"
+	}
+	var got int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+table+` WHERE fork_id = `+placeholder, forkID).Scan(&got); err != nil {
+		t.Fatalf("%s count %s for fork %s: %v", backend, table, forkID, err)
+	}
+	if got != want {
+		t.Fatalf("%s %s rows for fork %s = %d, want %d", backend, table, forkID, got, want)
+	}
+}
+
+func setServedConversationForkExpiry(t *testing.T, db *sql.DB, backend, forkID string, expiresAt time.Time) {
+	t.Helper()
+	var err error
+	if backend == "postgres" {
+		_, err = db.ExecContext(context.Background(), `UPDATE conversation_forks SET expires_at = $1 WHERE fork_id = $2::uuid`, expiresAt, forkID)
+	} else {
+		_, err = db.ExecContext(context.Background(), `UPDATE conversation_forks SET expires_at = ? WHERE fork_id = ?`, expiresAt, forkID)
+	}
+	if err != nil {
+		t.Fatalf("%s expire conversation fork %s: %v", backend, forkID, err)
+	}
 }
 
 func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {

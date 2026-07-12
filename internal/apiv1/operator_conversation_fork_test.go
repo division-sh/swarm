@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -519,6 +522,9 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if rt.startAgentID != "agent-source" {
 		t.Fatalf("StartSession agentID = %q, want source agent", rt.startAgentID)
 	}
+	if rt.actorModel != llmselection.ModelAliasRegular || rt.effectOwner != runtimeeffects.OwnerOperatorInfrastructure {
+		t.Fatalf("forkchat runtime authority = model:%q owner:%q", rt.actorModel, rt.effectOwner)
+	}
 	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
 		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
 	}
@@ -561,12 +567,17 @@ type forkChatScriptedRuntime struct {
 	systemPrompt string
 	tools        []runtimellm.ToolDefinition
 	messages     []runtimellm.Message
+	actorModel   string
+	effectOwner  runtimeeffects.DifferentOwner
 }
 
-func (r *forkChatScriptedRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	r.startAgentID = agentID
 	r.systemPrompt = systemPrompt
 	r.tools = append([]runtimellm.ToolDefinition(nil), tools...)
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	r.actorModel = actor.Model
+	r.effectOwner, _ = runtimeeffects.DifferentOwnerFromContext(ctx)
 	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID, RuntimeMode: "task"}, nil
 }
 

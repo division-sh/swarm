@@ -480,6 +480,8 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			name: "operator-read api ledger rejects stale split issue ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "conversation.fork_list")
+				entry.Classification = "split_with_issue_ref"
+				entry.Backends = nil
 				entry.SplitIssue = 999999
 				entry.ProofRefs = []publicSurfaceProofRef{
 					{Kind: "tracker", Issue: 999999, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
@@ -759,8 +761,8 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 		}
 		activeTrackers[trackerKey(tracker.Issue, tracker.Watchlist)] = struct{}{}
 	}
-	if _, ok := activeTrackers[trackerKey(1239, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
-		problems = append(problems, "active_trackers missing #1239 runtime_store_backend_default_and_sqlite_portability")
+	if _, ok := activeTrackers[trackerKey(1239, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1239 runtime_store_backend_default_and_sqlite_portability")
 	}
 	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
@@ -777,8 +779,8 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1386, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1386 runtime_store_backend_default_and_sqlite_portability")
 	}
-	if _, ok := activeTrackers[trackerKey(1927, "runtime_operations.shutdown_and_runtime_lifecycle")]; !ok {
-		problems = append(problems, "active_trackers missing #1927 shutdown_and_runtime_lifecycle")
+	if _, ok := activeTrackers[trackerKey(1927, "runtime_operations.shutdown_and_runtime_lifecycle")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1927 shutdown_and_runtime_lifecycle")
 	}
 	if _, ok := activeTrackers[trackerKey(1932, "runtime_operations.atomic_runtime_state_mutation")]; ok {
 		problems = append(problems, "active_trackers must not include closure-bearing #1932 atomic_runtime_state_mutation")
@@ -1117,6 +1119,10 @@ func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProof
 
 func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
 	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestServedParityHarnessConversationForkLifecycle": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"conversation.fork_list", "conversation.fork_view"},
+		},
 		"TestSQLiteAgentConversationOwnerBacksSupportedAPISurface": {
 			Backends: []string{"default_sqlite"},
 			Methods: []string{
@@ -2130,7 +2136,6 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"mailbox_read_cli",
 		"serve_dev_abandon_active_runs",
 		"handler_static_create_entity_retirement",
-		"remaining_openrpc_selected_backend_tail",
 		"bundle_hash_catalog_boot_postgres_only",
 	})
 }

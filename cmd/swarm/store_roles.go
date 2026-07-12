@@ -57,6 +57,8 @@ type selectedConcreteRuntimeStore interface {
 	apiv1.AgentConversationReadStore
 	apiv1.RunBundleContextStore
 	apiv1.BundleCatalogReadStore
+	apiv1.ConversationForkReadStore
+	apiv1.ConversationForkLifecycleStore
 	apiv1.TestSetupStore
 
 	runtimerunquiescence.ServeAbandonStore
@@ -147,13 +149,13 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "EntityReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "entity.get/list/aggregate reads are selected public read capabilities"},
 		{Name: "AgentConversationReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, Issue: 1782, SpecRef: selectedFacadeSpec, Reason: "agent/conversation reads were promoted as pure operator-read capabilities"},
 		{Name: "RunBundleContextStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "served event.publish run-bundle context reads are selected public read capabilities"},
-		{Name: "BundleRuntimeCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1239, SpecRef: selectedFacadeSpec, Reason: "DB-loaded bundle runtime catalog remains Postgres-only until separately promoted"},
-		{Name: "BundleSourceCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1239, SpecRef: selectedFacadeSpec, Reason: "bundle source catalog writes/register/delete are spec-classified optional product lifecycle capabilities"},
-		{Name: "RunBundleAvailabilityStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1239, SpecRef: selectedFacadeSpec, Reason: "active bundle availability admission is a Postgres-backed optional product capability"},
-		{Name: "StartupRecoveryStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1239, SpecRef: selectedFacadeSpec, Reason: "startup recovery remains split from local-dev SQLite runtime construction"},
+		{Name: "BundleRuntimeCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "DB-loaded bundle runtime catalog remains a spec-classified Postgres-only product capability"},
+		{Name: "BundleSourceCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "bundle source catalog writes/register/delete are spec-classified optional product lifecycle capabilities"},
+		{Name: "RunBundleAvailabilityStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "active bundle availability admission is a spec-classified Postgres-backed optional product capability"},
+		{Name: "StartupRecoveryStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "startup recovery is a spec-classified Postgres-only product capability outside local-dev SQLite runtime construction"},
 		{Name: "RunStalledReader", Classification: selectedStoreRoleOptionalProductWiredBoth, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "run-stalled monitor reads are wired on both selected stores and must not silently disappear"},
 		{Name: "APIOptionalCapabilityBuilder", Classification: selectedStoreRoleOptionalClassifier, RequiredOn: selectedStoreRoleBoth, Issue: 1810, SpecRef: selectedFacadeSpec, Reason: "optional public capabilities are produced through the explicit selected classifier"},
-		{Name: "RunForkRuntimeOwner", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1239, SpecRef: selectedFacadeSpec, Reason: "selected-contract run.fork runtime lifecycle is a spec-classified Postgres-only optional product capability until separately promoted"},
+		{Name: "RunForkRuntimeOwner", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "selected-contract run.fork runtime lifecycle is a spec-classified Postgres-only optional product capability"},
 	}
 }
 

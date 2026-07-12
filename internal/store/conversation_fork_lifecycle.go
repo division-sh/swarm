@@ -83,9 +83,22 @@ type conversationForkCursor struct {
 }
 
 func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
-	if s == nil || s.DB == nil {
-		return OperatorConversationForkSession{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
 	}
+	return owner.createOperatorConversationFork(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) CreateOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
+	}
+	return owner.createOperatorConversationFork(ctx, req)
+}
+
+func (s conversationForkStore) createOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return OperatorConversationForkSession{}, err
@@ -110,7 +123,9 @@ func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req 
 		return OperatorConversationForkSession{}, err
 	}
 	expiresAt := now.Add(ConversationForkLifecycleTTL).UTC()
-	row := s.DB.QueryRowContext(ctx, `
+	var created OperatorConversationForkSession
+	err = s.runMutation(ctx, false, func(txctx context.Context, tx *sql.Tx) error {
+		row := s.queryRow(txctx, tx, `
 		INSERT INTO conversation_forks (
 			source_session_id, source_run_id, source_agent_id,
 			fork_point_kind, fork_point_turn_index, fork_point_turn_id,
@@ -118,25 +133,41 @@ func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req 
 			created_by, created_at, expires_at
 		)
 		VALUES (
-			$1::uuid, nullif($2, '')::uuid, $3,
-			$4, $5, $6::uuid,
-			nullif($7, '')::uuid, $8, $9,
-			$10, $11, $12
+			?, ?, ?,
+			?, ?, ?,
+			?, ?, ?,
+			?, ?, ?
 		)
 		RETURNING
-			fork_id::text, source_session_id::text, COALESCE(source_run_id::text, ''),
+			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, fork_point_kind, fork_point_turn_index,
-			COALESCE(fork_point_turn_id::text, ''), COALESCE(fork_point_event_id::text, ''),
+			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
-	`, source.SessionID, source.RunID, source.AgentID, descriptor.Kind, descriptor.TurnIndex, descriptor.TurnID,
-		descriptor.EventID, descriptor.At, descriptor.SelectedAt, createdBy, now, expiresAt)
-	return scanConversationForkSession(row, now)
+	`, source.SessionID, nullableConversationForkID(source.RunID), source.AgentID, descriptor.Kind, descriptor.TurnIndex, descriptor.TurnID,
+			nullableConversationForkID(descriptor.EventID), descriptor.At, descriptor.SelectedAt, createdBy, now, expiresAt)
+		created, err = scanConversationForkSession(row, now)
+		return err
+	})
+	return created, err
 }
 
 func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
-	if s == nil || s.DB == nil {
-		return ConversationForkListResult{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return ConversationForkListResult{}, err
 	}
+	return owner.listOperatorConversationForks(ctx, opts)
+}
+
+func (s *SQLiteRuntimeStore) ListOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return ConversationForkListResult{}, err
+	}
+	return owner.listOperatorConversationForks(ctx, opts)
+}
+
+func (s conversationForkStore) listOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return ConversationForkListResult{}, err
@@ -149,7 +180,7 @@ func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts 
 		return ConversationForkListResult{}, err
 	}
 	args := make([]any, 0, 6)
-	where := []string{"deleted_at IS NULL", "expires_at > $1"}
+	where := []string{"deleted_at IS NULL", "expires_at > ?"}
 	args = append(args, opts.Now.UTC())
 	if opts.SourceSessionID != "" {
 		sessionID, err := normalizeUUIDParam(opts.SourceSessionID, "source_session_id")
@@ -157,7 +188,7 @@ func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts 
 			return ConversationForkListResult{}, err
 		}
 		args = append(args, sessionID)
-		where = append(where, fmt.Sprintf("source_session_id = $%d::uuid", len(args)))
+		where = append(where, "source_session_id = ?")
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeConversationForkCursor(opts.Cursor)
@@ -172,27 +203,24 @@ func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts 
 		if err != nil {
 			return ConversationForkListResult{}, ErrInvalidConversationForkCursor
 		}
-		args = append(args, createdAt.UTC(), forkID)
-		nTime := len(args) - 1
-		nFork := len(args)
-		where = append(where, fmt.Sprintf(`(
-			created_at < $%d
-			OR (created_at = $%d AND fork_id > $%d::uuid)
-		)`, nTime, nTime, nFork))
+		where = append(where, `(
+			created_at < ?
+			OR (created_at = ? AND fork_id > ?)
+		)`)
+		args = append(args, createdAt.UTC(), createdAt.UTC(), forkID)
 	}
 	args = append(args, opts.Limit+1)
-	limitArg := len(args)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
 		SELECT
-			fork_id::text, source_session_id::text, COALESCE(source_run_id::text, ''),
+			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, fork_point_kind, fork_point_turn_index,
-			COALESCE(fork_point_turn_id::text, ''), COALESCE(fork_point_event_id::text, ''),
+			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
 		FROM conversation_forks
 		WHERE %s
 		ORDER BY created_at DESC, fork_id ASC
-		LIMIT $%d
-	`, strings.Join(where, " AND "), limitArg), args...)
+		LIMIT ?
+	`, strings.Join(where, " AND ")), args...)
 	if err != nil {
 		return ConversationForkListResult{}, fmt.Errorf("list conversation forks: %w", err)
 	}
@@ -225,9 +253,22 @@ func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts 
 }
 
 func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
-	if s == nil || s.DB == nil {
-		return OperatorConversationForkSession{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
 	}
+	return owner.loadOperatorConversationFork(ctx, forkID)
+}
+
+func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
+	}
+	return owner.loadOperatorConversationFork(ctx, forkID)
+}
+
+func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return OperatorConversationForkSession{}, err
@@ -239,14 +280,14 @@ func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID
 	if err != nil {
 		return OperatorConversationForkSession{}, err
 	}
-	row := s.DB.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, s.db, `
 		SELECT
-			fork_id::text, source_session_id::text, COALESCE(source_run_id::text, ''),
+			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, fork_point_kind, fork_point_turn_index,
-			COALESCE(fork_point_turn_id::text, ''), COALESCE(fork_point_event_id::text, ''),
+			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
 		FROM conversation_forks
-		WHERE fork_id = $1::uuid
+		WHERE fork_id = ?
 	`, id)
 	item, err := scanConversationForkSession(row, time.Now().UTC())
 	if errors.Is(err, sql.ErrNoRows) {
@@ -258,7 +299,7 @@ func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID
 	if caps.Conversations.ForkTurns != SchemaFlavorCanonical {
 		return OperatorConversationForkSession{}, fmt.Errorf("store: conversation_fork_turns schema is unavailable")
 	}
-	turns, err := loadConversationForkTurns(ctx, s.DB, item.ForkID)
+	turns, err := loadConversationForkTurns(ctx, s, s.db, item.ForkID)
 	if err != nil {
 		return OperatorConversationForkSession{}, err
 	}
@@ -267,9 +308,22 @@ func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID
 }
 
 func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
-	if s == nil || s.DB == nil {
-		return ConversationForkDeleteResult{}, fmt.Errorf("postgres store is required")
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return ConversationForkDeleteResult{}, err
 	}
+	return owner.deleteOperatorConversationFork(ctx, forkID, now)
+}
+
+func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return ConversationForkDeleteResult{}, err
+	}
+	return owner.deleteOperatorConversationFork(ctx, forkID, now)
+}
+
+func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return ConversationForkDeleteResult{}, err
@@ -285,28 +339,34 @@ func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, fork
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	res, err := s.DB.ExecContext(ctx, `UPDATE conversation_forks SET deleted_at = $2 WHERE fork_id = $1::uuid AND deleted_at IS NULL`, id, now)
-	if err != nil {
-		return ConversationForkDeleteResult{}, fmt.Errorf("delete conversation fork: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return ConversationForkDeleteResult{}, fmt.Errorf("read conversation fork delete affected rows: %w", err)
-	}
-	if affected > 0 {
-		return ConversationForkDeleteResult{ForkID: id, Deleted: true, AlreadyDeleted: false}, nil
-	}
-	var existingDeleted sql.NullTime
-	if err := s.DB.QueryRowContext(ctx, `SELECT deleted_at FROM conversation_forks WHERE fork_id = $1::uuid`, id).Scan(&existingDeleted); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ConversationForkDeleteResult{}, ErrConversationForkNotFound
+	var result ConversationForkDeleteResult
+	err = s.runForkMutation(ctx, id, false, func(txctx context.Context, tx *sql.Tx) error {
+		res, err := s.exec(txctx, tx, `UPDATE conversation_forks SET deleted_at = ? WHERE fork_id = ? AND deleted_at IS NULL`, now, id)
+		if err != nil {
+			return fmt.Errorf("delete conversation fork: %w", err)
 		}
-		return ConversationForkDeleteResult{}, fmt.Errorf("load conversation fork delete state: %w", err)
-	}
-	if existingDeleted.Valid {
-		return ConversationForkDeleteResult{ForkID: id, Deleted: false, AlreadyDeleted: true}, nil
-	}
-	return ConversationForkDeleteResult{}, fmt.Errorf("conversation fork delete state changed concurrently")
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("read conversation fork delete affected rows: %w", err)
+		}
+		if affected > 0 {
+			result = ConversationForkDeleteResult{ForkID: id, Deleted: true}
+			return nil
+		}
+		var existingDeleted conversationForkTimeValue
+		if err := s.queryRow(txctx, tx, `SELECT deleted_at FROM conversation_forks WHERE fork_id = ?`, id).Scan(&existingDeleted); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrConversationForkNotFound
+			}
+			return fmt.Errorf("load conversation fork delete state: %w", err)
+		}
+		if existingDeleted.Valid {
+			result = ConversationForkDeleteResult{ForkID: id, AlreadyDeleted: true}
+			return nil
+		}
+		return fmt.Errorf("conversation fork delete state changed concurrently")
+	})
+	return result, err
 }
 
 func requireConversationForkLifecycleCapabilities(caps StoreSchemaCapabilities) error {
@@ -338,21 +398,21 @@ func defaultConversationForkListOptions(opts ConversationForkListOptions) (Conve
 	return opts, nil
 }
 
-func (s *PostgresStore) loadConversationForkSource(ctx context.Context, caps StoreSchemaCapabilities, sourceSessionID string) (conversationForkSource, error) {
+func (s conversationForkStore) loadConversationForkSource(ctx context.Context, caps StoreSchemaCapabilities, sourceSessionID string) (conversationForkSource, error) {
 	sessionID, err := normalizeUUIDParam(sourceSessionID, "source_session_id")
 	if err != nil {
 		return conversationForkSource{}, err
 	}
-	sources := operatorConversationQuerySources(caps)
+	sources := s.conversationQuerySources(caps)
 	if len(sources) == 0 {
 		return conversationForkSource{}, ErrSessionNotFound
 	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
 		SELECT session_id, agent_id, run_id
 		FROM (
 			%s
 		) conversations
-		WHERE session_id = $1
+		WHERE session_id = ?
 		LIMIT 2
 	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
 	if err != nil {
@@ -382,7 +442,7 @@ func (s *PostgresStore) loadConversationForkSource(ctx context.Context, caps Sto
 	return items[0], nil
 }
 
-func (s *PostgresStore) resolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector ConversationForkPointSelector) (ConversationForkPointDescriptor, error) {
+func (s conversationForkStore) resolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector ConversationForkPointSelector) (ConversationForkPointDescriptor, error) {
 	sessionID, err := normalizeUUIDParam(sourceSessionID, "source_session_id")
 	if err != nil {
 		return ConversationForkPointDescriptor{}, err
@@ -413,24 +473,24 @@ func (s *PostgresStore) resolveConversationForkPoint(ctx context.Context, source
 	}
 }
 
-func (s *PostgresStore) resolveConversationForkTurnPoint(ctx context.Context, sessionID string, turnIndex int, kind string, eventID string, at *time.Time) (ConversationForkPointDescriptor, error) {
-	row := s.DB.QueryRowContext(ctx, `
+func (s conversationForkStore) resolveConversationForkTurnPoint(ctx context.Context, sessionID string, turnIndex int, kind string, eventID string, at *time.Time) (ConversationForkPointDescriptor, error) {
+	row := s.queryRow(ctx, s.db, `
 		WITH ordered AS (
 			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC)::int AS turn_index,
-				turn_id::text AS turn_id,
-				COALESCE(trigger_event_id::text, '') AS event_id,
+				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
+				turn_id AS turn_id,
+				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
 				created_at
 			FROM agent_turns
-			WHERE session_id = $1::uuid
+			WHERE session_id = ?
 		)
-		SELECT turn_id, event_id, created_at
+		SELECT CAST(turn_id AS TEXT), CAST(event_id AS TEXT), created_at
 		FROM ordered
-		WHERE turn_index = $2
+		WHERE turn_index = ?
 	`, sessionID, turnIndex)
 	var turnID string
 	var triggerEventID string
-	var selectedAt time.Time
+	var selectedAt conversationForkTimeValue
 	if err := row.Scan(&turnID, &triggerEventID, &selectedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ConversationForkPointDescriptor{}, ErrTurnNotFound
@@ -446,24 +506,24 @@ func (s *PostgresStore) resolveConversationForkTurnPoint(ctx context.Context, se
 		TurnID:     turnID,
 		EventID:    eventID,
 		At:         at,
-		SelectedAt: selectedAt.UTC(),
+		SelectedAt: selectedAt.Time,
 	}, nil
 }
 
-func (s *PostgresStore) resolveConversationForkEventPoint(ctx context.Context, sessionID string, eventID string) (ConversationForkPointDescriptor, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+func (s conversationForkStore) resolveConversationForkEventPoint(ctx context.Context, sessionID string, eventID string) (ConversationForkPointDescriptor, error) {
+	rows, err := s.query(ctx, s.db, `
 		WITH ordered AS (
 			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC)::int AS turn_index,
-				turn_id::text AS turn_id,
-				COALESCE(trigger_event_id::text, '') AS event_id,
+				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
+				turn_id AS turn_id,
+				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
 				created_at
 			FROM agent_turns
-			WHERE session_id = $1::uuid
+			WHERE session_id = ?
 		)
 		SELECT turn_index, turn_id, created_at
 		FROM ordered
-		WHERE event_id = $2
+		WHERE event_id = ?
 		LIMIT 2
 	`, sessionID, eventID)
 	if err != nil {
@@ -473,7 +533,7 @@ func (s *PostgresStore) resolveConversationForkEventPoint(ctx context.Context, s
 	type match struct {
 		turnIndex int
 		turnID    string
-		createdAt time.Time
+		createdAt conversationForkTimeValue
 	}
 	matches := []match{}
 	for rows.Next() {
@@ -497,31 +557,31 @@ func (s *PostgresStore) resolveConversationForkEventPoint(ctx context.Context, s
 		TurnIndex:  matches[0].turnIndex,
 		TurnID:     matches[0].turnID,
 		EventID:    eventID,
-		SelectedAt: matches[0].createdAt.UTC(),
+		SelectedAt: matches[0].createdAt.Time,
 	}, nil
 }
 
-func (s *PostgresStore) resolveConversationForkTimePoint(ctx context.Context, sessionID string, at time.Time) (ConversationForkPointDescriptor, error) {
-	row := s.DB.QueryRowContext(ctx, `
+func (s conversationForkStore) resolveConversationForkTimePoint(ctx context.Context, sessionID string, at time.Time) (ConversationForkPointDescriptor, error) {
+	row := s.queryRow(ctx, s.db, `
 		WITH ordered AS (
 			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC)::int AS turn_index,
-				turn_id::text AS turn_id,
-				COALESCE(trigger_event_id::text, '') AS event_id,
+				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
+				turn_id AS turn_id,
+				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
 				created_at
 			FROM agent_turns
-			WHERE session_id = $1::uuid
+			WHERE session_id = ?
 		)
 		SELECT turn_index, turn_id, event_id, created_at
 		FROM ordered
-		WHERE created_at <= $2
+		WHERE created_at <= ?
 		ORDER BY created_at DESC, turn_id DESC
 		LIMIT 1
 	`, sessionID, at.UTC())
 	var turnIndex int
 	var turnID string
 	var eventID string
-	var selectedAt time.Time
+	var selectedAt conversationForkTimeValue
 	if err := row.Scan(&turnIndex, &turnID, &eventID, &selectedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
@@ -535,7 +595,7 @@ func (s *PostgresStore) resolveConversationForkTimePoint(ctx context.Context, se
 		TurnID:     turnID,
 		EventID:    eventID,
 		At:         &atCopy,
-		SelectedAt: selectedAt.UTC(),
+		SelectedAt: selectedAt.Time,
 	}, nil
 }
 
@@ -546,8 +606,11 @@ func scanConversationForkSession(scanner interface {
 	var turnIndex sql.NullInt64
 	var turnID string
 	var eventID string
-	var at sql.NullTime
-	var deletedAt sql.NullTime
+	var at conversationForkTimeValue
+	var selectedAt conversationForkTimeValue
+	var createdAt conversationForkTimeValue
+	var expiresAt conversationForkTimeValue
+	var deletedAt conversationForkTimeValue
 	if err := scanner.Scan(
 		&item.ForkID,
 		&item.SourceSessionID,
@@ -558,10 +621,10 @@ func scanConversationForkSession(scanner interface {
 		&turnID,
 		&eventID,
 		&at,
-		&item.ForkPoint.SelectedAt,
+		&selectedAt,
 		&item.CreatedBy,
-		&item.CreatedAt,
-		&item.ExpiresAt,
+		&createdAt,
+		&expiresAt,
 		&deletedAt,
 	); err != nil {
 		return OperatorConversationForkSession{}, err
@@ -572,16 +635,16 @@ func scanConversationForkSession(scanner interface {
 	item.ForkPoint.TurnID = strings.TrimSpace(turnID)
 	item.ForkPoint.EventID = strings.TrimSpace(eventID)
 	if at.Valid {
-		atValue := at.Time.UTC()
+		atValue := at.Time
 		item.ForkPoint.At = &atValue
 	}
 	if deletedAt.Valid {
-		value := deletedAt.Time.UTC()
+		value := deletedAt.Time
 		item.DeletedAt = &value
 	}
-	item.CreatedAt = item.CreatedAt.UTC()
-	item.ExpiresAt = item.ExpiresAt.UTC()
-	item.ForkPoint.SelectedAt = item.ForkPoint.SelectedAt.UTC()
+	item.CreatedAt = createdAt.Time
+	item.ExpiresAt = expiresAt.Time
+	item.ForkPoint.SelectedAt = selectedAt.Time
 	item.State = conversationForkState(item, now)
 	item.Turns = []OperatorConversationTurn{}
 	return item, nil

@@ -39,6 +39,9 @@ const (
 	ScenarioMailboxRejectDecisionLifecycle       = "mailbox_reject_decision_lifecycle"
 	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
 	ScenarioTestSetupEntitiesLifecycle           = "test_setup_entities_lifecycle"
+	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
+	ScenarioConversationForkChatLifecycle        = "conversation_fork_chat_lifecycle"
+	ScenarioConversationForkDeleteLifecycle      = "conversation_fork_delete_lifecycle"
 )
 
 type Scenario struct {
@@ -82,6 +85,9 @@ func Scenarios() []Scenario {
 		servedMailboxDecisionScenario(ScenarioMailboxRejectDecisionLifecycle, "mailbox.reject"),
 		servedMailboxDecisionScenario(ScenarioMailboxDeferDecisionLifecycle, "mailbox.defer"),
 		servedControlScenario(ScenarioTestSetupEntitiesLifecycle, "test.setup_entities", "TestServedParityHarnessTestSetupEntitiesLifecycle"),
+		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),
+		servedControlScenario(ScenarioConversationForkChatLifecycle, "conversation.fork_chat", "TestServedParityHarnessConversationForkLifecycle"),
+		servedControlScenario(ScenarioConversationForkDeleteLifecycle, "conversation.fork_delete", "TestServedParityHarnessConversationForkLifecycle"),
 	}
 }
 

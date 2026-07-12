@@ -249,8 +249,10 @@ func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntime
 	}
 	return func(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 		return selectedAPICapabilities{
-			BundleCatalog:   sqliteStore,
-			RuntimeContexts: req.RuntimeContextManager,
+			BundleCatalog:             sqliteStore,
+			ConversationForks:         sqliteStore,
+			ConversationForkLifecycle: sqliteStore,
+			RuntimeContexts:           req.RuntimeContextManager,
 		}, nil
 	}
 }
