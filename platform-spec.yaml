@@ -11348,7 +11348,10 @@ run_model:
       are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
       under the fork run_id. For platform.runtime_log diagnostics, the canonical persisted lineage is events.source_event_id;
       the runtime logger may derive it only from an explicit diagnostic parent_event_id or a verified same-run persisted
-      subject EventID. Diagnostic action/reason strings, EventBus descriptors, and produced_by_type are not lineage proof.
+      subject EventID. Activity diagnostics emitted while executing a selected-fork platform.activity_requested event MUST
+      use the actual persisted fork-local request event as that subject; a recomputed activity request identity that is not
+      persisted in the fork run is not lineage proof. Diagnostic action/reason strings, EventBus descriptors, and
+      produced_by_type are not lineage proof.
       Unrelated platform events without selected-fork causal context, source-run platform facts, source outcomes,
       source deliveries, source receipts, source dead letters, CLI/API/dashboard JSON, live EventBus descriptors, or
       produced_by_type alone are not executable fork truth and must remain fail-closed or split. This owner does not copy
@@ -11373,7 +11376,14 @@ run_model:
       persistence compiles it to source_event_id. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
       run_fork_selected_contract_executions, runs selected handlers through the fork-local runtime container and normal runtime pipeline, writes fork-local
-      outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
+      outcomes, and regenerates emitted follow-ups under the fork run_id. When selected frontier work is a
+      platform.activity_requested event, source preparation MUST bind the request payload source_event_id to the actual
+      fork-local frontier event before deriving fork-local request/result identities. read_only with reexecute_read executes
+      the connector exactly once under that fork-local generation and does not copy a source attempt;
+      non_idempotent_write with reuse_recorded_result copies only terminal succeeded, failed, or uncertain evidence under
+      fork-local request/result identities and publishes that recorded result without calling the connector. Failed and
+      uncertain evidence MUST preserve its typed failure, including platform.outcome_uncertain. Source events are
+      payload/lineage inputs only;
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
       NOT become executable fork work or fork suppressors. At/before-T source committed replay-scope marker rows may be
       consumed only as lineage/no-action evidence by the selected-contract marker policy; fork-local recovery must use

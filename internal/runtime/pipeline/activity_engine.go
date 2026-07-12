@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -359,7 +360,14 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	detail["request_event_id"] = activityRequestEventID(intent)
+	requestEventID := activityRequestEventID(intent)
+	detail["request_event_id"] = requestEventID
+	lineageEventID := requestEventID
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok && inbound.Type() == activityRequestEventType {
+		lineageEventID = inbound.ID()
+	} else if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok && lineage.SubjectEventType == string(activityRequestEventType) && lineage.SubjectEventID != "" {
+		lineageEventID = lineage.SubjectEventID
+	}
 	if intent.Generation.Valid() {
 		detail["loop_generation"] = intent.Generation.PayloadValue()
 		detail["loop_stage"] = intent.LoopStage
@@ -368,7 +376,7 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 		Level:     "info",
 		Component: "activity",
 		Action:    action,
-		EventID:   activityRequestEventID(intent),
+		EventID:   lineageEventID,
 		EventType: intent.SuccessEvent,
 		EntityID:  intent.EntityID.String(),
 		Detail:    detail,

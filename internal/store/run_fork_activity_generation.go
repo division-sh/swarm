@@ -63,6 +63,11 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
 		return event, nil
 	}
+	payload, err = bindRunForkActivitySourceEvent(payload, forkRunID, event.SourceEventID)
+	if err != nil {
+		return event, fmt.Errorf("bind selected-contract activity request %s to fork-local frontier: %w", event.SourceEventID, err)
+	}
+	event.Payload = payload
 	var request runForkActivityRequestPayload
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
@@ -89,6 +94,15 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	return event, nil
+}
+
+func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID string) (json.RawMessage, error) {
+	payload := map[string]any{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	payload["source_event_id"] = activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID)
+	return json.Marshal(payload)
 }
 
 func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, entityID string) ([]attemptgeneration.Generation, error) {
