@@ -221,7 +221,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		t.Fatalf("load standing fixture: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	registry := testProviderTriggerRegistry(t)
+	catalog := testProviderTriggerCatalog(t)
 	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore) {
 		persistence := &processIngressProofStore{}
 		eventsStore := &processIngressEventStore{}
@@ -229,14 +229,18 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewEventBus(%s): %v", alias, err)
 		}
-		gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, nil, nil, registry, persistence)
+		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, persistence)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
+		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+		if err != nil {
+			t.Fatalf("CompileAdmission(%s): %v", alias, err)
+		}
 		return runtimepkg.BundleContext{
 			BundleHash: hash, Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway},
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
-				EntityID: entityID, SigningSecret: "webhook_signing.telegram",
+				EntityID: entityID, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
 		}, persistence, eventsStore
 	}
@@ -244,7 +248,11 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
 	contextA, persistenceA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
 	contextB, persistenceB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB)
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -286,7 +294,16 @@ func TestRuntimeProjectSupervisorRejectsChangedStandingBundleWithoutMutation(t *
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "service/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", SigningSecret: "webhook_signing.telegram",
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+	catalog := testProviderTriggerCatalog(t)
+	oldTarget.AdmissionPlan, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, runtimepkg.BundleContext{
 		BundleHash: oldHash, Source: source, Runtime: oldRT, StandingTargets: []runtimepkg.StandingTarget{oldTarget},
 	})
 	if err != nil {
@@ -596,7 +613,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					source := semanticview.Wrap(bundle)
 					module := stubWorkflowModule{source: source}
-					providerRegistry := testProviderTriggerRegistry(t)
+					providerRegistry := testProviderTriggerCatalog(t)
 					oldHash := runtimeContextTestHash("a")
 					newHash := oldHash
 					if changedHash {
@@ -611,7 +628,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 								WorkflowModule:                   module,
 								LLMRuntime:                       runtimellm.NoopRuntime{},
 								DisablePersistentStartupRecovery: true,
-								ProviderTriggerRegistry:          providerRegistry,
+								ProviderTriggerCatalog:           providerRegistry,
 								BundleSourceFact: runtimecorrelation.BundleSourceFact{
 									BundleHash:   hash,
 									BundleSource: storerunlifecycle.BundleSourceEphemeral,
@@ -792,13 +809,13 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 				t.Fatalf("initializeStateStores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
-			providerRegistry := testProviderTriggerRegistry(t)
+			providerRegistry := testProviderTriggerCatalog(t)
 			hash := runtimeContextTestHash("f")
 			fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
 					Config: &config.Config{}, Stores: stores.runtimeStores(),
-					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerRegistry: providerRegistry, BundleSourceFact: fact},
+					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, BundleSourceFact: fact},
 				})
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
@@ -1152,6 +1169,9 @@ func newSupervisorForLoadProjectFailureTest(
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
 	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, nil, "", nil, nil, nil)
+	catalog := testProviderTriggerCatalog(t)
+	supervisor.providerTriggers = catalog
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
 	supervisor.dev = true
 	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
@@ -1159,7 +1179,7 @@ func newSupervisorForLoadProjectFailureTest(
 		}
 		return module, bundle, nil
 	}
-	supervisor.validateSource = func(context.Context, semanticview.Source) error { return nil }
+	supervisor.validateSource = func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error { return nil }
 	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
@@ -1200,23 +1220,25 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 	}
 }
 
-func TestRuntimeProjectSupervisorCarriesBootAdmittedProviderRegistryIntoReplacement(t *testing.T) {
+func TestRuntimeProjectSupervisorReverifiesProviderCatalogForReplacement(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
-	wantRegistry := testProviderTriggerRegistry(t)
-	var gotRegistry *providertriggers.Registry
+	bootCatalog := testProviderTriggerCatalog(t)
+	candidateCatalog := testProviderTriggerCatalog(t)
+	var gotCatalog *providertriggers.CatalogSnapshot
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		gotRegistry = deps.Options.ProviderTriggerRegistry
+		gotCatalog = deps.Options.ProviderTriggerCatalog
 		return &runtimepkg.Runtime{}, nil
 	})
-	supervisor.providerTriggers = wantRegistry
+	supervisor.providerTriggers = bootCatalog
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
 		t.Fatalf("OpenProject: %v", err)
 	}
-	if gotRegistry != wantRegistry {
-		t.Fatalf("replacement provider registry = %p, want boot-admitted %p", gotRegistry, wantRegistry)
+	if gotCatalog != candidateCatalog {
+		t.Fatalf("replacement provider catalog = %p, want reverified candidate %p (boot=%p)", gotCatalog, candidateCatalog, bootCatalog)
 	}
 }
 

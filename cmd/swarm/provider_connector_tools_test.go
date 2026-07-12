@@ -115,8 +115,7 @@ func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 		t.Fatalf("guarantee registry differs from authoritative platform spec:\ngot:  %#v\nwant: %#v", got, owners)
 	}
 	ownerFiles := map[string]string{
-		"internal/providertriggers.Manifest.resolveEventName":                                     "internal/providertriggers/providertriggers.go",
-		"internal/providertriggers.Manifest.Accept":                                               "internal/providertriggers/providertriggers.go",
+		"internal/providertriggers.InboundAdmissionPlan.Accept":                                   "internal/providertriggers/admission.go",
 		"internal/runtime.InboundGateway.HandleResolvedWebhook":                                   "internal/runtime/inbound.go",
 		"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent": "internal/runtime/pipeline/activity_engine.go",
 		"internal/runtime/pipeline.executePreparedActivityHTTPTool":                               "internal/runtime/pipeline/activity_engine.go",

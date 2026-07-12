@@ -8,13 +8,24 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type providerTriggerPackLoad struct {
-	Registry     *providertriggers.Registry
+	Catalog      *providertriggers.CatalogSnapshot
 	Loaded       []providertriggers.LoadedPack
 	PlatformDirs []string
 	ExternalDirs []string
+}
+
+func (l providerTriggerPackLoad) Reload() (*providertriggers.CatalogSnapshot, error) {
+	runningVersion, err := platform.PlatformVersion()
+	if err != nil {
+		return nil, err
+	}
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs(runningVersion, l.PlatformDirs, l.ExternalDirs)
+	return catalog, err
 }
 
 func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoadResult) (providerTriggerPackLoad, error) {
@@ -31,12 +42,12 @@ func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoad
 	}
 	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), configuredPlatformDirs)
 	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	registry, loaded, err := providertriggers.NewRegistryFromRequiredPlatformPackDirs(runningVersion, platformDirs, externalDirs)
+	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs(runningVersion, platformDirs, externalDirs)
 	if err != nil {
 		return providerTriggerPackLoad{}, err
 	}
 	return providerTriggerPackLoad{
-		Registry:     registry,
+		Catalog:      catalog,
 		Loaded:       loaded,
 		PlatformDirs: platformDirs,
 		ExternalDirs: externalDirs,
@@ -91,6 +102,18 @@ func appendProviderTriggerCapabilitySubjects(report *localPreflightReport, loade
 			return
 		}
 		subjects = append(subjects, subject)
+	}
+	report.addCapabilitySubjects(subjects)
+}
+
+func appendEffectiveProviderTriggerCapabilitySubjects(report *localPreflightReport, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) {
+	if report == nil || source == nil || catalog == nil {
+		return
+	}
+	subjects, err := runtime.EffectiveStandingIngressCapabilitySubjects(source, catalog)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_target_admission_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the standing ingress provider admission declaration or configured trigger packs")
+		return
 	}
 	report.addCapabilitySubjects(subjects)
 }

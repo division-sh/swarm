@@ -7241,8 +7241,9 @@ tool_model:
     promoted_by: '#1929'
     owner: internal/packs typed capability-surface model and deterministic renderer consuming internal/userfacing human-code projection
     description: >
-      Provider trigger packs and provider connector declarations expose one typed proof-ready model to local preflight and
-      doctor. Body-specific owners derive capability and guarantee facts from accepted manifests or ToolSchemaEntry values;
+      Provider trigger packs, effective compiled ingress targets, and provider connector declarations expose one typed
+      proof-ready model to verify, local preflight, serve readiness, and doctor. Body-specific owners derive capability and
+      guarantee facts from accepted manifests, compiled inbound admission plans, or ToolSchemaEntry values;
       credential owners derive connector requirement state. The common owner normalizes subject identity, applicability,
       status, requirements, enforcement evidence, ordering, and text/JSON projections. Pack envelope capabilities and
       requires remain import-time derive-and-compare integrity assertions and MUST NOT be read as runtime surface truth.
@@ -7259,19 +7260,22 @@ tool_model:
         provider_connector: effective ToolSchemaEntry or installed connector-pack action
       source_values:
         trigger_pack: verified platform or external trigger pack
+        trigger_pack_binding: effective standing ingress target compiled from one exact verified trigger pack identity
+        raw_declaration: effective standing ingress target compiled from an explicit closed raw admission declaration
         connector_pack_import: explicitly imported connector action
         connector_pack: installed but not imported connector action
         flow_local: flow-local ToolSchemaEntry with category provider_connector
       applicability_values:
-        effective: callable connector declaration selected by the contract
+        effective: compiled ingress target or callable connector declaration selected by the contract
         installed: verified pack inventory that is not an effective callable connector
     status:
       READY: effective connector whose every static or managed credential requirement is satisfied
       NOT_READY: effective connector with at least one unsatisfied static or managed credential requirement
       AVAILABLE: >
-        Installed capability that is not effective in the current contract. All provider-trigger pack subjects are
-        AVAILABLE until #1944 contributes a selected-target readiness subject. Unimported connector actions are AVAILABLE
-        and carry import remediation but MUST remain absent from ToolEntries, agent surfaces, validation, and execution.
+        Installed capability that is not effective in the current contract, or an effective provider-trigger target whose
+        target-scoped secret binding is intentionally unevaluated until #1944 contributes BOUND/UNBOUND readiness. Unimported
+        connector actions are AVAILABLE and carry import remediation but MUST remain absent from ToolEntries, agent
+        surfaces, validation, and execution.
       rollup_rule: >
         `internal/packs NormalizeSubjects` derives status from kind, applicability, and validated requirement state.
         Body adapters MUST NOT compute status. A supplied status that contradicts the derived tuple, an installed connector
@@ -7295,10 +7299,10 @@ tool_model:
     guarantee_enforcement_registry:
       claims:
         emit_undeclared_events:
-          enforced_by: internal/providertriggers.Manifest.resolveEventName
+          enforced_by: internal/providertriggers.InboundAdmissionPlan.Accept
           execution_proof: internal/providertriggers TestStripeManifestAcceptsLiteralEventType
         run_code_before_admission:
-          enforced_by: internal/providertriggers.Manifest.Accept
+          enforced_by: internal/providertriggers.InboundAdmissionPlan.Accept
           execution_proof: internal/runtime TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPublish
         touch_unbound_resources:
           enforced_by: internal/runtime.InboundGateway.HandleResolvedWebhook
@@ -7339,9 +7343,13 @@ tool_model:
         REFRESH_FAILED: swarm connections disconnect <resolved-deployment-key> && swarm connections connect <resolved-deployment-key>
         SCOPE_INSUFFICIENT: swarm connections connect <resolved-deployment-key>
       trigger_rule: >
+        Installed trigger-pack subjects render inventory facts with no target admission. Every declared standing ingress
+        provider also renders one effective typed subject with stable id `ingress:<bundle_hash>:<alias>:<provider>`, exact
+        catalog generation, policy_source, request_authentication, event policy, and resolved pack identity when applicable.
         Trigger signing requirements render with `scope: target` and no status, satisfied value, binding remediation,
-        READY/NOT_READY claim, selected-store query, or inferred global binding. #1944 owns target selection, enablement,
-        redacted SQLite/Postgres signing-binding readback, ambiguity, and mutation/remediation.
+        READY/NOT_READY claim, selected-store query, or inferred global binding. #1944 owns redacted SQLite/Postgres
+        signing-binding readback and mutation/remediation; it consumes this target identity and MUST NOT reconstruct another
+        admission model.
     projection:
       structured_owner: local preflight report capability_subjects
       human_phrase_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
@@ -7720,16 +7728,89 @@ tool_model:
     existing_gateway_owner: >
       `cmd/swarm.runtimeProcessInboundHandler` owns the supported `/webhooks/{alias}/{provider}` route and resolves alias plus
       provider through the loaded `RuntimeContextManager` standing-target registry. `internal/runtime/inbound.go` remains the
-      generic HTTP ingress executor only after that exact target is resolved. It consumes
-      `runtime_ingress.queueable_ingress.inbound.webhook`, delegates configured-provider interpretation to the
-      provider-trigger manifest interpreter, persists the inbound dedupe marker before publish for delivery callbacks, and
-      publishes the normalized root ingress event returned by the manifest interpreter. Provider manifests may also return
-      an authenticated response-only result when the provider protocol requires a challenge response that is not a delivery.
+      generic HTTP ingress executor only after that exact target and its immutable InboundAdmissionPlan are resolved. It
+      consumes `runtime_ingress.queueable_ingress.inbound.webhook`, executes only that plan, persists the inbound dedupe
+      marker before publish for delivery callbacks, and publishes the normalized root ingress event returned by the plan.
+      Provider manifests may also return an authenticated response-only result when the provider protocol requires a
+      challenge response that is not a delivery. The gateway MUST NOT inspect catalog presence, provider-specific headers,
+      or payload shape to select an interpreter at request time.
     manifest_interpreter_owner: >
       `internal/providertriggers` is the configured-provider manifest interpreter and canonical owner for first-class
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    compiled_admission_authority:
+      owner: internal/providertriggers.CatalogSnapshot and InboundAdmissionPlan
+      issue: '#1936'
+      declaration_owner: package.yaml flows[].ingress.providers[].admission
+      omission_rule: >
+        Omitted `admission` or omitted `admission.kind` always means `pack`, independent of environment. Pack mode must
+        resolve exactly one verified provider-trigger pack from the current immutable CatalogSnapshot or verification fails.
+        Missing packs never select raw mode. Platform and external packs resolve through the identical rule and verifier.
+      pack_grammar:
+        minimal: '{provider: telegram, signing_secret: webhook_signing.telegram}'
+        optional_pin: 'admission: {kind: pack, pack: {id: provider.telegram}}'
+        rules:
+        - '`kind` may be omitted or exactly `pack`'
+        - '`pack.id` is optional and pins one exact loaded pack id; wrong, missing, or provider-mismatched ids fail with loaded-pack remediation'
+        - authentication, event, delivery_id, and payload are raw-only and forbidden
+        - signed pack plans require one non-empty signing_secret reference; unauthenticated pack plans forbid it
+        - an unauthenticated pack plan requires `acknowledge: unsigned_webhook`; authenticated plans forbid acknowledgement
+      raw_grammar:
+        required:
+        - 'kind: raw'
+        - 'authentication.kind: none | token | hmac_sha256'
+        - exact literal event
+        - 'delivery_id.source: header | json_path | body_sha256'
+        - 'payload: json | raw'
+        conditional:
+        - token requires one explicit header, permits an optional prefix, and forbids encoding
+        - hmac_sha256 requires one explicit header, permits an optional prefix, signs exact raw body bytes, and uses encoding hex or base64
+        - none forbids header, prefix, encoding, and signing_secret
+        - header delivery identity requires exactly one value from the named header
+        - json_path delivery identity requires one syntactically valid declared JSONPath and a non-empty resolved value
+        - body_sha256 derives identity only from exact body bytes
+        rules:
+        - raw is legal only through explicit `kind: raw`; there is no raw default, fallback, or compatibility path
+        - raw provider names cannot equal a provider owned by any installed pack; intentional raw use must choose a distinct namespace such as `<provider>-raw`
+        - provider-specific signature headers, delivery fields, event fields, or payload heuristics not named by the declaration are ignored
+        - duplicate declared authentication or delivery-id header values fail closed
+        - authenticated raw plans require signing_secret; unauthenticated raw plans forbid it
+      unsigned_acknowledgement: >
+        `acknowledge: unsigned_webhook` is the only accepted acknowledgement token. For explicit unauthenticated raw
+        admission, absence emits the non-blocking `inbound_unsigned_webhook` verify warning with remediation naming the
+        token; presence suppresses that warning. Effective readback always renders request_authentication=UNAUTHENTICATED
+        regardless of acknowledgement. Comments and booleans are not controls.
+      exact_request_authentication:
+        TOKEN_EQUALITY: pack manifest token_equality
+        TOKEN: explicit raw token equality
+        HMAC_SHA256: pack or raw HMAC-SHA256
+        HMAC_SHA1: pack HMAC-SHA1
+        UNAUTHENTICATED: pack with no signature or explicit raw none
+      catalog_snapshot: >
+        Each successful configured pack load produces one immutable CatalogSnapshot. Its deterministic generation id is
+        SHA-256 over sorted semantic tuples `(pack id, normalized provider, version, exact manifest_hash, provenance)`.
+        Entries and capability projections return deep copies; consumers cannot mutate published catalog state. Signed
+        manifests with `secret.required: false` are invalid at load, and every signed execution rejects an empty runtime key.
+      plan: >
+        Verification compiles every standing ingress binding into one immutable InboundAdmissionPlan containing the exact
+        catalog generation, normalized provider, policy_source (`verified_pack` or `raw_declaration`), exact
+        request_authentication, resolved pack id/version/manifest_hash/provenance when applicable, copied executable policy,
+        secret requirement, event-name policy, and unsigned acknowledgement fact. Runtime targets and effective capability
+        subjects carry this plan; a target without a valid plan is unavailable and the gateway fails before credential
+        lookup, body interpretation, marker persistence, or publish.
+      process_generation: >
+        Boot compiles primary and every additional loaded BundleContext against one CatalogSnapshot generation before any
+        runtime is published. Reload re-reads and re-verifies configured pack directories into a candidate snapshot, then
+        recompiles the candidate context and every surviving loaded context. RuntimeContextManager validates and atomically
+        publishes the candidate primary context, all surviving target plans, catalog generation, installed subjects, and
+        effective subjects. Missing/remapped/tampered packs, incomplete surviving-context recompilation, generation mismatch,
+        target collision, or projection failure rejects reload while the predecessor contexts and generation remain loaded.
+      projections: >
+        Verify, local preflight, serve readiness, and doctor consume `tool_model.provider_capability_surface` installed and
+        effective subjects from the compiled owner. Basic describe and routing topology remain declaration-only and show
+        authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
+        request authentication, or readiness.
     pack_envelope_source_authority:
       owner: internal/packs universal envelope plus body-specific verifiers such as internal/providertriggers and internal/providerconnectors
       status: >
@@ -7742,9 +7823,10 @@ tool_model:
         platform-authored capability source. Runtime config declares external provider-trigger packs separately at
         `provider_triggers.packs.external_dirs`. Relative paths in both lists resolve against the config layer that declares
         the effective key. `swarm serve` verifies the complete declared set before runtime construction and injects one
-        registry into every runtime and Builder replacement runtime. Missing, malformed, incompatible, tampered, or
+        immutable catalog snapshot generation into every runtime and Builder replacement runtime. Missing, malformed,
+        incompatible, tampered, or
         colliding declared packs fail boot; no executable-relative, current-directory, source-checkout, embedded, package-
-        global default, or nil-registry discovery fallback exists. Connector packs in this first slice are platform packs
+        global default, or nil-catalog discovery fallback exists. Connector packs in this first slice are platform packs
         explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories require a later
         gated surface.
       required_platform_inventory:
@@ -7820,7 +7902,7 @@ tool_model:
       - reject competing immutable identities and duplicate universal pack ids across the composed set
       - require the exact current-platform first-party `(pack id, provider)` inventory from `required_platform_inventory`
       - reject provider-name/tool-name collisions independently according to the body-specific collision rule
-      - register/import only verified body manifests
+      - construct one immutable CatalogSnapshot and compile every effective ingress plan only from that snapshot
       trust_tiers: >
         Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
         future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
@@ -7845,7 +7927,7 @@ tool_model:
         GitHub, Slack, Stripe, Twilio, Shopify, Typeform, Intercom, and Telegram provider-trigger manifests are first-party
         platform packs distributed as filesystem inventory and loaded through this envelope path. Their trigger bodies are
         absent from binary embed inputs. There is no permanent built-in-control exemption, package-global default registry,
-        nil-registry reconstruction path, or partial platform-inventory mode for configured-provider manifests. Envelope
+        nil-catalog reconstruction path, or partial platform-inventory mode for configured-provider manifests. Envelope
         `manifest_hash`, `capabilities`, and `requires` are deterministic build-stamped summaries; import verifies exact-byte
         body hash and body-derived equality.
       non_goals:
@@ -8072,12 +8154,10 @@ tool_model:
         event name is literal `inbound.telegram`, not a dynamic template. Granular Telegram update classification from fields
         such as `message`, `edited_message`, or `callback_query` is a later gated semantic concept.
     raw_webhook_mode: >
-      Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
-      does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner
-      rather than generic signature, delivery-id, event-type, acknowledgement, or `inbound.{provider}` mapping fallbacks.
-      Raw webhook mode MUST NOT interpret configured-provider signatures such as `Stripe-Signature` or
-      `X-Twilio-Signature`; configured-provider signature semantics belong only to the corresponding configured-provider
-      manifest.
+      Raw webhook admission exists only as the explicit closed declaration in `compiled_admission_authority.raw_grammar`.
+      The former unknown-provider acceptRaw fallback, generic signature-header search, payload id/type guessing,
+      acknowledgement guessing, and automatic `inbound.{provider}` event mapping are retired with zero compatibility path.
+      An unplanned target or pack-required declaration without a verified pack fails closed; neither condition may invoke raw.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
@@ -8594,6 +8674,8 @@ flow_model:
       canonical_owners:
         declaration: internal/runtime/contracts.ProjectFlowRef
         verification: internal/runtime.ResolveStandingTargetDeclarations
+        provider_catalog: internal/providertriggers.CatalogSnapshot
+        admission_plan: internal/providertriggers.InboundAdmissionPlan
         lifecycle: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
         ingress_dispatch: internal/runtime.InboundGateway.HandleResolvedWebhook
@@ -8617,8 +8699,9 @@ flow_model:
         - ingress requires activation: standing and defaults alias to the package flow id
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
-        - signing_secret is an explicit deployment credential reference; package data never carries the value
-        - every provider binding requires an exact compatible external input pin under the provider manifest event-name policy
+        - admission omission is always pack-required; raw admission requires explicit kind plus its complete closed policy
+        - signing_secret is an explicit deployment credential reference required only by the compiled authentication policy; package data never carries the value
+        - every provider binding requires an exact compatible external input pin under its compiled event-name policy
       lifecycle_authority: >
         Before readiness, package activation atomically and idempotently creates or resumes one deterministic durable run,
         one singleton flow instance, and that instance's primary entity. First activation consumes the full canonical
@@ -8634,8 +8717,9 @@ flow_model:
       process_routing: >
         One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, replacement, and
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
-        Dispatch MUST use that selected context's source, provider registry, credential store, ingress controller, store,
-        EventBus, and runtime. Primary-runtime fallback and parallel alias registries are forbidden. Replacement and
+        Dispatch MUST use that selected context's source, immutable admission plan, credential store, ingress controller,
+        store, EventBus, and runtime. Primary-runtime fallback, request-time provider catalog lookup, and parallel alias
+        registries are forbidden. Replacement and
         deactivation atomically reject new predecessor admission while manager visibility is serialized. Before replacement
         quiescence begins, the RuntimeContextManager marks the predecessor unavailable and process readiness becomes false;
         `/readyz`, `/v1/rpc`, `/v1/ws`, and `/webhooks/...` fail with service-unavailable semantics until one loaded runtime
@@ -8649,7 +8733,11 @@ flow_model:
         and entity_id before persistence and publish; root-ingress admission MUST preserve that run and MUST NOT mint a run
         per webhook.
       replacement_policy: >
-        Same-bundle-hash restart resumes the standing identity. Same-hash live replacement may publish new runtime objects
+        Same-bundle-hash restart resumes the standing identity. Provider-trigger pack directories are re-read and re-verified
+        for every reload. One candidate catalog generation must successfully recompile every surviving loaded context and the
+        replacement context before readiness changes; RuntimeContextManager publishes the context set, target plans,
+        generation, and installed/effective capability subjects as one authority transition. Any failure leaves the previous
+        generation and contexts serving. Same-hash live replacement may publish new runtime objects
         only after they are ready and then atomically replaces process visibility. Replacement first rejects new predecessor
         admission and quiesces all predecessor shared-store/background consumers under the configured grace while retaining
         the one exclusive store lease. Only after quiescence may lease authority transfer and candidate activation begin.
@@ -8672,16 +8760,22 @@ flow_model:
       - duplicate aliases within a bundle or across loaded runtime contexts
       - duplicate providers within one alias
       - ingress on a non-standing or non-singleton flow
-      - missing provider, signing-secret reference, provider manifest, or compatible external event pin
+      - missing provider, required signing-secret reference, verified pack for pack-required admission, valid compiled admission plan, or compatible external event pin
+      - raw admission selected by omission, fallback, provider-pack collision, partial policy, or heuristic request interpretation
+      - unsigned pack without `acknowledge: unsigned_webhook`, invalid acknowledgement token, or acknowledgement on authenticated admission
+      - catalog-generation mismatch or incomplete all-context recompilation during boot/reload
       - unknown or unloaded alias/provider target
       - unbound signing-secret value at request time
       - standing run source or canonical bundle_hash mismatch
       readback: >
-        Basic describe projects activation, alias, providers, and signing-secret references from package declarations. Serve
-        readiness projects the exact POST URL and BOUND/UNBOUND state from the loaded RuntimeContextManager plus deployment
-        credential store. `routing-topology/v1.root_input_sources` projects each alias/provider binding and its target flow as
-        admission provenance; it is not a producer, edge, or third delivery scope. Neither surface exposes secret values or
-        creates a second target model.
+        Basic describe projects activation, alias, providers, signing-secret references, and authored admission kind, pack
+        pin, raw authentication/event policy, and acknowledgement from package declarations only. It never claims a resolved
+        pack identity, catalog generation, effective request authentication, or readiness. Verify, local preflight, serve,
+        and doctor project installed and effective trigger subjects from the process admission authority; effective rows name
+        the exact POST URL, policy_source, request_authentication, event, generation, and resolved pack identity when present.
+        #1944 adds BOUND/UNBOUND state from the deployment credential store. `routing-topology/v1.root_input_sources`
+        projects each authored alias/provider/admission binding and target flow as admission provenance; it is not a producer,
+        edge, or third delivery scope. No surface exposes secret values or creates a second target model.
       legacy_paths_removed:
       - scanning entity_state by route alias as ingress target authority
       - reading webhook signing values from flow-instance config
@@ -8815,8 +8909,10 @@ flow_model:
           - inter_flow_connect delivery between authored producers and consumers, lowered from declared output pin through parent connect to declared input pin
           root_input_source_rule: >
             `root_input_sources` is the deterministic admission-provenance projection for declared standing ingress. Each
-            entry names the authored alias, provider, package/flow target, and authored package location. It does not create a
-            producer endpoint or route edge, does not participate in delivery-scope counts, and does not authorize delivery.
+            entry names the authored alias, provider, admission kind/pin/authentication/event/acknowledgement facts,
+            package/flow target, and authored package location. It does not claim compiled pack identity, catalog generation,
+            or effective request authentication; create a producer endpoint or route edge; participate in delivery-scope
+            counts; or authorize delivery.
             After admission, the canonical declared-input association and typed pub/sub relation owners govern the event's
             ordinary delivery. Flow-entry ingress declarations remain the semantic source; the projection is read-only.
           typed_pubsub_rule: >

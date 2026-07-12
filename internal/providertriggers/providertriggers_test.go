@@ -24,7 +24,8 @@ import (
 func TestFilesystemRegistryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
 	registry := testPlatformRegistry(t)
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
-		got := registry.sources[provider]
+		entry, _ := registry.EntryByProvider(provider)
+		got := entry.Source
 		for _, want := range []string{"provenance=platform", "provider." + provider, filepath.Join("packs", "provider-triggers", provider)} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s source = %q, want containing %q", provider, got, want)
@@ -97,7 +98,7 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 
 func TestRequiredPlatformPackInventoryAdmission(t *testing.T) {
 	dirs := testPlatformPackDirs(t)
-	registry, loaded, err := NewRegistryFromRequiredPlatformPackDirs("0.7.0", dirs, nil)
+	registry, loaded, err := NewCatalogSnapshotFromRequiredPlatformPackDirs("0.7.0", dirs, nil)
 	if err != nil {
 		t.Fatalf("load complete required platform inventory: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestRequiredPlatformPackInventoryAdmission(t *testing.T) {
 			omitted = append(omitted, dir)
 		}
 	}
-	_, _, err = NewRegistryFromRequiredPlatformPackDirs("0.7.0", omitted, []string{"/external/must-not-be-read-before-platform-completeness"})
+	_, _, err = NewCatalogSnapshotFromRequiredPlatformPackDirs("0.7.0", omitted, []string{"/external/must-not-be-read-before-platform-completeness"})
 	if err == nil {
 		t.Fatal("required platform inventory accepted omitted Stripe pack")
 	}
@@ -263,10 +264,9 @@ func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPackFS: %v", err)
 	}
-	_, err = NewRegistryFromSources(
-		ManifestSource{Manifest: pack.Manifest, Source: "external:/tmp/github"},
-		SourcesFromLoadedPacks(pack)[0],
-	)
+	duplicate := CatalogEntriesFromLoadedPacks(pack)[0]
+	duplicate.Source = "external:/tmp/github"
+	_, err = NewCatalogSnapshot(duplicate, CatalogEntriesFromLoadedPacks(pack)[0])
 	if err == nil {
 		t.Fatal("NewRegistryFromSources succeeded, want duplicate provider failure")
 	}
@@ -277,7 +277,7 @@ func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
 	}
 }
 
-func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
+func TestProviderTriggerCatalogLoadsExternalPackDirs(t *testing.T) {
 	dir := copyBuiltinPackToTemp(t, "stripe")
 	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "provider: stripe", "provider: acme")
 	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "literal: inbound.stripe", "literal: inbound.acme")
@@ -290,14 +290,16 @@ func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "providertriggers/stripe", "providertriggers/acme")
 	rewritePackHash(t, dir)
 
-	registry, loaded, err := NewRegistryFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
+	registry, loaded, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
 	if err != nil {
-		t.Fatalf("NewRegistryFromPackDirs: %v", err)
+		t.Fatalf("NewCatalogSnapshotFromPackDirs: %v", err)
 	}
-	if got := registry.sources["acme"]; !strings.Contains(got, "provenance=external") || !strings.Contains(got, dir) {
+	acme, _ := registry.EntryByProvider("acme")
+	if got := acme.Source; !strings.Contains(got, "provenance=external") || !strings.Contains(got, dir) {
 		t.Fatalf("acme source = %q, want external dir source %q", got, dir)
 	}
-	if got := registry.sources["stripe"]; !strings.Contains(got, "provenance=platform") || !strings.Contains(got, "provider.stripe") {
+	stripe, _ := registry.EntryByProvider("stripe")
+	if got := stripe.Source; !strings.Contains(got, "provenance=platform") || !strings.Contains(got, "provider.stripe") {
 		t.Fatalf("stripe source = %q, want platform pack source", got)
 	}
 	foundExternal := false
@@ -312,14 +314,14 @@ func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
 	}
 }
 
-func TestProviderTriggerRegistryRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
+func TestProviderTriggerCatalogRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
 	dir := copyBuiltinPackToTemp(t, "github")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.github", "id: provider.github.external")
 
-	_, _, err := NewRegistryFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
+	_, _, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
 	if err == nil {
-		t.Fatal("NewRegistryFromPackDirs succeeded, want duplicate provider failure")
+		t.Fatal("NewCatalogSnapshotFromPackDirs succeeded, want duplicate provider failure")
 	}
 	for _, want := range []string{`duplicate provider trigger manifest for "github"`, "provenance=platform", "provenance=external", dir} {
 		if !strings.Contains(err.Error(), want) {
@@ -349,11 +351,11 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 	if strings.Contains(renderedCan, "stripe-secret") {
 		t.Fatal("capability surface leaked a concrete secret value")
 	}
-	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(pack)...)
+	registry, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(pack)...)
 	if err != nil {
 		t.Fatalf("NewRegistryFromSources: %v", err)
 	}
-	_, err = registry.Accept(Request{
+	_, err = acceptInstalled(registry, Request{
 		Provider: "stripe",
 		Target:   Target{EntitySlug: "customer-a"},
 	})
@@ -390,13 +392,13 @@ func TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier(t *tes
 	if err != nil {
 		t.Fatalf("LoadExternalPackDirs: %v", err)
 	}
-	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(loaded...)...)
+	registry, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(loaded...)...)
 	if err != nil {
 		t.Fatalf("NewRegistryFromSources: %v", err)
 	}
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
-	delivery, err := registry.Accept(telegramRequest("telegram-secret", body, map[string]any{
+	delivery, err := acceptInstalled(registry, telegramRequest("telegram-secret", body, map[string]any{
 		"update_id": float64(123456789),
 		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
 	}))
@@ -419,7 +421,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
 		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
 
-		delivery, err := registry.Accept(req)
+		delivery, err := acceptInstalled(registry, req)
 		if err != nil {
 			t.Fatalf("Accept hostile valid request: %v", err)
 		}
@@ -440,7 +442,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
 		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
 		req.Headers.Set("X-Other-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusUnauthorized)
 	})
 
@@ -451,7 +453,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
 		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(old))
 		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(old), body))
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusUnauthorized)
 	})
 
@@ -462,7 +464,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
 		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
 		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), signedBody))
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusUnauthorized)
 	})
 
@@ -475,7 +477,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Payload = map[string]any{
 			"event_type": map[string]any{"nested": "safe.event"},
 		}
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 
@@ -488,7 +490,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Payload = map[string]any{
 			"event_type": []any{"safe.event"},
 		}
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 
@@ -501,7 +503,7 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		req.Payload = map[string]any{
 			"event_type": true,
 		}
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 }
@@ -520,7 +522,7 @@ func TestManifestInterpreterRejectsMalformedJSONPathIdentityPayloads(t *testing.
 			"event_type": "safe.event",
 		}
 
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 
@@ -534,7 +536,7 @@ func TestManifestInterpreterRejectsMalformedJSONPathIdentityPayloads(t *testing.
 			"event_type": "safe.event",
 		}
 
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 
@@ -548,7 +550,7 @@ func TestManifestInterpreterRejectsMalformedJSONPathIdentityPayloads(t *testing.
 			"event_type": true,
 		}
 
-		_, err := registry.Accept(req)
+		_, err := acceptInstalled(registry, req)
 		requireProviderTriggerError(t, err, http.StatusBadRequest)
 	})
 }
@@ -569,15 +571,15 @@ func TestStripeManifestRejectsMalformedSignatureParams(t *testing.T) {
 	}
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",v0="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
 
-	_, err := testPlatformRegistry(t).Accept(req)
+	_, err := acceptInstalled(testPlatformRegistry(t), req)
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",broken,v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
-	_, err = testPlatformRegistry(t).Accept(req)
+	_, err = acceptInstalled(testPlatformRegistry(t), req)
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",t="+strconvFormatUnix(now)+",v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
-	_, err = testPlatformRegistry(t).Accept(req)
+	_, err = acceptInstalled(testPlatformRegistry(t), req)
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 }
 
@@ -597,7 +599,7 @@ func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
 	}
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Stripe literal event type: %v", err)
 	}
@@ -639,7 +641,7 @@ func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
 	}
 	req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", requestURL, form))
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Twilio form webhook: %v", err)
 	}
@@ -772,7 +774,7 @@ func TestTwilioManifestRejectsAmbiguousOrUnsupportedCallbacks(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testPlatformRegistry(t).Accept(tc.configure(validRequest()))
+			_, err := acceptInstalled(testPlatformRegistry(t), tc.configure(validRequest()))
 			requireProviderTriggerError(t, err, tc.wantStatus)
 		})
 	}
@@ -797,7 +799,7 @@ func TestShopifyManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	req.Headers.Set("X-Shopify-Webhook-Id", "webhook-123")
 	req.Headers.Set("X-Shopify-Topic", "orders/create")
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Shopify webhook: %v", err)
 	}
@@ -904,7 +906,7 @@ func TestShopifyManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testPlatformRegistry(t).Accept(tc.configure(validRequest()))
+			_, err := acceptInstalled(testPlatformRegistry(t), tc.configure(validRequest()))
 			requireProviderTriggerError(t, err, tc.wantStatus)
 		})
 	}
@@ -927,7 +929,7 @@ func TestTypeformManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	}
 	req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", body))
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Typeform webhook: %v", err)
 	}
@@ -1037,7 +1039,7 @@ func TestTypeformManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testPlatformRegistry(t).Accept(tc.configure(validRequest()))
+			_, err := acceptInstalled(testPlatformRegistry(t), tc.configure(validRequest()))
 			requireProviderTriggerError(t, err, tc.wantStatus)
 		})
 	}
@@ -1060,7 +1062,7 @@ func TestIntercomManifestAcceptsRawBodySHA1Signature(t *testing.T) {
 	}
 	req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", body))
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Intercom webhook: %v", err)
 	}
@@ -1170,7 +1172,7 @@ func TestIntercomManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testPlatformRegistry(t).Accept(tc.configure(validRequest()))
+			_, err := acceptInstalled(testPlatformRegistry(t), tc.configure(validRequest()))
 			requireProviderTriggerError(t, err, tc.wantStatus)
 		})
 	}
@@ -1183,7 +1185,7 @@ func TestTelegramManifestAcceptsHeaderTokenUpdate(t *testing.T) {
 		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
 	})
 
-	delivery, err := testPlatformRegistry(t).Accept(req)
+	delivery, err := acceptInstalled(testPlatformRegistry(t), req)
 	if err != nil {
 		t.Fatalf("Accept Telegram webhook: %v", err)
 	}
@@ -1278,7 +1280,7 @@ func TestTelegramManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testPlatformRegistry(t).Accept(tc.configure(validRequest()))
+			_, err := acceptInstalled(testPlatformRegistry(t), tc.configure(validRequest()))
 			requireProviderTriggerError(t, err, tc.wantStatus)
 		})
 	}
@@ -1412,15 +1414,15 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := NewRegistry(tc.manifest); err == nil {
-				t.Fatal("NewRegistry succeeded, want validation error")
+			if _, err := newTestCatalogSnapshot(tc.manifest); err == nil {
+				t.Fatal("newTestCatalogSnapshot succeeded, want validation error")
 			}
 		})
 	}
 }
 
 func TestRegistryRejectsEmptyProvider(t *testing.T) {
-	_, err := testPlatformRegistry(t).Accept(Request{
+	_, err := acceptInstalled(testPlatformRegistry(t), Request{
 		Target:  Target{EntityID: "entity-1"},
 		Body:    []byte(`{}`),
 		Headers: make(http.Header),
@@ -1476,7 +1478,7 @@ func tokenEqualityValidationManifest(provider string, mutate func(*SignatureMani
 	}
 }
 
-func newHostileRegistry(t *testing.T) *Registry {
+func newHostileRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
 	manifest := Manifest{
 		Provider:              "hostile",
@@ -1515,14 +1517,14 @@ func newHostileRegistry(t *testing.T) *Registry {
 			"hostile_event":    "event_type",
 		},
 	}
-	registry, err := NewRegistry(manifest)
+	registry, err := newTestCatalogSnapshot(manifest)
 	if err != nil {
 		t.Fatalf("NewRegistry hostile: %v", err)
 	}
 	return registry
 }
 
-func newHostilePayloadIdentityRegistry(t *testing.T) *Registry {
+func newHostilePayloadIdentityRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
 	manifest := Manifest{
 		Provider:              "hostile",
@@ -1557,7 +1559,7 @@ func newHostilePayloadIdentityRegistry(t *testing.T) *Registry {
 		EventName: EventNameManifest{Literal: "inbound.hostile"},
 		Ack:       AckManifest{Mode: "durable_before_dispatch"},
 	}
-	registry, err := NewRegistry(manifest)
+	registry, err := newTestCatalogSnapshot(manifest)
 	if err != nil {
 		t.Fatalf("NewRegistry hostile payload identity: %v", err)
 	}
@@ -1693,13 +1695,39 @@ func copyBuiltinPackToTemp(t *testing.T, provider string) string {
 	return dir
 }
 
-func testPlatformRegistry(t *testing.T) *Registry {
+func testPlatformRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
-	registry, _, err := NewRegistryFromPackDirs("0.7.0", testPlatformPackDirs(t), nil)
+	registry, _, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), nil)
 	if err != nil {
 		t.Fatalf("load filesystem provider trigger registry: %v", err)
 	}
 	return registry
+}
+
+func newTestCatalogSnapshot(manifests ...Manifest) (*CatalogSnapshot, error) {
+	entries := make([]CatalogEntry, 0, len(manifests))
+	for _, manifest := range manifests {
+		body, _ := json.Marshal(manifest)
+		sum := sha256.Sum256(body)
+		provider := NormalizeProviderName(manifest.Provider)
+		entries = append(entries, CatalogEntry{
+			Identity: PackIdentity{ID: "test." + provider, Version: "0.0.0", ManifestHash: hex.EncodeToString(sum[:]), Provenance: "test"},
+			Manifest: manifest, Source: "test",
+		})
+	}
+	return NewCatalogSnapshot(entries...)
+}
+
+func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
+	provider := NormalizeProviderName(req.Provider)
+	if provider == "" {
+		return Delivery{}, badRequest("provider is required")
+	}
+	entry, ok := snapshot.EntryByProvider(provider)
+	if !ok {
+		return Delivery{}, badRequest("provider trigger pack is not installed")
+	}
+	return entry.Manifest.Accept(req.withProvider(provider))
 }
 
 func testPlatformPackDirs(t *testing.T) []string {

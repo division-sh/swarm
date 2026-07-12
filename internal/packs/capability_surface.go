@@ -61,19 +61,39 @@ const (
 )
 
 type Subject struct {
-	ID            string        `json:"id"`
-	Kind          SubjectKind   `json:"kind"`
-	Provider      string        `json:"provider"`
-	Action        string        `json:"action,omitempty"`
-	Source        string        `json:"source"`
-	Provenance    string        `json:"provenance,omitempty"`
-	SourcePath    string        `json:"source_path,omitempty"`
-	Applicability string        `json:"applicability"`
-	Status        SubjectStatus `json:"status"`
-	Capabilities  []Capability  `json:"capabilities,omitempty"`
-	Guarantees    []Guarantee   `json:"guarantees,omitempty"`
-	Requirements  []Requirement `json:"requirements,omitempty"`
-	Evidence      []Evidence    `json:"evidence,omitempty"`
+	ID               string            `json:"id"`
+	Kind             SubjectKind       `json:"kind"`
+	Provider         string            `json:"provider"`
+	Action           string            `json:"action,omitempty"`
+	Source           string            `json:"source"`
+	Provenance       string            `json:"provenance,omitempty"`
+	SourcePath       string            `json:"source_path,omitempty"`
+	Applicability    string            `json:"applicability"`
+	Status           SubjectStatus     `json:"status"`
+	Capabilities     []Capability      `json:"capabilities,omitempty"`
+	Guarantees       []Guarantee       `json:"guarantees,omitempty"`
+	Requirements     []Requirement     `json:"requirements,omitempty"`
+	Evidence         []Evidence        `json:"evidence,omitempty"`
+	TriggerAdmission *TriggerAdmission `json:"trigger_admission,omitempty"`
+}
+
+type TriggerAdmission struct {
+	BundleHash            string               `json:"bundle_hash"`
+	Alias                 string               `json:"alias"`
+	CatalogGeneration     string               `json:"catalog_generation"`
+	PolicySource          string               `json:"policy_source"`
+	RequestAuthentication string               `json:"request_authentication"`
+	Event                 string               `json:"event"`
+	SignedPayload         string               `json:"signed_payload,omitempty"`
+	DigestEncoding        string               `json:"digest_encoding,omitempty"`
+	Pack                  *TriggerPackIdentity `json:"pack,omitempty"`
+}
+
+type TriggerPackIdentity struct {
+	ID           string `json:"id"`
+	Version      string `json:"version"`
+	ManifestHash string `json:"manifest_hash"`
+	Provenance   string `json:"provenance"`
 }
 
 type Capability struct {
@@ -115,8 +135,8 @@ type Evidence struct {
 var guaranteeRegistry = map[string]struct {
 	enforcedBy string
 }{
-	GuaranteeEmitDeclaredEventsOnly: {"internal/providertriggers.Manifest.resolveEventName"},
-	GuaranteeAdmissionBeforeCode:    {"internal/providertriggers.Manifest.Accept"},
+	GuaranteeEmitDeclaredEventsOnly: {"internal/providertriggers.InboundAdmissionPlan.Accept"},
+	GuaranteeAdmissionBeforeCode:    {"internal/providertriggers.InboundAdmissionPlan.Accept"},
 	GuaranteeBoundResourcesOnly:     {"internal/runtime.InboundGateway.HandleResolvedWebhook"},
 	GuaranteeActivityJournal:        {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
 	GuaranteeNoAutomaticWriteRetry:  {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
@@ -237,7 +257,7 @@ func requirementRemediation(kind, name, status string) string {
 }
 
 func NormalizeSubjects(subjects []Subject) ([]Subject, error) {
-	out := append([]Subject(nil), subjects...)
+	out := CloneSubjects(subjects)
 	for i := range out {
 		if err := normalizeSubject(&out[i]); err != nil {
 			return nil, err
@@ -255,6 +275,54 @@ func NormalizeSubjects(subjects []Subject) ([]Subject, error) {
 		}
 	}
 	return out, nil
+}
+
+func CloneSubjects(subjects []Subject) []Subject {
+	out := make([]Subject, len(subjects))
+	for i, subject := range subjects {
+		out[i] = subject
+		out[i].Capabilities = append([]Capability(nil), subject.Capabilities...)
+		out[i].Guarantees = append([]Guarantee(nil), subject.Guarantees...)
+		out[i].Requirements = make([]Requirement, len(subject.Requirements))
+		for j, requirement := range subject.Requirements {
+			out[i].Requirements[j] = requirement
+			out[i].Requirements[j].Scopes = append([]string(nil), requirement.Scopes...)
+			if requirement.Satisfied != nil {
+				value := *requirement.Satisfied
+				out[i].Requirements[j].Satisfied = &value
+			}
+			if requirement.TokenRequest != nil {
+				profile := *requirement.TokenRequest
+				profile.StaticHeaders = cloneStringMap(requirement.TokenRequest.StaticHeaders)
+				out[i].Requirements[j].TokenRequest = &profile
+			}
+		}
+		out[i].Evidence = make([]Evidence, len(subject.Evidence))
+		for j, evidence := range subject.Evidence {
+			out[i].Evidence[j] = evidence
+			out[i].Evidence[j].Fields = cloneStringMap(evidence.Fields)
+		}
+		if subject.TriggerAdmission != nil {
+			admission := *subject.TriggerAdmission
+			if subject.TriggerAdmission.Pack != nil {
+				identity := *subject.TriggerAdmission.Pack
+				admission.Pack = &identity
+			}
+			out[i].TriggerAdmission = &admission
+		}
+	}
+	return out
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func normalizeSubject(subject *Subject) error {
@@ -284,15 +352,10 @@ func normalizeSubject(subject *Subject) error {
 	var derivedStatus SubjectStatus
 	switch subject.Kind {
 	case SubjectProviderTrigger:
-		if subject.Source != "trigger_pack" || subject.Applicability != "installed" {
-			return fmt.Errorf("provider trigger subject %q must use trigger_pack/installed applicability", subject.ID)
+		if err := normalizeProviderTriggerSubject(subject); err != nil {
+			return err
 		}
 		derivedStatus = StatusAvailable
-		for _, requirement := range subject.Requirements {
-			if requirement.Scope != RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" {
-				return fmt.Errorf("provider trigger subject %q requirement %q must remain target-scoped and unevaluated", subject.ID, requirement.Name)
-			}
-		}
 	case SubjectProviderConnector:
 		switch subject.Applicability {
 		case "installed":
@@ -368,6 +431,77 @@ func normalizeSubject(subject *Subject) error {
 	return nil
 }
 
+func normalizeProviderTriggerSubject(subject *Subject) error {
+	switch subject.Applicability {
+	case "installed":
+		if subject.Source != "trigger_pack" || subject.TriggerAdmission != nil {
+			return fmt.Errorf("installed provider trigger subject %q must use trigger_pack source and must not carry target admission", subject.ID)
+		}
+	case "effective":
+		if subject.Source != "trigger_pack_binding" && subject.Source != "raw_declaration" {
+			return fmt.Errorf("effective provider trigger subject %q has invalid source %q", subject.ID, subject.Source)
+		}
+		if subject.TriggerAdmission == nil {
+			return fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
+		}
+		admission := subject.TriggerAdmission
+		admission.BundleHash = strings.TrimSpace(admission.BundleHash)
+		admission.Alias = strings.Trim(strings.TrimSpace(admission.Alias), "/")
+		admission.CatalogGeneration = strings.TrimSpace(admission.CatalogGeneration)
+		admission.PolicySource = strings.TrimSpace(admission.PolicySource)
+		admission.RequestAuthentication = strings.TrimSpace(admission.RequestAuthentication)
+		admission.Event = strings.TrimSpace(admission.Event)
+		admission.SignedPayload = strings.TrimSpace(admission.SignedPayload)
+		admission.DigestEncoding = strings.TrimSpace(admission.DigestEncoding)
+		if admission.BundleHash == "" || admission.Alias == "" || admission.CatalogGeneration == "" || admission.Event == "" {
+			return fmt.Errorf("effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event", subject.ID)
+		}
+		wantID := "ingress:" + admission.BundleHash + ":" + admission.Alias + ":" + subject.Provider
+		if subject.ID != wantID {
+			return fmt.Errorf("effective provider trigger subject %q must use stable target id %q", subject.ID, wantID)
+		}
+		if admission.PolicySource != "verified_pack" && admission.PolicySource != "raw_declaration" {
+			return fmt.Errorf("effective provider trigger subject %q has invalid policy_source %q", subject.ID, admission.PolicySource)
+		}
+		allowedAuth := map[string]bool{"TOKEN_EQUALITY": true, "TOKEN": true, "HMAC_SHA256": true, "HMAC_SHA1": true, "UNAUTHENTICATED": true}
+		if !allowedAuth[admission.RequestAuthentication] {
+			return fmt.Errorf("effective provider trigger subject %q has invalid request_authentication %q", subject.ID, admission.RequestAuthentication)
+		}
+		if admission.PolicySource == "verified_pack" {
+			if subject.Source != "trigger_pack_binding" || admission.Pack == nil {
+				return fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
+			}
+			pack := admission.Pack
+			pack.ID = strings.TrimSpace(pack.ID)
+			pack.Version = strings.TrimSpace(pack.Version)
+			pack.ManifestHash = strings.TrimSpace(pack.ManifestHash)
+			pack.Provenance = strings.TrimSpace(pack.Provenance)
+			if pack.ID == "" || pack.Version == "" || pack.ManifestHash == "" || pack.Provenance == "" {
+				return fmt.Errorf("effective verified-pack trigger subject %q has incomplete pack identity", subject.ID)
+			}
+		} else if subject.Source != "raw_declaration" || admission.Pack != nil {
+			return fmt.Errorf("effective raw trigger subject %q must use raw_declaration source without pack identity", subject.ID)
+		}
+	default:
+		return fmt.Errorf("provider trigger subject %q has invalid applicability %q", subject.ID, subject.Applicability)
+	}
+	for _, requirement := range subject.Requirements {
+		if requirement.Scope != RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" {
+			return fmt.Errorf("provider trigger subject %q requirement %q must remain target-scoped and unevaluated", subject.ID, requirement.Name)
+		}
+	}
+	if subject.Applicability == "effective" {
+		unauthenticated := subject.TriggerAdmission.RequestAuthentication == "UNAUTHENTICATED"
+		if unauthenticated && len(subject.Requirements) != 0 {
+			return fmt.Errorf("effective unauthenticated provider trigger subject %q must not carry secret requirements", subject.ID)
+		}
+		if !unauthenticated && len(subject.Requirements) != 1 {
+			return fmt.Errorf("effective authenticated provider trigger subject %q must carry exactly one unevaluated secret requirement", subject.ID)
+		}
+	}
+	return nil
+}
+
 func validateConnectorRequirement(subjectID string, requirement Requirement) error {
 	if requirement.Satisfied == nil || requirement.Status == "" {
 		return fmt.Errorf("provider connector subject %q requirement %q must be evaluated", subjectID, requirement.Name)
@@ -406,6 +540,19 @@ func RenderSubject(subject Subject, verbose bool) string {
 	}
 	if subject.SourcePath != "" {
 		parts = append(parts, "source_path="+subject.SourcePath)
+	}
+	if subject.TriggerAdmission != nil {
+		admission := subject.TriggerAdmission
+		parts = append(parts,
+			"alias="+admission.Alias,
+			"policy_source="+admission.PolicySource,
+			"request_authentication="+admission.RequestAuthentication,
+			"event="+admission.Event,
+			"catalog_generation="+admission.CatalogGeneration,
+		)
+		if admission.Pack != nil {
+			parts = append(parts, "pack="+admission.Pack.ID+"@"+admission.Pack.Version+" manifest_hash="+admission.Pack.ManifestHash)
+		}
 	}
 	for _, requirement := range subject.Requirements {
 		parts = append(parts, renderRequirement(requirement))

@@ -74,14 +74,14 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 		t.Fatalf("standing describe flow = %#v", flow)
 	}
 	provider := flow.Ingress.Providers[0]
-	if provider.Provider != "telegram" || provider.SigningSecret != "webhook_signing.telegram" {
+	if provider.Provider != "telegram" || provider.SigningSecret != "webhook_signing.telegram" || provider.AdmissionKind != "pack-required" || provider.PackID != "" || provider.RequestAuthentication != "" {
 		t.Fatalf("standing describe provider = %#v", provider)
 	}
 	if len(view.RoutingTopology.RootInputSources) != 1 {
 		t.Fatalf("standing root input sources = %#v", view.RoutingTopology.RootInputSources)
 	}
 	source := view.RoutingTopology.RootInputSources[0]
-	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-chat" || source.Target.FlowPath != "telegram-chat" {
+	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-chat" || source.Target.FlowPath != "telegram-chat" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
 		t.Fatalf("standing root input source = %#v", source)
 	}
 	for _, edge := range view.RoutingTopology.Edges {
@@ -109,7 +109,7 @@ func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T)
 	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
 	}
-	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-chat"} {
+	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-chat admission=pack-required"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("standing routes human output missing %q:\n%s", want, humanOut.String())
 		}

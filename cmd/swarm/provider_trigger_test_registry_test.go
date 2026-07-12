@@ -11,10 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 )
 
-func testProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
+func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()
 	dirs := testProviderTriggerPackDirs(t)
-	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", dirs, nil)
+	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", dirs, nil)
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
@@ -42,9 +42,9 @@ func testProviderTriggerPackDirs(t *testing.T) []string {
 	return dirs
 }
 
-func emptyProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
+func emptyProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	registry, err := providertriggers.NewRegistry()
+	registry, err := providertriggers.NewCatalogSnapshot()
 	if err != nil {
 		t.Fatalf("create empty provider trigger registry: %v", err)
 	}

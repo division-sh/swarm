@@ -1338,11 +1338,17 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 		UserAgent: "telegram-test",
 	}
 	req.Headers.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", []string{filepath.Join("..", "..", "..", "packs", "provider-triggers", "telegram")}, nil)
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", []string{filepath.Join("..", "..", "..", "packs", "provider-triggers", "telegram")}, nil)
 	if err != nil {
 		t.Fatalf("load Telegram provider trigger pack: %v", err)
 	}
-	delivery, err := registry.Accept(req)
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "telegram-chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
+	})
+	if err != nil {
+		t.Fatalf("compile Telegram inbound admission: %v", err)
+	}
+	delivery, err := plan.Accept(req)
 	if err != nil {
 		t.Fatalf("Accept Telegram inbound delivery: %v", err)
 	}

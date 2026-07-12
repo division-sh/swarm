@@ -89,6 +89,7 @@ type localPreflightRequest struct {
 	CheckContractSecrets   bool
 	ContractSecretSeverity localPreflightSeverity
 	ProviderTriggerPacks   []providertriggers.LoadedPack
+	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
 }
 
 func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) localPreflightReport {
@@ -246,6 +247,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 		return nil, "", false
 	}
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
+	appendEffectiveProviderTriggerCapabilitySubjects(report, source, req.ProviderTriggerCatalog)
 	return source, contractsRoot, true
 }
 
@@ -587,7 +589,7 @@ func serveLocalPreflightMode(opts serveOptions) string {
 	return "serve"
 }
 
-func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection, mountSources workspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack) localPreflightReport {
+func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection, mountSources workspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot) localPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
@@ -604,5 +606,6 @@ func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serv
 		CheckContractSecrets:   true,
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets(mode),
 		ProviderTriggerPacks:   providerTriggerPacks,
+		ProviderTriggerCatalog: providerTriggerCatalog,
 	})
 }

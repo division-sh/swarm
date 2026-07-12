@@ -55,6 +55,27 @@ var projectFlowIngressFields = map[string]struct{}{
 var projectFlowIngressProviderFields = map[string]struct{}{
 	"provider":       {},
 	"signing_secret": {},
+	"admission":      {},
+}
+
+var projectFlowIngressAdmissionFields = map[string]struct{}{
+	"kind":           {},
+	"pack":           {},
+	"acknowledge":    {},
+	"authentication": {},
+	"event":          {},
+	"delivery_id":    {},
+	"payload":        {},
+}
+
+var projectFlowIngressAdmissionPackFields = map[string]struct{}{"id": {}}
+
+var projectFlowIngressAuthenticationFields = map[string]struct{}{
+	"kind": {}, "header": {}, "prefix": {}, "encoding": {},
+}
+
+var projectFlowIngressDeliveryIDFields = map[string]struct{}{
+	"source": {}, "header": {}, "json_path": {},
 }
 
 func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
@@ -187,6 +208,70 @@ func (p *ProjectFlowIngressProvider) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = ProjectFlowIngressProvider(out)
+	return nil
+}
+
+func (a *ProjectFlowIngressAdmission) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress admission", projectFlowIngressAdmissionFields); err != nil {
+		return err
+	}
+	type raw ProjectFlowIngressAdmission
+	var out raw
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*a = ProjectFlowIngressAdmission(out)
+	return nil
+}
+
+func (p *ProjectFlowIngressAdmissionPack) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress admission pack", projectFlowIngressAdmissionPackFields); err != nil {
+		return err
+	}
+	type raw ProjectFlowIngressAdmissionPack
+	var out raw
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*p = ProjectFlowIngressAdmissionPack(out)
+	return nil
+}
+
+func (a *ProjectFlowIngressAuthentication) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress admission authentication", projectFlowIngressAuthenticationFields); err != nil {
+		return err
+	}
+	type raw ProjectFlowIngressAuthentication
+	var out raw
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*a = ProjectFlowIngressAuthentication(out)
+	return nil
+}
+
+func (d *ProjectFlowIngressDeliveryID) UnmarshalYAML(node *yaml.Node) error {
+	if d == nil {
+		return nil
+	}
+	if err := validateKnownMappingFields(node, "package flow ingress admission delivery_id", projectFlowIngressDeliveryIDFields); err != nil {
+		return err
+	}
+	type raw ProjectFlowIngressDeliveryID
+	var out raw
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*d = ProjectFlowIngressDeliveryID(out)
 	return nil
 }
 
