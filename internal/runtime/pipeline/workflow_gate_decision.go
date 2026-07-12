@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/google/uuid"
 )
@@ -38,7 +39,13 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 		return nil, fmt.Errorf("card verdict %s is absent from the frozen outcome plan", card.Verdict)
 	}
 	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
-		return nil, fmt.Errorf("decision card bundle %s is unavailable under current bundle %s; frozen route remains committed", card.BundleHash, current)
+		return nil, DeferPipelineReceipt(runtimefailures.New(
+			runtimefailures.ClassDependencyUnavailable,
+			"decision_card_bundle_unavailable",
+			runtimeWorkflowID,
+			"route_gate_decision",
+			map[string]any{"card_id": card.CardID, "required_bundle_hash": card.BundleHash, "current_bundle_hash": current},
+		))
 	}
 	emitted, err := workflowGateOutcomeEvent(card, evt, outcome)
 	if err != nil {

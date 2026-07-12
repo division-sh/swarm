@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
@@ -152,12 +153,16 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
-		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
+		if err := eb.RecoverPersistedPipeline(ctx, evt, recipients); err != nil {
 			if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) {
 				_ = lease.Release(ctx)
 				if errors.Is(err, ErrRuntimeIngressPaused) {
 					return redelivered, nil
 				}
+				continue
+			}
+			if runtimepipeline.IsPipelineReceiptDeferred(err) {
+				_ = lease.Release(ctx)
 				continue
 			}
 			if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
