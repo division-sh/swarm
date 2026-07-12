@@ -1,0 +1,293 @@
+version: 1
+kind: pre_implementation_failure_class_artifact
+issue: 2007
+audit_base: e0ab4dbbf358438b8ccb689642703ff6799178ee
+working_class: declaration_owned_standing_service_reconciliation_and_destructive_terminal_quiescence
+parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+
+binding_context:
+  lead_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952893673
+  insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952943372
+  superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
+  lifecycle_conformance_sibling: 2008
+  normal_completion_regression_owner: 994
+  forked_freeze_split: 2020
+  delivery_terminal_taxonomy_watchpoint: 777
+
+terminal_status_invariants:
+  completed:
+    owner: normal_run_completion_owner_from_issue_994
+    policy: prove_settled
+    rule: >-
+      The transition does not destroy work. It succeeds only when canonical
+      entity/flow terminality, deliveries, pipeline receipts, active timers and
+      claims, and session leases prove that no same-run execution remains.
+    issue_2007_action: preserve_and_regression_prove
+  cancelled:
+    owner: canonical_run_destructive_terminalization_owner
+    policy: destructive_complete_quiescence
+    rule: >-
+      In one selected-store transaction, terminalize every pending,
+      in-progress, or retryable delivery and its receipts; terminate active
+      sessions; cancel active timers and release claims; write the reasoned run
+      control and terminal run row; and fence every late writer from
+      resurrection.
+    issue_2007_action: absorb
+  failed:
+    owner: canonical_run_destructive_terminalization_owner
+    policy: destructive_complete_quiescence
+    rule: >-
+      The canonical failure envelope and destructive child quiescence commit in
+      the same selected-store transaction. Builder and direct store terminal
+      writers may not write failed while any run-owned execution remains.
+    issue_2007_action: absorb
+  forked:
+    owner: terminal_forked_source_freeze_owner
+    policy: preserved_lineage_non_execution
+    rule: >-
+      Source rows may remain pending-looking as immutable lineage, but every
+      dispatch, retry, replay, recovery, timer, session, outbox, mutation, and
+      late-writer path must prove the source run is not terminal forked before
+      execution. The source-advanced selected-contract branch remains
+      explicitly unfrozen and disjoint.
+    issue_2007_action: split_to_issue_2020
+
+standing_identity:
+  namespace: selected_store
+  uniqueness: [package_key, flow_id]
+  service_id: uuid_v5(standing_service_namespace, package_key + NUL + flow_id)
+  collision_rule: >-
+    The complete candidate set is validated before mutation. Two runtime
+    contexts resolving the same selected-store package_key and flow_id fail
+    closed; bundle hash, source path, alias, and load order never disambiguate.
+  mutable_revision_evidence: [bundle_hash, bundle_source]
+  forbidden_identity_inputs: [bundle_hash, bundle_source, source_path, boot_timestamp, lease_timestamp]
+  generation_identity:
+    run_id: uuid_v5(service_id, "run" + NUL + decimal_generation)
+    instance_id: uuid_v5(service_id, "instance" + NUL + decimal_generation)
+    entity_id: existing_canonical_flow_instance_entity_identity_owner
+    ordinary_revision_change: preserve_generation_run_instance_entity
+    explicit_reset: retire_current_generation_and_increment
+
+persisted_model:
+  standing_services:
+    primary_key: service_id
+    columns:
+      service_id: uuid_not_null
+      package_key: text_not_null
+      flow_id: text_not_null
+      declaration_present: boolean_not_null
+      operator_override: enum_none_suspended_not_null
+      effective_state: enum_active_suspended_orphaned_not_null
+      current_bundle_hash: text_not_null
+      current_bundle_source: text_not_null
+      revision_sequence: bigint_positive_not_null
+      publication_state: enum_pending_published_not_null
+      publication_sequence: bigint_nonnegative_not_null
+      override_actor: nullable_text
+      override_reason: nullable_text
+      override_at: nullable_timestamp
+      created_at: timestamp_not_null
+      updated_at: timestamp_not_null
+    unique_constraints:
+      - [package_key, flow_id]
+    checks:
+      - declaration_present_false_implies_effective_state_orphaned
+      - declaration_present_true_and_override_none_implies_effective_state_active
+      - declaration_present_true_and_override_suspended_implies_effective_state_suspended
+      - override_metadata_present_iff_operator_override_suspended
+  standing_service_generations:
+    primary_key: [service_id, generation]
+    columns:
+      service_id: uuid_fk_standing_services
+      generation: bigint_positive_not_null
+      run_id: uuid_fk_runs_unique_not_null
+      instance_id: text_unique_not_null
+      entity_id: uuid_not_null
+      created_bundle_hash: text_not_null
+      created_bundle_source: text_not_null
+      created_at: timestamp_not_null
+      retired_at: nullable_timestamp
+      retired_reason: nullable_text
+      retired_by: nullable_text
+    unique_constraints:
+      - one_unretired_generation_per_service
+      - [run_id]
+      - [instance_id]
+  standing_service_journal:
+    primary_key: [service_id, sequence]
+    columns:
+      service_id: uuid_fk_standing_services
+      sequence: bigint_positive_not_null
+      operation_id: uuid_not_null
+      generation: bigint_positive_not_null
+      run_id: uuid_not_null
+      transition: enum_created_resumed_revised_repaired_suspended_operator_resumed_orphaned_reset
+      previous_effective_state: nullable_state
+      effective_state: enum_active_suspended_orphaned_not_null
+      previous_bundle_hash: nullable_text
+      bundle_hash: text_not_null
+      previous_bundle_source: nullable_text
+      bundle_source: text_not_null
+      actor: text_not_null
+      reason: nullable_text
+      poison_provenance: nullable_text
+      occurred_at: timestamp_not_null
+    unique_constraints:
+      - [service_id, operation_id]
+
+state_machine:
+  absent_plus_declaration:
+    result: active_created_generation_1
+  active_plus_same_revision:
+    result: active_resumed_same_generation
+  active_plus_changed_revision:
+    result: active_revised_same_generation
+    source_rule: accept_and_journal
+  any_plus_server_restart_abandon_poison:
+    result: repaired_same_generation
+    preconditions:
+      - current_generation_run_id_matches_service
+      - run_control_reason_equals_server_restart_abandon
+      - startup_ownership_is_exclusive
+      - complete_child_quiescence_is_proven
+    mutation: >-
+      Clear only the abandon-owned terminal/control evidence, preserve service
+      run/entity state, update current revision, journal repaired, and rehydrate
+      runtime side effects. Unknown or operator-owned terminality fails closed.
+  declaration_removed:
+    result: orphaned_same_generation
+    mutation: >-
+      Preserve the service aggregate and generation history, pause the current
+      run, destructively quiesce active work, withdraw ingress, and leave zero
+      active schedules or claims. Preserve operator_override for a later
+      declaration return.
+  operator_suspend:
+    result: suspended_same_generation
+    mutation: >-
+      Persist actor/reason/time, pause the run, destructively quiesce active
+      work, withdraw ingress, and leave zero active schedules or claims.
+  operator_resume:
+    precondition: declaration_present
+    result: active_same_generation
+    mutation: >-
+      Clear the override, journal the transition, move the run to running, and
+      idempotently reconstruct routes, agents, timers, schedules, and ingress.
+  operator_resume_without_declaration:
+    result: refuse_with_restore_declaration_instruction
+  operator_reset:
+    precondition: declaration_present
+    result: fresh_next_generation_preserve_service_history_and_override
+    mutation: >-
+      Destructively terminalize the old generation with standing_reset,
+      retire it, insert the deterministic next generation and canonical fresh
+      run/instance/entity state, and publish only when the durable transaction
+      commits. A suspended override remains suspended after reset.
+  generic_run_stop_current_standing_generation:
+    result: refuse_before_mutation
+    remediation: standing_suspend_or_standing_reset
+
+reconciliation_transaction:
+  phase_0_read_only_plan:
+    - resolve_complete_candidate_declaration_set
+    - derive_stable_service_ids_and_reject_collisions
+    - classify_persisted_services_as_declared_or_orphaned
+    - partition_standing_owned_and_unrelated_recovery_work
+  phase_1_exclusive_authority:
+    - acquire_selected_store_startup_ownership_before_abandon_or_recovery_mutation
+    - lock_all_affected_standing_service_rows_in_service_id_order
+    - lock_current_generation_runs_and_owned_children
+  phase_2_single_store_commit:
+    - apply_revision_override_orphan_reset_or_repair_state_machine
+    - apply_complete_cancelled_or_failed_child_quiescence_when_required
+    - mutate_run_instance_entity_route_agent_and_timer_persistence
+    - append_exactly_one_journal_row_per_operation_id
+    - set_publication_state_pending_and_increment_publication_sequence
+    - commit_all_or_nothing
+  phase_3_idempotent_publication:
+    - rebuild_manager_routes_agents_and_runtime_handlers_from_committed_state
+    - restore_only_active_standing_schedules_and_claims
+    - publish_runtime_context_targets_and_ingress_last
+    - keep_process_readiness_false_until_every_service_succeeds
+  phase_4_acknowledgement:
+    - conditionally_mark_publication_state_published_for_the_committed_sequence
+    - emit_measured_readiness_and_journal_readback
+  failure_rules:
+    pre_commit: rollback_without_runtime_publication
+    post_commit_pre_publication: leave_pending_with_readiness_false_and_rederive_on_retry_or_next_boot
+    partial_publication: withdraw_the_candidate_runtime_context_then_retry_from_committed_truth
+    publication_ack_failure: >-
+      Treat publication as pending; replay is safe because every publication
+      consumer is keyed by service_id, generation, and publication_sequence.
+    no_database_transaction_across_runtime_publication: true
+
+startup_order:
+  - load_verify_and_plan_all_declarations_without_mutation
+  - acquire_startup_ownership
+  - reconcile_and_protect_standing_services
+  - destructively_abandon_only_unprotected_nonstanding_active_runs
+  - apply_unrelated_recovery_on_startup_policy
+  - restore_intrinsic_active_standing_work
+  - start_runtime_components
+  - publish_reconciled_targets
+  - report_readiness
+
+systematic_consumers:
+  standing_same_class:
+    - flowidentity_standing_and_standing_run_id
+    - runtime_standing_target_plans_and_ensure_standing_targets
+    - workflow_instance_store_standing_run_and_source_guards
+    - cmd_swarm_abandon_and_startup_order
+    - startup_schedule_and_manager_recovery_partition
+    - runtime_context_manager_and_builder_replacement
+    - scheduler_claim_and_lifecycle_schedule_rehydration
+    - standing_api_cli_openrpc_permissions_and_readiness
+  destructive_terminal_same_class:
+    - postgres_and_sqlite_active_run_quiescence
+    - postgres_and_sqlite_run_stop
+    - destructive_reset_runtime_nuke
+    - builder_and_store_failed_run_terminalization
+    - delivery_receipt_session_timer_claim_late_writers
+  already_aligned_or_distinct:
+    - normal_completion_issue_994_prove_settled
+    - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
+    - flow_entity_terminal_timer_scope_distinct
+    - forked_source_freeze_issue_2020
+    - reusable_lifecycle_e2e_issue_2008
+
+proof_manifestations:
+  standing:
+    - default_dev_recovery_false_cold_boot_and_restart_with_timer
+    - exact_server_restart_abandon_poison_repaired
+    - unknown_or_operator_terminality_refuses_with_reset_command
+    - edited_source_restart_three_times_same_service_generation_and_journaled_revisions
+    - declaration_removed_zero_active_schedules_claims_deliveries_sessions
+    - suspend_reboot_readiness_resume
+    - reset_new_generation_without_store_surgery
+    - generic_run_stop_teaching_refusal
+    - multi_context_collision_before_mutation
+  terminal_cancelled_failed:
+    - pending_in_progress_retryable_delivery_and_receipt_quiescence
+    - active_session_terminated
+    - active_timer_cancelled_and_claim_released
+    - late_writer_non_resurrection
+    - builder_failed_run_atomic_failure_envelope_and_quiescence
+    - direct_store_failed_run_atomic_failure_envelope_and_quiescence
+    - serve_abandon_run_stop_and_runtime_nuke_reason_preservation
+  preserved_or_split:
+    - normal_completion_regression_matrix
+    - unavailable_bundle_cleanup_regression_matrix
+    - ordinary_and_selected_contract_fork_freeze_tracked_by_2020
+  supported_surfaces:
+    - real_swarm_serve_dev_default_sqlite
+    - real_swarm_serve_dev_host_postgres
+    - human_and_json_readiness_all_outcomes
+    - api_cli_openrpc_catalog_permission_guards
+    - full_go_test_all
+
+closure:
+  intended_level: selected_failure_class_eliminated
+  remaining_parent_tail:
+    - issue_2020_forked_freeze_invariant
+    - issue_2008_reusable_full_lifecycle_conformance_tier
+  implementation_blocked_until_independent_gate: true
