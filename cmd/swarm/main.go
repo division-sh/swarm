@@ -57,9 +57,8 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -2733,12 +2732,15 @@ func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.Pl
 	if platformSpecPath == "" {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("platform spec path is required")
 	}
-	data, err := os.ReadFile(platformSpecPath)
+	source, err := yamlsource.LoadFile(platformSpecPath)
 	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", cause)
+		}
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
 	}
 	return spec, nil

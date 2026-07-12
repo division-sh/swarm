@@ -3,7 +3,6 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,8 +21,8 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 type humanTaskToolStore interface {
@@ -488,12 +487,12 @@ func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {
 
 func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 	t.Helper()
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(spec)

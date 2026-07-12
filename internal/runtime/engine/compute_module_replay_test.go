@@ -23,8 +23,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnStoredDivergence(t *testing.T) {
@@ -101,7 +101,11 @@ func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Co
 func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 	t.Helper()
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &spec); err != nil {
+	source, err := yamlsource.Load(platform.PlatformSpecYAML())
+	if err != nil {
+		t.Fatalf("load platform spec: %v", err)
+	}
+	if err := source.Decode(&spec); err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(spec)

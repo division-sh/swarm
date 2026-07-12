@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1144,14 +1145,11 @@ func repoRoot(t *testing.T) string {
 
 func loadPlatformSpecYAMLNode(t *testing.T) *yaml.Node {
 	t.Helper()
-	raw, err := os.ReadFile(platform.DefaultPlatformSpecFile(repoRoot(t)))
+	source, err := yamlsource.LoadFile(platform.DefaultPlatformSpecFile(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse platform spec yaml: %v", err)
-	}
+	doc := source.NodeCopy()
 	if len(doc.Content) != 1 {
 		t.Fatalf("platform spec yaml document content count = %d, want 1", len(doc.Content))
 	}

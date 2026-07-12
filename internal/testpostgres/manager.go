@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,8 +18,8 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store/platformschema"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -948,12 +947,15 @@ func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 	path := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	raw, err := os.ReadFile(path)
+	source, err := yamlsource.LoadFile(path)
 	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", cause)
+		}
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
 	}
 	return spec, nil

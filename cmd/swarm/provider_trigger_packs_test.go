@@ -21,7 +21,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
-	"gopkg.in/yaml.v3"
 )
 
 func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing.T) {
@@ -96,10 +95,6 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 }
 
 func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join(repoRoot(), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
 	var spec struct {
 		ToolModel struct {
 			ProviderTriggerAdapters struct {
@@ -112,9 +107,7 @@ func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *test
 			} `yaml:"provider_trigger_adapters"`
 		} `yaml:"tool_model"`
 	}
-	if err := yaml.Unmarshal(body, &spec); err != nil {
-		t.Fatalf("parse platform spec provider trigger inventory: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), "platform-spec.yaml"), &spec)
 	declared := spec.ToolModel.ProviderTriggerAdapters.PackEnvelopeSourceAuthority.RequiredPlatformInventory
 	if declared.Owner != "internal/providertriggers.RequiredPlatformPackIdentities" {
 		t.Fatalf("required platform inventory owner = %q", declared.Owner)
@@ -131,10 +124,6 @@ func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *test
 }
 
 func TestPlatformSpecProviderTriggerTargetAuthorityMatchesStandingIngress(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join(repoRoot(), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
 	var spec struct {
 		ToolModel struct {
 			ProviderTriggerAdapters struct {
@@ -147,9 +136,7 @@ func TestPlatformSpecProviderTriggerTargetAuthorityMatchesStandingIngress(t *tes
 			} `yaml:"provider_trigger_adapters"`
 		} `yaml:"tool_model"`
 	}
-	if err := yaml.Unmarshal(body, &spec); err != nil {
-		t.Fatalf("parse platform spec provider trigger authority: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), "platform-spec.yaml"), &spec)
 	contract := spec.ToolModel.ProviderTriggerAdapters
 	routeAuthority := strings.Join(append(append([]string(nil), contract.Scope...), contract.ExistingGatewayOwner, contract.ManifestVocabulary.Provider), "\n")
 	for _, want := range []string{"/webhooks/{alias}/{provider}", "standing ingress target", "RuntimeContextManager"} {
@@ -310,9 +297,7 @@ func writeReleaseProviderTriggerConfig(t *testing.T, path, sqlitePath string) {
 func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqlitePath string) {
 	t.Helper()
 	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platformSpecBody, &platformSpec); err != nil {
-		t.Fatalf("parse release platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLBytesForTest(t, platformSpecBody, &platformSpec)
 	plans, err := store.GeneratePlatformTableDDLs(platformSpec)
 	if err != nil {
 		t.Fatalf("generate release platform tables: %v", err)

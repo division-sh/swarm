@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type BundleIdentity struct {
@@ -210,26 +210,34 @@ func sameFilePath(left, right string) bool {
 }
 
 func canonicalBundleIdentityContent(path string) ([]byte, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".yaml", ".yml":
-		var decoded any
-		if err := yaml.Unmarshal(raw, &decoded); err != nil {
-			return nil, err
-		}
-		normalized := normalizeYAMLForJSON(decoded)
-		out, err := json.Marshal(normalized)
+		snapshot, err := yamlsource.LoadFile(path)
 		if err != nil {
 			return nil, err
 		}
-		return out, nil
+		return canonicalBundleIdentityYAMLSnapshot(snapshot)
 	default:
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
 		return []byte(normalizeTextContent(string(raw))), nil
 	}
+}
+
+func canonicalBundleIdentityYAMLSnapshot(snapshot yamlsource.Snapshot) ([]byte, error) {
+	var decoded any
+	if err := snapshot.Decode(&decoded); err != nil {
+		return nil, err
+	}
+	normalized := normalizeYAMLForJSON(decoded)
+	out, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func normalizeYAMLForJSON(value any) any {

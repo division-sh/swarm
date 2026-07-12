@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/userfacing"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,14 +76,11 @@ func TestProviderHumanCodeParityRejectsKnownCapabilitySpecDrift(t *testing.T) {
 
 func loadPlatformSpecRootForHumanProjection(t *testing.T) *yaml.Node {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(driftTestRepoRoot(t), "platform-spec.yaml"))
+	source, err := yamlsource.LoadFile(filepath.Join(driftTestRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
+	doc := source.NodeCopy()
 	if len(doc.Content) != 1 {
 		t.Fatalf("platform spec document content = %d, want 1", len(doc.Content))
 	}

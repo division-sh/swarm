@@ -4,13 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type EventEndpointDirection string
@@ -773,7 +772,7 @@ func endpointAssociationResult(flowID, identity, nodeID string, candidates []Aut
 type endpointCensusBuilder struct {
 	source     Source
 	seen       map[string]struct{}
-	yamlFiles  map[string]*yaml.Node
+	yamlFiles  map[string]yamlsource.Node
 	producers  []AuthoredEventEndpoint
 	consumers  []AuthoredEventEndpoint
 	inputPins  []AuthoredEventEndpoint
@@ -1075,7 +1074,7 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 		return 0
 	}
 	root := b.yamlFile(file)
-	if root == nil {
+	if !root.Valid() {
 		return 0
 	}
 	eventType := eventidentity.Normalize(endpoint.Event.Authored)
@@ -1093,48 +1092,47 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 	}
 }
 
-func (b *endpointCensusBuilder) yamlFile(file string) *yaml.Node {
+func (b *endpointCensusBuilder) yamlFile(file string) yamlsource.Node {
 	if b.yamlFiles == nil {
-		b.yamlFiles = map[string]*yaml.Node{}
+		b.yamlFiles = map[string]yamlsource.Node{}
 	}
 	if root, ok := b.yamlFiles[file]; ok {
 		return root
 	}
-	b.yamlFiles[file] = nil
-	contents, err := os.ReadFile(file)
+	b.yamlFiles[file] = yamlsource.Node{}
+	source, err := yamlsource.LoadFile(file)
 	if err != nil {
-		return nil
+		return yamlsource.Node{}
 	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(contents, &root); err != nil {
-		return nil
-	}
-	b.yamlFiles[file] = &root
-	return &root
+	root := source.Root()
+	b.yamlFiles[file] = root
+	return root
 }
 
-func yamlActorEventLine(root *yaml.Node, actorID string, fields []string, eventType string) int {
+func yamlActorEventLine(root yamlsource.Node, actorID string, fields []string, eventType string) int {
 	document := yamlDocumentMapping(root)
 	actor := yamlMappingValue(document, strings.TrimSpace(actorID))
-	if actor == nil || actor.Kind != yaml.MappingNode {
+	if actor.Kind() != yamlsource.MappingNode {
 		return 0
 	}
 	for _, field := range fields {
 		value := yamlMappingValue(actor, field)
-		if value == nil {
+		if !value.Valid() {
 			continue
 		}
-		switch value.Kind {
-		case yaml.MappingNode:
-			for i := 0; i+1 < len(value.Content); i += 2 {
-				if eventidentity.Normalize(value.Content[i].Value) == eventType {
-					return value.Content[i].Line
+		switch value.Kind() {
+		case yamlsource.MappingNode:
+			for i := 0; i+1 < value.Len(); i += 2 {
+				item, _ := value.Child(i)
+				if eventidentity.Normalize(item.Value()) == eventType {
+					return item.Line()
 				}
 			}
-		case yaml.SequenceNode:
-			for _, item := range value.Content {
-				if eventidentity.Normalize(item.Value) == eventType {
-					return item.Line
+		case yamlsource.SequenceNode:
+			for i := 0; i < value.Len(); i++ {
+				item, _ := value.Child(i)
+				if eventidentity.Normalize(item.Value()) == eventType {
+					return item.Line()
 				}
 			}
 		}
@@ -1142,26 +1140,26 @@ func yamlActorEventLine(root *yaml.Node, actorID string, fields []string, eventT
 	return 0
 }
 
-func yamlDocumentMapping(root *yaml.Node) *yaml.Node {
-	if root == nil {
-		return nil
-	}
-	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
-		return root.Content[0]
+func yamlDocumentMapping(root yamlsource.Node) yamlsource.Node {
+	if root.Kind() == yamlsource.DocumentNode && root.Len() == 1 {
+		child, _ := root.Child(0)
+		return child
 	}
 	return root
 }
 
-func yamlMappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return nil
+func yamlMappingValue(mapping yamlsource.Node, key string) yamlsource.Node {
+	if mapping.Kind() != yamlsource.MappingNode {
+		return yamlsource.Node{}
 	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if strings.TrimSpace(mapping.Content[i].Value) == key {
-			return mapping.Content[i+1]
+	for i := 0; i+1 < mapping.Len(); i += 2 {
+		candidate, _ := mapping.Child(i)
+		if strings.TrimSpace(candidate.Value()) == key {
+			value, _ := mapping.Child(i + 1)
+			return value
 		}
 	}
-	return nil
+	return yamlsource.Node{}
 }
 
 func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {

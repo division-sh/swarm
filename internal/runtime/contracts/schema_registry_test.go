@@ -592,13 +592,9 @@ func currentPlatformSpecForSchemaRegistryTest(t *testing.T) PlatformSpecDocument
 		}
 		dir = parent
 	}
-	raw, err := os.ReadFile(DefaultPlatformSpecFile(dir))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
 	var spec PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
+	if err := loadYAMLFile(DefaultPlatformSpecFile(dir), &spec); err != nil {
+		t.Fatalf("load platform spec: %v", err)
 	}
 	return spec
 }

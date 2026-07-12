@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,9 +16,6 @@ var (
 	promptAgentIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	promptModePattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	promptTokenPattern   = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)\}\}`)
-
-	promptVariablesMu    sync.RWMutex
-	promptVariablesCache = map[string]map[string]any{}
 )
 
 // Load reads an agent prompt from the configured prompt directory with optional
@@ -88,38 +85,39 @@ func renderPromptTemplateForDir(promptsDir, promptText string) (string, error) {
 
 func loadPromptVariables(promptsDir string) (map[string]any, error) {
 	promptsDir = filepath.Clean(promptsDir)
-	promptVariablesMu.RLock()
-	if cached, ok := promptVariablesCache[promptsDir]; ok {
-		promptVariablesMu.RUnlock()
-		return cached, nil
-	}
-	promptVariablesMu.RUnlock()
-
 	sources := promptVariableSources(promptsDir)
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("missing prompt variables source near %s", promptsDir)
 	}
 	vars := map[string]any{}
 	for _, source := range sources {
-		raw, err := os.ReadFile(source)
-		if err != nil {
-			return nil, fmt.Errorf("read prompt variable source %s: %w", source, err)
-		}
 		loaded := map[string]any{}
-		if err := yaml.Unmarshal(raw, &loaded); err != nil {
-			return nil, fmt.Errorf("parse prompt variables from %s: %w", source, err)
-		}
 		if isPolicyPromptVariableSource(source) {
+			snapshot, err := yamlsource.LoadFile(source)
+			if err != nil {
+				if cause, ok := yamlsource.ParseCause(err); ok {
+					return nil, fmt.Errorf("parse prompt variables from %s: %w", source, cause)
+				}
+				return nil, fmt.Errorf("read prompt variable source %s: %w", source, err)
+			}
+			if err := snapshot.Decode(&loaded); err != nil {
+				return nil, fmt.Errorf("parse prompt variables from %s: %w", source, err)
+			}
 			delete(loaded, "criteria")
+		} else {
+			raw, err := os.ReadFile(source)
+			if err != nil {
+				return nil, fmt.Errorf("read prompt variable source %s: %w", source, err)
+			}
+			if err := yaml.Unmarshal(raw, &loaded); err != nil {
+				return nil, fmt.Errorf("parse prompt variables from %s: %w", source, err)
+			}
 		}
 		for key, value := range loaded {
 			vars[key] = value
 		}
 	}
 
-	promptVariablesMu.Lock()
-	promptVariablesCache[promptsDir] = vars
-	promptVariablesMu.Unlock()
 	return vars, nil
 }
 

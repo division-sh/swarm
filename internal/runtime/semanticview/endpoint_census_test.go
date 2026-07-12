@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *testing.T) {
@@ -377,6 +378,41 @@ func TestLegacyQualifiedSubscriptionsUseDeclaredFlowIdentityAndExactSourceLine(t
 	if got.Consumer.SourceFile != filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path", "nodes.yaml") || got.Consumer.SourceLine != 13 {
 		t.Fatalf("legacy source = %s:%d, want nodes.yaml:13", got.Consumer.SourceFile, got.Consumer.SourceLine)
 	}
+}
+
+func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixture := filepath.Join(repoRoot, "tests", "tier7-composition", "test-agent-emits-to-node")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixture,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	afterBundle := yamlsource.DefaultStats().ParseCount
+
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	if afterCensus := yamlsource.DefaultStats().ParseCount; afterCensus != afterBundle {
+		t.Fatalf("census reparsed authoritative YAML: parse count %d -> %d", afterBundle, afterCensus)
+	}
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", filepath.Join(fixture, "nodes.yaml"), 14)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", filepath.Join(fixture, "agents.yaml"), 6)
+	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 8)
+}
+
+func assertEndpointSourceLine(t *testing.T, endpoints []AuthoredEventEndpoint, kind EventEndpointKind, nodeID, agentID, eventType, sourceFile string, sourceLine int) {
+	t.Helper()
+	for _, endpoint := range endpoints {
+		if endpoint.Kind == kind && endpoint.NodeID == nodeID && endpoint.AgentID == agentID && endpoint.Event.Authored == eventType {
+			if endpoint.SourceFile != sourceFile || endpoint.SourceLine != sourceLine {
+				t.Fatalf("endpoint source = %s:%d, want %s:%d", endpoint.SourceFile, endpoint.SourceLine, sourceFile, sourceLine)
+			}
+			return
+		}
+	}
+	t.Fatalf("endpoint kind=%s node=%q agent=%q event=%q not found: %#v", kind, nodeID, agentID, eventType, endpoints)
 }
 
 func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T) {

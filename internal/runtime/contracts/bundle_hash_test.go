@@ -573,6 +573,7 @@ value: 1e0
 		{name: "non finite number", yaml: "a: .nan\n", contains: "non-finite"},
 		{name: "non string key", yaml: "true: value\n", contains: "not a string"},
 		{name: "multi document", yaml: "a: 1\n---\nb: 2\n", contains: "multiple documents"},
+		{name: "alias cycle", yaml: "a: &a [*a]\n", contains: "alias cycle"},
 		{name: "explicit bool quoted", yaml: `a: !!bool "true"` + "\n", contains: "widens quoted"},
 		{name: "explicit int quoted", yaml: `a: !!int "1"` + "\n", contains: "widens quoted"},
 		{name: "explicit null quoted", yaml: `a: !!null "null"` + "\n", contains: "widens quoted"},

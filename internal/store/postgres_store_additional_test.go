@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -29,7 +28,6 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 const specEntityStateRunID = "33333333-3333-3333-3333-333333333333"
@@ -1861,14 +1859,7 @@ func TestPostgresStore_RecordInboundEvent_PlatformCatalogSchemaMatchesProducerPa
 
 func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValidator {
 	t.Helper()
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
 	return func(eventType string, payload []byte) error {
 		schema, ok := registry[strings.TrimSpace(eventType)]

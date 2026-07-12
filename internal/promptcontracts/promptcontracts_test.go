@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -179,14 +181,8 @@ criteria:
 	if err := os.Chdir(root); err != nil {
 		t.Fatalf("chdir %s: %v", root, err)
 	}
-	promptVariablesMu.Lock()
-	delete(promptVariablesCache, "prompts")
-	promptVariablesMu.Unlock()
 	t.Cleanup(func() {
 		_ = os.Chdir(cwd)
-		promptVariablesMu.Lock()
-		delete(promptVariablesCache, "prompts")
-		promptVariablesMu.Unlock()
 	})
 
 	if _, _, err := LoadFromDir("prompts", "analysis-agent", ""); err == nil {
@@ -203,6 +199,120 @@ criteria:
 	}
 	if _, ok := vars["criteria"]; ok {
 		t.Fatalf("criteria leaked into relative prompt variables: %#v", vars["criteria"])
+	}
+}
+
+func TestLoadFromDirReflectsPolicyRewriteAtSamePath(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	writePromptContractTestFile(t, filepath.Join(dir, "agent.md"), "Value={{value}}")
+	policy := filepath.Join(root, "policy.yaml")
+	writePromptContractTestFile(t, policy, "value: first\n")
+
+	assertPromptContractRender(t, dir, "Value=first")
+	writePromptContractTestFile(t, policy, "value: second\n")
+	assertPromptContractRender(t, dir, "Value=second")
+}
+
+func TestLoadFromDirReflectsSourceAdditionRemovalAndPrecedence(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	writePromptContractTestFile(t, filepath.Join(dir, "agent.md"), "Value={{value}}")
+	writePromptContractTestFile(t, filepath.Join(root, "prompt-variables.yaml"), "value: prompt-only\n")
+
+	assertPromptContractRender(t, dir, "Value=prompt-only")
+	policy := filepath.Join(root, "policy.yaml")
+	writePromptContractTestFile(t, policy, "value: policy\n")
+	assertPromptContractRender(t, dir, "Value=policy")
+	if err := os.Remove(policy); err != nil {
+		t.Fatal(err)
+	}
+	assertPromptContractRender(t, dir, "Value=prompt-only")
+}
+
+func TestLoadFromDirReflectsPromptOnlySourceRewriteRemovalAndAddition(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	writePromptContractTestFile(t, filepath.Join(dir, "agent.md"), "Value={{value}}")
+	variables := filepath.Join(root, "prompt-variables.yaml")
+	writePromptContractTestFile(t, variables, "value: first\n")
+
+	assertPromptContractRender(t, dir, "Value=first")
+	writePromptContractTestFile(t, variables, "value: second\n")
+	assertPromptContractRender(t, dir, "Value=second")
+	if err := os.Remove(variables); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadFromDir(dir, "agent", ""); err == nil || !strings.Contains(err.Error(), "missing prompt variables source") {
+		t.Fatalf("LoadFromDir after source removal error = %v", err)
+	}
+	writePromptContractTestFile(t, variables, "value: third\n")
+	assertPromptContractRender(t, dir, "Value=third")
+}
+
+func TestLoadFromDirDoesNotMaskMalformedCurrentPolicy(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	writePromptContractTestFile(t, filepath.Join(dir, "agent.md"), "Value={{value}}")
+	policy := filepath.Join(root, "policy.yaml")
+	writePromptContractTestFile(t, policy, "value: valid\n")
+	assertPromptContractRender(t, dir, "Value=valid")
+	writePromptContractTestFile(t, policy, "value: [\n")
+
+	if _, _, err := LoadFromDir(dir, "agent", ""); err == nil || !strings.Contains(err.Error(), policy) {
+		t.Fatalf("LoadFromDir error = %v, want current policy path", err)
+	}
+}
+
+func TestPromptVariableProjectionIsFreshAndConcurrent(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	writePromptContractTestFile(t, filepath.Join(dir, "agent.md"), "Value={{value}}")
+	writePromptContractTestFile(t, filepath.Join(root, "policy.yaml"), "value: stable\n")
+
+	vars, err := loadPromptVariables(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars["value"] = "mutated"
+	assertPromptContractRender(t, dir, "Value=stable")
+
+	const workers = 24
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			prompt, found, err := LoadFromDir(dir, "agent", "")
+			if err != nil || !found || prompt != "Value=stable" {
+				t.Errorf("LoadFromDir = %q, %v, %v", prompt, found, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+func writePromptContractTestFile(t testing.TB, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertPromptContractRender(t testing.TB, dir, want string) {
+	t.Helper()
+	got, found, err := LoadFromDir(dir, "agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || got != want {
+		t.Fatalf("LoadFromDir = %q, %v; want %q, true", got, found, want)
 	}
 }
 
@@ -309,46 +419,38 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 
 	vars := map[string]any{}
 	for _, candidate := range promptVariableSources(promptsDir) {
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatalf("read %s: %v", candidate, err)
-		}
 		loaded := map[string]any{}
-		if err := yaml.Unmarshal(raw, &loaded); err != nil {
-			t.Fatalf("parse %s: %v", candidate, err)
+		if isPolicyPromptVariableSource(candidate) {
+			decodePromptContractSourceForTest(t, candidate, &loaded)
+		} else {
+			raw, err := os.ReadFile(candidate)
+			if err != nil {
+				t.Fatalf("read %s: %v", candidate, err)
+			}
+			if err := yaml.Unmarshal(raw, &loaded); err != nil {
+				t.Fatalf("parse %s: %v", candidate, err)
+			}
 		}
 		for key, value := range loaded {
 			vars[key] = value
 		}
 	}
 	for _, candidate := range promptSchemaSources(promptsDir) {
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatalf("read %s: %v", candidate, err)
-		}
 		var loaded struct {
 			InstanceVariables struct {
 				Variables map[string]any `yaml:"variables"`
 			} `yaml:"instance_variables"`
 		}
-		if err := yaml.Unmarshal(raw, &loaded); err != nil {
-			t.Fatalf("parse %s: %v", candidate, err)
-		}
+		decodePromptContractSourceForTest(t, candidate, &loaded)
 		for key := range loaded.InstanceVariables.Variables {
 			vars[key] = true
 		}
 	}
 	for _, candidate := range promptAgentInputSources(promptsDir) {
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatalf("read %s: %v", candidate, err)
-		}
 		loaded := map[string]struct {
 			PromptInputs []string `yaml:"prompt_inputs"`
 		}{}
-		if err := yaml.Unmarshal(raw, &loaded); err != nil {
-			t.Fatalf("parse %s: %v", candidate, err)
-		}
+		decodePromptContractSourceForTest(t, candidate, &loaded)
 		for _, entry := range loaded {
 			for _, key := range entry.PromptInputs {
 				key = strings.TrimSpace(key)
@@ -360,10 +462,6 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 		}
 	}
 	for _, candidate := range promptPackageSources(promptsDir) {
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatalf("read %s: %v", candidate, err)
-		}
 		var loaded struct {
 			EntitySchema struct {
 				Groups []struct {
@@ -373,9 +471,7 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 				} `yaml:"groups"`
 			} `yaml:"entity_schema"`
 		}
-		if err := yaml.Unmarshal(raw, &loaded); err != nil {
-			t.Fatalf("parse %s: %v", candidate, err)
-		}
+		decodePromptContractSourceForTest(t, candidate, &loaded)
 		for _, group := range loaded.EntitySchema.Groups {
 			for _, field := range group.Fields {
 				key := strings.TrimSpace(field.Name)
@@ -387,6 +483,20 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 		}
 	}
 	return vars
+}
+
+func decodePromptContractSourceForTest(t testing.TB, path string, target any) {
+	t.Helper()
+	source, err := yamlsource.LoadFile(path)
+	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			t.Fatalf("parse %s: %v", path, cause)
+		}
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if err := source.Decode(target); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
 }
 
 func promptContractAncestorDirs(promptsDir string) []string {

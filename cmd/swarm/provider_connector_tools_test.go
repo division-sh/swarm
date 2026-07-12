@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packs"
-	"gopkg.in/yaml.v3"
 )
 
 func TestProviderConnectorSurfaceMessageIncludesGeneratedReviewEvidence(t *testing.T) {
@@ -87,10 +86,6 @@ func TestProviderCapabilitySurfaceRetiresDuplicateOwnersAndTargetBindingGuess(t 
 }
 
 func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot(), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var spec struct {
 		ToolModel struct {
 			ProviderCapabilitySurface struct {
@@ -103,9 +98,7 @@ func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 			} `yaml:"provider_capability_surface"`
 		} `yaml:"tool_model"`
 	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), "platform-spec.yaml"), &spec)
 	owners := map[string]string{}
 	for code, row := range spec.ToolModel.ProviderCapabilitySurface.Guarantees.Claims {
 		owners[code] = strings.TrimSpace(row.EnforcedBy)

@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 // StartSQLiteRuntimeStore creates a file-backed SQLite runtime store with the
@@ -23,7 +23,11 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 	t.Helper()
 
 	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &platformSpec); err != nil {
+	source, err := yamlsource.Load(platform.PlatformSpecYAML())
+	if err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if err := source.Decode(&platformSpec); err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	plans, err := store.GeneratePlatformTableDDLs(platformSpec)

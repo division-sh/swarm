@@ -2,14 +2,12 @@ package store
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	stdruntime "runtime"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSchemaFieldTypeToDDL(t *testing.T) {
@@ -138,14 +136,7 @@ func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T
 func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 	_, file, _, _ := stdruntime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
@@ -180,14 +171,7 @@ func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	_, file, _, _ := stdruntime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
@@ -243,14 +227,7 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 func TestPlatformSpecEventReceiptsUsesTypedSubscriberIdentity(t *testing.T) {
 	_, file, _, _ := stdruntime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)

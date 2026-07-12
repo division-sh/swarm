@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
@@ -244,13 +242,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	owner := spec.WorkspaceModel.BuildAuthority
 	if owner.PromotedBy != "#1566" || owner.ImplementationStatus != "implemented_first_slice" || owner.CanonicalOwner != "platform-spec.yaml#workspace_model.local_workspace_image_build_authority" {
 		t.Fatalf("workspace image build authority = %#v", owner)
