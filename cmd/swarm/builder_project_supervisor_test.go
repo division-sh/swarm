@@ -1311,7 +1311,7 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 		}
 		return module, bundle, nil
 	}
-	supervisor.validateSource = func(context.Context, semanticview.Source) error { return nil }
+	supervisor.validateSource = func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error { return nil }
 	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
