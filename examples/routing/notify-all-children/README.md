@@ -6,7 +6,7 @@ The `portfolio` flow owns the ordered `account_ids` membership list as journaled
 
 The setup path is production-shaped: `portfolio.opened` creates the owner, `portfolio.account.register.requested` creates account instances through `select-or-create`, and `portfolio.membership.seeded` writes the owner list through a normal event handler. Tests and examples must not seed runtime stores directly.
 
-List order and duplicates are preserved. Expansion does not silently deduplicate. A stale key fails only that item's route with `platform.target_unreachable`; valid siblings still process. The owner can consume the failure event and remove stale membership through ordinary domain logic.
+List order and duplicates are preserved. Expansion does not silently deduplicate. A stale key fails only that item's route with `platform.target_unreachable`; valid siblings still process. This failure is a dead-letter record, not a subscribable event. An operator can find it with `swarm event list --has-dead-letter`, inspect it with `swarm event view <event-id>`, then publish an ordinary domain reconciliation event such as `portfolio.membership.seeded` to remove stale membership.
 
 Need to know every child received the notification? Pair the downward fan-out with a join over acknowledgment events, as described by issue #1848. Fan-out delivery itself is deliberately non-atomic across instances.
 

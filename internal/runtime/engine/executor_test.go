@@ -4271,7 +4271,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	}
 }
 
-func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testing.T) {
+func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testing.T) {
 	type fanOutContextCase struct {
 		name            string
 		eventType       events.EventType
@@ -4347,7 +4347,8 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 			},
 		}
 	}
-	payloadItems := json.RawMessage(`{"items":[{"id":"item-a"},{"id":"item-b"}]}`)
+	payloadItems := json.RawMessage(`{"items":[{"id":"item-b"},{"id":"item-a"},{"id":"item-b"}]}`)
+	wantItemOrder := []string{"item-b", "item-a", "item-b"}
 	state := func() StateSnapshot {
 		return testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{})
 	}
@@ -4376,7 +4377,7 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 				if err := json.Unmarshal(payload, &timerPayload); err != nil {
 					t.Fatalf("decode timer payload: %v", err)
 				}
-				timerPayload["items"] = []any{map[string]any{"id": "item-a"}, map[string]any{"id": "item-b"}}
+				timerPayload["items"] = []any{map[string]any{"id": "item-b"}, map[string]any{"id": "item-a"}, map[string]any{"id": "item-b"}}
 				payload, _ = json.Marshal(timerPayload)
 			}
 			result, err := exec.Execute(context.Background(), ExecutionRequest{
@@ -4391,15 +4392,15 @@ func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testin
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
-				t.Fatalf("fan_out result count=%d intents=%d, want 2/2", result.FanOutCount, len(result.EmitIntents))
+			if result.FanOutCount != len(wantItemOrder) || len(result.EmitIntents) != len(wantItemOrder) {
+				t.Fatalf("fan_out result count=%d intents=%d, want %d/%d", result.FanOutCount, len(result.EmitIntents), len(wantItemOrder), len(wantItemOrder))
 			}
 			for index, intent := range result.EmitIntents {
 				var emitted map[string]any
 				if err := json.Unmarshal(intent.Event.Payload(), &emitted); err != nil {
 					t.Fatalf("emit %d payload: %v", index, err)
 				}
-				if got, want := emitted["item_id"], []string{"item-a", "item-b"}[index]; got != want {
+				if got, want := emitted["item_id"], wantItemOrder[index]; got != want {
 					t.Fatalf("emit %d item_id = %#v, want %q", index, got, want)
 				}
 				if got := emitted["item_index"]; got != float64(index) {

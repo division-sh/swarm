@@ -65,7 +65,6 @@ type Resolution struct {
 	Event     events.Event
 	Envelope  events.EventEnvelope
 	Target    events.RouteIdentity
-	TargetSet []events.RouteIdentity
 	Broadcast bool
 	Failure   TargetFailure
 }
@@ -376,14 +375,11 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 		route := routeForInstance(input.Source, flowID, instanceID)
 		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, route), Target: route}
 	case runtimecontracts.EmitTargetKindFlowMatch:
-		routes, failure := resolveFlowMatch(input, target)
+		route, failure := resolveFlowMatch(input, target)
 		if failure != "" {
 			return Resolution{Envelope: envelope.Normalized(), Failure: failure}
 		}
-		if len(routes) == 1 {
-			return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, routes[0]), Target: routes[0]}
-		}
-		return Resolution{Envelope: events.EnvelopeForTargetSet(envelope, routes), TargetSet: routes}
+		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, route), Target: route}
 	default:
 		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetMalformed}
 	}
@@ -456,14 +452,14 @@ func routeForInstance(source semanticview.Source, flowID, instanceID string) eve
 	}.Normalized()
 }
 
-func resolveFlowMatch(input ResolutionInput, target runtimecontracts.EmitTargetSpec) ([]events.RouteIdentity, TargetFailure) {
+func resolveFlowMatch(input ResolutionInput, target runtimecontracts.EmitTargetSpec) (events.RouteIdentity, TargetFailure) {
 	flowID := strings.TrimSpace(target.Flow)
 	if flowID == "" {
-		return nil, FailureTargetMalformed
+		return events.RouteIdentity{}, FailureTargetMalformed
 	}
 	if input.Source != nil {
 		if _, ok := input.Source.FlowScopeByID(flowID); !ok {
-			return nil, FailureTargetUnknownFlow
+			return events.RouteIdentity{}, FailureTargetUnknownFlow
 		}
 	}
 	matches := make([]events.RouteIdentity, 0, len(input.Descriptors))
@@ -484,13 +480,13 @@ func resolveFlowMatch(input ResolutionInput, target runtimecontracts.EmitTargetS
 		matches = append(matches, route)
 	}
 	if len(matches) == 0 {
-		return nil, FailureTargetUnreachableNoSub
+		return events.RouteIdentity{}, FailureTargetUnreachableNoSub
 	}
 	matches = uniqueRoutes(matches)
 	if len(matches) > 1 {
-		return nil, FailureTargetAmbiguous
+		return events.RouteIdentity{}, FailureTargetAmbiguous
 	}
-	return matches, ""
+	return matches[0], ""
 }
 
 func descriptorRoute(source semanticview.Source, flowID string, descriptor Descriptor) events.RouteIdentity {

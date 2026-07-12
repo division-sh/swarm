@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +63,6 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			ctx := context.Background()
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
-			seedNotifyAllChildrenRun(t, ctx, backend, db, runID)
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			runtime := newNotifyAllChildrenRuntime(t, backend, db, source)
@@ -70,6 +70,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
+			assertNotifyAllChildrenRunPersisted(t, ctx, backend, db, runID)
 			for _, accountID := range []string{"acct-a", "acct-b", "acct-stale"} {
 				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.account.register.requested", map[string]any{
 					"portfolio_id": "portfolio-main",
@@ -85,6 +86,28 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			for _, accountID := range []string{"acct-a", "acct-b", "acct-stale"} {
 				if _, ok := descriptors[accountID]; !ok {
 					t.Fatalf("active account descriptor %q missing from %#v", accountID, descriptors)
+				}
+			}
+
+			orderedMembership := []string{"acct-b", "acct-a", "acct-b"}
+			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
+				"portfolio_id": "portfolio-main",
+				"account_ids":  orderedMembership,
+			})
+			orderedNotifyID := publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+				"portfolio_id": "portfolio-main",
+				"command":      "ordered-duplicate",
+			})
+			orderedItems := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, orderedNotifyID)
+			assertNotifyAllChildrenItemSequence(t, orderedItems, orderedMembership)
+			for index, item := range orderedItems {
+				routes, err := backend.ListEventDeliveryRoutes(ctx, item.ID)
+				if err != nil {
+					t.Fatalf("ordered item %d ListEventDeliveryRoutes(%s): %v", index, item.AccountID, err)
+				}
+				want := descriptors[item.AccountID]
+				if len(routes) != 1 || routes[0].Target.FlowInstance != want.FlowInstance || routes[0].Target.EntityID != want.EntityID {
+					t.Fatalf("ordered item %d persisted routes = %#v, want only %s/%s", index, routes, want.FlowInstance, want.EntityID)
 				}
 			}
 
@@ -114,10 +137,11 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"command":      "refresh",
 			})
-			items := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, notifyID)
-			if len(items) != 3 {
-				t.Fatalf("fan-out item events = %#v, want exactly A/B/stale", items)
+			itemEvents := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, notifyID)
+			if len(itemEvents) != 3 {
+				t.Fatalf("fan-out item events = %#v, want exactly A/B/stale", itemEvents)
 			}
+			items := notifyAllChildrenItemIDsByAccount(t, itemEvents)
 
 			for _, accountID := range []string{"acct-a", "acct-b"} {
 				itemID := items[accountID]
@@ -293,14 +317,18 @@ func waitNotifyAllChildrenBus(t *testing.T, eventBus *runtimebus.EventBus) {
 	}
 }
 
-func seedNotifyAllChildrenRun(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) {
+func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+	query := `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+		query = `SELECT COUNT(*) FROM runs WHERE run_id = ?`
 	}
-	if _, err := db.ExecContext(ctx, query, runID); err != nil {
-		t.Fatalf("seed notify-all-children run: %v", err)
+	var count int
+	if err := db.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
+		t.Fatalf("query notify-all-children run: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("persisted notify-all-children run count = %d, want 1 from supported event admission", count)
 	}
 }
 
@@ -322,7 +350,12 @@ func notifyAllChildrenAccountDescriptors(t *testing.T, ctx context.Context, back
 	return out
 }
 
-func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string) map[string]string {
+type notifyAllChildrenItemEvent struct {
+	ID        string
+	AccountID string
+}
+
+func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string) []notifyAllChildrenItemEvent {
 	t.Helper()
 	query := `SELECT event_id::text, payload FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid ORDER BY created_at, event_id`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
@@ -333,7 +366,7 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 		t.Fatalf("query fan-out item events: %v", err)
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	out := []notifyAllChildrenItemEvent{}
 	for rows.Next() {
 		var id string
 		var raw any
@@ -345,10 +378,33 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 			t.Fatalf("decode fan-out item payload: %v", err)
 		}
 		accountID, _ := payload["account_id"].(string)
-		out[accountID] = id
+		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read fan-out item events: %v", err)
+	}
+	return out
+}
+
+func assertNotifyAllChildrenItemSequence(t *testing.T, items []notifyAllChildrenItemEvent, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.AccountID)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("persisted fan-out item sequence = %#v, want %#v with order and duplicates preserved", got, want)
+	}
+}
+
+func notifyAllChildrenItemIDsByAccount(t *testing.T, items []notifyAllChildrenItemEvent) map[string]string {
+	t.Helper()
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		if _, exists := out[item.AccountID]; exists {
+			t.Fatalf("fan-out item events contain duplicate account %q where unique membership was required: %#v", item.AccountID, items)
+		}
+		out[item.AccountID] = item.ID
 	}
 	return out
 }
