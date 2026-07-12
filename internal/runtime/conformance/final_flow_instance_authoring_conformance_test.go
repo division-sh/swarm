@@ -292,7 +292,7 @@ func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysCla
 			t.Fatalf("seam_family %s invalid_authority missing", id)
 		}
 	}
-	if problems := validateRouteAuthorityDriftInventory(root, inventory); len(problems) != 0 {
+	if problems := validateRouteAuthorityDriftInventory(t, root, inventory); len(problems) != 0 {
 		t.Fatalf("route authority inventory validation failed:\n- %s", strings.Join(problems, "\n- "))
 	}
 }

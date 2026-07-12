@@ -2,10 +2,6 @@ package conformance
 
 import (
 	"encoding/json"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -86,7 +82,7 @@ func TestMultiBundleOptionAMatrixProofReferencesResolve(t *testing.T) {
 	matrix := loadMultiBundleOptionAMatrix(t, root)
 	openRPCMethods := loadMatrixOpenRPCMethods(t, filepath.Join(root, matrix.Source.OpenRPCArtifact))
 	apiMatrixMethods := loadMatrixAPIMethods(t, filepath.Join(root, matrix.Source.APIComplianceMatrix))
-	goTests := collectGoTestNames(t, root)
+	goTests := conformanceGoTestNames(t, root)
 
 	allowedClassifications := map[string]bool{}
 	for _, classification := range matrix.Classifications {
@@ -311,43 +307,6 @@ func loadMatrixAPIMethods(t *testing.T, path string) map[string]bool {
 			t.Fatal("api compliance matrix method missing name")
 		}
 		out[name] = true
-	}
-	return out
-}
-
-func collectGoTestNames(t *testing.T, root string) map[string]bool {
-	t.Helper()
-	out := map[string]bool{}
-	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "vendor", "node_modules":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
-				continue
-			}
-			out[fn.Name.Name] = true
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("collect go tests: %v", err)
 	}
 	return out
 }
