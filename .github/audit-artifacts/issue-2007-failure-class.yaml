@@ -1,7 +1,7 @@
 version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
-audit_base: e0ab4dbbf358438b8ccb689642703ff6799178ee
+audit_base: 13f8418633a8f7745aa685397366070932f9a2e5
 working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_and_typed_event_admission
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
@@ -9,9 +9,11 @@ binding_context:
   lead_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952893673
   insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4952943372
   diagnostic_direct_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953045570
+  diagnostic_subtype_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953095958
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
+  directive_operation_owner: 1932
   forked_freeze_split: 2020
   delivery_terminal_taxonomy_watchpoint: 777
 
@@ -318,97 +320,164 @@ terminal_event_admission:
     - SQLite terminal-run event insertion with unchanged terminal status
 
 diagnostic_direct_event_admission:
-  canonical_owner: typed selected-store diagnostic-direct evidence mutation boundary
-  preserved_closed_owner: issue_1150_runtime_log_event_storage_and_read_architecture
+  canonical_owner: closed diagnostic-direct catalog with typed selected-store subtype owners
+  preserved_closed_owners:
+    - issue_1150_runtime_log_event_storage_and_read_architecture
+    - issue_1932_directive_operation_outcome_transaction
   allowed_event_types:
     - platform.runtime_log
     - platform.inbound_recorded
+    - platform.agent_directive
   type_rule: >-
     Admission is a closed event-type match, not a name prefix, producer label,
-    payload heuristic, or caller privilege. Generic AppendEvent and every
-    executable EventBus path reject diagnostic-direct events and require the
-    typed owner. Adding another type requires an authoritative spec change and
-    an exhaustive owner/reader/proof update.
+    payload heuristic, or caller privilege. The three types share a routing
+    classification but not mutation semantics. Generic AppendEvent and generic
+    EventBus publication reject diagnostic-direct events; each type requires
+    its exact subtype owner. Adding another type requires an authoritative spec
+    change and an exhaustive owner/reader/proof update.
   producer_rule: >-
-    Both admitted types persist produced_by_type=platform. Runtime logs persist
-    produced_by=runtime. Inbound provider identity remains explicit in the
-    payload and idempotency key rather than reclassifying the platform evidence
-    row as an agent/external executable event. The current PostgreSQL and SQLite
-    inbound direct INSERT values produced_by_type=external are non-authoritative
-    and are removed with the bypass.
-  run_rule: >-
-    A global diagnostic-direct event has no run_id by design. A run-scoped row
-    requires an existing locked run but may target running, paused, completed,
-    cancelled, failed, or forked because it records non-executable evidence. It
-    never creates a run, reopens a run, changes terminal lifecycle truth, or
-    confers execution authority.
-  ordering:
-    - validate_canonical_diagnostic_direct_type_payload_shape_and_lineage
-    - check_event_id_or_inbound_idempotency_identity_first
-    - exact_duplicate_returns_idempotent_success_without_mutation
-    - conflicting_duplicate_fails_closed_without_mutation
-    - lock_and_require_existing_run_when_run_scoped
-    - insert_only_the_diagnostic_event_row
-    - synchronize_the_derived_run_event_count_when_run_scoped
-    - commit_without_delivery_dispatch_or_runtime_publication
-  forbidden_effects:
-    - event_deliveries
-    - event_receipts
-    - committed_replay_scope
-    - outbox_or_deferred_publish
-    - entity_or_flow_state_mutation
-    - run_creation_or_status_transition
-    - ended_at_failure_run_control_or_terminal_outcome_identity_mutation
-    - handler_or_pipeline_execution
-  counter_policy: >-
-    event_count remains the count of every persisted run-scoped events row, so
-    a newly admitted diagnostic-direct row changes event_count by exactly one
-    on both backends even after terminalization. Exact duplicates do not change
-    it. Purging or deleting a run-scoped platform.inbound_recorded row decreases
-    it in the same transaction. entity_count never changes. This derived-count
-    mutation is explicitly not a lifecycle transition.
-  runtime_log_owner: >-
-    RuntimeLogPersistence and RuntimeLogger retain the #1150 event-backed model.
-    Run-scoped platform.runtime_log uses this typed mutation instead of generic
-    AppendEvent; global logs use the same typed validation and duplicate policy
-    without a run lock or counter.
-  inbound_record_owner: >-
-    PostgreSQL and SQLite RecordInboundEvent use this typed mutation with their
-    canonical provider/entity/provider_event_id idempotency identity. Recording
-    evidence against a terminal run is allowed, but the subsequent executable
-    inbound publication independently refuses at ordinary terminal admission.
-    DeleteInboundEvent and PurgeInboundEventsBefore keep event_count coherent.
-  readers:
-    - runtime.logs
-    - runtime.subscribe_logs
-    - run.trace_include_internal
-    - run.subscribe_trace_include_internal
-    - run_diagnostics_and_debug_read_surfaces
-    - conversation_and_turn_runtime_log_projections
-    - compute_module_replay_evidence
-  post_terminal_producers:
-    - runtime_failure_and_completion_adjacent_logging
-    - delivery_receipt_and_manager_aftermath_logging
-    - scheduler_timer_and_startup_recovery_aftermath_logging
-    - event_bus_payload_and_publish_failure_logging
-    - inbound_publish_and_rollback_failure_logging
-    - agent_llm_tool_activity_and_pipeline_aftermath_logging
+    All three persisted rows use produced_by_type=platform. Runtime logs use
+    produced_by=runtime. Inbound provider identity remains explicit in payload
+    and reservation identity rather than reclassifying the marker as external
+    executable work. Directive producer and operation evidence remain governed
+    by #1932. The current inbound direct INSERT value produced_by_type=external
+    is non-authoritative and removed with that bypass.
+  runtime_log_subtype:
+    owner: RuntimeLogPersistence selected-store diagnostic evidence mutation
+    statuses: [running, paused, completed, cancelled, failed, forked]
+    global_no_run: allowed
+    mutation: event_row_only
+    forbidden_effects:
+      - event_deliveries
+      - event_receipts
+      - committed_replay_scope
+      - outbox_or_deferred_publish
+      - entity_or_flow_state_mutation
+      - run_creation_or_lifecycle_transition
+      - handler_or_pipeline_execution
+    ordering:
+      - validate_runtime_log_payload_lineage_event_identity_and_timestamp
+      - exact_event_duplicate_returns_idempotent_success
+      - conflicting_event_duplicate_refuses
+      - lock_and_require_existing_run_when_run_scoped
+      - insert_runtime_log_event_only
+      - synchronize_derived_event_count_when_run_scoped
+    counter_policy: >-
+      A new run-scoped log changes event_count by exactly one on both backends,
+      including after terminalization. Exact duplicates do not. entity_count and
+      every lifecycle field remain unchanged.
+    readers:
+      - runtime.logs
+      - runtime.subscribe_logs
+      - run.trace_include_internal
+      - run.subscribe_trace_include_internal
+      - run_diagnostics_and_debug_read_surfaces
+      - conversation_and_turn_runtime_log_projections
+      - compute_module_replay_evidence
+    post_terminal_producers:
+      - runtime_failure_and_completion_adjacent_logging
+      - delivery_receipt_and_manager_aftermath_logging
+      - scheduler_timer_and_startup_recovery_aftermath_logging
+      - event_bus_payload_publish_and_post_commit_failure_logging
+      - inbound_publication_failure_logging
+      - agent_llm_tool_activity_and_pipeline_aftermath_logging
+  inbound_recorded_subtype:
+    owner: selected-store atomic inbound publication reservation
+    statuses: [running, paused]
+    global_no_run: forbidden_for_webhook_publication
+    identity: [provider, entity_id, provider_event_id]
+    request_fingerprint: >-
+      Hash the canonical provider event type, translated platform event type and
+      payload, target route/entity facts, and provider identity. Same identity
+      with a different fingerprint is a conflict, never a duplicate.
+    event_identity: >-
+      Derive deterministic marker and executable publication event IDs from the
+      inbound identity. The marker carries the executable publication event ID
+      and request fingerprint as typed payload evidence.
+    current_generation_rule: >-
+      Before mutation, lock the target run and, for declaration-owned standing
+      ingress, the standing service row. Require target.run_id to equal the
+      service's current published generation and require running or paused. A
+      retired or terminal generation refuses before marker, executable event,
+      scope, delivery, or counter mutation.
+    atomic_mutation:
+      - duplicate_or_conflict_check_by_inbound_identity
+      - current_generation_and_run_status_admission
+      - insert_platform_inbound_recorded_marker
+      - insert_executable_root_ingress_event
+      - insert_committed_subscribed_replay_scope
+      - insert_complete_delivery_route_manifest_including_canonical_empty_plan
+      - synchronize_event_count_for_both_rows
+      - commit_then_dispatch_or_queue_from_durable_manifest
+    duplicate_rule: >-
+      Marker existence is authoritative only because marker, executable event,
+      replay scope, and delivery manifest committed atomically. An exact retry
+      returns duplicate/accepted without creating or dispatching another event;
+      durable delivery recovery remains responsible for any pending manifest.
+      A marker missing any coupled row is corruption and fails closed.
+    failure_rule: >-
+      Planning, admission, or persistence failure commits no marker and a retry
+      may resolve the new current standing generation. Post-commit dispatch
+      failure does not delete the marker or publication; the request reports the
+      durable accepted/queued outcome and recovery consumes the committed
+      delivery manifest. InboundFailureRollback and best-effort
+      DeleteInboundEvent rollback are removed.
+    retention_rule: >-
+      Purge removes only expired marker evidence under the existing retention
+      policy and synchronizes event_count. It never deletes the executable event,
+      replay scope, or delivery history. Before retention expiry the inbound
+      identity remains globally consumed across standing generation changes.
+  agent_directive_subtype:
+    owner: issue_1932_agent_directive_operation_reservation
+    statuses: [running, paused]
+    global_no_run: forbidden
+    identity: agent_directive_operations operation_id plus optional actor_key idempotency
+    atomic_mutation:
+      - validate_request_hash_run_and_directive_event_identity
+      - exact_same_key_and_hash_returns_existing_operation
+      - same_key_conflicting_hash_refuses
+      - lock_and_require_nonterminal_resolved_run
+      - insert_platform_agent_directive_event
+      - insert_committed_direct_replay_scope
+      - insert_prepared_agent_directive_operation
+      - synchronize_event_count
+    effects: >-
+      Committed direct replay scope and the prepared operation row are required
+      subtype effects, not forbidden diagnostic behavior. No event deliveries
+      are created by reservation. BoardStep execution and operation settlement
+      remain governed by the closed #1932 state machine.
+    recovery: >-
+      Preserve #1932 prepared/executing/executed/succeeded/failed/indeterminate
+      recovery, same-key replay, retention, destructive-reset, and heartbeat
+      ownership semantics. Generic event replay never executes this row.
   backend_atomicity:
-    postgres: duplicate check, run FOR UPDATE, insert, and event_count sync in one transaction
-    sqlite: duplicate check, run lookup, insert, and event_count sync in one serialized runtime mutation
+    postgres: each subtype owns one explicit transaction and locks run or semantic identity before insert
+    sqlite: each subtype owns one serialized runtime mutation with the same ordering
 
 direct_event_sql_writers:
   postgres_inbound_record_persistence:
-    classification: move_to_typed_diagnostic_direct_owner
+    classification: replace_with_atomic_inbound_publication_owner
     event_type: platform.inbound_recorded
-    invalid_behavior: direct_insert_records_produced_by_type_external
+    invalid_behavior:
+      - marker_insert_precedes_executable_publish
+      - failed_publish_uses_best_effort_marker_delete
+      - direct_insert_records_produced_by_type_external
   sqlite_inbound_record_persistence:
-    classification: move_to_typed_diagnostic_direct_owner
+    classification: replace_with_atomic_inbound_publication_owner
     event_type: platform.inbound_recorded
-    invalid_behavior: direct_insert_records_produced_by_type_external
+    invalid_behavior:
+      - marker_insert_precedes_executable_publish
+      - failed_publish_uses_best_effort_marker_delete
+      - direct_insert_records_produced_by_type_external
   postgres_and_sqlite_runtime_log_persistence:
     classification: move_run_scoped_and_global_rows_to_typed_diagnostic_direct_owner
     event_type: platform.runtime_log
+  postgres_and_sqlite_directive_reservation:
+    classification: move_from_generic_AppendEventTx_to_typed_directive_reservation_event_insert
+    event_type: platform.agent_directive
+    preserved_atomic_rows:
+      - agent_directive_operations
+      - committed_direct_replay_scope
   run_fork_delivery_event_replay:
     classification: consume_ordinary_duplicate_and_status_admission
     rule: >-
@@ -466,7 +535,11 @@ systematic_consumers:
     - recovery_and_sweeper_duplicate_replay_paths
   diagnostic_direct_admission_consumers:
     - postgres_and_sqlite_RuntimeLogPersistence_global_and_run_scoped
-    - postgres_and_sqlite_RecordInboundEvent_DeleteInboundEvent_and_PurgeInboundEventsBefore
+    - postgres_and_sqlite_atomic_inbound_publication_reservation
+    - inbound_gateway_route_plan_publication_duplicate_and_failure_response
+    - inbound_delivery_recovery_and_marker_retention
+    - postgres_and_sqlite_ReserveDirectiveOperation
+    - agent_directive_operation_recovery_and_same_key_replay
     - runtime_logs_and_runtime_subscribe_logs
     - run_trace_and_run_subscribe_trace_include_internal
     - run_diagnostics_debug_conversation_turn_and_compute_module_replay_readers
@@ -475,6 +548,7 @@ systematic_consumers:
     - postgres_inbound_record_direct_insert
     - sqlite_inbound_record_direct_insert
     - postgres_and_sqlite_runtime_log_direct_insert
+    - postgres_and_sqlite_directive_generic_AppendEventTx
     - postgres_run_fork_delivery_event_replay_direct_insert
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
@@ -518,20 +592,45 @@ proof_manifestations:
     - sqlite_terminal_append_divergence_removed
   diagnostic_direct_event_admission:
     - postgres_and_sqlite_runtime_log_persists_for_running_paused_completed_cancelled_failed_and_forked
-    - postgres_and_sqlite_inbound_recorded_persists_for_running_paused_completed_cancelled_failed_and_forked
     - global_runtime_log_persists_without_creating_a_run
-    - exact_duplicate_is_idempotent_and_conflicting_duplicate_refuses
-    - only_platform_runtime_log_and_platform_inbound_recorded_are_admitted
-    - both_types_persist_produced_by_type_platform_and_inbound_provider_stays_payload_evidence
+    - runtime_log_exact_duplicate_is_idempotent_and_conflicting_duplicate_refuses
+    - authoritative_three_type_catalog_is_guarded_and_unclassified_type_refuses
+    - all_three_types_persist_produced_by_type_platform
     - generic_AppendEvent_and_EventBus_paths_refuse_diagnostic_direct_events
-    - no_delivery_receipt_replay_scope_outbox_state_or_execution_rows_are_created
-    - status_ended_at_failure_run_control_and_terminal_outcome_identity_remain_unchanged
-    - event_count_changes_exactly_with_insert_delete_and_purge_while_entity_count_is_unchanged
+    - runtime_log_creates_no_delivery_receipt_replay_scope_outbox_state_or_execution_rows
+    - runtime_log_preserves_status_ended_at_failure_run_control_and_terminal_outcome_identity
+    - runtime_log_event_count_changes_exactly_while_entity_count_is_unchanged
     - runtime_logs_subscribe_logs_trace_debug_conversation_turn_and_compute_replay_readback_preserved
     - post_terminal_failure_completion_recovery_and_post_commit_logger_callers_persist_without_reopening
+  inbound_publication:
+    - running_and_paused_current_generation_marker_event_scope_and_delivery_manifest_commit_atomically
+    - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_mutation
+    - exact_duplicate_after_success_returns_accepted_without_second_event_or_dispatch
+    - same_identity_conflicting_request_fingerprint_refuses
+    - route_plan_or_persistence_failure_leaves_no_marker_and_retry_can_target_next_generation
+    - injected_marker_event_scope_and_delivery_write_failures_roll_back_every_row_on_both_backends
+    - post_commit_dispatch_failure_preserves_durable_manifest_and_retry_does_not_suppress_recovery
+    - former_marker_delete_rollback_failure_is_unrepresentable
+    - standing_generation_replacement_after_failed_attempt_accepts_retry_once
+    - standing_generation_replacement_after_success_preserves_global_duplicate_consumption
+    - marker_corruption_missing_executable_event_scope_or_delivery_manifest_fails_closed
+    - event_count_changes_by_two_on_new_publication_zero_on_duplicate_and_one_on_expired_marker_purge
+    - acknowledge_before_dispatch_and_queued_dispatch_consume_the_same_durable_publication_owner
+  agent_directive_reservation:
+    - postgres_and_sqlite_exact_same_key_hash_return_existing_operation_and_event
+    - postgres_and_sqlite_conflicting_same_key_hash_refuse_without_mutation
+    - keyless_request_creates_one_fresh_operation_and_event
+    - completed_cancelled_failed_and_forked_target_refuse_before_event_scope_or_operation
+    - prepared_operation_event_and_committed_direct_replay_scope_commit_atomically
+    - injected_event_scope_or_operation_failure_rolls_back_all_reservation_rows
+    - generic_AppendEventTx_cannot_persist_platform_agent_directive
+    - prepared_executing_executed_succeeded_failed_and_indeterminate_recovery_remains_issue_1932_authoritative
+    - generic_replay_excludes_platform_agent_directive_and_never_calls_BoardStep
+    - both_backend_served_agent_send_directive_issue_1932_proof_remains_green
   direct_event_sql_writers:
-    - postgres_and_sqlite_inbound_record_writers_consume_typed_diagnostic_admission
+    - postgres_and_sqlite_inbound_record_writers_are_replaced_by_atomic_inbound_publication
     - postgres_and_sqlite_runtime_log_writers_consume_typed_diagnostic_admission
+    - postgres_and_sqlite_directive_reservation_consumes_typed_directive_admission
     - run_fork_delivery_event_replay_requires_locked_paused_fork_and_duplicate_first_admission
     - run_fork_delivery_event_replay_refuses_every_terminal_fork_target_without_partial_rows
   preserved_or_split:
