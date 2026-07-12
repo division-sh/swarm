@@ -34,6 +34,31 @@ type SchemaCompatibilityError struct {
 	Drift   []string
 }
 
+type schemaCompatibilityDiagnostic struct {
+	Backend SchemaDialect
+	Target  string
+	Current RuntimeStoreOrigin
+	Origin  *RuntimeStoreOrigin
+}
+
+func (d schemaCompatibilityDiagnostic) failure(drift []string) *SchemaCompatibilityError {
+	return &SchemaCompatibilityError{
+		Backend: d.Backend,
+		Target:  d.Target,
+		Current: d.Current,
+		Origin:  d.Origin,
+		Drift:   append([]string(nil), drift...),
+	}
+}
+
+func generatedStateDrift(tableName string, drift []string) []string {
+	prefixed := make([]string, len(drift))
+	for i, item := range drift {
+		prefixed[i] = fmt.Sprintf("generated state table %s: %s", tableName, item)
+	}
+	return prefixed
+}
+
 func (e *SchemaCompatibilityError) Error() string {
 	target := strings.TrimSpace(e.Target)
 	if target == "" {
@@ -451,6 +476,9 @@ func readRuntimeStoreOrigin(ctx context.Context, q interface {
 		return nil, fmt.Errorf("runtime store creation time has unsupported type %T", createdAt)
 	}
 	origin.CreatedAt = origin.CreatedAt.UTC()
+	if err := origin.validateStored(); err != nil {
+		return nil, err
+	}
 	return &origin, nil
 }
 

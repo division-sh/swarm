@@ -35,6 +35,19 @@ func (o RuntimeStoreOrigin) validate() error {
 	return nil
 }
 
+func (o RuntimeStoreOrigin) validateStored() error {
+	if strings.TrimSpace(o.SwarmVersion) == "" {
+		return fmt.Errorf("stored Swarm version is required")
+	}
+	if strings.TrimSpace(o.PlatformVersion) == "" {
+		return fmt.Errorf("stored platform version is required")
+	}
+	if o.CreatedAt.IsZero() {
+		return fmt.Errorf("stored creation time must be non-zero")
+	}
+	return nil
+}
+
 type SchemaBootstrapRequest struct {
 	PlatformPlans []SchemaTableDDL
 	StatePlans    []SchemaTableDDL
