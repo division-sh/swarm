@@ -462,6 +462,9 @@ func (s *PostgresStore) SettleExternalAttemptAndPromoteProviderHead(ctx context.
 		return err
 	}
 	defer tx.Rollback()
+	if err := requireProviderHeadLifecyclePostgres(ctx, tx, req); err != nil {
+		return err
+	}
 	if err := promoteProviderHeadPostgres(ctx, tx, req); err != nil {
 		return err
 	}
@@ -475,11 +478,50 @@ func (s *SQLiteRuntimeStore) SettleExternalAttemptAndPromoteProviderHead(ctx con
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 	return s.runRuntimeMutation(ctx, "sqlite settle provider turn and promote head", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireProviderHeadLifecycleSQLiteTx(txctx, tx, req); err != nil {
+			return err
+		}
 		if err := promoteProviderHeadSQLiteTx(txctx, tx, req); err != nil {
 			return err
 		}
 		return settleExternalAttemptSQLiteTx(txctx, tx, req.Settlement)
 	})
+}
+
+func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req runtimeeffects.ProviderHeadSettlement) error {
+	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.AgentID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.AgentID})
+	}
+	var epoch, generation int64
+	var phase string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=$1 FOR UPDATE`, req.Token.AgentID).Scan(&epoch, &generation, &phase); err != nil {
+		if err == sql.ErrNoRows {
+			return supersededExternalAttempt(req.Token, 0, 0, "absent")
+		}
+		return fmt.Errorf("lock provider-head lifecycle: %w", err)
+	}
+	if epoch != req.Token.RuntimeEpoch || generation != int64(req.Token.Generation) || strings.TrimSpace(phase) != "running" {
+		return supersededExternalAttempt(req.Token, epoch, generation, phase)
+	}
+	return nil
+}
+
+func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req runtimeeffects.ProviderHeadSettlement) error {
+	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.AgentID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.AgentID})
+	}
+	var epoch, generation int64
+	var phase string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=?`, req.Token.AgentID).Scan(&epoch, &generation, &phase); err != nil {
+		if err == sql.ErrNoRows {
+			return supersededExternalAttempt(req.Token, 0, 0, "absent")
+		}
+		return fmt.Errorf("lock sqlite provider-head lifecycle: %w", err)
+	}
+	if epoch != req.Token.RuntimeEpoch || generation != int64(req.Token.Generation) || strings.TrimSpace(phase) != "running" {
+		return supersededExternalAttempt(req.Token, epoch, generation, phase)
+	}
+	return nil
 }
 
 func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req runtimeeffects.ProviderHeadSettlement) error {
@@ -493,6 +535,8 @@ func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req runtimeeff
 		  AND scope_key = $6
 		  AND status = 'active'
 		  AND lease_holder = $7
+		  AND lease_expires_at IS NOT NULL
+		  AND lease_expires_at > $2
 		  AND COALESCE(runtime_state->>'provider_session_id', '') = $8
 	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.AgentID), strings.TrimSpace(req.RuntimeMode), strings.TrimSpace(req.ScopeKey), strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead))
 	if err != nil {
@@ -525,8 +569,10 @@ func promoteProviderHeadSQLiteTx(ctx context.Context, tx *sql.Tx, req runtimeeff
 		  AND scope_key = ?
 		  AND status = 'active'
 		  AND lease_holder = ?
+		  AND lease_expires_at IS NOT NULL
+		  AND lease_expires_at > ?
 		  AND COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') = ?
-	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.AgentID), strings.TrimSpace(req.RuntimeMode), strings.TrimSpace(req.ScopeKey), strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead))
+	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.AgentID), strings.TrimSpace(req.RuntimeMode), strings.TrimSpace(req.ScopeKey), strings.TrimSpace(req.LockOwner), req.Now.UTC(), strings.TrimSpace(req.ExpectedProviderHead))
 	if err != nil {
 		return fmt.Errorf("promote sqlite provider head: %w", err)
 	}

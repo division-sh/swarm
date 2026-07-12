@@ -63,21 +63,11 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	}
 	timeout := r.effectiveCLITimeout(ctx)
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
-		if attempt != nil {
-			failure := runtimefailures.FromError(err, "claude-cli-adapter", "resolve_execution_target")
-			_ = attempt.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true})
-		}
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "resolve_execution_target", map[string]any{"prelaunch": true})
 	}
 	release, err := r.admitProviderDispatch(ctx)
 	if err != nil {
-		if attempt != nil {
-			failure := runtimefailures.FromError(err, "claude-cli-adapter", "provider_admission")
-			if settleErr := attempt.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); settleErr != nil {
-				return nil, settleErr
-			}
-		}
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "provider_admission", map[string]any{"prelaunch": true})
 	}
 	defer release()
 
@@ -86,16 +76,10 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 
 	cmd, err := r.buildCommand(runCtx, args, target)
 	if err != nil {
-		if attempt != nil {
-			failure := runtimefailures.FromError(err, "claude-cli-adapter", "build_command")
-			if settleErr := attempt.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); settleErr != nil {
-				return nil, settleErr
-			}
-		}
 		if IsMissingProviderCredential(err) {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "claude-cli-adapter", "build_command", map[string]any{"auth_kind": "provider_credential"}, err)
+			err = runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "claude-cli-adapter", "build_command", map[string]any{"auth_kind": "provider_credential"}, err)
 		}
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "build_command", map[string]any{"prelaunch": true})
 	}
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
 		return r.runStreamingPrepared(runCtx, cmd, target, timeout, input, meta, attempt)
@@ -109,7 +93,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		cmd.Stdin = strings.NewReader(input)
 	}
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
@@ -155,25 +139,27 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create claude stdout pipe: %w", err)
+		failureErr := fmt.Errorf("create claude stdout pipe: %w", err)
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, failureErr, "create_stdout_pipe", map[string]any{"prelaunch": true})
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create claude stderr pipe: %w", err)
+		failureErr := fmt.Errorf("create claude stderr pipe: %w", err)
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, failureErr, "create_stderr_pipe", map[string]any{"prelaunch": true})
 	}
 	if strings.TrimSpace(input) != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
 	monitor, monitorErr := r.openMonitorTurn(ctx, meta)
 	if monitorErr != nil {
-		return nil, monitorErr
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, monitorErr, "open_monitor", map[string]any{"prelaunch": true})
 	}
 	if monitor != nil {
 		defer func() { _ = monitor.Close() }()
 	}
 
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		return nil, err
+		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
@@ -209,6 +195,17 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(coalesce(resp.SessionID, meta.SessionID)))
 	}
 	return resp, nil
+}
+
+func settleClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Handle, state runtimeeffects.State, original error, operation string, evidence map[string]any) error {
+	if original == nil || attempt == nil {
+		return original
+	}
+	failure := runtimefailures.FromError(original, "claude-cli-adapter", operation)
+	if settleErr := attempt.Settle(ctx, state, &failure.Failure, evidence); settleErr != nil {
+		return errors.Join(original, fmt.Errorf("settle claude attempt after %s: %w", operation, settleErr))
+	}
+	return original
 }
 
 func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurnMeta) (MonitorTurnWriter, error) {

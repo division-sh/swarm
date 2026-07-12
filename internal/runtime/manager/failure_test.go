@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -70,6 +71,9 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 		{name: "internal", newFailure: func() error {
 			return runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_runtime_defect", "test-agent", "run_turn", nil)
 		}},
+		{name: "direct dead letter", newFailure: func() error {
+			return runtimeengine.ErrChainDepthExceeded
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -77,10 +81,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			bus := &recordingReceiptBus{}
 			am := NewAgentManager(bus, nil, store)
 			err := tt.newFailure()
-			expected, ok := runtimefailures.EnvelopeFromError(err)
-			if !ok {
-				t.Fatalf("fixture error = %v, want canonical failure", err)
-			}
+			expected := runtimefailures.FromError(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 			result := am.processEventDetailed(context.Background(), failureReturningAgent{id: "agent-a", err: err}, evt)
 
@@ -90,10 +91,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			if result.record.Failure == nil {
 				t.Fatal("startup replay record failure = nil")
 			}
-			wantStatus := ReceiptStatusTerminal
-			if expected.Retryable {
-				wantStatus = ReceiptStatusError
-			}
+			wantStatus := receiptStatusForAgentFailure(err)
 			if store.lastStatus != wantStatus || store.lastFailure == nil {
 				t.Fatalf("receipt = status:%q failure:%#v, want status %q with typed failure", store.lastStatus, store.lastFailure, wantStatus)
 			}

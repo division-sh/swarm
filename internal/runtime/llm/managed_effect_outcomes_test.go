@@ -21,6 +21,12 @@ type effectRoundTripper struct {
 	adapter string
 }
 
+type failingMonitorSink struct{ err error }
+
+func (s failingMonitorSink) OpenTurn(context.Context, MonitorTurnMeta) (MonitorTurnWriter, error) {
+	return nil, s.err
+}
+
 func (r effectRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	r.t.Helper()
 	if err := r.harness.RequireState(r.adapter, runtimeeffects.StateLaunched); err != nil {
@@ -103,6 +109,23 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("stale CLI process reached start: %v", err)
+	}
+}
+
+func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
+	harness := effecttest.New()
+	ctx := harness.Context("claude-cli-monitor-prelaunch")
+	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", []byte("request"), nil)
+	if err != nil {
+		t.Fatalf("authorize claude attempt: %v", err)
+	}
+	runtime := &ClaudeCLIRuntime{monitor: failingMonitorSink{err: errors.New("injected monitor open failure")}}
+	cmd := exec.Command("sh", "-lc", "true")
+	if _, err := runtime.runStreamingPrepared(ctx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, attempt); err == nil {
+		t.Fatal("monitor open failure returned nil")
+	}
+	if err := harness.RequireState("claude_cli", runtimeeffects.StateTerminalFailure); err != nil {
+		t.Fatal(err)
 	}
 }
 

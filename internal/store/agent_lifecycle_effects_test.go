@@ -13,6 +13,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type lifecycleEffectStore interface {
@@ -28,6 +29,118 @@ func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
 func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveLifecycleAndExternalEffectAuthority(t, &PostgresStore{DB: db}, db, false)
+}
+
+func TestProviderHeadSettlementFencesLifecycleAndLeaseSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveProviderHeadSettlementFencesLifecycleAndLease(t, store, store.DB, true)
+}
+
+func TestProviderHeadSettlementFencesLifecycleAndLeasePostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveProviderHeadSettlementFencesLifecycleAndLease(t, &PostgresStore{DB: db}, db, false)
+}
+
+func proveProviderHeadSettlementFencesLifecycleAndLease(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	agentID := "provider-head-fence-agent"
+	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "provider-head-fence-spawn",
+		AgentID: agentID, Trigger: "spawn", TargetEpoch: 41, TargetGeneration: 1,
+		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
+		RunMode: runtimemanager.AgentRunModeStopped, Agent: &runtimemanager.PersistedAgent{
+			Config: runtimeactors.AgentConfig{ID: agentID, Type: "sonnet", Role: "worker", Mode: "global", Model: "regular", Config: []byte(`{"system_prompt":"x"}`)},
+			Status: "active", HiredBy: "test", StartedAt: now,
+		}, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("spawn provider-head fence agent: %v", err)
+	}
+	started, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "provider-head-fence-start",
+		AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch, ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
+		TargetEpoch: spawned.RuntimeEpoch, TargetGeneration: spawned.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("start provider-head fence agent: %v", err)
+	}
+	var registry runtimesessions.Registry
+	if sqlite {
+		registry = store.(*SQLiteRuntimeStore)
+	} else {
+		registry = runtimesessions.NewPostgresRegistry(db, time.Minute)
+	}
+	lease, err := registry.Acquire(ctx, agentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "provider-head-fence-owner", "global")
+	if err != nil {
+		t.Fatalf("acquire provider-head fence lease: %v", err)
+	}
+	controller := runtimeeffects.NewController(store)
+	activeCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
+		RuntimeEpoch: started.RuntimeEpoch, AgentID: agentID, Generation: started.Generation,
+	}), controller)
+	activeCtx = runtimeeffects.WithLogicalOperationIdentity(activeCtx, "provider-head-superseded-commit")
+	attempt, err := runtimeeffects.Begin(activeCtx, "claude_cli", []byte("superseded-head"), nil)
+	if err != nil {
+		t.Fatalf("authorize superseded provider-head attempt: %v", err)
+	}
+	if err := attempt.MarkLaunched(activeCtx); err != nil {
+		t.Fatalf("launch superseded provider-head attempt: %v", err)
+	}
+	restarted, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "restart", RequestHash: "provider-head-fence-restart",
+		AgentID: agentID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch, ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
+		TargetEpoch: started.RuntimeEpoch, TargetGeneration: started.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("supersede provider-head attempt: %v", err)
+	}
+	if err := attempt.SucceedAndPromoteProviderHead(activeCtx, runtimeeffects.ProviderHeadSettlement{
+		Settlement: runtimeeffects.Settlement{Evidence: map[string]any{"provider_session_id": attempt.Attempt().AttemptID}},
+		AgentID:    agentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
+		ScopeKey: lease.ScopeKey, LockOwner: lease.LockOwner, NewProviderHead: attempt.Attempt().AttemptID,
+	}); err == nil {
+		t.Fatal("superseded provider-head settlement succeeded")
+	}
+	requireExternalAttemptState(t, db, sqlite, attempt.Attempt().AttemptID, runtimeeffects.StateLaunched)
+	requireProviderHead(t, db, sqlite, lease.SessionID, "")
+	supersededFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassSupersededGeneration, "superseded_generation", "test", "settle_provider_head", nil), "test", "settle_provider_head")
+	if err := attempt.Settle(activeCtx, runtimeeffects.StateOutcomeUncertain, &supersededFailure.Failure, nil); err != nil {
+		t.Fatalf("settle superseded provider-head attempt: %v", err)
+	}
+
+	restartedCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
+		RuntimeEpoch: restarted.RuntimeEpoch, AgentID: agentID, Generation: restarted.Generation,
+	}), controller)
+	restartedCtx = runtimeeffects.WithLogicalOperationIdentity(restartedCtx, "provider-head-expired-lease")
+	expiredAttempt, err := runtimeeffects.Begin(restartedCtx, "claude_cli", []byte("expired-lease-head"), nil)
+	if err != nil {
+		t.Fatalf("authorize expired-lease provider-head attempt: %v", err)
+	}
+	if err := expiredAttempt.MarkLaunched(restartedCtx); err != nil {
+		t.Fatalf("launch expired-lease provider-head attempt: %v", err)
+	}
+	var expireErr error
+	if sqlite {
+		_, expireErr = db.ExecContext(ctx, `UPDATE agent_sessions SET lease_expires_at=? WHERE session_id=?`, now.Add(-time.Minute), lease.SessionID)
+	} else {
+		_, expireErr = db.ExecContext(ctx, `UPDATE agent_sessions SET lease_expires_at=$1 WHERE session_id=$2::uuid`, now.Add(-time.Minute), lease.SessionID)
+	}
+	if expireErr != nil {
+		t.Fatalf("expire provider-head lease: %v", expireErr)
+	}
+	if err := expiredAttempt.SucceedAndPromoteProviderHead(restartedCtx, runtimeeffects.ProviderHeadSettlement{
+		Settlement: runtimeeffects.Settlement{Evidence: map[string]any{"provider_session_id": expiredAttempt.Attempt().AttemptID}},
+		AgentID:    agentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
+		ScopeKey: lease.ScopeKey, LockOwner: lease.LockOwner, NewProviderHead: expiredAttempt.Attempt().AttemptID,
+	}); err == nil {
+		t.Fatal("expired-lease provider-head settlement succeeded")
+	}
+	requireExternalAttemptState(t, db, sqlite, expiredAttempt.Attempt().AttemptID, runtimeeffects.StateLaunched)
+	requireProviderHead(t, db, sqlite, lease.SessionID, "")
 }
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
@@ -127,6 +240,18 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	if _, err := runtimeeffects.Begin(claudeRetryCtx, "claude_cli", []byte("stable-request"), nil); err == nil {
 		t.Fatal("postlaunch uncertain claude attempt was redispatched")
+	}
+	nonRetryCtx := runtimeeffects.WithLogicalOperationIdentity(activeCtx, "claude-nonretryable-prelaunch")
+	nonRetryAttempt, err := runtimeeffects.Begin(nonRetryCtx, "claude_cli", []byte("stable-nonretry-request"), nil)
+	if err != nil {
+		t.Fatalf("authorize non-retryable claude attempt: %v", err)
+	}
+	nonRetryFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "test", "prelaunch", nil), "test", "prelaunch")
+	if err := nonRetryAttempt.Settle(nonRetryCtx, runtimeeffects.StateTerminalFailure, &nonRetryFailure.Failure, map[string]any{"prelaunch": true}); err != nil {
+		t.Fatalf("settle non-retryable claude attempt: %v", err)
+	}
+	if _, err := runtimeeffects.Begin(nonRetryCtx, "claude_cli", []byte("stable-nonretry-request"), nil); err == nil {
+		t.Fatal("non-retryable prelaunch claude attempt admitted another ordinal")
 	}
 	var registry runtimesessions.Registry
 	if sqlite {
@@ -336,5 +461,20 @@ func requireExternalAttemptState(t *testing.T, db *sql.DB, sqlite bool, attemptI
 	}
 	if state != string(want) {
 		t.Fatalf("external attempt state = %q, want %q", state, want)
+	}
+}
+
+func requireProviderHead(t *testing.T, db *sql.DB, sqlite bool, sessionID, want string) {
+	t.Helper()
+	query := `SELECT COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE session_id=?`
+	if !sqlite {
+		query = `SELECT COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE session_id=$1::uuid`
+	}
+	var got string
+	if err := db.QueryRow(query, sessionID).Scan(&got); err != nil {
+		t.Fatalf("load provider head: %v", err)
+	}
+	if got != want {
+		t.Fatalf("provider head = %q, want %q", got, want)
 	}
 }
