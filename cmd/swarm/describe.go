@@ -191,7 +191,7 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		return cliExitValidation
 	}
 	source := semanticview.Wrap(bundle)
-	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
+	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "describe failed: resolve workspace backend: %v\n", err)

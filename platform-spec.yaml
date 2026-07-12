@@ -16626,7 +16626,11 @@ cli_specification:
         --backend claude_cli` and local foreground `swarm run start --backend claude_cli` consume the same owner as admission
         evidence and fail closed before readiness when a blocking prerequisite is missing. Non-dev `swarm serve
         --backend claude_cli` consumes the runtime-safety subset where the selected disk-contract startup path needs the same
-        prerequisites; dev-only conveniences must not leak into deployment-mode serve.
+        prerequisites; dev-only conveniences must not leak into deployment-mode serve. When local foreground `swarm run start`
+        starts the serve owner and startup fails, it MUST render the complete typed blocking finding, including remediation, on
+        the run command's error output. Direct non-dev serve startup failures carrying a typed workspace prerequisite MUST render
+        that complete blocking finding on command output as well. A generic exit code or log-only cause is not a substitute for
+        the startup diagnostic.
       owner_consumption_rule: >
         The preflight owner MUST delegate subordinate facts to existing owners: backend profile/credential and retired
         selector checks consume `llm_provider_selection_config_authority`; the selected backend credential is required only

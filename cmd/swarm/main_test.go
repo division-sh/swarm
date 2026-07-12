@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -3673,6 +3674,78 @@ func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) 
 	}
 	if strings.Contains(serve.outputString(), "missing-platform-spec.yaml") || strings.Contains(serve.outputString(), "read platform spec") {
 		t.Fatalf("DB-loaded serve used missing local platform spec before catalog read:\n%s", serve.outputString())
+	}
+}
+
+func TestRunServeRuntimeDBLoadedExecutesExplicitHostRefusal(t *testing.T) {
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	bundleHash := seedServeRuntimeBundleCatalog(t, ctx, pg, doctorAgentContractsPath)
+	var out lockedBuffer
+	code := runServeRuntime(ctx, repoRoot(), serveOptions{
+		ConfigPath:         writeDoctorClaudeHostConfig(t, ""),
+		BundleHash:         bundleHash,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Output:             &out,
+	})
+	if code != cliExitRuntime {
+		t.Fatalf("DB-loaded serve code = %d, want %d\n%s", code, cliExitRuntime, out.String())
+	}
+	assertClaudeHostRefusal(t, out.String())
+}
+
+func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
+	const dockerBin = "/opt/db-loaded-docker"
+	var daemonProbes atomic.Int32
+	contractsRoot := writeServeRuntimeNativeBashFixture(t)
+	_, _, pg := installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources workspaceMountSources) serveWorkspaceLifecycle {
+		manager := workspace.NewDockerManager(nil)
+		cfg := workspace.DefaultDockerConfig()
+		cfg.DockerBin = dockerBin
+		cfg.WorkspaceImage = "db-loaded-workspace:test"
+		cfg.SharedDataSource = mountSources.DataSource
+		cfg.ContractsSource = contractsRoot
+		manager.SetConfig(cfg)
+		manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "version" {
+				daemonProbes.Add(1)
+				return "", fmt.Errorf("daemon offline")
+			}
+			return "", nil
+		})
+		return manager
+	})
+	ctx := context.Background()
+	bundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, contractsRoot)
+	var out lockedBuffer
+	code := runServeRuntime(ctx, repoRoot(), serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         bundleHash,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Output:             &out,
+	})
+	if code == 0 {
+		t.Fatalf("DB-loaded serve code = 0, want Docker prerequisite failure\n%s", out.String())
+	}
+	if daemonProbes.Load() == 0 {
+		t.Fatal("DB-loaded runtime did not execute DockerManager daemon probe")
+	}
+	for _, want := range []string{dockerBin, "Start the Docker daemon, then verify with `" + dockerBin + " info`"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("DB-loaded runtime output missing %q:\n%s", want, out.String())
+		}
 	}
 }
 
@@ -11293,6 +11366,29 @@ flows: []
 	}
 }
 
+func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal(t *testing.T) {
+	dsn, _, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	configPath := os.Getenv("SWARM_CONFIG")
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read run-fork config: %v", err)
+	}
+	writeRuntimeConfigText(t, configPath, string(rawConfig)+fmt.Sprintf("workspace:\n  backend: host\n  data_source: %q\n", t.TempDir()))
+	var out bytes.Buffer
+	code := runForkRuntimeOwnerHarness(context.Background(), repoRoot(), []string{
+		"--store", "postgres",
+		"--config", configPath,
+		"--contracts", doctorAgentContractsPath,
+		"--run", uuid.NewString(),
+		"--at", uuid.NewString(),
+	}, &out)
+	if code != 1 {
+		t.Fatalf("selected-contract run-fork code = %d, want 1\n%s", code, out.String())
+	}
+	assertClaudeHostRefusal(t, out.String())
+}
+
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
@@ -14924,7 +15020,7 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 		dataSource:       t.TempDir(),
 		platformSpecPath: defaultPlatformSpecPath,
 		apiPort:          apiPort,
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("startLocalRunServe: %v", err)
 	}

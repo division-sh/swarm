@@ -200,12 +200,7 @@ func TestDoctorWorkspaceBackendHostRefusalRendersTypedCapabilityRemediation(t *t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			configPath := writeDoctorClaudeConfig(t, "")
-			raw, err := os.ReadFile(configPath)
-			if err != nil {
-				t.Fatalf("read doctor config: %v", err)
-			}
-			writeRuntimeConfigText(t, configPath, strings.Replace(string(raw), "workspace:\n", "workspace:\n  backend: host\n", 1))
+			configPath := writeDoctorClaudeHostConfig(t, "")
 			args := doctorClaudeArgs(t, configPath, true)
 			for i := range args {
 				if args[i] == "--contracts" && i+1 < len(args) {
@@ -1216,6 +1211,11 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 			t.Fatalf("preflight spec missing consumer %q:\n%#v", want, preflight)
 		}
 	}
+	for _, want := range []string{"complete typed blocking finding", "including remediation", "error output", "Direct non-dev serve", "log-only cause is not a substitute"} {
+		if !strings.Contains(preflight.CommandModeRule, want) {
+			t.Fatalf("preflight command-mode rule missing %q:\n%s", want, preflight.CommandModeRule)
+		}
+	}
 	for _, want := range []string{"llm_provider_selection_config_authority", "tool_model.credential_store", "workspace lifecycle", "serve startup/listener"} {
 		if !strings.Contains(preflight.OwnerConsumptionRule, want) {
 			t.Fatalf("owner consumption rule missing %q:\n%s", want, preflight.OwnerConsumptionRule)
@@ -1395,6 +1395,17 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		strings.Join(providerPacks, "\n"),
 	}, "\n")+"\n")
 	return path
+}
+
+func writeDoctorClaudeHostConfig(t *testing.T, dockerBin string) string {
+	t.Helper()
+	configPath := writeDoctorClaudeConfig(t, dockerBin)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read doctor config: %v", err)
+	}
+	writeRuntimeConfigText(t, configPath, strings.Replace(string(raw), "workspace:\n", "workspace:\n  backend: host\n", 1))
+	return configPath
 }
 
 func writeDoctorTargetRepo(t *testing.T) string {

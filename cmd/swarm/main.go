@@ -955,6 +955,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	primaryWorkspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, source)
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		writeWorkspaceBackendDecisionFailure(opts.Output, "serve", err)
 		log.Printf("resolve workspace backend decision: %v", err)
 		return 3
 	}
@@ -1094,6 +1095,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		workspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
 			reporter.emit(5, "runtime_context", "FAILED", err.Error())
+			writeWorkspaceBackendDecisionFailure(opts.Output, "serve", err)
 			slog.Error("resolve workspace backend decision", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
 			return 3
 		}
@@ -1123,6 +1125,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		})
 		if err != nil {
 			reporter.emit(5, "runtime_context", "FAILED", err.Error())
+			writeWorkspacePrerequisiteFailure(opts.Output, "serve", err)
 			slog.Error("build runtime context", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
 			return 1
 		}
@@ -1563,7 +1566,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			}
 			return 1
 		}
-		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
+		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: resolve workspace backend: %v\n", err)

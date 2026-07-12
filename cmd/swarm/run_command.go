@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -167,7 +169,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
-		stopLocal, err = startLocalRunServe(ctx, repo, opts)
+		stopLocal, err = startLocalRunServe(ctx, repo, opts, errOut)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -374,7 +376,31 @@ func loadRunCommandPayload(path string) (map[string]any, error) {
 	return payload, nil
 }
 
-func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions) (func(), error) {
+type runStartupOutput struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	discard bool
+}
+
+func (o *runStartupOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.discard {
+		return len(p), nil
+	}
+	return o.buffer.Write(p)
+}
+
+func (o *runStartupOutput) finish() []byte {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.discard = true
+	output := append([]byte(nil), o.buffer.Bytes()...)
+	o.buffer.Reset()
+	return output
+}
+
+func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions, startupErrOut io.Writer) (func(), error) {
 	runServe := opts.apiOptions.runServe
 	if runServe == nil {
 		runServe = runServeRuntime
@@ -401,6 +427,8 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.DataSource = opts.dataSource
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	serveOpts.LocalRun = true
+	var startupOutput runStartupOutput
+	serveOpts.Output = &startupOutput
 	if opts.apiPort > 0 {
 		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))
 	}
@@ -408,6 +436,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	done := make(chan int, 1)
 	go func() {
 		done <- runServe(serveCtx, repo, serveOpts)
+		close(done)
 	}()
 	stop := func() {
 		cancel()
@@ -422,8 +451,12 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	}
 	if err := waitForRunCommandReady(ctx, opts, done); err != nil {
 		stop()
+		if output := startupOutput.finish(); startupErrOut != nil && len(output) > 0 {
+			_, _ = startupErrOut.Write(output)
+		}
 		return nil, err
 	}
+	startupOutput.finish()
 	return stop, nil
 }
 

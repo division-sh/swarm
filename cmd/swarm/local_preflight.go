@@ -131,13 +131,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	workspaceBackend, err := decideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
 	if err != nil {
-		message := err.Error()
-		remediation := "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities"
-		var decisionErr *workspaceBackendDecisionError
-		if errors.As(err, &decisionErr) {
-			message = decisionErr.Problem
-			remediation = decisionErr.Remediation
-		}
+		message, remediation := workspaceBackendDecisionDiagnostic(err)
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
 		return report.finalize()
 	}
@@ -187,6 +181,53 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command)
 	return report.finalize()
+}
+
+func workspaceBackendDecisionDiagnostic(err error) (string, string) {
+	message := err.Error()
+	remediation := "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities"
+	var decisionErr *workspaceBackendDecisionError
+	if errors.As(err, &decisionErr) {
+		message = decisionErr.Problem
+		remediation = decisionErr.Remediation
+	}
+	return message, remediation
+}
+
+func writeWorkspaceBackendDecisionFailure(out io.Writer, location string, err error) {
+	if out == nil || err == nil {
+		return
+	}
+	message, remediation := workspaceBackendDecisionDiagnostic(err)
+	fmt.Fprintln(out, formatLocalPreflightFinding(location, localPreflightFinding{
+		Category:    localPreflightWorkspacePrerequisite,
+		Code:        "workspace_backend_decision_failed",
+		Status:      localPreflightStatusFailed,
+		Severity:    localPreflightSeverityBlocker,
+		Message:     message,
+		Remediation: remediation,
+		Owner:       localPreflightOwner,
+	}))
+}
+
+func writeWorkspacePrerequisiteFailure(out io.Writer, location string, err error) bool {
+	if out == nil || err == nil {
+		return false
+	}
+	var prerequisiteErr *workspace.PrerequisiteError
+	if !errors.As(err, &prerequisiteErr) {
+		return false
+	}
+	fmt.Fprintln(out, formatLocalPreflightFinding(location, localPreflightFinding{
+		Category:    localPreflightWorkspacePrerequisite,
+		Code:        "workspace_prerequisite_failed",
+		Status:      localPreflightStatusFailed,
+		Severity:    localPreflightSeverityBlocker,
+		Message:     prerequisiteErr.Problem,
+		Remediation: prerequisiteErr.Remediation,
+		Owner:       localPreflightOwner,
+	}))
+	return true
 }
 
 func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightRequest, report *localPreflightReport) (semanticview.Source, string, bool) {

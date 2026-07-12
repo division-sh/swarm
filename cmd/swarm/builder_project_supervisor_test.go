@@ -24,6 +24,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1264,6 +1265,46 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailure
 				t.Fatalf("CurrentRuntime = %p after %s failure, want nil", supervisor.CurrentRuntime(), tc.name)
 			}
 		})
+	}
+}
+
+func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	bundle := testBuilderSupervisorBundle(t)
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+		"worker": {ID: "worker"},
+	}
+	source := semanticview.Wrap(bundle)
+	module := stubWorkflowModule{source: source}
+	cfg := testWorkspaceBackendConfig(llmselection.BackendClaudeCLI)
+	supervisor := newRuntimeProjectSupervisor(
+		"", "", cfg, storeBundle{}, new(atomic.Bool), workspaceMountSources{},
+		workspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true},
+		nil, nil, nil, "", nil, nil, nil,
+	)
+	supervisor.dev = true
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		if strings.TrimSpace(contractsRoot) != strings.TrimSpace(projectRoot) {
+			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
+		}
+		return module, bundle, nil
+	}
+	supervisor.validateSource = func(context.Context, semanticview.Source) error { return nil }
+	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
+		return "store wiring ready", nil
+	}
+	supervisor.createRuntime = func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		t.Fatal("createRuntime must not run after workspace backend refusal")
+		return nil, nil
+	}
+
+	_, err := supervisor.OpenProject(context.Background(), projectRoot)
+	if err == nil {
+		t.Fatal("OpenProject unexpectedly accepted claude_cli host execution")
+	}
+	assertClaudeHostRefusal(t, err.Error())
+	if supervisor.CurrentProject().Loaded || supervisor.CurrentRuntime() != nil {
+		t.Fatalf("failed replacement changed authority: project=%#v runtime=%p", supervisor.CurrentProject(), supervisor.CurrentRuntime())
 	}
 }
 
