@@ -661,7 +661,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want construction blocker removed after mailbox_write owner", runtimeStores.ConstructionBlocker)
 	}
 	bundle := loadStoreBackendSelectionWorkflowBundle(t)
-	if _, err := initializeStateStores(ctx, stores, bundle, false); err != nil {
+	if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
 		t.Fatalf("initializeStateStores(sqlite): %v", err)
 	}
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{

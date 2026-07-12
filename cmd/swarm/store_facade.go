@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
@@ -122,7 +123,16 @@ func (f selectedRuntimeStoreFacade) runtimeStores() runtime.Stores {
 }
 
 func (f selectedRuntimeStoreFacade) close() {
-	closeDB(f.stores.SQLDB)
+	if err := f.closeWithError(); err != nil {
+		log.Printf("close db: %v", err)
+	}
+}
+
+func (f selectedRuntimeStoreFacade) closeWithError() error {
+	if f.stores.SQLDB == nil {
+		return nil
+	}
+	return f.stores.SQLDB.Close()
 }
 
 func (f selectedRuntimeStoreFacade) workspaceDB() *sql.DB {

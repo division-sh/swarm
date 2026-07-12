@@ -59,7 +59,8 @@ func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 		},
 		filepath.Join("cmd", "swarm", "store_facade.go"): {
 			"SQLDB:               s.RuntimeSQLDB",
-			"closeDB(f.stores.SQLDB)",
+			"f.stores.SQLDB == nil",
+			"f.stores.SQLDB.Close()",
 			"return f.stores.SQLDB",
 		},
 		filepath.Join("cmd", "swarm", "store_roles.go"): {

@@ -18841,7 +18841,7 @@ cli_specification:
           - remote server build date
           - server-local bundle path
     doctor:
-      command: swarm doctor [--backend claude_cli] [--target] [--contracts <path>] [--json]
+      command: swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--contracts <path>] [--json]
       group: getting_started
       tier: should_have
       implementation_status: implemented
@@ -18858,6 +18858,23 @@ cli_specification:
         preflight or local state writes. Human typed findings render through the shared typed diagnostic list renderer
         as `[BLOCKER]`, `[WARN]`, or `[INFO]` lines with remediation when present. JSON output is supported for scripts
         and remains the existing doctor/preflight report shape.
+      schema_inventory:
+        flag: --schema-inventory
+        canonical_owner: platform-spec.yaml#cli_specification.command_catalog.doctor.schema_inventory
+        implementation_owner: cmd/swarm/doctor_schema_inventory.go doctorSchemaInventory
+        source_owner: cmd/swarm/main.go stateStoreSchemaPlans
+        behavior: >
+          Explicitly derives the generated platform and node state-store table plans from the selected contract bundle and
+          platform spec without starting runtime or reading/writing runtime database state. Human output renders sorted table
+          names and column counts. JSON adds a typed schema_inventory object with owner, aggregate counts, and table rows.
+          The flag is incompatible with `--target`, whose dry-run target-resolution contract remains separate.
+        consumers:
+        - swarm doctor --schema-inventory
+        - swarm doctor --schema-inventory --json
+        forbidden:
+        - serving or booting runtime
+        - inspecting a live database to guess generated ownership
+        - per-table inventory in default, dev, verbose, or local-run serve output
       split_scope:
       - workspace image build
       - local API connection discovery files
@@ -19393,19 +19410,39 @@ cli_specification:
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
-        implemented_by: '#802'
+        implemented_by: '#802/#2010 boot-presentation first slice'
+        canonical_presentation_owner: cmd/swarm/serve_lifecycle_presentation.go serveLifecyclePresenter
         flags:
         - --verbose
         - '-v'
         rule: >
-          By default `swarm serve` remains quiet except for readiness and errors. With `--verbose` or `-v`, serve prints
-          the numbered boot-progress sequence to stdout as the canonical serve/runtime boot phases complete. The CLI
-          owns stdout rendering; runtime owns the boot-progress facts and the persisted `platform.boot` payload.
+          Default `swarm serve` and `swarm serve --dev` render one concise boot/readiness presentation from the canonical
+          runtime boot-progress facts plus typed local-state, workspace, listener, standing-ingress, and shutdown facts.
+          With explicit `--verbose` or `-v`, the same presentation owner renders the numbered 22-step boot-progress sequence
+          in canonical order. `--dev` does not imply verbose; `--dev --verbose` is meaningful. Runtime owns boot facts and
+          persisted `platform.boot`; the CLI presentation never reconstructs runtime decisions from process-log prose.
+        output_boundary: >
+          Human serve boot, readiness, standing-ingress, failure, and shutdown output has one writer:
+          serveLifecyclePresenter. Direct log, slog, reporter, and output writers are non-authoritative and MUST NOT emit
+          parallel normal terminal presentation. Local foreground `swarm run start` consumes this owner while preserving
+          quiet successful startup and buffered failure replay. Machine/persisted diagnostics remain separate fact owners.
+        concise_projection:
+          required_facts:
+          - bundle/source counts from loaded semantic sources
+          - exact resolved store backend and SQLite path, or explicit path-not-applicable for Postgres
+          - resolved workspace backend decision
+          - canonical recovery outcome
+          - bound API and MCP listener addresses
+          - readiness duration
+          - zero, one, or multiple standing-ingress targets with bound/unbound signing state and no secret values
+          - normal or failed shutdown disposition
+          tty_policy: Plain words and values are authoritative; non-TTY output contains no ANSI control sequences or emoji.
         schema_inventory_detail: >
-          Default serve and local foreground run process logs may report concise generated state-store schema counts
-          such as `tables=N` and `columns=M`, but MUST NOT dump per-table `table(column_count)` inventory details.
-          Per-table generated schema inventory is diagnostic boot detail owned by the explicit serve verbose channel
-          (`swarm serve --verbose/-v`, and `--dev` through its verbose composition).
+          Default, dev, explicit verbose, local foreground run, and process-log serve output may report only the concise
+          generated-table count carried by the canonical boot fact. They MUST NOT render per-table table/column inventory.
+          Complete generated schema inventory is owned exclusively by
+          `cli_specification.command_catalog.doctor.schema_inventory`, which consumes the same generated schema-plan owner
+          without starting runtime or reading/writing runtime database state.
         boot_progress_sequence:
           total_steps: 22
           steps:
@@ -19550,20 +19587,21 @@ cli_specification:
           `--dev`, dev entity-container shutdown cleanup, `platform.shutdown` event persistence, and persisted delivery/receipt
           interruption reasons remain outside this owner and under #750 unless a later child promotes them.
       dev_mode_lifecycle_composition:
-        implemented_by: '#830'
+        implemented_by: '#830/#2010 boot-presentation first slice'
         flag: --dev
         owner: >
           `cmd/swarm serve` owns command-line composition; existing serve startup owners perform active-run abandon,
-          bundle-match admission, and verbose boot output; `internal/runtime/workspace` plus
+          bundle-match admission, and concise lifecycle presentation; `internal/runtime/workspace` plus
           `internal/runtime/containeridentity` own dev entity-container cleanup and preservation.
         composition:
         - sets `--abandon-active-runs`
         - sets `--no-require-bundle-match`
-        - sets `--verbose`
+        - consumes concise serve boot/readiness presentation without setting `--verbose`
         - enables dev entity-container cleanup after runtime shutdown/drain
         conflict_rules:
         - '`--dev --require-bundle-match` or `--dev --require-bundle-match=true` fails before runtime boot because dev mode disables bundle-match admission.'
-        - '`--dev --require-bundle-match=false`, `--dev --no-require-bundle-match`, `--dev --abandon-active-runs`, and `--dev --verbose` are redundant but valid.'
+        - '`--dev --require-bundle-match=false`, `--dev --no-require-bundle-match`, and `--dev --abandon-active-runs` are redundant but valid.'
+        - '`--dev --verbose` is valid and selects explicit 22-step presentation; it is not redundant.'
         shutdown_ordering: >
           On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. Dev cleanup runs
           only after that shutdown attempt reaches its completion point. Cleanup still runs after a shutdown timeout/error and

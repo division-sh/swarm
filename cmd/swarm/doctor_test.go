@@ -89,6 +89,57 @@ func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 	}
 }
 
+func TestDoctorSchemaInventoryOwnsTypedHumanAndJSONReadback(t *testing.T) {
+	dockerBin := configureDoctorDockerStub(t)
+	setDoctorEmptyProviderSecrets(t)
+	configPath := writeDoctorClaudeConfig(t, dockerBin)
+
+	var humanOut, humanErr bytes.Buffer
+	humanArgs := append(doctorClaudeArgs(t, configPath, false), "--schema-inventory")
+	humanCode := executeRootCommandWithOptions(context.Background(), repoRoot(), humanArgs, &humanOut, &humanErr, defaultRootCommandOptions())
+	if humanCode != cliExitRuntime {
+		t.Fatalf("human doctor code = %d, want prerequisite failure %d\nstdout=%s\nstderr=%s", humanCode, cliExitRuntime, humanOut.String(), humanErr.String())
+	}
+	for _, want := range []string{"schema inventory:", " tables · ", "  events · ", " columns"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human schema inventory missing %q:\n%s", want, humanOut.String())
+		}
+	}
+
+	var jsonOut, jsonErr bytes.Buffer
+	jsonArgs := append(doctorClaudeArgs(t, configPath, true), "--schema-inventory")
+	jsonCode := executeRootCommandWithOptions(context.Background(), repoRoot(), jsonArgs, &jsonOut, &jsonErr, defaultRootCommandOptions())
+	if jsonCode != cliExitRuntime {
+		t.Fatalf("json doctor code = %d, want prerequisite failure %d\nstdout=%s\nstderr=%s", jsonCode, cliExitRuntime, jsonOut.String(), jsonErr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(jsonOut.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor schema inventory JSON: %v\n%s", err, jsonOut.String())
+	}
+	if report.SchemaInventory == nil || report.SchemaInventory.Owner != doctorSchemaInventoryOwner {
+		t.Fatalf("schema inventory owner = %#v", report.SchemaInventory)
+	}
+	if report.SchemaInventory.TableCount == 0 || report.SchemaInventory.ColumnCount == 0 || len(report.SchemaInventory.Tables) != report.SchemaInventory.TableCount {
+		t.Fatalf("schema inventory counts = %#v", report.SchemaInventory)
+	}
+	for i := 1; i < len(report.SchemaInventory.Tables); i++ {
+		if report.SchemaInventory.Tables[i-1].Name >= report.SchemaInventory.Tables[i].Name {
+			t.Fatalf("schema inventory is not sorted: %#v", report.SchemaInventory.Tables)
+		}
+	}
+	if strings.Contains(humanOut.String(), "events(") || strings.Contains(jsonOut.String(), "events(") {
+		t.Fatalf("doctor retained retired table(count) compatibility rendering\nhuman=%s\njson=%s", humanOut.String(), jsonOut.String())
+	}
+}
+
+func TestDoctorSchemaInventoryRejectsTargetMode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"doctor", "--target", "--schema-inventory"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation || !strings.Contains(stderr.String(), "--schema-inventory cannot be combined with --target") {
+		t.Fatalf("doctor target/schema inventory code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestDoctorClaudeCLIPreflightReportsMissingDocker(t *testing.T) {
 	dockerBin := configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
@@ -1220,7 +1271,7 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 		}
 	}
 	doctor := spec.CLISpecification.CommandCatalog.Doctor
-	if doctor.Command != "swarm doctor [--backend claude_cli] [--target] [--contracts <path>] [--json]" || doctor.ImplementationStatus != "implemented" || !strings.Contains(doctor.Owner, "local_claude_cli_preflight_admission") {
+	if doctor.Command != "swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--contracts <path>] [--json]" || doctor.ImplementationStatus != "implemented" || !strings.Contains(doctor.Owner, "local_claude_cli_preflight_admission") {
 		t.Fatalf("doctor command catalog = %#v", doctor)
 	}
 	if !strings.Contains(doctor.Owner, "local_target_resolution_authority") {

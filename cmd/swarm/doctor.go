@@ -21,6 +21,7 @@ type doctorOptions struct {
 	mcpListenAddr       string
 	target              bool
 	asJSON              bool
+	schemaInventory     bool
 	apiOptions          rootCommandOptions
 }
 
@@ -38,6 +39,9 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if cliAPIConnectionFlagsChanged(cmd) && !opts.target {
 				return fmt.Errorf("--api-server and --api-token-file require --target")
+			}
+			if opts.target && opts.schemaInventory {
+				return fmt.Errorf("--schema-inventory cannot be combined with --target")
 			}
 			if cmd.Flags().Changed("data") {
 				opts.dataSource = strings.TrimSpace(opts.dataSource)
@@ -78,6 +82,7 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 	cmd.Flags().StringVar(&opts.mcpListenAddr, "mcp-listen-addr", opts.mcpListenAddr, "HTTP bind address to preflight for MCP and tools routes")
 	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render the diagnostic report as JSON")
+	cmd.Flags().BoolVar(&opts.schemaInventory, "schema-inventory", false, "Show the generated state-store table and column inventory without starting runtime")
 	opts.apiOptions.rootFlags = rootOpts.rootFlags
 	bindCLIAPIConnectionFlags(cmd, &opts.apiOptions)
 	return cmd
@@ -115,6 +120,15 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report := configReport
 		report.add(localPreflightBackendPrerequisite, "path_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
+	if opts.schemaInventory {
+		inventory, err := buildDoctorSchemaInventory(repo, resolvedPaths)
+		if err != nil {
+			report := configReport
+			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec so the generated schema can be derived")
+			return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+		}
+		configReport.SchemaInventory = &inventory
 	}
 	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
 	if err != nil {
@@ -198,6 +212,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		ProviderTriggerPacks:   providerPackLoad.Loaded,
 		ProviderTriggerCatalog: providerPackLoad.Catalog,
 	})
+	report.SchemaInventory = configReport.SchemaInventory
 	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)
 	addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)

@@ -538,13 +538,17 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"action"},
 		Reason: "runtime-log action is exact LogEntry evidence, not a registered watchdog action",
 	},
-	"main.go\x00emit": {
+	"serve_lifecycle_presentation.go\x00boot": {
 		Names:  []string{"status"},
-		Reason: "serve boot progress status is process-progress output, not a registered API code family",
+		Reason: "canonical serve boot progress status is a lifecycle-presentation taxonomy, not a registered API code family",
 	},
-	"main.go\x00runtimeSink": {
+	"serve_lifecycle_presentation.go\x00writeBootEventLocked": {
 		Names:  []string{"status"},
-		Reason: "serve boot runtime event status feeds process-progress output, not a registered API code family",
+		Reason: "canonical serve boot progress status is a lifecycle-presentation taxonomy, not a registered API code family",
+	},
+	"serve_lifecycle_presentation.go\x00writeResolvedFactsLocked": {
+		Names:  []string{"status"},
+		Reason: "canonical startup recovery outcome is a lifecycle-presentation taxonomy, not a registered API code family",
 	},
 	"main.go\x00printRunForkActivation": {
 		Names:  []string{"forkrunstatus", "sourcerunstatus"},

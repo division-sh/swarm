@@ -608,7 +608,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					stores := backend.open(t)
 					var active, maxActive atomic.Int32
 					bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-					if _, err := initializeStateStores(context.Background(), stores, bundle, false); err != nil {
+					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 						t.Fatalf("initializeStateStores: %v", err)
 					}
 					source := semanticview.Wrap(bundle)
@@ -805,7 +805,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 		t.Run(backend.name, func(t *testing.T) {
 			stores := backend.open(t)
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-			if _, err := initializeStateStores(context.Background(), stores, bundle, false); err != nil {
+			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)

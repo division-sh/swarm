@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -704,7 +703,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
 		var err error
-		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle, req.Options.Verbose)
+		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
 		if err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
@@ -812,21 +811,19 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootStartedAt := time.Now().UTC()
 	runtimeInstanceID := uuid.NewString()
-	reporter := newServeBootReporter(opts.Verbose, opts.Output)
-	reporter.emit(1, "process_start", "ok", "")
+	presenter := newServeLifecyclePresenter(opts)
+	presenter.boot(1, "process_start", "ok", "")
 	apiAuth, err := resolveServeAPIAuth(repo, opts)
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("configure v1 api auth: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("configure v1 api auth: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	if apiAuth.UsesDefaultLoopbackToken() {
-		log.Print("using built-in dev API token on numeric loopback; use swarm serve --api-token-file or config serve.api_token_file before exposing")
+		presenter.note("using built-in dev API token on numeric loopback; configure serve.api_token_file before exposing the listener")
 	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
@@ -834,14 +831,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ConfigPath:       opts.ConfigPath,
 	})
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("resolve CLI path config: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	projectContextRegistration, err := prepareServeProjectContextRegistration(ctx, repo, opts, resolvedPaths)
 	if err != nil {
-		reporter.emit(2, "serve_admission", "FAILED", err.Error())
-		log.Printf("prepare local project context registration: %v", err)
+		presenter.fail(2, "serve_admission", err)
 		return 3
 	}
 	defer projectContextRegistration.Release()
@@ -852,29 +847,25 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		BackendOverride: opts.Backend,
 	})
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("load config: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	cfg := cfgResult.Config
-	reporter.emit(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
+	presenter.boot(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
 	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("load provider trigger packs: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	if !opts.Dev && !opts.LocalRun {
 		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
-			reporter.emit(2, "serve_admission", "FAILED", err.Error())
-			log.Printf("validate non-dev mcp gateway env: %v", err)
+			presenter.fail(2, "serve_admission", err)
 			return 3
 		}
 	}
 	swarmDir, err := resolveServeContextRegistrationSwarmDir(opts)
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("resolve Swarm dir: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	localState, err := resolveLocalRuntimeState(localRuntimeStateOptions{
@@ -889,37 +880,40 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		EnforceLegacySQLite:     true,
 	})
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("resolve local runtime state: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	mountSources := localState.MountSources
 	workspaceBackendPreference, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfg)
 	if err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("resolve workspace backend: %v", err)
+		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	storeSelection := localState.StoreSelection
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
-		reporter.emit(3, "db_connection", "FAILED", err.Error())
-		log.Printf("init stores: %v", err)
+		presenter.fail(3, "db_connection", err)
 		return 1
 	}
-	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
+	presenter.recordStore(storeSelection)
 	storeFacade := stores.facade()
-	defer storeFacade.close()
+	storeClosed := false
+	defer func() {
+		if storeClosed {
+			return
+		}
+		if err := storeFacade.closeWithError(); err != nil {
+			presenter.runtimeFailure("store shutdown", err)
+		}
+	}()
 	if stores.SchemaBootstrapper != nil {
 		preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
 		if err != nil {
-			reporter.emit(4, "bundle_load", "FAILED", err.Error())
-			log.Printf("resolve pre-catalog platform spec: %v", err)
+			presenter.fail(4, "bundle_load", err)
 			return 1
 		}
-		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath, opts.Verbose); err != nil {
-			reporter.emit(4, "bundle_load", "FAILED", err.Error())
-			log.Printf("initialize platform state stores: %v", err)
+		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath); err != nil {
+			presenter.fail(4, "bundle_load", err)
 			return 1
 		}
 	}
@@ -928,60 +922,62 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 			detail = formatCLIAPIError(err)
-			log.Print(detail)
-		} else {
-			log.Printf("load Swarm contracts: %v", err)
 		}
-		reporter.emit(4, "bundle_load", "FAILED", detail)
+		presenter.fail(4, "bundle_load", errors.New(detail))
 		return 1
 	}
 	if len(loadedBundles) == 0 {
-		reporter.emit(4, "bundle_load", "FAILED", "no bundle contexts loaded")
+		presenter.fail(4, "bundle_load", errors.New("no bundle contexts loaded"))
 		return 1
 	}
-	defer func() {
+	bundleSourcesCleaned := false
+	cleanupLoadedBundleSources := func() error {
+		var cleanupErr error
 		for _, loaded := range loadedBundles {
 			if loaded.cleanup != nil {
-				if err := loaded.cleanup(); err != nil {
-					log.Printf("cleanup DB-loaded bundle runtime source failed: %v", err)
-				}
+				cleanupErr = errors.Join(cleanupErr, loaded.cleanup())
 			}
+		}
+		return cleanupErr
+	}
+	defer func() {
+		if bundleSourcesCleaned {
+			return
+		}
+		if err := cleanupLoadedBundleSources(); err != nil {
+			presenter.runtimeFailure("bundle source cleanup", err)
 		}
 	}()
 	loadedBundle := loadedBundles[0]
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
-	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
+	presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	primaryWorkspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, source)
 	if err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		writeWorkspaceBackendDecisionFailure(opts.Output, "serve", err)
-		log.Printf("resolve workspace backend decision: %v", err)
+		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
+			writeWorkspaceBackendDecisionFailure(out, "serve", err)
+		})
 		return 3
 	}
-	logWorkspaceBackendDecision(opts.Output, primaryWorkspaceBackend)
 	if shouldRunServeLocalClaudeCLIPreflight(opts) {
 		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
-			reporter.emit(5, "local_preflight", "FAILED", detail)
-			if opts.Output != nil {
-				writeLocalPreflightText(opts.Output, preflight)
-			}
-			log.Printf("local claude_cli preflight failed: %s", detail)
+			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) {
+				writeLocalPreflightText(out, preflight)
+			})
 			return 3
 		}
 	}
 	if err := validateServeMultiContextToolGatewayAdmission(cfg, loadedBundles); err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("validate multi-context tool gateway admission: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 3
 	}
 	stateStoreSummaries := make([]string, len(loadedBundles))
 	if stores.SchemaBootstrapper != nil {
-		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles, opts.Verbose)
+		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles)
 		if err != nil {
-			slog.Error("initialize state stores", "error", err)
+			presenter.fail(4, "state_store_schema", err)
 			return 1
 		}
 		stateStoreSummaries = summaries
@@ -989,7 +985,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	for i := range loadedBundles {
 		fact, err := prepareLoadedServeBundleSource(ctx, stores, loadedBundles[i], opts.Dev)
 		if err != nil {
-			slog.Error("prepare bundle source before startup recovery", "error", err)
+			presenter.fail(4, "bundle_source", err)
 			return 1
 		}
 		loadedBundles[i].bundleSourceFact = fact
@@ -997,20 +993,20 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	loadedBundle = loadedBundles[0]
 	if opts.AbandonActiveRuns {
 		if stores.RunQuiescenceStore == nil {
-			slog.Error("abandon active runs failed", "error", "selected store active-run quiescence owner is required")
+			presenter.fail(5, "run_quiescence", errors.New("selected store active-run quiescence owner is required"))
 			return 3
 		}
 		result, err := stores.RunQuiescenceStore.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
 		if err != nil {
-			slog.Error("abandon active runs failed", "error", err)
+			presenter.fail(5, "run_quiescence", err)
 			return 3
 		}
-		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
+		presenter.note(fmt.Sprintf("abandoned active work: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount))
 	}
 	if recoveryStore := storeFacade.startupRecoveryStore(); recoveryStore != nil {
 		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loadedBundle.contractsRoot, source, mountSources, primaryWorkspaceBackend)
 		if err != nil {
-			slog.Error("configure recovery workspaces", "error", err)
+			presenter.fail(5, "recovery_workspace", err)
 			return 1
 		}
 		recoveryContainers := runtimestartuprecovery.ManagedContainerOwner(serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces})
@@ -1024,56 +1020,57 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			RequestedAt:        time.Now().UTC(),
 		})
 		if err != nil {
-			slog.Error("unavailable bundle startup recovery failed", "error", err)
+			presenter.fail(5, "startup_recovery", err)
 			if runtimestartuprecovery.IsDataIntegrityError(err) {
 				return serveExitDataIntegrity
 			}
 			return 3
 		}
 		if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
-			log.Printf("unavailable bundle startup recovery complete: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
+			presenter.note(fmt.Sprintf("recovered unavailable bundles: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
 				len(recovery.Cleanup.Runs),
 				len(recovery.Cleanup.Deliveries),
 				len(recovery.Cleanup.Sessions),
 				len(recovery.Cleanup.Timers),
 				len(recovery.StoppedContainers),
 				recovery.Cleanup.PipelineReceiptCount,
-			)
+			))
 		}
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
+	if !opts.RequireBundleMatch {
+		presenter.note("bundle-match admission disabled after startup recovery consumed active-run bundle state")
+	}
 	if err := enforceServeBundleMatchAdmissionForHashes(ctx, storeFacade.runBundleAvailabilityStore(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
-		slog.Error("bundle match admission failed", "error", err)
+		presenter.fail(5, "bundle_match_admission", err)
 		return 3
 	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
-		slog.Error("configure credentials", "error", err)
+		presenter.fail(5, "credentials", err)
 		return 1
 	}
 	managedCredentialStore, err := buildManagedCredentialStore()
 	if err != nil {
-		slog.Error("configure managed credentials", "error", err)
+		presenter.fail(5, "managed_credentials", err)
 		return 1
 	}
 	providerCredentialStore, err := buildProviderCredentialStore()
 	if err != nil {
-		slog.Error("configure provider credentials", "error", err)
+		presenter.fail(5, "provider_credentials", err)
 		return 1
 	}
 
 	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("bind api listener: %v", err)
+		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
 	defer apiListener.Close()
 	mcpListener, err := listenServeHTTPListener("mcp", opts.MCPListenAddr)
 	if err != nil {
 		_ = apiListener.Close()
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("bind mcp listener: %v", err)
+		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
 	defer mcpListener.Close()
@@ -1081,8 +1078,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	if err != nil {
 		_ = mcpListener.Close()
 		_ = apiListener.Close()
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("configure mcp gateway binding: %v", err)
+		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
 
@@ -1094,13 +1090,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		workspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
-			reporter.emit(5, "runtime_context", "FAILED", err.Error())
-			writeWorkspaceBackendDecisionFailure(opts.Output, "serve", err)
-			slog.Error("resolve workspace backend decision", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
+			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
+				writeWorkspaceBackendDecisionFailure(out, "serve", err)
+			})
 			return 3
 		}
-		if i > 0 {
-			logWorkspaceBackendDecision(opts.Output, workspaceBackend)
+		presenter.recordWorkspace(loaded.serveIdentityDetail(), workspaceBackend)
+		var bootProgress func(runtime.BootProgressEvent)
+		if i == 0 {
+			bootProgress = presenter.runtimeSink()
 		}
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			Ctx:                    ctx,
@@ -1116,7 +1114,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			ProviderCredentials:    providerCredentialStore,
 			ProviderTriggerCatalog: providerPackLoad.Catalog,
 			BootStartedAt:          bootStartedAt,
-			BootProgress:           reporter.runtimeSink(),
+			BootProgress:           bootProgress,
 			EnableToolGateway:      i == 0,
 			ToolGatewayBinding:     contextToolGatewayBinding,
 			UseStartupOwnership:    len(loadedBundles) == 1 && i == 0,
@@ -1124,9 +1122,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			RequireBundleScopeName: len(loadedBundles) > 1,
 		})
 		if err != nil {
-			reporter.emit(5, "runtime_context", "FAILED", err.Error())
-			writeWorkspacePrerequisiteFailure(opts.Output, "serve", err)
-			slog.Error("build runtime context", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
+			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) {
+				writeWorkspacePrerequisiteFailure(out, "serve", err)
+			})
 			return 1
 		}
 		runtimeContexts = append(runtimeContexts, contextDef)
@@ -1143,32 +1141,28 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 	preflightContexts, err := plannedServeRuntimeContexts(runtimeContexts)
 	if err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("plan runtime contexts: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 	installedTriggerSubjects, err := providerPackLoad.Catalog.InstalledCapabilitySubjects()
 	if err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("derive provider trigger capability subjects: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 	admissionState := runtime.ProcessAdmissionState{GenerationID: providerPackLoad.Catalog.GenerationID(), InstalledSubjects: installedTriggerSubjects}
 	if err := runtime.ValidateRuntimeContextSetWithAdmission(admissionState, preflightContexts...); err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("validate runtime contexts: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 	runtimeContextManager, err := runtime.NewRuntimeContextManagerWithAdmission(runtimeContextAvailabilityReader(stores), admissionState)
 	if err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("init runtime context manager: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 
 	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore)
 	if err != nil {
-		log.Printf("init forkchat sandbox runtime: %v", err)
+		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
 	}
 
@@ -1183,17 +1177,21 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
+	var apiServer, mcpServer *http.Server
 	defer func() {
-		if err := closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts); err != nil {
-			log.Printf("additional runtime context shutdown failed: %v", err)
-		}
-		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
-			log.Printf("runtime shutdown failed: %v", err)
-		}
+		shutdownErr := shutdownHTTPServer("api", apiServer)
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer("mcp", mcpServer))
+		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts))
+		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces))
+		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
+		bundleSourcesCleaned = true
+		shutdownErr = errors.Join(shutdownErr, storeFacade.closeWithError())
+		storeClosed = true
+		presenter.shutdown(shutdownErr)
 	}()
 	mailboxDecisionRoutes, err := apiv1.MailboxDecisionRoutesFromSpec(resolvedPlatformSpecPath)
 	if err != nil {
-		log.Printf("load v1 api mailbox decision routes: %v", err)
+		presenter.fail(5, "mailbox_routes", err)
 		return 1
 	}
 	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
@@ -1212,8 +1210,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("init runtime context manager: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 	apiReadOptions := apiv1.OperatorReadOptions{
@@ -1266,46 +1263,58 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
 	})
 	if err != nil {
-		log.Printf("init v1 api: %v", err)
+		presenter.fail(20, "api_initialization", err)
 		return 1
 	}
 	var inboundHandler http.Handler
 	if rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
-	apiServer := newAPIServer(&ready, apiV1Handler, inboundHandler)
-	mcpServer := newMCPServer(rt.ToolGateway)
+	apiServer = newAPIServer(&ready, apiV1Handler, inboundHandler)
+	mcpServer = newMCPServer(rt.ToolGateway)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
-		reporter.emit(20, "context_registry", "FAILED", err.Error())
-		log.Printf("register local project context: %v", err)
+		presenter.fail(20, "context_registry", err)
 		return 3
 	}
 	defer projectContextRegistration.Unregister()
-	go serveHTTPServer("api", apiServer, apiListener)
-	go serveHTTPServer("mcp", mcpServer, mcpListener)
-	defer shutdownHTTPServer("mcp", mcpServer)
-	defer shutdownHTTPServer("api", apiServer)
-	logBootWarnings(bootReport, opts.Output)
+	go serveHTTPServer("api", apiServer, apiListener, presenter.runtimeFailure)
+	go serveHTTPServer("mcp", mcpServer, mcpListener, presenter.runtimeFailure)
+	presenter.recordBootWarnings(bootReport)
 	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
-		reporter.emit(22, "ready", "FAILED", err.Error())
-		log.Printf("start runtime: %v", err)
+		presenter.fail(22, "ready", err)
 		return 1
 	}
 	if opts.TestRuntimeReadyHook != nil {
 		opts.TestRuntimeReadyHook(rt)
 	}
 	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
-	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
+	presenter.boot(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
 	ready.Store(true)
 	if err := waitForServeHealthEndpoints(ctx, apiListener.Addr()); err != nil {
-		reporter.emit(21, "health_endpoints_respond", "FAILED", err.Error())
-		log.Printf("health endpoint verification failed: %v", err)
+		presenter.fail(21, "health_endpoints_respond", err)
 		return 1
 	}
-	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
-	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
-	logReadySummary(source, contractsRoot, apiListener.Addr(), mcpListener.Addr())
-	logReadyStandingIngress(runtimeContextManager, apiListener.Addr(), opts.Output)
+	readyAfter := time.Since(bootStartedAt)
+	presenter.boot(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
+	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialStore, apiListener.Addr())
+	if err != nil {
+		ready.Store(false)
+		presenter.fail(22, "ready", err)
+		return 1
+	}
+	presenter.boot(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", readyAfter.Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
+	flowCount, agentCount, toolCount := serveLifecycleSourceCounts(runtimeContexts)
+	presenter.readyPresentation(serveLifecycleReadyFacts{
+		ProjectName: serveLifecycleProjectName(localState, loadedBundles),
+		BundleCount: len(loadedBundles),
+		FlowCount:   flowCount,
+		AgentCount:  agentCount,
+		ToolCount:   toolCount,
+		APIListener: addrString(apiListener.Addr()),
+		MCPListener: addrString(mcpListener.Addr()),
+		ReadyAfter:  readyAfter,
+		Standing:    standing,
+	})
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -1346,20 +1355,93 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 	return planned, nil
 }
 
-func logReadyStandingIngress(manager *runtime.RuntimeContextManager, apiAddr net.Addr, out io.Writer) {
+func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeContextManager, credentials runtimecredentials.Store, apiAddr net.Addr) ([]serveLifecycleIngressFact, error) {
 	if manager == nil || apiAddr == nil {
-		return
+		return nil, nil
 	}
+	targets := map[string]runtime.StandingTarget{}
+	for _, contextDef := range manager.LoadedContexts() {
+		for _, target := range contextDef.StandingTargets {
+			key := serveStandingIngressKey(target.BundleHash, target.Alias, target.Provider)
+			if _, exists := targets[key]; exists {
+				return nil, fmt.Errorf("standing ingress readiness has duplicate loaded target %s/%s", target.Alias, target.Provider)
+			}
+			targets[key] = target
+		}
+	}
+
+	facts := []serveLifecycleIngressFact{}
 	for _, subject := range manager.CapabilitySubjects() {
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
 			continue
 		}
-		message := fmt.Sprintf("standing ingress admitted: api_base_url=http://%s %s", apiAddr.String(), packs.RenderSubject(subject, false))
-		log.Print(message)
-		if out != nil {
-			fmt.Fprintln(out, message)
+		admission := subject.TriggerAdmission
+		if admission == nil {
+			return nil, fmt.Errorf("effective provider trigger %s has no compiled admission readback", subject.ID)
+		}
+		key := serveStandingIngressKey(admission.BundleHash, admission.Alias, subject.Provider)
+		target, ok := targets[key]
+		if !ok {
+			return nil, fmt.Errorf("effective provider trigger %s has no loaded standing target", subject.ID)
+		}
+		bound := false
+		signingSecret := strings.TrimSpace(target.SigningSecret)
+		if signingSecret != "" {
+			if credentials == nil {
+				return nil, fmt.Errorf("standing ingress credential readback is unavailable for %s/%s", target.Alias, target.Provider)
+			}
+			value, found, err := credentials.Get(ctx, signingSecret)
+			if err != nil {
+				return nil, fmt.Errorf("read standing ingress credential %s: %w", signingSecret, err)
+			}
+			bound = found && strings.TrimSpace(value) != ""
+		}
+		facts = append(facts, serveLifecycleIngressFact{
+			Provider:      strings.TrimSpace(target.Provider),
+			URL:           fmt.Sprintf("http://%s/webhooks/%s/%s", apiAddr.String(), target.Alias, target.Provider),
+			SigningSecret: signingSecret,
+			SigningBound:  bound,
+			BundleHash:    strings.TrimSpace(target.BundleHash),
+			Subject:       subject,
+		})
+		delete(targets, key)
+	}
+	if len(targets) != 0 {
+		return nil, fmt.Errorf("standing ingress readiness is missing %d effective capability subjects", len(targets))
+	}
+	return facts, nil
+}
+
+func serveStandingIngressKey(bundleHash, alias, provider string) string {
+	return strings.TrimSpace(bundleHash) + "\x00" + strings.TrimSpace(alias) + "\x00" + strings.TrimSpace(provider)
+}
+
+func serveLifecycleSourceCounts(contexts []serveRuntimeBundleContext) (flows, agents, tools int) {
+	for _, contextDef := range contexts {
+		source := contextDef.loaded.source
+		if source == nil {
+			continue
+		}
+		flows += len(source.FlowSchemaEntries())
+		agents += len(source.AgentEntries())
+		tools += len(runtimetools.RuntimeAvailableToolNamesForSource(source))
+	}
+	return flows, agents, tools
+}
+
+func serveLifecycleProjectName(localState localRuntimeStateResolution, bundles []serveRuntimeBundle) string {
+	if root := strings.TrimSpace(localState.Project.CanonicalProjectRoot); root != "" {
+		if name := strings.TrimSpace(filepath.Base(root)); name != "" && name != "." {
+			return name
 		}
 	}
+	if len(bundles) == 1 {
+		return bundles[0].serveIdentityDetail()
+	}
+	if len(bundles) > 1 {
+		return fmt.Sprintf("%d persisted bundles", len(bundles))
+	}
+	return "runtime"
 }
 
 func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts serveOptions, workspaces serveWorkspaceLifecycle) error {
@@ -1376,20 +1458,6 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 		_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
 	}
 	return errors.Join(shutdownErr, cleanupErr)
-}
-
-func logWorkspaceBackendDecision(out io.Writer, decision workspaceBackendSelection) {
-	detail := workspaceBackendDecisionDetail(decision)
-	log.Print(detail)
-	if out != nil {
-		fmt.Fprintln(out, detail)
-	}
-	if warning := workspaceBackendUnsafeWarning(decision); warning != "" {
-		log.Print(warning)
-		if out != nil {
-			fmt.Fprintln(out, warning)
-		}
-	}
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
@@ -2552,9 +2620,6 @@ func enforceServeBundleMatchAdmission(ctx context.Context, availability selected
 func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
 	bootIdentity = strings.TrimSpace(bootIdentity)
 	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
-	if !requireMatch {
-		log.Printf("legacy bundle match admission disabled by --no-require-bundle-match; startup recovery has already consumed active run bundle source state")
-	}
 	enforceActiveAvailability := requireMatch || len(pinnedBundleHashes) > 0
 	if enforceActiveAvailability && bootIdentity == "" {
 		return fmt.Errorf("boot bundle identity is required")
@@ -2655,30 +2720,50 @@ func uniqueTrimmedServeBundleHashes(values []string) []string {
 	return out
 }
 
-func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, verbose bool) (string, error) {
+func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 	if stores.SchemaBootstrapper == nil || bundle == nil {
 		return "store wiring ready", nil
 	}
-	platformPlans, err := store.GeneratePlatformTableDDLs(bundle.Platform)
+	plans, err := stateStoreSchemaPlans(bundle)
 	if err != nil {
-		return "", fmt.Errorf("platform-owned tables: %w", err)
+		return "", err
 	}
-	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.NodeEntries())
-	if err != nil {
-		return "", fmt.Errorf("state_schema tables: %w", err)
-	}
-	request, err := schemaBootstrapRequest(bundle.Platform, platformPlans, statePlans)
+	request, err := schemaBootstrapRequest(bundle.Platform, plans.platform, plans.state)
 	if err != nil {
 		return "", err
 	}
 	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
 		return "", err
 	}
-	plans := append(append([]store.SchemaTableDDL{}, platformPlans...), statePlans...)
-	return summarizeServeSchemaPlans(plans, verbose), nil
+	return summarizeServeSchemaPlans(plans.all()), nil
 }
 
-func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string, verbose bool) (string, error) {
+type stateStoreSchemaPlanSet struct {
+	platform []store.SchemaTableDDL
+	state    []store.SchemaTableDDL
+}
+
+func (p stateStoreSchemaPlanSet) all() []store.SchemaTableDDL {
+	plans := append([]store.SchemaTableDDL{}, p.platform...)
+	return append(plans, p.state...)
+}
+
+func stateStoreSchemaPlans(bundle *runtimecontracts.WorkflowContractBundle) (stateStoreSchemaPlanSet, error) {
+	if bundle == nil {
+		return stateStoreSchemaPlanSet{}, fmt.Errorf("workflow contract bundle is required")
+	}
+	platformPlans, err := store.GeneratePlatformTableDDLs(bundle.Platform)
+	if err != nil {
+		return stateStoreSchemaPlanSet{}, fmt.Errorf("platform-owned tables: %w", err)
+	}
+	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.NodeEntries())
+	if err != nil {
+		return stateStoreSchemaPlanSet{}, fmt.Errorf("state_schema tables: %w", err)
+	}
+	return stateStoreSchemaPlanSet{platform: platformPlans, state: statePlans}, nil
+}
+
+func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string) (string, error) {
 	if stores.SchemaBootstrapper == nil {
 		return "store wiring ready", nil
 	}
@@ -2697,13 +2782,13 @@ func initializeServePlatformStateStores(ctx context.Context, stores storeBundle,
 	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
 		return "", err
 	}
-	return summarizeServeSchemaPlans(plans, verbose), nil
+	return summarizeServeSchemaPlans(plans), nil
 }
 
-func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle, verbose bool) ([]string, error) {
+func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle) ([]string, error) {
 	summaries := make([]string, len(loaded))
 	for i, bundle := range loaded {
-		summary, err := initializeStateStores(ctx, stores, bundle.bundle, verbose)
+		summary, err := initializeStateStores(ctx, stores, bundle.bundle)
 		if err != nil {
 			return nil, fmt.Errorf("bundle %s state stores: %w", bundle.serveIdentityDetail(), err)
 		}
@@ -2774,39 +2859,39 @@ func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.Pl
 type serveSchemaPlanSummary struct {
 	tableCount  int
 	columnCount int
-	detail      string
+	tables      []serveSchemaTableSummary
 }
 
-func summarizeServeSchemaPlans(plans []store.SchemaTableDDL, verbose bool) string {
+type serveSchemaTableSummary struct {
+	Name        string `json:"name"`
+	ColumnCount int    `json:"column_count"`
+}
+
+func summarizeServeSchemaPlans(plans []store.SchemaTableDDL) string {
 	summary := newServeSchemaPlanSummary(plans)
-	slog.Info("swarm boot state stores", "tables", summary.tableCount, "columns", summary.columnCount)
-	return summary.text(verbose)
+	return summary.text()
 }
 
 func newServeSchemaPlanSummary(plans []store.SchemaTableDDL) serveSchemaPlanSummary {
-	tableNames := make([]string, 0, len(plans))
+	tables := make([]serveSchemaTableSummary, 0, len(plans))
 	totalColumns := 0
 	for _, plan := range plans {
-		tableNames = append(tableNames, fmt.Sprintf("%s(%d)", strings.TrimSpace(plan.TableName), plan.ColumnCount))
+		tables = append(tables, serveSchemaTableSummary{Name: strings.TrimSpace(plan.TableName), ColumnCount: plan.ColumnCount})
 		totalColumns += plan.ColumnCount
 	}
-	sort.Strings(tableNames)
+	sort.Slice(tables, func(i, j int) bool { return tables[i].Name < tables[j].Name })
 	return serveSchemaPlanSummary{
 		tableCount:  len(plans),
 		columnCount: totalColumns,
-		detail:      strings.Join(tableNames, ", "),
+		tables:      tables,
 	}
 }
 
-func (summary serveSchemaPlanSummary) text(verbose bool) string {
+func (summary serveSchemaPlanSummary) text() string {
 	if summary.tableCount == 0 {
 		return "verified 0 generated tables"
 	}
-	base := fmt.Sprintf("verified %d generated tables", summary.tableCount)
-	if verbose && strings.TrimSpace(summary.detail) != "" {
-		return fmt.Sprintf("%s (%s)", base, summary.detail)
-	}
-	return base
+	return fmt.Sprintf("verified %d generated tables", summary.tableCount)
 }
 
 func serveStateStoreSummaryAt(summaries []string, index int) string {
@@ -2869,42 +2954,6 @@ func (m *swarmWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
 	return m.actionRegistry
 }
 
-type serveBootReporter struct {
-	enabled bool
-	out     io.Writer
-}
-
-func newServeBootReporter(enabled bool, out io.Writer) serveBootReporter {
-	if out == nil {
-		out = io.Discard
-	}
-	return serveBootReporter{enabled: enabled, out: out}
-}
-
-func (r serveBootReporter) runtimeSink() func(runtime.BootProgressEvent) {
-	if !r.enabled {
-		return nil
-	}
-	return func(evt runtime.BootProgressEvent) {
-		r.emit(evt.Step, evt.Name, evt.Status, evt.Detail)
-	}
-}
-
-func (r serveBootReporter) emit(step int, name, status, detail string) {
-	if !r.enabled || r.out == nil {
-		return
-	}
-	status = strings.TrimSpace(status)
-	if status == "" {
-		status = "ok"
-	}
-	detail = strings.TrimSpace(detail)
-	if detail != "" {
-		detail = "  (" + detail + ")"
-	}
-	fmt.Fprintf(r.out, "[%d/%d] %-34s %s%s\n", step, runtime.BootProgressTotalSteps, strings.TrimSpace(name), status, detail)
-}
-
 func serveBootRegistryDetail(source semanticview.Source) string {
 	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
 	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))
@@ -2916,25 +2965,6 @@ func serveBootBundleLoadDetail(fingerprint string, source semanticview.Source) s
 		return serveBootRegistryDetail(source)
 	}
 	return fmt.Sprintf("%s, %s", fingerprint, serveBootRegistryDetail(source))
-}
-
-func logBootWarnings(report runtimebootverify.Report, out io.Writer) {
-	warningCounts := make(map[string]int, len(report.Findings))
-	for _, finding := range report.Warnings() {
-		warningCounts[strings.TrimSpace(finding.CheckID)]++
-	}
-	if len(warningCounts) > 0 {
-		slog.Info("swarm boot validation warning summary",
-			"event_wiring_warnings", warningCounts["event_chain_integrity"]+warningCounts["event_consumer_exists"]+warningCounts["event_producer_exists"],
-			"tool_warnings", warningCounts["prompt_exists"]+warningCounts["tool_resolution"],
-		)
-	}
-	for _, finding := range report.Warnings() {
-		slog.Warn("swarm boot validation warning", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
-		if out != nil {
-			fmt.Fprintln(out, runtimebootverify.FormatSurfaceFinding(finding, false))
-		}
-	}
 }
 
 type systemWorkspaceContainerLister interface {
@@ -3054,12 +3084,14 @@ func listenServeHTTPListener(name, addr string) (net.Listener, error) {
 	return listener, nil
 }
 
-func serveHTTPServer(name string, server *http.Server, listener net.Listener) {
+func serveHTTPServer(name string, server *http.Server, listener net.Listener, onFailure func(string, error)) {
 	if server == nil || listener == nil {
 		return
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("%s server stopped: %v", name, err)
+		if onFailure != nil {
+			onFailure(name+" server", err)
+		}
 	}
 }
 
@@ -3121,28 +3153,16 @@ func probeServeHealthEndpoint(ctx context.Context, client *http.Client, endpoint
 	return nil
 }
 
-func shutdownHTTPServer(name string, server *http.Server) {
+func shutdownHTTPServer(name string, server *http.Server) error {
 	if server == nil {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("%s server shutdown failed: %v", name, err)
+		return fmt.Errorf("%s server shutdown: %w", name, err)
 	}
-}
-
-func logReadySummary(source semanticview.Source, contractsRoot string, apiAddr, mcpAddr net.Addr) {
-	log.Printf(
-		"swarm runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d api_listener=%s mcp_listener=%s",
-		contractsRoot,
-		len(source.FlowSchemaEntries()),
-		len(source.NodeEntries()),
-		len(source.AgentEntries()),
-		len(source.ResolvedEventCatalog()),
-		addrString(apiAddr),
-		addrString(mcpAddr),
-	)
+	return nil
 }
 
 func addrString(addr net.Addr) string {

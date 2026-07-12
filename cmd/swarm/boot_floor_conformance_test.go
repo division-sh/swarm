@@ -35,7 +35,6 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 		SelfCheck:            true,
 		RequireBundleMatch:   false,
 		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		Verbose:              true,
 		NoRequireBundleMatch: true,
 		TestLLMRuntime:       bootFloorNativeFallbackRuntime{},
 	})
@@ -55,6 +54,9 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(output), "docker is not reachable") {
 		t.Fatalf("host opt-out serve output shows Docker dependency despite explicit host backend:\n%s", output)
+	}
+	if !strings.Contains(output, "swarm serve · ") || strings.Contains(output, "[1/22]") || strings.Contains(output, "\x1b[") {
+		t.Fatalf("default serve did not use concise non-TTY lifecycle presentation:\n%s", output)
 	}
 }
 

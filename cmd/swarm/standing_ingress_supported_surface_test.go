@@ -55,7 +55,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	opts := serveOptions{
 		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+		SelfCheck: true, RequireBundleMatch: false, Dev: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 
@@ -70,6 +70,27 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	requireStandingTelegramCalls(t, calls, 2, sqlitePath)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
+	}
+	firstOutput := first.outputString()
+	for _, want := range []string{
+		"swarm serve --dev · ",
+		"store                      sqlite · " + sqlitePath,
+		"workspace                  workspace backend:",
+		"listeners                  api 127.0.0.1:",
+		"ready in ",
+		"telegram webhook",
+		"webhook_signing.telegram bound",
+		"shutdown · complete",
+	} {
+		if !strings.Contains(firstOutput, want) {
+			t.Fatalf("concise supported serve output missing %q:\n%s", want, firstOutput)
+		}
+	}
+	if strings.Contains(firstOutput, "[1/22]") || strings.Contains(firstOutput, "telegram-secret") || strings.Contains(firstOutput, "\x1b[") {
+		t.Fatalf("concise supported serve output leaked verbose, secret, or terminal decoration:\n%s", firstOutput)
+	}
+	if strings.Count(firstOutput, "workspace backend:") != 1 || strings.Count(firstOutput, "ready in ") != 1 {
+		t.Fatalf("concise supported serve output retained parallel lifecycle writers:\n%s", firstOutput)
 	}
 
 	second := startServeRuntimeTestProcess(t, opts)

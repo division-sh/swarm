@@ -72,6 +72,7 @@ type localPreflightReport struct {
 	Backend            string                  `json:"backend"`
 	CapabilitySubjects []packs.Subject         `json:"capability_subjects,omitempty"`
 	Findings           []localPreflightFinding `json:"findings"`
+	SchemaInventory    *doctorSchemaInventory  `json:"schema_inventory,omitempty"`
 }
 
 type localPreflightRequest struct {
@@ -507,6 +508,7 @@ func writeLocalPreflightText(out io.Writer, report localPreflightReport) {
 	for _, finding := range report.Findings {
 		fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
 	}
+	writeDoctorSchemaInventoryText(out, report.SchemaInventory)
 }
 
 func formatLocalPreflightFinding(mode string, finding localPreflightFinding) string {

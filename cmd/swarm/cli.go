@@ -293,7 +293,6 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			if opts.Dev {
 				opts.AbandonActiveRuns = true
 				opts.NoRequireBundleMatch = true
-				opts.Verbose = true
 			}
 			if opts.NoRequireBundleMatch {
 				opts.RequireBundleMatch = false
@@ -361,7 +360,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.MCPListenAddr, "mcp-listen-addr", opts.MCPListenAddr, "HTTP bind address for MCP and tools routes")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
-	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development mode: abandon active runs, skip bundle-match admission, emit verbose boot output, and clean up dev entity containers on shutdown")
+	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: abandon active runs, skip bundle-match admission, use concise boot output, and clean up dev entity containers on shutdown")
 	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs have unavailable bundle source state")
 	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs have unavailable bundle source state")
 	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
