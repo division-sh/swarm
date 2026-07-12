@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -39,14 +40,11 @@ func driftTestRepoRoot(t *testing.T) string {
 
 func loadCLISpecification(t *testing.T) *yaml.Node {
 	t.Helper()
-	raw, err := os.ReadFile(platform.DefaultPlatformSpecFile(driftTestRepoRoot(t)))
+	source, err := yamlsource.LoadFile(platform.DefaultPlatformSpecFile(driftTestRepoRoot(t)))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	doc := source.NodeCopy()
 	root := doc.Content[0]
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "cli_specification" {

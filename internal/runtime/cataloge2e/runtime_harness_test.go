@@ -159,7 +159,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	var rootSchema struct {
 		InitialState string `yaml:"initial_state"`
 	}
-	loadYAML(t, filepath.Join(fixtureRoot, "schema.yaml"), &rootSchema)
+	loadContractYAML(t, filepath.Join(fixtureRoot, "schema.yaml"), &rootSchema)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {
 		t.Fatalf("newFixtureWorkflowModule: %v", err)

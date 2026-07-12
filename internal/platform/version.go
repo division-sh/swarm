@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type platformVersionDocument struct {
@@ -18,8 +18,12 @@ func PlatformVersion() (string, error) {
 }
 
 func PlatformVersionFromYAML(raw []byte) (string, error) {
+	source, err := yamlsource.Load(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse platform version: %w", err)
+	}
 	var doc platformVersionDocument
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := source.Decode(&doc); err != nil {
 		return "", fmt.Errorf("parse platform version: %w", err)
 	}
 	version := strings.TrimSpace(doc.Platform.Version)

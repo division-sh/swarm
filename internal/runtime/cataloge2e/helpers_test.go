@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,6 +58,20 @@ func loadYAML(t testing.TB, path string, out any) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	if err := yaml.Unmarshal(b, out); err != nil {
+		t.Fatalf("unmarshal %s: %v", path, err)
+	}
+}
+
+func loadContractYAML(t testing.TB, path string, out any) {
+	t.Helper()
+	source, err := yamlsource.LoadFile(path)
+	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			t.Fatalf("unmarshal %s: %v", path, cause)
+		}
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if err := source.Decode(out); err != nil {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
 }

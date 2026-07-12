@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestDefaultPlatformCleanupCatalogClassifiesEveryPlatformTable(t *testing.T) {
@@ -104,7 +104,7 @@ func TestCleanupCatalogRetainsDirectiveOperationAuthority(t *testing.T) {
 func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct{} {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
+	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("read platform-spec.yaml: %v", err)
 	}
@@ -115,7 +115,7 @@ func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct
 			} `yaml:"tables"`
 		} `yaml:"platform_tables"`
 	}
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := source.Decode(&doc); err != nil {
 		t.Fatalf("parse platform-spec.yaml: %v", err)
 	}
 	if len(doc.PlatformTables.Tables) == 0 {
@@ -131,7 +131,7 @@ func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct
 func loadPlatformCleanupClassificationsForCleanupCatalogTest(t *testing.T) map[string]string {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
+	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("read platform-spec.yaml: %v", err)
 	}
@@ -142,7 +142,7 @@ func loadPlatformCleanupClassificationsForCleanupCatalogTest(t *testing.T) map[s
 			} `yaml:"destructive_reset_cleanup_policy"`
 		} `yaml:"platform_tables"`
 	}
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := source.Decode(&doc); err != nil {
 		t.Fatalf("parse platform-spec.yaml: %v", err)
 	}
 	if len(doc.PlatformTables.DestructiveResetCleanupPolicy.Classifications) == 0 {

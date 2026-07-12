@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1410,21 +1411,17 @@ func publicSurfaceSpecRefExists(root, specRef string) error {
 	if filepath.IsAbs(path) || strings.HasPrefix(clean, "..") {
 		return fmt.Errorf("path must be repo-relative")
 	}
-	raw, err := os.ReadFile(filepath.Join(root, clean))
+	source, err := yamlsource.LoadFile(filepath.Join(root, clean))
 	if err != nil {
 		return err
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return err
-	}
-	node := yamlDocumentRoot(&doc)
+	parts := make([]string, 0, 8)
 	for _, part := range strings.Split(strings.Trim(strings.TrimSpace(yamlPath), "."), ".") {
 		if part == "" {
 			continue
 		}
-		node = yamlMappingValue(node, part)
-		if node == nil {
+		parts = append(parts, part)
+		if _, found := source.LookupMapPath(parts...); !found {
 			return fmt.Errorf("anchor path component %q missing", part)
 		}
 	}
@@ -1796,22 +1793,18 @@ func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixR
 
 func loadPublicSurfaceCLICommands(t *testing.T, root string) map[string]struct{} {
 	t.Helper()
-	raw, err := os.ReadFile(compliancePlatformSpecPath(root))
+	source, err := yamlsource.LoadFile(compliancePlatformSpecPath(root))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse platform spec yaml: %v", err)
-	}
-	rootNode := yamlDocumentRoot(&doc)
-	commandCatalog := yamlMappingValue(yamlMappingValue(rootNode, "cli_specification"), "command_catalog")
-	if commandCatalog == nil || commandCatalog.Kind != yaml.MappingNode {
+	commandCatalog, found := source.LookupMapPath("cli_specification", "command_catalog")
+	if !found || commandCatalog.Kind() != yamlsource.MappingNode {
 		t.Fatal("platform spec cli_specification.command_catalog missing")
 	}
 	out := map[string]struct{}{}
-	for i := 0; i+1 < len(commandCatalog.Content); i += 2 {
-		out[commandCatalog.Content[i].Value] = struct{}{}
+	for i := 0; i+1 < commandCatalog.Len(); i += 2 {
+		key, _ := commandCatalog.Child(i)
+		out[key.Value()] = struct{}{}
 	}
 	return out
 }
@@ -1854,28 +1847,6 @@ func loadPublicSurfaceGoTests(root string) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func yamlDocumentRoot(doc *yaml.Node) *yaml.Node {
-	if doc == nil {
-		return nil
-	}
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-		return doc.Content[0]
-	}
-	return doc
-}
-
-func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
 }
 
 func publicSurfaceMatrixRowByID(t *testing.T, matrix *publicSurfaceBackendMatrix, id string) *publicSurfaceMatrixRow {

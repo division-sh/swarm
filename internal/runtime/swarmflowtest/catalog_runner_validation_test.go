@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,14 +68,11 @@ func TestCatalogFixtures_UseCanonicalCreateFlowInstanceAuthoring(t *testing.T) {
 	}
 	for _, path := range matches {
 		t.Run(strings.TrimPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(repoRoot, "tests"))+"/"), func(t *testing.T) {
-			raw, err := os.ReadFile(path)
+			source, err := yamlsource.LoadFile(path)
 			if err != nil {
 				t.Fatalf("read %s: %v", path, err)
 			}
-			var root yaml.Node
-			if err := yaml.Unmarshal(raw, &root); err != nil {
-				t.Fatalf("parse %s: %v", path, err)
-			}
+			root := source.NodeCopy()
 			assertCanonicalCreateFlowInstanceAuthoring(t, path, &root)
 		})
 	}

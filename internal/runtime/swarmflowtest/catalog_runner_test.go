@@ -21,6 +21,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1408,18 +1409,18 @@ func catalogSemanticEventWarningIssues(source semanticview.Source) []catalogBoot
 
 func catalogLoadRawYAMLMap(t testing.TB, path string) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	source, err := yamlsource.LoadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]any{}
 		}
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			t.Fatalf("decode raw YAML %s: %v", path, cause)
+		}
 		t.Fatalf("read raw YAML %s: %v", path, err)
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return map[string]any{}
-	}
 	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := source.Decode(&raw); err != nil {
 		t.Fatalf("decode raw YAML %s: %v", path, err)
 	}
 	if raw == nil {
@@ -3591,11 +3592,14 @@ func toYAMLScalar(value any) string {
 
 func loadYAMLForCatalogTest(t testing.TB, path string, target any) {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	source, err := yamlsource.LoadFile(path)
 	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			t.Fatalf("parse %s: %v", path, cause)
+		}
 		t.Fatalf("read %s: %v", path, err)
 	}
-	if err := yaml.Unmarshal(raw, target); err != nil {
+	if err := source.Decode(target); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 }

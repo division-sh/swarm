@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
@@ -556,15 +555,7 @@ func loadPlatformSpecForSQLiteSchemaTest(t *testing.T) runtimecontracts.Platform
 	t.Helper()
 	_, file, _, _ := stdruntime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	return spec
+	return loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 }
 
 func platformTableNamesForSQLiteSchemaTest() []string {

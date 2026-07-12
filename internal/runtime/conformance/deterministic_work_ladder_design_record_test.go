@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -282,12 +283,12 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 
 func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t *testing.T) {
 	root := conformanceRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
+	source, err := yamlsource.LoadFile(filepath.Join(root, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
 	var spec map[string]any
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		t.Fatalf("parse platform spec: %v", err)
 	}
 	artifact := yamlMapAt(t, spec,

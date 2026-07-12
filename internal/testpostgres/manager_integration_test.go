@@ -14,6 +14,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store/platformschema"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -37,7 +38,11 @@ func TestTemplateDigestUsesCanonicalGeneratedSchema(t *testing.T) {
 	}
 	raw = append(raw, []byte("\n# unrelated non-schema spec comment\n")...)
 	var reparsed runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &reparsed); err != nil {
+	source, err := yamlsource.Load(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Decode(&reparsed); err != nil {
 		t.Fatal(err)
 	}
 	reparsedPlans, err := platformschema.GeneratePlatformTableDDLs(reparsed)

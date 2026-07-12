@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/userfacing"
-	"gopkg.in/yaml.v3"
 )
 
 func TestServeCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
@@ -218,13 +217,7 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 			} `yaml:"workspace_monitor_artifact_debug_slice"`
 		} `yaml:"environment_source_authority"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 
 	authority := spec.EnvironmentSourceAuthority.WorkspaceMonitorArtifactDebugSlice
 	if authority.PromotedBy != "#1640" || authority.ParentTracker != "#1600" || authority.ImplementationStatus != "classification_updated_by_1843" {
@@ -332,13 +325,7 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 			} `yaml:"repo_wide_swarm_env_accepted_set"`
 		} `yaml:"environment_source_authority"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 
 	authority := spec.EnvironmentSourceAuthority.RepoWideSwarmEnvAcceptedSet
 	if authority.PromotedBy != "#1731" || authority.ParentTracker != "#1600" || authority.ImplementationStatus != "implemented_first_slice" {

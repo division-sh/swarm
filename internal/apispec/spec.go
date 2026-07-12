@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const (
@@ -163,12 +162,15 @@ type OpenRPCComponents struct {
 }
 
 func LoadPlatformSpec(path string) (*APISpecification, error) {
-	raw, err := os.ReadFile(path)
+	source, err := yamlsource.LoadFile(path)
 	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			return nil, fmt.Errorf("parse platform spec: %w", cause)
+		}
 		return nil, err
 	}
 	var spec PlatformSpec
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		return nil, fmt.Errorf("parse platform spec: %w", err)
 	}
 	if len(spec.APISpecification.MethodCatalog) == 0 {

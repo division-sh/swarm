@@ -757,7 +757,7 @@ func writeBusImportBoundaryWildcardFixture(t *testing.T, opts importBoundaryWild
 	if workerSubscription == "" {
 		workerSubscription = "**/task.done"
 	}
-	rootNode := ""
+	rootNode := "{}\n"
 	if opts.RootWildcard {
 		rootNode = `
 root-listener:

@@ -9,7 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
@@ -59,12 +59,12 @@ func validateCurrentPlatformEventPayloadForAgentControlTest(t testing.TB, eventT
 		}
 		dir = parent
 	}
-	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(dir))
+	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(dir))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
 	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
+	if err := source.Decode(&spec); err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -18,8 +17,8 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"golang.org/x/text/unicode/norm"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -481,22 +480,15 @@ func canonicalBundleHashYAML(raw []byte) ([]byte, error) {
 	if !utf8.Valid(raw) {
 		return nil, fmt.Errorf("YAML input is not valid UTF-8")
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	var doc yaml.Node
-	if err := dec.Decode(&doc); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("YAML input has no document")
-		}
+	source, err := yamlsource.Load(raw)
+	if err != nil {
 		return nil, err
 	}
-	var second yaml.Node
-	if err := dec.Decode(&second); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("YAML input has multiple documents")
-		}
-		return nil, err
-	}
-	value, err := canonicalBundleHashYAMLValue(&doc, map[*yaml.Node]bool{})
+	return canonicalBundleHashYAMLSnapshot(source)
+}
+
+func canonicalBundleHashYAMLSnapshot(source yamlsource.Snapshot) ([]byte, error) {
+	value, err := canonicalBundleHashYAMLValue(source.Root(), map[yamlsource.Node]bool{})
 	if err != nil {
 		return nil, err
 	}
@@ -508,26 +500,28 @@ func canonicalBundleHashYAML(raw []byte) ([]byte, error) {
 	return out, nil
 }
 
-func canonicalBundleHashYAMLValue(node *yaml.Node, stack map[*yaml.Node]bool) (any, error) {
-	if node == nil {
+func canonicalBundleHashYAMLValue(node yamlsource.Node, stack map[yamlsource.Node]bool) (any, error) {
+	if !node.Valid() {
 		return nil, fmt.Errorf("nil YAML node")
 	}
-	switch node.Kind {
-	case yaml.DocumentNode:
-		if len(node.Content) != 1 {
+	switch node.Kind() {
+	case yamlsource.DocumentNode:
+		if node.Len() != 1 {
 			return nil, fmt.Errorf("YAML document must contain exactly one root node")
 		}
-		return canonicalBundleHashYAMLValue(node.Content[0], stack)
-	case yaml.MappingNode:
-		if node.Tag != "" && node.Tag != "!!map" {
-			return nil, fmt.Errorf("unsupported YAML mapping tag %q", node.Tag)
+		child, _ := node.Child(0)
+		return canonicalBundleHashYAMLValue(child, stack)
+	case yamlsource.MappingNode:
+		if node.Tag() != "" && node.Tag() != "!!map" {
+			return nil, fmt.Errorf("unsupported YAML mapping tag %q", node.Tag())
 		}
-		if len(node.Content)%2 != 0 {
+		if node.Len()%2 != 0 {
 			return nil, fmt.Errorf("YAML mapping has an odd number of nodes")
 		}
-		out := make(map[string]any, len(node.Content)/2)
-		for i := 0; i < len(node.Content); i += 2 {
-			keyValue, err := canonicalBundleHashYAMLValue(node.Content[i], stack)
+		out := make(map[string]any, node.Len()/2)
+		for i := 0; i < node.Len(); i += 2 {
+			keyNode, _ := node.Child(i)
+			keyValue, err := canonicalBundleHashYAMLValue(keyNode, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -538,19 +532,21 @@ func canonicalBundleHashYAMLValue(node *yaml.Node, stack map[*yaml.Node]bool) (a
 			if _, exists := out[key]; exists {
 				return nil, fmt.Errorf("duplicate YAML mapping key %q", key)
 			}
-			value, err := canonicalBundleHashYAMLValue(node.Content[i+1], stack)
+			valueNode, _ := node.Child(i + 1)
+			value, err := canonicalBundleHashYAMLValue(valueNode, stack)
 			if err != nil {
 				return nil, err
 			}
 			out[key] = value
 		}
 		return out, nil
-	case yaml.SequenceNode:
-		if node.Tag != "" && node.Tag != "!!seq" {
-			return nil, fmt.Errorf("unsupported YAML sequence tag %q", node.Tag)
+	case yamlsource.SequenceNode:
+		if node.Tag() != "" && node.Tag() != "!!seq" {
+			return nil, fmt.Errorf("unsupported YAML sequence tag %q", node.Tag())
 		}
-		out := make([]any, 0, len(node.Content))
-		for _, child := range node.Content {
+		out := make([]any, 0, node.Len())
+		for i := 0; i < node.Len(); i++ {
+			child, _ := node.Child(i)
 			value, err := canonicalBundleHashYAMLValue(child, stack)
 			if err != nil {
 				return nil, err
@@ -558,21 +554,22 @@ func canonicalBundleHashYAMLValue(node *yaml.Node, stack map[*yaml.Node]bool) (a
 			out = append(out, value)
 		}
 		return out, nil
-	case yaml.AliasNode:
-		if node.Alias == nil {
+	case yamlsource.AliasNode:
+		alias, ok := node.Alias()
+		if !ok {
 			return nil, fmt.Errorf("YAML alias has no target")
 		}
-		if stack[node.Alias] {
+		if stack[alias] {
 			return nil, fmt.Errorf("YAML alias cycle detected")
 		}
-		stack[node.Alias] = true
-		value, err := canonicalBundleHashYAMLValue(node.Alias, stack)
-		delete(stack, node.Alias)
+		stack[alias] = true
+		value, err := canonicalBundleHashYAMLValue(alias, stack)
+		delete(stack, alias)
 		return value, err
-	case yaml.ScalarNode:
+	case yamlsource.ScalarNode:
 		return canonicalBundleHashYAMLScalar(node)
 	default:
-		return nil, fmt.Errorf("unsupported YAML node kind %d", node.Kind)
+		return nil, fmt.Errorf("unsupported YAML node kind %d", node.Kind())
 	}
 }
 
@@ -585,47 +582,47 @@ const (
 	canonicalYAMLNumber
 )
 
-func canonicalBundleHashYAMLScalar(node *yaml.Node) (any, error) {
-	explicit := node.Style&yaml.TaggedStyle != 0
+func canonicalBundleHashYAMLScalar(node yamlsource.Node) (any, error) {
+	explicit := node.Style()&yamlsource.TaggedStyle != 0
 	if explicit {
-		if node.Tag != "!!str" && canonicalBundleHashYAMLQuotedScalar(node.Style) {
-			return nil, fmt.Errorf("explicit %s tag widens quoted scalar %q", node.Tag, node.Value)
+		if node.Tag() != "!!str" && canonicalBundleHashYAMLQuotedScalar(node.Style()) {
+			return nil, fmt.Errorf("explicit %s tag widens quoted scalar %q", node.Tag(), node.Value())
 		}
-		implicitValue, implicitKind, err := canonicalBundleHashImplicitScalar(node.Value)
+		implicitValue, implicitKind, err := canonicalBundleHashImplicitScalar(node.Value())
 		if err != nil {
 			return nil, err
 		}
-		switch node.Tag {
+		switch node.Tag() {
 		case "!!str":
-			return norm.NFC.String(node.Value), nil
+			return norm.NFC.String(node.Value()), nil
 		case "!!bool":
 			if implicitKind != canonicalYAMLBool {
-				return nil, fmt.Errorf("explicit bool tag widens scalar %q", node.Value)
+				return nil, fmt.Errorf("explicit bool tag widens scalar %q", node.Value())
 			}
 			return implicitValue, nil
 		case "!!int", "!!float":
 			if implicitKind != canonicalYAMLNumber {
-				return nil, fmt.Errorf("explicit numeric tag widens scalar %q", node.Value)
+				return nil, fmt.Errorf("explicit numeric tag widens scalar %q", node.Value())
 			}
 			return implicitValue, nil
 		case "!!null":
 			if implicitKind != canonicalYAMLNull {
-				return nil, fmt.Errorf("explicit null tag widens scalar %q", node.Value)
+				return nil, fmt.Errorf("explicit null tag widens scalar %q", node.Value())
 			}
 			return nil, nil
 		default:
-			return nil, fmt.Errorf("unsupported YAML scalar tag %q", node.Tag)
+			return nil, fmt.Errorf("unsupported YAML scalar tag %q", node.Tag())
 		}
 	}
-	if node.Tag == "!!str" {
-		return norm.NFC.String(node.Value), nil
+	if node.Tag() == "!!str" {
+		return norm.NFC.String(node.Value()), nil
 	}
-	value, _, err := canonicalBundleHashImplicitScalar(node.Value)
+	value, _, err := canonicalBundleHashImplicitScalar(node.Value())
 	return value, err
 }
 
-func canonicalBundleHashYAMLQuotedScalar(style yaml.Style) bool {
-	return style&yaml.DoubleQuotedStyle != 0 || style&yaml.SingleQuotedStyle != 0
+func canonicalBundleHashYAMLQuotedScalar(style yamlsource.Style) bool {
+	return style&yamlsource.DoubleQuotedStyle != 0 || style&yamlsource.SingleQuotedStyle != 0
 }
 
 func canonicalBundleHashImplicitScalar(raw string) (any, canonicalYAMLScalarKind, error) {

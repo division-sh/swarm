@@ -59,7 +59,6 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 type delayedRunStatusAgent struct {
@@ -2171,13 +2170,7 @@ func TestPlatformSpecSecretsCLISurfacePromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	store := spec.ToolModel.CredentialStore
 	for _, want := range []string{"shadowed", "required_by"} {
 		if !strings.Contains(store.Interface.List, want) {
@@ -2275,13 +2268,7 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	authority := spec.WorkspaceModel.DataSourceAuthority
 	if !strings.Contains(authority.PromotedBy, "#1139") || !strings.Contains(authority.PromotedBy, "#1223") || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
 		t.Fatalf("workspace data source authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
@@ -2373,13 +2360,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	authority := spec.WorkspaceModel.WorkspaceBackendSelection
 	if strings.TrimSpace(authority.PromotedBy) != "#1138" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_capability_driven_first_slice" {
 		t.Fatalf("workspace backend authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
@@ -2494,13 +2475,7 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	authority := spec.WorkspaceModel.WorkspaceExecutionTargetCapability
 	if strings.TrimSpace(authority.PromotedBy) != "#1213/#1235/#1286/#1356" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_host_file_relay_and_trusted_command_slice" {
 		t.Fatalf("workspace execution target authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
@@ -2618,13 +2593,7 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 			} `yaml:"runtime_image_packaging"`
 		} `yaml:"workspace_model"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	portability := spec.CLISpecification.Foundations.InstalledBinaryPortability
 	if strings.TrimSpace(portability.PromotedBy) != "#1002" {
 		t.Fatalf("installed binary portability promoted_by = %q, want #1002", portability.PromotedBy)
@@ -2706,13 +2675,7 @@ func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	startup := spec.CLISpecification.Foundations.LocalCLITestGatewayStartup
 	if strings.TrimSpace(startup.PromotedBy) != "#997" {
 		t.Fatalf("local cli_test gateway startup promoted_by = %q, want #997", startup.PromotedBy)
@@ -2770,13 +2733,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	binding := spec.CLISpecification.Foundations.LocalToolGatewayBinding
 	if strings.TrimSpace(binding.PromotedBy) != "#1568" {
 		t.Fatalf("local tool gateway binding promoted_by = %q, want #1568", binding.PromotedBy)
@@ -2845,13 +2802,7 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	availability := spec.CLISpecification.Foundations.LocalCLITestWorkspaceCLIAvailability
 	if strings.TrimSpace(availability.PromotedBy) != "#997" {
 		t.Fatalf("local cli_test workspace cli availability promoted_by = %q, want #997", availability.PromotedBy)
@@ -3018,13 +2969,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			} `yaml:"agent_session_management"`
 		} `yaml:"engine"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	authority := spec.Engine.AgentSessionManagement.Selection
 	if strings.TrimSpace(authority.PromotedBy) != "#1127" {
 		t.Fatalf("llm provider selection promoted_by = %q, want #1127", authority.PromotedBy)
@@ -15617,13 +15562,7 @@ func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpec
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	sequence := spec.CLISpecification.CommandCatalog.Serve.BootObservability.BootProgressSequence
 	if sequence.TotalSteps != runtimepkg.BootProgressTotalSteps {
 		t.Fatalf("platform spec total_steps = %d, want %d", sequence.TotalSteps, runtimepkg.BootProgressTotalSteps)
@@ -15653,13 +15592,7 @@ func loadServeDevModeSpec(t *testing.T) serveDevModeSpec {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.DevMode.Flag) == "" {
 		t.Fatal("platform spec missing serve dev_mode_lifecycle_composition")
 	}
@@ -15677,13 +15610,7 @@ func loadServeUnifiedListenerSpec(t *testing.T) serveUnifiedListenerSpec {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.Listener.Flag) == "" {
 		t.Fatal("platform spec missing serve unified_listener_bind_contract")
 	}
@@ -15701,13 +15628,7 @@ func loadServeListenerTopologySpec(t *testing.T) serveListenerTopologySpec {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.ListenerTopology.CanonicalOwner) == "" {
 		t.Fatal("platform spec missing serve listener_topology_v2_1")
 	}
@@ -15723,13 +15644,7 @@ func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfig
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	if strings.TrimSpace(spec.CLISpecification.Foundations.APIConnectionAuthConfig.CanonicalOwner) == "" {
 		t.Fatal("platform spec missing api_connection_auth_config_precedence")
 	}
@@ -15745,13 +15660,7 @@ func loadCLIContractPlatformSpecPathResolutionSpec(t *testing.T) cliContractPlat
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	if strings.TrimSpace(spec.CLISpecification.Foundations.ContractPlatformSpecPathResolution.CanonicalOwner) == "" {
 		t.Fatal("platform spec missing contract_platform_spec_path_resolution")
 	}

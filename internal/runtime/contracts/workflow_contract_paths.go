@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const maxDiscoveredPackageDepth = 99
@@ -450,11 +450,14 @@ func sortedContractKeys[T any](m map[string]T) []string {
 	return keys
 }
 func loadYAMLFile(path string, target any) error {
-	raw, err := os.ReadFile(path)
+	source, err := yamlsource.LoadFile(path)
 	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			return wrapLoaderDiagnosticFile(cause, path)
+		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if err := yaml.Unmarshal(raw, target); err != nil {
+	if err := source.Decode(target); err != nil {
 		return wrapLoaderDiagnosticFile(err, path)
 	}
 	return nil

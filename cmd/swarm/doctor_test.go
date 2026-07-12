@@ -17,7 +17,6 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"gopkg.in/yaml.v3"
 )
 
 func setDoctorProviderSecret(t *testing.T, key, value string) {
@@ -1190,13 +1189,7 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	preflight := spec.CLISpecification.Foundations.Preflight
 	if preflight.PromotedBy != "#1565" || preflight.ImplementationStatus != "implemented" || !strings.Contains(preflight.CanonicalOwner, "local_claude_cli_preflight_admission") {
 		t.Fatalf("preflight spec = %#v", preflight)
@@ -1278,13 +1271,7 @@ func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRoot(), defaultPlatformSpecPath), &spec)
 	target := spec.CLISpecification.Foundations.LocalTarget
 	if target.PromotedBy != "#1612" || target.ImplementationStatus != "implemented_first_slice" || target.CanonicalOwner != localTargetOwner {
 		t.Fatalf("local target owner = %#v", target)
