@@ -81,7 +81,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			bus := &recordingReceiptBus{}
 			am := NewAgentManager(bus, nil, store)
 			err := tt.newFailure()
-			expected := runtimefailures.FromError(err, "agent-manager", "process_event.on_event").Failure
+			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 			result := am.processEventDetailed(context.Background(), failureReturningAgent{id: "agent-a", err: err}, evt)
 
