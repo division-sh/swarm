@@ -30,13 +30,23 @@ type RouteTable struct {
 	eventPath         map[string]struct{}
 	templates         map[string]routeFlowTemplate
 	instances         map[string]struct{}
+	instanceScope     map[string]string
 	instanceEventPath map[string][]string
+	templateObservers map[string][]routeTemplateSourceObserver
 }
 
 type routePattern struct {
-	EventPattern string
-	Subscriber   Subscriber
-	InstancePath string
+	EventPattern       string
+	Subscriber         Subscriber
+	InstancePath       string
+	SourceInstancePath string
+}
+
+type routeTemplateSourceObserver struct {
+	SourceTemplatePath     string
+	SourceLocalEvent       string
+	Subscriber             Subscriber
+	SubscriberInstancePath string
 }
 
 type routeFlowTemplate struct {
@@ -54,11 +64,13 @@ type routeSubscriberTemplate struct {
 }
 
 type routeResolvedPattern struct {
-	EventPattern   string
-	MatchPattern   string
-	RouteSource    string
-	LocalizedEvent string
-	RoutePath      string
+	EventPattern       string
+	MatchPattern       string
+	RouteSource        string
+	LocalizedEvent     string
+	RoutePath          string
+	SourceTemplatePath string
+	SourceLocalEvent   string
 }
 
 type TypedPubSubAuthorizationError struct {
@@ -228,7 +240,9 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	templateScope := strings.TrimSpace(identity.ScopeKey)
 	if templateDef, ok := rt.templates[templateScope]; ok {
 		rt.instances[instancePath] = struct{}{}
+		rt.instanceScope[instancePath] = templateScope
 		rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
+		rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 		vars := flowInstanceRouteMaterializationVars(req, templateDef.FlowID)
 		for _, subscriberTemplate := range templateDef.Subscribers {
 			subscriber := Subscriber{
@@ -241,12 +255,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 					if strings.TrimSpace(resolved.EventPattern) == "" {
 						continue
 					}
-					resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-					rt.patterns = append(rt.patterns, routePattern{
-						EventPattern: resolved.EventPattern,
-						Subscriber:   resolvedSubscriber,
-						InstancePath: instancePath,
-					})
+					rt.addResolvedPatternLocked(subscriber, resolved, instancePath)
 				}
 				if !routeFlowInputHasLoweredConnectReceiver(rt.source, templateDef.FlowID, rawPattern) {
 					continue
@@ -272,7 +281,9 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	}
 	localEvents := routeNodeLocalEventSet(req.Template)
 	rt.instances[instancePath] = struct{}{}
+	rt.instanceScope[instancePath] = templateScope
 	rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, localEvents)
+	rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 	vars := flowInstanceRouteMaterializationVars(req, templateID)
 	subscriber := Subscriber{
 		ID:   routeRenderTemplate(req.Template.ID, vars),
@@ -284,12 +295,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			if strings.TrimSpace(resolved.EventPattern) == "" {
 				continue
 			}
-			resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-			rt.patterns = append(rt.patterns, routePattern{
-				EventPattern: resolved.EventPattern,
-				Subscriber:   resolvedSubscriber,
-				InstancePath: instancePath,
-			})
+			rt.addResolvedPatternLocked(subscriber, resolved, instancePath)
 		}
 	}
 	rt.rebuildLocked()
@@ -325,18 +331,33 @@ func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route
 		return
 	}
 	delete(rt.instances, instancePath)
+	delete(rt.instanceScope, instancePath)
 	for _, eventType := range rt.instanceEventPath[instancePath] {
 		delete(rt.eventPath, eventType)
 	}
 	delete(rt.instanceEventPath, instancePath)
 	filtered := rt.patterns[:0]
 	for _, pattern := range rt.patterns {
-		if pattern.InstancePath == instancePath {
+		if pattern.InstancePath == instancePath || pattern.SourceInstancePath == instancePath {
 			continue
 		}
 		filtered = append(filtered, pattern)
 	}
 	rt.patterns = filtered
+	for sourceTemplatePath, observers := range rt.templateObservers {
+		filteredObservers := observers[:0]
+		for _, observer := range observers {
+			if observer.SubscriberInstancePath == instancePath {
+				continue
+			}
+			filteredObservers = append(filteredObservers, observer)
+		}
+		if len(filteredObservers) == 0 {
+			delete(rt.templateObservers, sourceTemplatePath)
+			continue
+		}
+		rt.templateObservers[sourceTemplatePath] = filteredObservers
+	}
 	rt.rebuildLocked()
 }
 
@@ -397,7 +418,9 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		eventPath:         make(map[string]struct{}),
 		templates:         make(map[string]routeFlowTemplate),
 		instances:         make(map[string]struct{}),
+		instanceScope:     make(map[string]string),
 		instanceEventPath: make(map[string][]string),
+		templateObservers: make(map[string][]routeTemplateSourceObserver),
 	}
 }
 
@@ -537,11 +560,7 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, package
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
-				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-				rt.patterns = append(rt.patterns, routePattern{
-					EventPattern: resolved.EventPattern,
-					Subscriber:   resolvedSubscriber,
-				})
+				rt.addResolvedPatternLocked(subscriber, resolved, "")
 			}
 		}
 	}
@@ -572,21 +591,13 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
-				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-				rt.patterns = append(rt.patterns, routePattern{
-					EventPattern: resolved.EventPattern,
-					Subscriber:   resolvedSubscriber,
-				})
+				rt.addResolvedPatternLocked(subscriber, resolved, "")
 			}
 			if routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
 				continue
 			}
 			if resolved := routeResolveNodeCanonicalPattern(source, basePath, semanticNodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
-				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-				rt.patterns = append(rt.patterns, routePattern{
-					EventPattern: resolved.EventPattern,
-					Subscriber:   resolvedSubscriber,
-				})
+				rt.addResolvedPatternLocked(subscriber, resolved, "")
 			}
 		}
 	}
@@ -594,12 +605,112 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 
 func (rt *RouteTable) addReceiverCarrierPatternsLocked(inputEvents []string, basePath string, subscriber Subscriber, rawPattern string) {
 	for _, resolved := range routeReceiverCarrierSubscriberPatterns(inputEvents, basePath, rawPattern) {
-		resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-		rt.patterns = append(rt.patterns, routePattern{
-			EventPattern: resolved.EventPattern,
-			Subscriber:   resolvedSubscriber,
-		})
+		rt.addResolvedPatternLocked(subscriber, resolved, "")
 	}
+}
+
+func (rt *RouteTable) addResolvedPatternLocked(subscriber Subscriber, resolved routeResolvedPattern, subscriberInstancePath string) {
+	resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
+	sourceTemplatePath := eventidentity.Normalize(resolved.SourceTemplatePath)
+	sourceLocalEvent := eventidentity.Normalize(resolved.SourceLocalEvent)
+	if sourceTemplatePath != "" || sourceLocalEvent != "" {
+		if sourceTemplatePath == "" || sourceLocalEvent == "" {
+			return
+		}
+		rt.addTemplateSourceObserverLocked(routeTemplateSourceObserver{
+			SourceTemplatePath:     sourceTemplatePath,
+			SourceLocalEvent:       sourceLocalEvent,
+			Subscriber:             resolvedSubscriber,
+			SubscriberInstancePath: strings.Trim(strings.TrimSpace(subscriberInstancePath), "/"),
+		})
+		return
+	}
+	rt.patterns = append(rt.patterns, routePattern{
+		EventPattern: resolved.EventPattern,
+		Subscriber:   resolvedSubscriber,
+		InstancePath: strings.Trim(strings.TrimSpace(subscriberInstancePath), "/"),
+	})
+}
+
+func (rt *RouteTable) addTemplateSourceObserverLocked(observer routeTemplateSourceObserver) {
+	observer.SourceTemplatePath = eventidentity.Normalize(observer.SourceTemplatePath)
+	observer.SourceLocalEvent = eventidentity.Normalize(observer.SourceLocalEvent)
+	observer.SubscriberInstancePath = strings.Trim(strings.TrimSpace(observer.SubscriberInstancePath), "/")
+	if observer.SourceTemplatePath == "" || observer.SourceLocalEvent == "" {
+		return
+	}
+	key := routeTemplateSourceObserverKey(observer)
+	for _, existing := range rt.templateObservers[observer.SourceTemplatePath] {
+		if routeTemplateSourceObserverKey(existing) == key {
+			return
+		}
+	}
+	rt.templateObservers[observer.SourceTemplatePath] = append(rt.templateObservers[observer.SourceTemplatePath], observer)
+	for _, instancePath := range sortedStringKeys(rt.instanceScope) {
+		if eventidentity.Normalize(rt.instanceScope[instancePath]) == observer.SourceTemplatePath {
+			rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+		}
+	}
+}
+
+func (rt *RouteTable) materializeTemplateSourceObserversLocked(templateScope, instancePath string) {
+	templateScope = eventidentity.Normalize(templateScope)
+	instancePath = eventidentity.Normalize(instancePath)
+	for _, observer := range rt.templateObservers[templateScope] {
+		rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+	}
+}
+
+func (rt *RouteTable) materializeTemplateSourceObserverLocked(observer routeTemplateSourceObserver, instancePath string) {
+	instancePath = eventidentity.Normalize(instancePath)
+	eventPattern := eventidentity.Normalize(instancePath + "/" + observer.SourceLocalEvent)
+	if instancePath == "" || eventPattern == "" {
+		return
+	}
+	if _, active := rt.eventPath[eventPattern]; !active {
+		return
+	}
+	subscriber := observer.Subscriber
+	subscriber.MatchPattern = eventPattern
+	candidate := routePattern{
+		EventPattern:       eventPattern,
+		Subscriber:         subscriber,
+		InstancePath:       observer.SubscriberInstancePath,
+		SourceInstancePath: instancePath,
+	}
+	key := routePatternIdentity(candidate)
+	for _, existing := range rt.patterns {
+		if routePatternIdentity(existing) == key {
+			return
+		}
+	}
+	rt.patterns = append(rt.patterns, candidate)
+}
+
+func routeTemplateSourceObserverKey(observer routeTemplateSourceObserver) string {
+	return strings.Join([]string{
+		eventidentity.Normalize(observer.SourceTemplatePath),
+		eventidentity.Normalize(observer.SourceLocalEvent),
+		strings.TrimSpace(observer.Subscriber.Type),
+		strings.TrimSpace(observer.Subscriber.ID),
+		strings.TrimSpace(observer.Subscriber.Path),
+		strings.TrimSpace(observer.Subscriber.RouteSource),
+		eventidentity.Normalize(observer.Subscriber.LocalizedEvent),
+		strings.Trim(strings.TrimSpace(observer.SubscriberInstancePath), "/"),
+	}, "|")
+}
+
+func routePatternIdentity(pattern routePattern) string {
+	return strings.Join([]string{
+		eventidentity.Normalize(pattern.EventPattern),
+		strings.TrimSpace(pattern.Subscriber.Type),
+		strings.TrimSpace(pattern.Subscriber.ID),
+		strings.TrimSpace(pattern.Subscriber.Path),
+		strings.TrimSpace(pattern.Subscriber.RouteSource),
+		eventidentity.Normalize(pattern.Subscriber.LocalizedEvent),
+		strings.Trim(strings.TrimSpace(pattern.InstancePath), "/"),
+		strings.Trim(strings.TrimSpace(pattern.SourceInstancePath), "/"),
+	}, "|")
 }
 
 func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
@@ -931,19 +1042,18 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 			if resolution.Scoped {
 				out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
 				for _, pattern := range resolution.Patterns {
-					eventPattern := eventidentity.Normalize(pattern.RuntimeEventPattern)
-					if eventPattern == "" && pattern.RouteSource != "import_boundary_wildcard_grant" {
-						eventPattern = eventidentity.Normalize(pattern.EventPattern)
-					}
+					eventPattern := eventidentity.Normalize(pattern.EventPattern)
 					if eventPattern == "" {
 						continue
 					}
 					out = append(out, routeResolvedPattern{
-						EventPattern:   eventPattern,
-						MatchPattern:   eventPattern,
-						RouteSource:    pattern.RouteSource,
-						LocalizedEvent: pattern.LocalizedEvent,
-						RoutePath:      routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
+						EventPattern:       eventPattern,
+						MatchPattern:       eventPattern,
+						RouteSource:        pattern.RouteSource,
+						LocalizedEvent:     pattern.LocalizedEvent,
+						RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
+						SourceTemplatePath: pattern.SourceTemplatePath,
+						SourceLocalEvent:   pattern.SourceLocalEvent,
 					})
 				}
 				return out
