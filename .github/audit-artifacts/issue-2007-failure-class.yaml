@@ -2,7 +2,7 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
 audit_base: 13f8418633a8f7745aa685397366070932f9a2e5
-working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_and_typed_event_admission
+working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
 binding_context:
@@ -12,6 +12,7 @@ binding_context:
   diagnostic_subtype_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953095958
   inbound_lifetime_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953136933
   inbound_fingerprint_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953153929
+  inbound_ledger_direction: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953164256
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -384,18 +385,86 @@ diagnostic_direct_event_admission:
       - inbound_publication_failure_logging
       - agent_llm_tool_activity_and_pipeline_aftermath_logging
   inbound_recorded_subtype:
-    owner: selected-store atomic inbound publication reservation
+    owner: selected-store inbound_publications operation ledger
     statuses: [running, paused]
     global_no_run: forbidden_for_webhook_publication
     identity: [provider, entity_id, provider_event_id]
+    publication_id: uuid_v5(inbound_publication_namespace, normalized_provider + NUL + entity_id + NUL + provider_event_id)
+    schema:
+      table: inbound_publications
+      primary_key: publication_id
+      columns:
+        publication_id: uuid_not_null
+        provider: text_not_null
+        entity_id: uuid_not_null
+        provider_event_id: text_not_null
+        semantic_fingerprint: text_not_null_inbound_semantic_v1_sha256
+        semantic_projection_version: text_not_null_equal_inbound_semantic_v1
+        stable_service_id: nullable_uuid_fk_standing_services
+        package_key: text_not_null
+        flow_id: text_not_null
+        instance_id: text_not_null
+        target_alias: text_not_null
+        target_flow_instance: text_not_null
+        expected_publication_sequence: bigint_nonnegative_not_null
+        resolved_run_id: uuid_not_null_fk_runs
+        marker_event_id: nullable_uuid_unique_fk_events
+        publication_event_id: nullable_uuid_unique_fk_events
+        acknowledgement_mode: enum_after_publish_durable_before_dispatch_not_null
+        recipient_manifest: canonical_json_array_not_null
+        recipient_manifest_fingerprint: text_not_null
+        recipient_count: integer_nonnegative_not_null
+        original_received_at: timestamp_not_null
+        original_user_agent: text_not_null
+        original_transport_metadata: canonical_json_object_not_null
+        state: enum_prepared_committed_not_null
+        created_at: timestamp_not_null
+        committed_at: nullable_timestamp
+      unique_constraints:
+        - [provider, entity_id, provider_event_id]
+        - [marker_event_id]
+        - [publication_event_id]
+      checks:
+        - prepared_implies_event_ids_and_committed_at_are_null
+        - committed_implies_event_ids_and_committed_at_are_nonnull
+        - recipient_count_equals_canonical_manifest_length
+        - global_marker_or_missing_resolved_run_is_forbidden
+      state_authority: >-
+        prepared is transaction-local reservation state only. The same selected-
+        store transaction advances it to committed after marker, executable event,
+        replay scope, delivery manifest, and counters exist. A crash rolls the
+        whole transaction back; any durably visible prepared row is corruption
+        and startup/read/retry admission fails closed.
+      outcome_authority: >-
+        The ledger stores no delivery success/failure enum. publication_event_id,
+        committed replay scope, event_deliveries, and event_receipts remain the
+        canonical execution and pipeline-outcome owners. recipient_manifest is
+        immutable publication-plan evidence, including explicit empty array, not
+        a second delivery-state machine.
+    backend_neutral_capability:
+      - CommitInboundPublication
+      - LoadInboundPublicationByIdentity
+      - ValidateInboundPublicationIntegrity
+    capability_rule: >-
+      CommitInboundPublication owns its complete database transaction and returns
+      either one newly committed operation or the existing exact operation. The
+      runtime and EventBus pass typed semantic projection, expected standing
+      publication sequence, executable event, and canonical recipient manifest;
+      they never receive a raw SQL transaction or perform a fallback marker write.
+      Integrity validation is read-only and never repairs missing coupled rows.
+    concurrency:
+      postgres: transaction-scoped advisory identity lock then row/run/service FOR UPDATE locks
+      sqlite: one serialized runtime mutation with identity lookup before inserts
     semantic_fingerprint:
       owner: providertriggers canonical retry projection
       ordering: >-
         Authenticate and normalize the provider request, derive the inbound
-        identity and semantic projection, then load the existing marker before
-        constructing a new persisted event envelope. An exact match returns the
-        original publication event, original received_at, and original transport
-        evidence. Retry-local observations are never written over the first row.
+        identity and semantic projection, then load the existing operation before
+        constructing a new persisted event envelope. The lookup owner is the
+        inbound_publications ledger, not platform.inbound_recorded. An exact
+        match returns the original publication event, original received_at, and
+        original transport evidence. Retry-local observations are never written
+        over the first row.
       included_fields:
         - normalized_provider
         - authoritative_provider_event_id
@@ -439,33 +508,41 @@ diagnostic_direct_event_admission:
         change only to an excluded observation is an exact retry.
     event_identity: >-
       Derive deterministic marker and executable publication event IDs from the
-      inbound identity. The marker carries the executable publication event ID
-      canonical semantic fingerprint, and original provider acknowledgement
-      mode as typed payload evidence.
+      publication_id using separate typed labels. The ledger owns both IDs,
+      fingerprint, and original acknowledgement mode. platform.inbound_recorded
+      carries publication_id and publication_event_id as immutable audit evidence
+      but is not consulted as dedupe, retry, retention, or response-state truth.
     current_generation_rule: >-
-      Before mutation, lock the target run and, for declaration-owned standing
-      ingress, the standing service row. Require target.run_id to equal the
-      service's current published generation and require running or paused. A
-      retired or terminal generation refuses before marker, executable event,
-      scope, delivery, or counter mutation.
+      Route planning is read-only and carries the expected standing publication
+      sequence into the operation request. Before mutation, lock the target run
+      and standing service row. Require target.run_id and publication sequence to
+      equal the service's current published generation and require running or
+      paused. A stale plan, retired generation, or terminal run refuses before
+      ledger, evidence, executable event, scope, delivery, or counter mutation;
+      the caller may re-resolve and re-plan only while the provider identity is
+      still absent.
     atomic_mutation:
-      - identity_first_marker_load_and_semantic_fingerprint_comparison
+      - lock_or_reserve_provider_identity_and_load_ledger_first
+      - exact_fingerprint_returns_existing_committed_operation
+      - conflicting_fingerprint_refuses_before_mutation
       - current_generation_and_run_status_admission
-      - insert_platform_inbound_recorded_marker
+      - insert_prepared_inbound_publications_row
+      - insert_platform_inbound_recorded_evidence
       - insert_executable_root_ingress_event
       - insert_committed_subscribed_replay_scope
       - insert_complete_delivery_route_manifest_including_canonical_empty_plan
       - synchronize_event_count_for_both_rows
+      - transition_ledger_prepared_to_committed_with_event_links
       - commit_then_dispatch_or_queue_from_durable_manifest
     duplicate_rule: >-
-      Marker existence is authoritative only because marker, executable event,
-      replay scope, and delivery manifest committed atomically. An exact retry
-      never creates another event. Durable-before-dispatch returns the durable
-      duplicate immediately. After-publish reconciles the existing delivery
-      manifest and waits for its normal publish outcome; it does not mint or
-      dispatch a second event. A marker missing any coupled row is corruption
-      and fails closed. Duplicate response/reconciliation uses the original
-      persisted acknowledgement mode; a later pack/config change does not
+      A committed ledger row is authoritative because the operation, evidence,
+      executable event, replay scope, and delivery manifest committed atomically.
+      An exact retry never creates another event. Durable-before-dispatch returns
+      the committed operation immediately. After-publish reconciles the linked
+      delivery manifest and waits for its normal publish outcome; it does not
+      mint or dispatch a second event. A committed ledger row missing any coupled
+      row is corruption and fails closed. Duplicate response/reconciliation uses
+      the original acknowledgement mode; a later pack/config change does not
       reinterpret an already accepted provider delivery.
     acknowledgement_policies:
       durable_before_dispatch: >-
@@ -490,18 +567,37 @@ diagnostic_direct_event_admission:
     retention_rule:
       policy: permanent_dedupe
       rule: >-
-        The marker is a durable publication receipt and remains for the lifetime
-        of the event history, exactly like the coupled executable event, replay
-        scope, and delivery evidence. Inbound identity is never reused after
-        success, including across standing generation replacement. The unused
+        The ledger is the durable publication receipt and remains for the
+        lifetime of the coupled audit event, executable event, replay scope, and
+        delivery evidence. Inbound identity is never reused after success,
+        including across standing generation replacement. The unused
         PurgeInboundEventsBefore store capability and marker-only purge SQL are
-        removed; there is no expiry, marker-absent/event-present normal state, or
-        publication incarnation model.
+        removed; there is no expiry or publication incarnation model.
       rationale: >-
         Marker-only expiry contradicts deterministic executable identity and can
-        re-admit consumed provider work. Permanent retention adds one evidence row
-        beside an already permanent executable row and is the smallest model with
-        one durable semantic owner.
+        re-admit consumed provider work. Permanent operation retention adds one
+        semantic row beside already permanent evidence and is the smallest model
+        with one durable owner.
+    reset_policy:
+      standing_reset_repair_suspend_or_orphan: preserve_ledger_and_all_coupled_publication_rows
+      bundle_delete: preserve_ledger_and_run_event_history_while_marking_source_deleted
+      runtime_nuke: >-
+        Intentionally release all inbound identities only by deleting each ledger
+        row and its coupled marker, executable event, replay scope, deliveries,
+        receipts, and other event-owned rows in the same destructive-reset cleanup
+        transaction before deleting runs. Runtime ingress is closed and in-flight
+        after-publish work is quiesced before cleanup. Partial deletion rolls back;
+        no preserved-ledger/deleted-event mixed state is allowed.
+      post_nuke: >-
+        A provider retry is a new publication because runtime.nuke explicitly
+        discarded both idempotency authority and all coupled execution history.
+    migration_policy: >-
+      No legacy marker adoption, inferred event linkage, dual read, or tolerant
+      fallback exists. The authoritative platform shape includes
+      inbound_publications. Existing selected stores lacking the table or carrying
+      marker rows without ledger ownership fail exact schema compatibility before
+      runtime admission and receive the existing backend-specific fresh-store
+      remediation. Fresh/compatible stores use only the ledger owner.
   agent_directive_subtype:
     owner: issue_1932_agent_directive_operation_reservation
     statuses: [running, paused]
@@ -531,7 +627,7 @@ diagnostic_direct_event_admission:
 
 direct_event_sql_writers:
   postgres_inbound_record_persistence:
-    classification: replace_with_atomic_inbound_publication_owner
+    classification: replace_with_inbound_publications_ledger_transaction
     event_type: platform.inbound_recorded
     invalid_behavior:
       - marker_insert_precedes_executable_publish
@@ -539,7 +635,7 @@ direct_event_sql_writers:
       - marker_only_purge_allows_identity_reuse_against_surviving_executable_event
       - direct_insert_records_produced_by_type_external
   sqlite_inbound_record_persistence:
-    classification: replace_with_atomic_inbound_publication_owner
+    classification: replace_with_inbound_publications_ledger_transaction
     event_type: platform.inbound_recorded
     invalid_behavior:
       - marker_insert_precedes_executable_publish
@@ -612,10 +708,12 @@ systematic_consumers:
     - recovery_and_sweeper_duplicate_replay_paths
   diagnostic_direct_admission_consumers:
     - postgres_and_sqlite_RuntimeLogPersistence_global_and_run_scoped
-    - postgres_and_sqlite_atomic_inbound_publication_reservation
+    - postgres_and_sqlite_inbound_publications_ledger_transaction
     - inbound_gateway_route_plan_publication_duplicate_and_failure_response
     - provider_trigger_ack_mode_after_publish_and_durable_before_dispatch
-    - inbound_delivery_recovery_and_permanent_marker_retention
+    - inbound_delivery_recovery_and_permanent_ledger_retention
+    - destructive_reset_catalog_quiescence_and_atomic_coupled_cleanup
+    - selected_store_schema_compatibility_and_fresh_store_remediation
     - postgres_and_sqlite_ReserveDirectiveOperation
     - agent_directive_operation_recovery_and_same_key_replay
     - runtime_logs_and_runtime_subscribe_logs
@@ -628,6 +726,16 @@ systematic_consumers:
     - postgres_and_sqlite_runtime_log_direct_insert
     - postgres_and_sqlite_directive_generic_AppendEventTx
     - postgres_run_fork_delivery_event_replay_direct_insert
+  inbound_publication_ledger_consumers:
+    - providertriggers_configured_pack_and_explicit_raw_semantic_projection
+    - runtime_InboundGateway_identity_first_admission_and_ack_response
+    - EventBus_read_only_route_plan_and_post_commit_dispatch_reconciliation
+    - standing_service_current_generation_and_publication_sequence_owner
+    - postgres_and_sqlite_event_delivery_scope_and_counter_mutation
+    - delivery_claim_receipt_retry_and_recovery_owners
+    - runtime_nuke_quiescence_cleanup_catalog_and_result_accounting
+    - schema_bootstrap_compatibility_platform_table_order_and_store_roles
+    - platform_inbound_recorded_operator_readback_as_evidence_only
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
     - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
@@ -681,7 +789,7 @@ proof_manifestations:
     - runtime_logs_subscribe_logs_trace_debug_conversation_turn_and_compute_replay_readback_preserved
     - post_terminal_failure_completion_recovery_and_post_commit_logger_callers_persist_without_reopening
   inbound_publication:
-    - running_and_paused_current_generation_marker_event_scope_and_delivery_manifest_commit_atomically
+    - running_and_paused_current_generation_ledger_evidence_event_scope_and_delivery_manifest_commit_atomically
     - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_mutation
     - exact_duplicate_after_success_returns_accepted_without_second_event_or_dispatch
     - same_identity_conflicting_semantic_fingerprint_refuses
@@ -691,12 +799,13 @@ proof_manifestations:
     - configured_manifest_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
     - explicit_raw_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
     - route_plan_or_persistence_failure_leaves_no_marker_and_retry_can_target_next_generation
-    - injected_marker_event_scope_and_delivery_write_failures_roll_back_every_row_on_both_backends
+    - injected_ledger_evidence_event_scope_delivery_counter_and_commit_failures_roll_back_every_row_on_both_backends
     - post_commit_dispatch_failure_preserves_durable_manifest_and_retry_does_not_suppress_recovery
     - former_marker_delete_rollback_failure_is_unrepresentable
     - standing_generation_replacement_after_failed_attempt_accepts_retry_once
     - standing_generation_replacement_after_success_preserves_global_duplicate_consumption
-    - marker_corruption_missing_executable_event_scope_or_delivery_manifest_fails_closed
+    - committed_ledger_missing_evidence_event_scope_or_delivery_manifest_fails_closed
+    - durable_prepared_ledger_row_fails_closed_as_corruption
     - event_count_changes_by_two_on_new_publication_and_zero_on_duplicate
     - durable_before_dispatch_returns_after_commit_before_blocked_post_commit_dispatch
     - durable_before_dispatch_retry_returns_durable_duplicate_without_second_dispatch
@@ -705,13 +814,20 @@ proof_manifestations:
     - after_publish_retry_reconciles_same_manifest_without_second_event_or_manifest_and_uses_only_canonical_delivery_claims
     - after_publish_terminal_nonretryable_failure_replays_same_failure
     - marker_purge_capability_and_sql_are_removed_on_both_backends
-    - permanent_marker_survives_terminal_delivery_and_standing_generation_replacement
-    - marker_absent_coupled_event_present_is_corruption_not_retention_state
+    - permanent_ledger_and_evidence_survive_terminal_delivery_and_standing_generation_replacement
     - semantic_fingerprint_excludes_receipt_transport_run_generation_revision_and_route_plan_facts
     - semantic_fingerprint_canonical_json_is_map_order_independent_and_array_order_preserving
     - durable_before_dispatch_retry_with_changed_receipt_metadata_returns_original_publication
     - after_publish_retry_with_changed_receipt_metadata_reconciles_original_publication
     - standing_generation_replacement_with_changed_receipt_metadata_still_returns_original_duplicate
+    - stale_standing_publication_sequence_refuses_before_operation_and_replans_when_identity_absent
+    - committed_publication_restart_uses_existing_manifest_without_duplicate_dispatch
+    - runtime_nuke_quiesces_after_publish_then_atomically_deletes_ledger_and_all_coupled_rows
+    - runtime_nuke_injected_cleanup_failure_preserves_ledger_and_all_coupled_rows
+    - post_runtime_nuke_provider_retry_is_one_new_publication_by_explicit_policy
+    - standing_reset_orphan_suspend_resume_and_bundle_delete_preserve_ledger_authority
+    - legacy_marker_without_ledger_fails_schema_compatibility_with_backend_fresh_store_remediation
+    - all_configured_provider_packs_and_explicit_raw_surface_pass_both_backend_served_proof
   agent_directive_reservation:
     - postgres_and_sqlite_exact_same_key_hash_return_existing_operation_and_event
     - postgres_and_sqlite_conflicting_same_key_hash_refuse_without_mutation
@@ -724,7 +840,7 @@ proof_manifestations:
     - generic_replay_excludes_platform_agent_directive_and_never_calls_BoardStep
     - both_backend_served_agent_send_directive_issue_1932_proof_remains_green
   direct_event_sql_writers:
-    - postgres_and_sqlite_inbound_record_writers_are_replaced_by_atomic_inbound_publication
+    - postgres_and_sqlite_inbound_record_writers_are_replaced_by_inbound_publications_ledger_transaction
     - postgres_and_sqlite_runtime_log_writers_consume_typed_diagnostic_admission
     - postgres_and_sqlite_directive_reservation_consumes_typed_directive_admission
     - run_fork_delivery_event_replay_requires_locked_paused_fork_and_duplicate_first_admission
