@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -32,9 +33,24 @@ type rowQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+type eventReadQueryer interface {
+	rowQueryer
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 type execQueryer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return tx
+	}
+	if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		return conn
+	}
+	return db
 }
 
 func (s *PostgresStore) SetEventPayloadValidator(validator func(eventType string, payload []byte) error) {
@@ -495,7 +511,7 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	default:
 		return false, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
-	if err := s.DB.QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
+	if err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
@@ -522,7 +538,7 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 	default:
 		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	}
-	rows, err := s.DB.QueryContext(ctx, query, eventID)
+	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, query, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery recipients: %w", err)
 	}
@@ -560,7 +576,7 @@ func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID st
 	if !caps.Events.DeliveryTargetRoute {
 		return nil, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
 		SELECT subscriber_id, COALESCE(delivery_target_route, '{}'::jsonb)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -613,7 +629,7 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	if caps.Events.DeliveryContext {
 		contextSelect = `COALESCE(delivery_context, '{}'::jsonb)`
 	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, fmt.Sprintf(`
 		SELECT subscriber_type, subscriber_id, %s, %s
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -662,7 +678,7 @@ func (s *PostgresStore) LoadCommittedReplayScope(
 		return "", unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	}
 	var reasonCode string
-	err = s.DB.QueryRowContext(ctx, `
+	err = eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
 		SELECT COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -696,6 +712,8 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		execFn = conn.ExecContext
 	}
 	q := `
 		INSERT INTO events (
@@ -1269,6 +1287,8 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		execFn = conn.ExecContext
 	}
 	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, failureJSON, string(sideEffects), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode); err != nil {
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
@@ -1674,7 +1694,13 @@ func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context
 	if err != nil {
 		return err
 	}
-	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, strings.TrimSpace(evt.ID()))
+	var db storerunlifecycle.DBTX = s.DB
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		db = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		db = conn
+	}
+	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, db, caps, strings.TrimSpace(evt.ID()))
 }
 
 func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {

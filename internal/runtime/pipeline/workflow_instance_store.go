@@ -755,13 +755,23 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 	if s == nil || s.db == nil {
 		return fn(ctx, nil)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, borrowed := PipelineSQLConnFromContext(ctx)
+	if !borrowed {
+		var err error
+		conn, err = s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	postCommit := make([]func(), 0, 4)
 	rollbackActions := make([]func(), 0, 4)
-	txctx := withSQLTxContext(ctx, tx)
+	txctx := WithPipelineSQLConnContext(ctx, conn)
+	txctx = withSQLTxContext(txctx, tx)
 	txctx = withPipelinePostCommitActions(txctx, &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {

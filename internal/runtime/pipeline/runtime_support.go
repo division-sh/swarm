@@ -324,6 +324,7 @@ func asObject(v any) (map[string]any, bool) {
 }
 
 type sqlTxContextKey struct{}
+type sqlConnContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
 type pipelineRollbackActionsKey struct{}
 type pipelineAfterPublishActionsKey struct{}
@@ -381,6 +382,24 @@ func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 
 func WithPipelineSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 	return withSQLTxContext(ctx, tx)
+}
+
+func WithPipelineSQLConnContext(ctx context.Context, conn *sql.Conn) context.Context {
+	if conn == nil {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, sqlConnContextKey{}, conn)
+}
+
+func PipelineSQLConnFromContext(ctx context.Context) (*sql.Conn, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	conn, ok := ctx.Value(sqlConnContextKey{}).(*sql.Conn)
+	return conn, ok && conn != nil
 }
 
 func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {

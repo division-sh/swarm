@@ -19,8 +19,16 @@ type advisoryLockLease interface {
 }
 
 type sqlAdvisoryLockLease struct {
-	conn    *sql.Conn
-	lockKey string
+	conn     *sql.Conn
+	lockKey  string
+	ownsConn bool
+}
+
+func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context {
+	if l == nil || l.conn == nil {
+		return ctx
+	}
+	return runtimepipeline.WithPipelineSQLConnContext(ctx, l.conn)
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
@@ -31,13 +39,17 @@ func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	if _, err := l.conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey); err != nil {
-		_ = l.conn.Close()
+		if l.ownsConn {
+			_ = l.conn.Close()
+		}
 		l.conn = nil
 		return fmt.Errorf("release advisory lock: %w", err)
 	}
-	if err := l.conn.Close(); err != nil {
-		l.conn = nil
-		return fmt.Errorf("close advisory lock connection: %w", err)
+	if l.ownsConn {
+		if err := l.conn.Close(); err != nil {
+			l.conn = nil
+			return fmt.Errorf("close advisory lock connection: %w", err)
+		}
 	}
 	l.conn = nil
 	return nil
@@ -51,20 +63,32 @@ func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (
 	if lockKey == "" {
 		return nil, false, fmt.Errorf("advisory lock key is required")
 	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
+	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	if !borrowed {
+		var err error
+		conn, err = db.Conn(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
+		}
 	}
 	var acquired bool
-	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
-		_ = conn.Close()
+	query := conn.QueryRowContext
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		query = tx.QueryRowContext
+	}
+	if err := query(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
+		if !borrowed {
+			_ = conn.Close()
+		}
 		return nil, false, fmt.Errorf("acquire advisory lock: %w", err)
 	}
 	if !acquired {
-		_ = conn.Close()
+		if !borrowed {
+			_ = conn.Close()
+		}
 		return nil, false, nil
 	}
-	return &sqlAdvisoryLockLease{conn: conn, lockKey: lockKey}, true, nil
+	return &sqlAdvisoryLockLease{conn: conn, lockKey: lockKey, ownsConn: !borrowed}, true, nil
 }
 
 func replayClaimLockKey(eventID string) string {

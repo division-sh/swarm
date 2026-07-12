@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -37,7 +38,16 @@ func (s *PostgresStore) ConvergeNormalRunCompletion(ctx context.Context, eventID
 		return nil
 	}
 	return withEventStoreRetry(ctx, nil, func() error {
-		tx, err := s.DB.BeginTx(ctx, nil)
+		conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+		if !borrowed {
+			var err error
+			conn, err = s.DB.Conn(ctx)
+			if err != nil {
+				return fmt.Errorf("acquire normal run completion connection: %w", err)
+			}
+			defer conn.Close()
+		}
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin normal run completion tx: %w", err)
 		}

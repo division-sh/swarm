@@ -53,3 +53,10 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) {
 		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
 	}
 }
+
+func (c *pipelinePublicationClaim) BindContext(ctx context.Context) context.Context {
+	if c == nil {
+		return ctx
+	}
+	return runtimereplayclaim.BindLeaseContext(ctx, c.lease)
+}
