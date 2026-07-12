@@ -11,6 +11,7 @@ binding_context:
   diagnostic_direct_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953045570
   diagnostic_subtype_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953095958
   inbound_lifetime_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953136933
+  inbound_fingerprint_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953153929
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -387,16 +388,60 @@ diagnostic_direct_event_admission:
     statuses: [running, paused]
     global_no_run: forbidden_for_webhook_publication
     identity: [provider, entity_id, provider_event_id]
-    request_fingerprint: >-
-      Hash the canonical provider event type, translated platform event type and
-      payload, stable target route/entity facts, and provider identity. Physical
-      run_id, standing generation, bundle revision/hash, and boot identity are
-      explicitly excluded. Same inbound identity with a different semantic
-      fingerprint is a conflict, never a duplicate.
+    semantic_fingerprint:
+      owner: providertriggers canonical retry projection
+      ordering: >-
+        Authenticate and normalize the provider request, derive the inbound
+        identity and semantic projection, then load the existing marker before
+        constructing a new persisted event envelope. An exact match returns the
+        original publication event, original received_at, and original transport
+        evidence. Retry-local observations are never written over the first row.
+      included_fields:
+        - normalized_provider
+        - authoritative_provider_event_id
+        - normalized_provider_event_type
+        - translated_platform_event_name
+        - canonical_redacted_provider_body_or_form_data
+        - target_entity_id
+        - stable_ingress_service_identity_package_key_flow_id_and_instance
+        - manifest_metadata_derived_from_delivery_id_or_event_type
+      excluded_fields:
+        - received_at
+        - user_agent_and_manifest_metadata_derived_from_user_agent
+        - signature_authentication_and_secret_headers
+        - request_url_and_other_transport_local_metadata
+        - physical_run_id
+        - standing_generation
+        - bundle_revision_hash_or_source
+        - boot_or_process_identity
+        - computed_recipient_plan_delivery_routes_and_runtime_subscribers
+        - current_retry_acknowledgement_mode
+      manifest_payload_projection: >-
+        For configured provider packs, hash provider, provider_event_id,
+        provider_event_type/event_type, emitted event name, entity/stable service
+        identity, canonical redacted payload (or canonical form payload), and only
+        metadata values sourced from delivery_id/event_type. Exclude received_at
+        and user_agent metadata even though both remain in the persisted first
+        publication for operator evidence.
+      raw_payload_projection: >-
+        For explicit raw admission, hash provider, provider_event_id,
+        provider_event_type, emitted event name, entity/stable service identity,
+        and canonical data. Raw admission currently adds no receipt timestamp or
+        user-agent fields; if observational fields are added later they remain
+        excluded unless the authoritative fingerprint contract changes.
+      canonicalization: >-
+        Hash one typed canonical JSON projection with sorted object keys, exact
+        array order, normalized event/provider tokens, and preserved scalar
+        types. Never hash serialized map iteration order or the full persisted
+        payload.
+      conflict_rule: >-
+        Same inbound identity with a changed included field is a conflict. A
+        change only to an excluded observation is an exact retry.
     event_identity: >-
       Derive deterministic marker and executable publication event IDs from the
       inbound identity. The marker carries the executable publication event ID
-      and request fingerprint as typed payload evidence.
+      canonical semantic fingerprint, and original provider acknowledgement
+      mode as typed payload evidence.
     current_generation_rule: >-
       Before mutation, lock the target run and, for declaration-owned standing
       ingress, the standing service row. Require target.run_id to equal the
@@ -404,7 +449,7 @@ diagnostic_direct_event_admission:
       retired or terminal generation refuses before marker, executable event,
       scope, delivery, or counter mutation.
     atomic_mutation:
-      - duplicate_or_conflict_check_by_inbound_identity
+      - identity_first_marker_load_and_semantic_fingerprint_comparison
       - current_generation_and_run_status_admission
       - insert_platform_inbound_recorded_marker
       - insert_executable_root_ingress_event
@@ -419,7 +464,9 @@ diagnostic_direct_event_admission:
       duplicate immediately. After-publish reconciles the existing delivery
       manifest and waits for its normal publish outcome; it does not mint or
       dispatch a second event. A marker missing any coupled row is corruption
-      and fails closed.
+      and fails closed. Duplicate response/reconciliation uses the original
+      persisted acknowledgement mode; a later pack/config change does not
+      reinterpret an already accepted provider delivery.
     acknowledgement_policies:
       durable_before_dispatch: >-
         After atomic publication commit, return accepted and dispatch the
@@ -637,7 +684,12 @@ proof_manifestations:
     - running_and_paused_current_generation_marker_event_scope_and_delivery_manifest_commit_atomically
     - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_mutation
     - exact_duplicate_after_success_returns_accepted_without_second_event_or_dispatch
-    - same_identity_conflicting_request_fingerprint_refuses
+    - same_identity_conflicting_semantic_fingerprint_refuses
+    - same_signed_configured_provider_delivery_at_different_received_at_is_exact_duplicate_on_both_backends
+    - same_signed_configured_provider_delivery_at_different_user_agent_is_exact_duplicate_on_both_backends
+    - exact_duplicate_preserves_original_received_at_user_agent_event_id_and_event_payload
+    - configured_manifest_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
+    - explicit_raw_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
     - route_plan_or_persistence_failure_leaves_no_marker_and_retry_can_target_next_generation
     - injected_marker_event_scope_and_delivery_write_failures_roll_back_every_row_on_both_backends
     - post_commit_dispatch_failure_preserves_durable_manifest_and_retry_does_not_suppress_recovery
@@ -655,7 +707,11 @@ proof_manifestations:
     - marker_purge_capability_and_sql_are_removed_on_both_backends
     - permanent_marker_survives_terminal_delivery_and_standing_generation_replacement
     - marker_absent_coupled_event_present_is_corruption_not_retention_state
-    - request_fingerprint_excludes_run_and_generation_but_includes_stable_semantic_target
+    - semantic_fingerprint_excludes_receipt_transport_run_generation_revision_and_route_plan_facts
+    - semantic_fingerprint_canonical_json_is_map_order_independent_and_array_order_preserving
+    - durable_before_dispatch_retry_with_changed_receipt_metadata_returns_original_publication
+    - after_publish_retry_with_changed_receipt_metadata_reconciles_original_publication
+    - standing_generation_replacement_with_changed_receipt_metadata_still_returns_original_duplicate
   agent_directive_reservation:
     - postgres_and_sqlite_exact_same_key_hash_return_existing_operation_and_event
     - postgres_and_sqlite_conflicting_same_key_hash_refuse_without_mutation
