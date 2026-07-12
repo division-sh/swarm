@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/github
+        receive_https_route: /webhooks/{alias}/github
         verify_secret: webhook_signing.github
         emit_events:
             - inbound.github.{event_type}

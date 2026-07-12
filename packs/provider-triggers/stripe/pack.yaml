@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/stripe
+        receive_https_route: /webhooks/{alias}/stripe
         verify_secret: webhook_signing.stripe
         emit_events:
             - inbound.stripe

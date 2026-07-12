@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/twilio
+        receive_https_route: /webhooks/{alias}/twilio
         verify_secret: webhook_signing.twilio
         emit_events:
             - inbound.twilio

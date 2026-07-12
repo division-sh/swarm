@@ -66,6 +66,16 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider || len(subject.Capabilities) != 4 || len(subject.Guarantees) != 3 {
 			t.Fatalf("capability subject %s = %#v", dir, subject)
 		}
+		wantRoute := "/webhooks/{alias}/" + pack.Manifest.Provider
+		var gotRoute string
+		for _, capability := range subject.Capabilities {
+			if capability.Code == packs.CapabilityReceiveHTTPSRoute {
+				gotRoute = capability.Target
+			}
+		}
+		if gotRoute != wantRoute {
+			t.Fatalf("capability subject %s receive route = %q, want %q", dir, gotRoute, wantRoute)
+		}
 		if len(subject.Requirements) != 1 || subject.Requirements[0].Scope != packs.RequirementScopeTarget || subject.Requirements[0].Satisfied != nil || subject.Requirements[0].Status != "" {
 			t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
 		}
@@ -273,7 +283,7 @@ func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
 	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "literal: inbound.stripe", "literal: inbound.acme")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.stripe", "id: provider.acme")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "/webhooks/{entity}/stripe", "/webhooks/{entity}/acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "/webhooks/{alias}/stripe", "/webhooks/{alias}/acme")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.stripe", "inbound.acme")
@@ -333,7 +343,7 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 		t.Fatalf("surface requirements = %+v status=%s, want AVAILABLE target-scoped unevaluated stripe signing secret", surface.Requirements, surface.Status)
 	}
 	renderedCan := packs.RenderSubject(surface, false)
-	if strings.Contains(renderedCan, "/envelope-must-not-render") || !strings.Contains(renderedCan, "/webhooks/{entity}/stripe") {
+	if strings.Contains(renderedCan, "/envelope-must-not-render") || !strings.Contains(renderedCan, "/webhooks/{alias}/stripe") {
 		t.Fatalf("capability surface did not derive accepted body truth: %s", renderedCan)
 	}
 	if strings.Contains(renderedCan, "stripe-secret") {

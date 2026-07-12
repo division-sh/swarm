@@ -183,17 +183,17 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 			t.Fatalf("provider pack %s missing filesystem source/provenance readback: %#v", provider, report.Findings)
 		}
 	}
-	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{entity}/github") ||
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{alias}/github") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "guarantee: cannot emit undeclared events") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "requires webhook_signing.github (target-scoped)") {
 		t.Fatalf("github provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
-	if !localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CAN receive HTTPS route /webhooks/{entity}/stripe") ||
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CAN receive HTTPS route /webhooks/{alias}/stripe") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "guarantee: cannot emit undeclared events") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "requires webhook_signing.stripe (target-scoped)") {
 		t.Fatalf("stripe provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
-	if !localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CAN receive HTTPS route /webhooks/{entity}/telegram") ||
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CAN receive HTTPS route /webhooks/{alias}/telegram") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "guarantee: cannot emit undeclared events") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "requires webhook_signing.telegram (target-scoped)") {
 		t.Fatalf("telegram provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)

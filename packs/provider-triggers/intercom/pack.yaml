@@ -7,7 +7,7 @@ provenance:
     source: platform
 capabilities:
     can:
-        receive_https_route: /webhooks/{entity}/intercom
+        receive_https_route: /webhooks/{alias}/intercom
         verify_secret: webhook_signing.intercom
         emit_events:
             - inbound.intercom

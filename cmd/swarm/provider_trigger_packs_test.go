@@ -130,6 +130,45 @@ func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *test
 	}
 }
 
+func TestPlatformSpecProviderTriggerTargetAuthorityMatchesStandingIngress(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repoRoot(), "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec struct {
+		ToolModel struct {
+			ProviderTriggerAdapters struct {
+				Scope                []string `yaml:"scope"`
+				ExistingGatewayOwner string   `yaml:"existing_gateway_owner"`
+				ManifestVocabulary   struct {
+					Provider string `yaml:"provider"`
+				} `yaml:"manifest_vocabulary"`
+				SecretBinding string `yaml:"secret_binding"`
+			} `yaml:"provider_trigger_adapters"`
+		} `yaml:"tool_model"`
+	}
+	if err := yaml.Unmarshal(body, &spec); err != nil {
+		t.Fatalf("parse platform spec provider trigger authority: %v", err)
+	}
+	contract := spec.ToolModel.ProviderTriggerAdapters
+	routeAuthority := strings.Join(append(append([]string(nil), contract.Scope...), contract.ExistingGatewayOwner, contract.ManifestVocabulary.Provider), "\n")
+	for _, want := range []string{"/webhooks/{alias}/{provider}", "standing ingress target", "RuntimeContextManager"} {
+		if !strings.Contains(routeAuthority, want) {
+			t.Fatalf("provider trigger route authority lacks %q:\n%s", want, routeAuthority)
+		}
+	}
+	for _, retired := range []string{"/webhooks/{entity}/{provider}", "flow_instances.config.secrets.webhook_signing"} {
+		if strings.Contains(routeAuthority+"\n"+contract.SecretBinding, retired) {
+			t.Fatalf("provider trigger authority retains retired owner %q", retired)
+		}
+	}
+	for _, want := range []string{"package.yaml flows[].ingress.providers[].signing_secret", "deployment credential-store entry", "Flow-instance config"} {
+		if !strings.Contains(contract.SecretBinding, want) {
+			t.Fatalf("provider trigger secret authority lacks %q:\n%s", want, contract.SecretBinding)
+		}
+	}
+}
+
 func TestProviderTriggerPlatformDirsAreElevated(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
