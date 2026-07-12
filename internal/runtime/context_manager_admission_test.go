@@ -42,6 +42,22 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 			default:
 			}
 			subjects := manager.CapabilitySubjects()
+			lookup := manager.LookupIngress("survivor", "acme")
+			if !lookup.Loaded() {
+				select {
+				case errCh <- &mixedAdmissionGenerationError{first: "loaded", second: "missing lookup"}:
+				default:
+				}
+				return
+			}
+			lookupGeneration := lookup.Target.AdmissionPlan.GenerationID()
+			if lookupGeneration != oldCatalog.GenerationID() && lookupGeneration != newCatalog.GenerationID() {
+				select {
+				case errCh <- &mixedAdmissionGenerationError{first: oldCatalog.GenerationID() + " or " + newCatalog.GenerationID(), second: lookupGeneration}:
+				default:
+				}
+				return
+			}
 			generation := ""
 			for _, subject := range subjects {
 				if subject.TriggerAdmission == nil {
@@ -145,29 +161,119 @@ func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t
 }
 
 func TestRuntimeContextManagerRejectsCandidatePackRemovalAcrossContexts(t *testing.T) {
-	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
+	source, oldCatalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	emptyCatalog, err := providertriggers.NewCatalogSnapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
+	survivor := testBundleContext(t, runtimeContextTestHashB, "inbound.telegram")
+	survivor.Source = source
+	plan, err := oldCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	survivor.StandingTargets = []StandingTarget{{
+		BundleHash: runtimeContextTestHashB, FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		RunID: "run-chat", FlowInstance: "coordinator/chat", EntityID: "entity-chat",
+		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+	}}
 	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidatePrimary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	err = manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, map[string][]StandingTarget{
-		runtimeContextTestHashB: survivor.StandingTargets,
-	}, runtimeAdmissionTestState(t, emptyCatalog))
-	if err == nil || !strings.Contains(err.Error(), "does not match candidate process generation") {
-		t.Fatalf("pack removal validation error = %v", err)
+	if _, err = RecompileStandingTargetAdmissions(survivor.Source, emptyCatalog, survivor.StandingTargets); err == nil || !strings.Contains(err.Error(), `provider "telegram" is pack-required`) {
+		t.Fatalf("actual pack removal recompile error = %v", err)
 	}
 	if got := manager.AdmissionState().GenerationID; got != oldCatalog.GenerationID() {
 		t.Fatalf("pack removal changed process generation to %q", got)
 	}
-	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || got.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+	if got := manager.LookupIngress("chat", "telegram"); !got.Loaded() || got.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
 		t.Fatalf("pack removal changed survivor: %#v", got)
+	}
+	if _, ok := manager.LookupBundleHash(candidatePrimary.BundleHash); !ok {
+		t.Fatal("pack removal failure withdrew unchanged primary context")
+	}
+}
+
+func TestRuntimeContextManagerRejectsTwoContextIngressCollisionWithoutMutation(t *testing.T) {
+	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
+	newCatalog := runtimeAdmissionTestCatalog(t, "b")
+	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
+	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
+	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "survivor", newCatalog)
+	updates := map[string][]StandingTarget{
+		runtimeContextTestHashB: runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog).StandingTargets,
+	}
+	err = manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidate, updates, runtimeAdmissionTestState(t, newCatalog))
+	if err == nil || !strings.Contains(err.Error(), `duplicate standing ingress alias "survivor"`) {
+		t.Fatalf("collision validation error = %v", err)
+	}
+	if got := manager.AdmissionState().GenerationID; got != oldCatalog.GenerationID() {
+		t.Fatalf("collision changed generation to %q", got)
+	}
+	for alias, hash := range map[string]string{"primary": runtimeContextTestHashA, "survivor": runtimeContextTestHashB} {
+		lookup := manager.LookupIngress(alias, "acme")
+		if !lookup.Loaded() || lookup.Context.BundleHash != hash || lookup.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+			t.Fatalf("collision changed %s lookup: %#v", alias, lookup)
+		}
+	}
+}
+
+func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedRecompileAcrossContexts(t *testing.T) {
+	signed := runtimeAdmissionTestCatalog(t, "a")
+	unsigned := runtimeAdmissionUnsignedTestCatalog(t, "b")
+	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
+	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", signed)
+	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, signed), primary, survivor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unsigned.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "survivor", Provider: "acme"}); err == nil || !strings.Contains(err.Error(), "admission.acknowledge: unsigned_webhook") {
+		t.Fatalf("unacknowledged transition compile error = %v", err)
+	}
+	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || got.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationTokenEquality {
+		t.Fatalf("failed transition changed predecessor: %#v", got)
+	}
+
+	unsignedPlan, err := unsigned.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "survivor", Provider: "acme",
+		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSurvivor := survivor
+	newSurvivor.StandingTargets = append([]StandingTarget(nil), survivor.StandingTargets...)
+	newSurvivor.StandingTargets[0].SigningSecret = ""
+	newSurvivor.StandingTargets[0].AdmissionPlan = unsignedPlan
+	candidatePrimary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
+	updates := map[string][]StandingTarget{runtimeContextTestHashB: newSurvivor.StandingTargets}
+	state := runtimeAdmissionTestState(t, unsigned)
+	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, candidatePrimary); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
+		t.Fatal(err)
+	}
+	lookup := manager.LookupIngress("survivor", "acme")
+	if !lookup.Loaded() || lookup.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone || lookup.Target.AdmissionPlan.GenerationID() != unsigned.GenerationID() {
+		t.Fatalf("acknowledged transition lookup = %#v", lookup)
+	}
+	for _, subject := range manager.CapabilitySubjects() {
+		if subject.TriggerAdmission != nil && subject.Applicability == "effective" && subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" {
+			t.Fatalf("transition readback retained stale authentication: %#v", subject)
+		}
 	}
 }
 
@@ -207,6 +313,27 @@ func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertrigge
 	manifest := providertriggers.Manifest{
 		Provider: "acme", Secret: providertriggers.SecretManifest{Required: true},
 		Signature:  providertriggers.SignatureManifest{Type: "token_equality", Header: "X-Acme-Token"},
+		DeliveryID: providertriggers.ValueSource{Header: "X-Acme-Delivery", Required: true},
+		EventType:  providertriggers.ValueSource{Literal: "event", Required: true},
+		EventName:  providertriggers.EventNameManifest{Literal: "inbound.acme"},
+		Ack:        providertriggers.AckManifest{Mode: "after_publish"},
+	}
+	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
+		Identity: providertriggers.PackIdentity{
+			ID: "provider.acme", Version: "1.0.0", ManifestHash: strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
+		},
+		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
+func runtimeAdmissionUnsignedTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
+	t.Helper()
+	manifest := providertriggers.Manifest{
+		Provider: "acme", Secret: providertriggers.SecretManifest{Required: false},
 		DeliveryID: providertriggers.ValueSource{Header: "X-Acme-Delivery", Required: true},
 		EventType:  providertriggers.ValueSource{Literal: "event", Required: true},
 		EventName:  providertriggers.EventNameManifest{Literal: "inbound.acme"},

@@ -159,9 +159,6 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, "webhook body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if len(body) == 0 {
-		body = []byte("{}")
-	}
 	requestURL := inboundRequestURL(r)
 	queryValues, queryParseError := inboundQueryValues(r)
 	formValues, formParsed, formParseError := inboundFormValues(r.Header.Get("Content-Type"), body)

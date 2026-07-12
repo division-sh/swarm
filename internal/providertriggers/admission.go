@@ -453,7 +453,13 @@ func (p InboundAdmissionPlan) acceptExplicitRaw(req Request) (Delivery, error) {
 	} else {
 		parsed = string(req.Body)
 	}
-	deliveryID, err := rawDeliveryID(policy.DeliveryID, req.Headers, parsed, req.Body)
+	deliverySource := parsed
+	if policy.DeliveryID.Source == "json_path" && policy.Payload == "raw" {
+		if err := json.Unmarshal(req.Body, &deliverySource); err != nil {
+			return Delivery{}, badRequest("raw webhook delivery id JSON path requires a valid JSON request body")
+		}
+	}
+	deliveryID, err := rawDeliveryID(policy.DeliveryID, req.Headers, deliverySource, req.Body)
 	if err != nil {
 		return Delivery{}, err
 	}

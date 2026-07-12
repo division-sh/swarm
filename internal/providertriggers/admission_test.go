@@ -256,6 +256,40 @@ func TestRawAdmissionBase64SignatureComparisonIsCaseSensitive(t *testing.T) {
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 }
 
+func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *testing.T) {
+	catalog, err := NewCatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
+		Alias: "partner", Provider: "partner-events",
+		Declaration: AdmissionDeclaration{
+			Kind: "raw", Acknowledge: UnsignedWebhookAcknowledgement,
+			Event: "inbound.partner", Payload: "raw",
+			Authentication: RawAuthenticationDeclaration{Kind: "none"},
+			DeliveryID:     RawDeliveryIDDeclaration{Source: "json_path", JSONPath: "$.delivery.id"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"delivery":{"id":"evt-raw-json-path"},"value":1}`)
+	delivery, err := plan.Accept(Request{Provider: "partner-events", Body: body})
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if delivery.ProviderEventID != "evt-raw-json-path" {
+		t.Fatalf("delivery id = %q", delivery.ProviderEventID)
+	}
+	data, ok := delivery.Payload["data"].(string)
+	if !ok || data != string(body) {
+		t.Fatalf("raw emitted payload = %#v, want exact body string", delivery.Payload["data"])
+	}
+	if _, err := plan.Accept(Request{Provider: "partner-events", Body: []byte("not-json")}); err == nil || !strings.Contains(err.Error(), "requires a valid JSON request body") {
+		t.Fatalf("invalid JSON error = %v", err)
+	}
+}
+
 func TestCompileAdmissionTeachingFailures(t *testing.T) {
 	catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme"))
 	if err != nil {

@@ -2241,13 +2241,11 @@ func verifyWorkflowContractValidationOptions(repo string, source semanticview.So
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
 	opts.ModelAliases = configResult.Config.LLM.Models
-	if sourceHasStandingIngress(source) {
-		providerPacks, err := loadConfiguredProviderTriggerPacks(repo, configResult)
-		if err != nil {
-			return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
-		}
-		opts.ProviderTriggerCatalog = providerPacks.Catalog
+	providerPacks, err := loadVerifyProviderTriggerPacks(repo, configResult, sourceHasStandingIngress(source))
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
 	}
+	opts.ProviderTriggerCatalog = providerPacks.Catalog
 	return opts, nil
 }
 

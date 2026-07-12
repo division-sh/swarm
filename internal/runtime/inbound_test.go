@@ -2252,6 +2252,80 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 	}
 }
 
+func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T) {
+	catalog, err := providertriggers.NewCatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "partner", Provider: "partner-events", SigningSecret: "partner-secret",
+		Declaration: providertriggers.AdmissionDeclaration{
+			Kind: "raw", Event: "inbound.partner", Payload: "raw",
+			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "hmac_sha256", Header: "X-Partner-Signature", Encoding: "hex"},
+			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, []byte("partner-secret"))
+	signature := hex.EncodeToString(mac.Sum(nil))
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingInboundStore{inserted: true}
+	gateway := NewInboundGateway(bus, nil, nil, store)
+	gateway.SetCredentialStore(identityInboundCredentialStore{})
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
+	req.Header.Set("X-Partner-Signature", signature)
+	rec := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), FlowID: "partner-flow", RunID: "run-partner",
+		FlowInstance: "partner-flow/standing", EntityID: "entity-partner", Alias: "partner", Provider: "partner-events",
+		SigningSecret: "partner-secret", AdmissionPlan: plan,
+	}, nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	wantID := hex.EncodeToString(sha256.New().Sum(nil))
+	if store.providerEventID != wantID {
+		t.Fatalf("body_sha256 delivery id = %q, want exact empty-body hash %q", store.providerEventID, wantID)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventStore.events))
+	}
+
+	jsonPlan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "json", Provider: "json-events",
+		Declaration: providertriggers.AdmissionDeclaration{
+			Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
+			Event: "inbound.json", Payload: "json",
+			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
+			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonStore := &recordingInboundStore{inserted: true}
+	jsonGateway := NewInboundGateway(bus, nil, nil, jsonStore)
+	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
+	jsonRec := httptest.NewRecorder()
+	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("f", 64), FlowID: "json-flow", RunID: "run-json",
+		FlowInstance: "json-flow/standing", EntityID: "entity-json", Alias: "json", Provider: "json-events",
+		AdmissionPlan: jsonPlan,
+	}, nil)
+	if jsonRec.Code != http.StatusBadRequest || !strings.Contains(jsonRec.Body.String(), "must be valid JSON") {
+		t.Fatalf("empty JSON body response = %d %q", jsonRec.Code, jsonRec.Body.String())
+	}
+	if jsonStore.recorded {
+		t.Fatal("empty JSON body reached marker persistence")
+	}
+}
+
 func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
