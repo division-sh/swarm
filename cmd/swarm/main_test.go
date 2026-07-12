@@ -10615,7 +10615,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	t.Helper()
 	return installServeRuntimePostgresTestStoresForDatabase(t, func(workspaceMountSources) serveWorkspaceLifecycle {
 		return workspaceFactory()
-	}, false, testutil.PostgresFreshPhysical())
+	}, false, testutil.PostgresEmptyPhysical())
 }
 
 func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, requirement testutil.DatabaseRequirement) (string, string) {
