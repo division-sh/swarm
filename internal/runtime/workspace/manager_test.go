@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,41 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+func TestWorkspacePrerequisiteRecoveryUsesConfiguredDockerBinaryAndLocalBuild(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.DockerBin = "/opt/docker cli"
+	cfg.WorkspaceImage = "custom-workspace:test"
+	manager.SetConfig(cfg)
+
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		return "", fmt.Errorf("daemon offline")
+	})
+	err := manager.CheckDockerAvailable(context.Background())
+	var prerequisiteErr *PrerequisiteError
+	if !errors.As(err, &prerequisiteErr) {
+		t.Fatalf("CheckDockerAvailable error type = %T, want *PrerequisiteError", err)
+	}
+	if !strings.Contains(prerequisiteErr.Problem, cfg.DockerBin) || prerequisiteErr.Remediation != "Start the Docker daemon, then verify with `'/opt/docker cli' info`" {
+		t.Fatalf("Docker diagnostic = %#v, want configured binary recovery", prerequisiteErr)
+	}
+
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "image" && args[1] == "inspect" {
+			return "", fmt.Errorf("image absent")
+		}
+		return "", nil
+	})
+	err = manager.CheckWorkspaceImageAvailable(context.Background())
+	prerequisiteErr = nil
+	if !errors.As(err, &prerequisiteErr) {
+		t.Fatalf("CheckWorkspaceImageAvailable error type = %T, want *PrerequisiteError", err)
+	}
+	if !strings.Contains(prerequisiteErr.Problem, cfg.WorkspaceImage) || prerequisiteErr.Remediation != "Run `swarm workspace build --backend claude_cli` before startup" || strings.Contains(prerequisiteErr.Error(), "pull") {
+		t.Fatalf("image diagnostic = %#v, want exact local build recovery without pull", prerequisiteErr)
+	}
+}
 
 func TestWorkspaceClassesForSource(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -418,11 +454,11 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *tes
 	if err == nil {
 		t.Fatal("EnsurePrereqs unexpectedly succeeded with missing workspace image")
 	}
-	if !strings.Contains(err.Error(), "workspace image test-image:latest is not available") {
+	if !strings.Contains(err.Error(), `workspace image "test-image:latest" is not available`) {
 		t.Fatalf("EnsurePrereqs error = %v, want missing image diagnostic", err)
 	}
-	if !strings.Contains(err.Error(), "set workspace.image") {
-		t.Fatalf("EnsurePrereqs error = %v, want configured image remediation", err)
+	if !strings.Contains(err.Error(), "swarm workspace build --backend claude_cli") || strings.Contains(err.Error(), "pull") {
+		t.Fatalf("EnsurePrereqs error = %v, want exact local build remediation without pull", err)
 	}
 
 	joined := flattenDockerCalls(calls)

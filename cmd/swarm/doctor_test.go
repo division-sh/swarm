@@ -79,7 +79,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 		"backend_prerequisite/missing_backend_credential",
 		"workspace_prerequisite/workspace_image_unavailable",
 		"swarm secrets set CLAUDE_CODE_OAUTH_TOKEN",
-		"set workspace.image",
+		"swarm workspace build --backend claude_cli",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
@@ -105,12 +105,141 @@ func TestDoctorClaudeCLIPreflightReportsMissingDocker(t *testing.T) {
 	}
 	for _, want := range []string{
 		"workspace_prerequisite/docker_unavailable",
-		"docker is not available",
-		"start Docker, set workspace.docker_bin",
+		"Docker is not reachable",
+		"Start the Docker daemon, then verify with",
+		dockerBin + " info",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestDoctorClaudeCLIPreflightSkipsDependentChecksAfterDockerFailure(t *testing.T) {
+	dockerBin := configureDoctorDockerStub(t)
+	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("SWARM_TEST_DOCKER_UNAVAILABLE", "1")
+	dockerLog := filepath.Join(t.TempDir(), "docker-calls.log")
+	t.Setenv("SWARM_TEST_DOCKER_LOG", dockerLog)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), true), &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	assertLocalPreflightFindingState(t, report, "docker_unavailable", localPreflightStatusFailed, localPreflightSeverityBlocker)
+	assertLocalPreflightFindingState(t, report, "workspace_image_unavailable", localPreflightStatusSkipped, localPreflightSeverityInfo)
+	assertLocalPreflightFindingState(t, report, "workspace_claude_cli_unavailable", localPreflightStatusSkipped, localPreflightSeverityInfo)
+	dockerFinding, _ := localPreflightReportFinding(report, "docker_unavailable")
+	if !strings.Contains(dockerFinding.Remediation, dockerBin+" info") {
+		t.Fatalf("Docker remediation = %q, want configured binary verification command", dockerFinding.Remediation)
+	}
+	assertDoctorDockerCalls(t, dockerLog, []string{"version --format {{.Server.Version}}"}, []string{"image inspect", "run --rm"})
+}
+
+func TestDoctorClaudeCLIPreflightSkipsCLIProofAfterImageFailure(t *testing.T) {
+	dockerBin := configureDoctorDockerStub(t)
+	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("SWARM_TEST_DOCKER_IMAGE_MISSING", "1")
+	dockerLog := filepath.Join(t.TempDir(), "docker-calls.log")
+	t.Setenv("SWARM_TEST_DOCKER_LOG", dockerLog)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), true), &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	assertLocalPreflightFindingState(t, report, "docker_available", localPreflightStatusOK, localPreflightSeverityInfo)
+	assertLocalPreflightFindingState(t, report, "workspace_image_unavailable", localPreflightStatusFailed, localPreflightSeverityBlocker)
+	assertLocalPreflightFindingState(t, report, "workspace_claude_cli_unavailable", localPreflightStatusSkipped, localPreflightSeverityInfo)
+	imageFinding, _ := localPreflightReportFinding(report, "workspace_image_unavailable")
+	if !strings.Contains(imageFinding.Remediation, "swarm workspace build --backend claude_cli") || strings.Contains(imageFinding.Remediation, "pull") {
+		t.Fatalf("image remediation = %q, want exact local build command without pull", imageFinding.Remediation)
+	}
+	assertDoctorDockerCalls(t, dockerLog, []string{"version --format {{.Server.Version}}", "image inspect"}, []string{"run --rm"})
+}
+
+func TestDoctorWorkspaceBackendHostRefusalRendersTypedCapabilityRemediation(t *testing.T) {
+	tests := []struct {
+		name              string
+		contractsPath     func(*testing.T) string
+		wantMessage       []string
+		wantRemediation   []string
+		forbidRemediation string
+	}{
+		{
+			name:          "claude only",
+			contractsPath: func(*testing.T) string { return doctorAgentContractsPath },
+			wantMessage:   []string{"uses claude_cli backend"},
+			wantRemediation: []string{
+				"Use Docker",
+				"llm.backend: anthropic",
+				"host execution is refused only for exec-capable agents",
+			},
+		},
+		{
+			name:          "claude plus native bash",
+			contractsPath: writeServeRuntimeNativeBashFixture,
+			wantMessage:   []string{"uses claude_cli backend", "native_tools.bash"},
+			wantRemediation: []string{
+				"Use Docker",
+				"llm.backend: anthropic",
+				"workspace.allow_exec_on_host: true",
+			},
+			forbidRemediation: "or switch to an API backend",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := writeDoctorClaudeConfig(t, "")
+			raw, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("read doctor config: %v", err)
+			}
+			writeRuntimeConfigText(t, configPath, strings.Replace(string(raw), "workspace:\n", "workspace:\n  backend: host\n", 1))
+			args := doctorClaudeArgs(t, configPath, true)
+			for i := range args {
+				if args[i] == "--contracts" && i+1 < len(args) {
+					args[i+1] = tt.contractsPath(t)
+				}
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitRuntime {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+			}
+			var report localPreflightReport
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+			}
+			finding, ok := localPreflightReportFinding(report, "workspace_backend_decision_failed")
+			if !ok || finding.Status != localPreflightStatusFailed || finding.Severity != localPreflightSeverityBlocker {
+				t.Fatalf("workspace backend finding = %#v, want failed blocker", finding)
+			}
+			for _, want := range tt.wantMessage {
+				if !strings.Contains(finding.Message, want) {
+					t.Fatalf("message = %q, want %q", finding.Message, want)
+				}
+			}
+			for _, want := range tt.wantRemediation {
+				if !strings.Contains(finding.Remediation, want) {
+					t.Fatalf("remediation = %q, want %q", finding.Remediation, want)
+				}
+			}
+			if tt.forbidRemediation != "" && strings.Contains(finding.Remediation, tt.forbidRemediation) {
+				t.Fatalf("remediation = %q, must not present API switch as complete", finding.Remediation)
+			}
+		})
 	}
 }
 
@@ -1043,15 +1172,16 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 		CLISpecification struct {
 			Foundations struct {
 				Preflight struct {
-					PromotedBy           string   `yaml:"promoted_by"`
-					ImplementationStatus string   `yaml:"implementation_status"`
-					CanonicalOwner       string   `yaml:"canonical_owner"`
-					ImplementationOwner  string   `yaml:"implementation_owner"`
-					Scope                string   `yaml:"scope"`
-					FindingCategories    []string `yaml:"finding_categories"`
-					CommandModeRule      string   `yaml:"command_mode_rule"`
-					OwnerConsumptionRule string   `yaml:"owner_consumption_rule"`
-					SplitTail            []string `yaml:"split_tail"`
+					PromotedBy              string   `yaml:"promoted_by"`
+					ImplementationStatus    string   `yaml:"implementation_status"`
+					CanonicalOwner          string   `yaml:"canonical_owner"`
+					ImplementationOwner     string   `yaml:"implementation_owner"`
+					Scope                   string   `yaml:"scope"`
+					FindingCategories       []string `yaml:"finding_categories"`
+					CommandModeRule         string   `yaml:"command_mode_rule"`
+					OwnerConsumptionRule    string   `yaml:"owner_consumption_rule"`
+					DependencyReportingRule string   `yaml:"dependency_reporting_rule"`
+					SplitTail               []string `yaml:"split_tail"`
 				} `yaml:"local_claude_cli_preflight_admission"`
 			} `yaml:"foundations"`
 			CommandCatalog struct {
@@ -1089,6 +1219,11 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 	for _, want := range []string{"llm_provider_selection_config_authority", "tool_model.credential_store", "workspace lifecycle", "serve startup/listener"} {
 		if !strings.Contains(preflight.OwnerConsumptionRule, want) {
 			t.Fatalf("owner consumption rule missing %q:\n%s", want, preflight.OwnerConsumptionRule)
+		}
+	}
+	for _, want := range []string{"Docker daemon probe fails", "`skipped`/not measured", "MUST NOT emit derivative blockers", "configured-image probe", "Text and JSON"} {
+		if !strings.Contains(preflight.DependencyReportingRule, want) {
+			t.Fatalf("dependency reporting rule missing %q:\n%s", want, preflight.DependencyReportingRule)
 		}
 	}
 	doctor := spec.CLISpecification.CommandCatalog.Doctor
@@ -1371,6 +1506,9 @@ func configureDoctorDockerStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docker")
 	script := `#!/bin/sh
+if [ -n "${SWARM_TEST_DOCKER_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "${SWARM_TEST_DOCKER_LOG}"
+fi
 case "$1:$2" in
   version:--format)
     if [ "${SWARM_TEST_DOCKER_UNAVAILABLE:-}" = "1" ]; then
@@ -1410,6 +1548,36 @@ esac
 		t.Fatalf("write docker stub: %v", err)
 	}
 	return path
+}
+
+func assertLocalPreflightFindingState(t *testing.T, report localPreflightReport, code string, status localPreflightFindingStatus, severity localPreflightSeverity) {
+	t.Helper()
+	finding, ok := localPreflightReportFinding(report, code)
+	if !ok {
+		t.Fatalf("report missing finding %q: %#v", code, report.Findings)
+	}
+	if finding.Status != status || finding.Severity != severity {
+		t.Fatalf("finding %q = %#v, want status=%s severity=%s", code, finding, status, severity)
+	}
+}
+
+func assertDoctorDockerCalls(t *testing.T, path string, required, forbidden []string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read Docker call log: %v", err)
+	}
+	calls := string(raw)
+	for _, want := range required {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("Docker calls missing %q:\n%s", want, calls)
+		}
+	}
+	for _, forbiddenCall := range forbidden {
+		if strings.Contains(calls, forbiddenCall) {
+			t.Fatalf("Docker calls include dependent probe %q after upstream failure:\n%s", forbiddenCall, calls)
+		}
+	}
 }
 
 func freeDoctorTCPPort(t *testing.T) string {

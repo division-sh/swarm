@@ -21,6 +21,68 @@ const (
 	workspaceCapabilityExec           workspaceCapabilityClass = "exec"
 )
 
+type workspaceCapabilityReasonKind string
+
+const (
+	workspaceReasonNoAgents     workspaceCapabilityReasonKind = "no_agents"
+	workspaceReasonLifecycle    workspaceCapabilityReasonKind = "workspace_lifecycle"
+	workspaceReasonClaudeCLI    workspaceCapabilityReasonKind = "claude_cli"
+	workspaceReasonNativeBash   workspaceCapabilityReasonKind = "native_bash"
+	workspaceReasonExecTool     workspaceCapabilityReasonKind = "exec_tool"
+	workspaceReasonNativeFileIO workspaceCapabilityReasonKind = "native_file_io"
+)
+
+type workspaceCapabilityReason struct {
+	Kind    workspaceCapabilityReasonKind
+	AgentID string
+	Tool    string
+}
+
+func (r workspaceCapabilityReason) String() string {
+	switch r.Kind {
+	case workspaceReasonNoAgents:
+		return "selected contract source declares no agents"
+	case workspaceReasonLifecycle:
+		return "declared agents use runtime-mediated workspace lifecycle"
+	case workspaceReasonClaudeCLI:
+		return fmt.Sprintf("agent %s uses claude_cli backend", workspaceBackendAgentLabel(r.AgentID))
+	case workspaceReasonNativeBash:
+		return fmt.Sprintf("agent %s has native_tools.bash", workspaceBackendAgentLabel(r.AgentID))
+	case workspaceReasonExecTool:
+		return fmt.Sprintf("agent %s has exec-class tool %s", workspaceBackendAgentLabel(r.AgentID), strings.TrimSpace(r.Tool))
+	case workspaceReasonNativeFileIO:
+		return fmt.Sprintf("agent %s has native_tools.file_io", workspaceBackendAgentLabel(r.AgentID))
+	default:
+		return "the selected contract"
+	}
+}
+
+func (r workspaceCapabilityReason) isExec() bool {
+	switch r.Kind {
+	case workspaceReasonClaudeCLI, workspaceReasonNativeBash, workspaceReasonExecTool:
+		return true
+	default:
+		return false
+	}
+}
+
+type workspaceBackendDecisionError struct {
+	Problem     string
+	Remediation string
+}
+
+func (e *workspaceBackendDecisionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	problem := strings.TrimSpace(e.Problem)
+	remediation := strings.TrimSpace(e.Remediation)
+	if remediation == "" {
+		return problem
+	}
+	return problem + ". " + remediation
+}
+
 type workspaceBackendSelection struct {
 	Backend string
 	Source  string
@@ -31,8 +93,7 @@ type workspaceBackendSelection struct {
 	UnsafeHost         bool
 
 	CapabilityClass workspaceCapabilityClass
-	Reasons         []string
-	HostUnsupported []string
+	Reasons         []workspaceCapabilityReason
 }
 
 type workspaceBackendInput struct {
@@ -120,14 +181,13 @@ func normalizeWorkspaceBackend(raw string, source string) (string, error) {
 }
 
 func decideWorkspaceBackend(preference workspaceBackendSelection, cfg *config.Config, source semanticview.Source) (workspaceBackendSelection, error) {
-	class, reasons, hostUnsupported, err := classifyWorkspaceBackendRequirement(cfg, source)
+	class, reasons, err := classifyWorkspaceBackendRequirement(cfg, source)
 	if err != nil {
 		return preference, err
 	}
 	decision := preference
 	decision.CapabilityClass = class
 	decision.Reasons = reasons
-	decision.HostUnsupported = hostUnsupported
 
 	switch class {
 	case workspaceCapabilityNone:
@@ -148,17 +208,30 @@ func decideWorkspaceBackend(preference workspaceBackendSelection, cfg *config.Co
 			break
 		}
 		if decision.Backend == workspace.BackendHost {
-			if len(hostUnsupported) > 0 {
-				return decision, fmt.Errorf("workspace backend host is unsupported for this exec-capable contract: %s; use Docker", strings.Join(hostUnsupported, "; "))
+			if workspaceBackendHasReason(reasons, workspaceReasonClaudeCLI) {
+				problem := fmt.Sprintf("workspace backend host is unsupported for this exec-capable contract: %s", workspaceBackendExecReasonSummary(reasons))
+				remediation := "Use Docker"
+				if workspaceBackendExecReasonsAreClaudeOnly(reasons) {
+					remediation += ", or switch to an API backend (`llm.backend: anthropic`) for a Docker-free local run; host execution is refused only for exec-capable agents"
+				} else {
+					remediation += ". For a Docker-free local run, switch to an API backend (`llm.backend: anthropic`) and explicitly authorize the remaining host execution with `workspace.allow_exec_on_host: true`"
+				}
+				return decision, &workspaceBackendDecisionError{Problem: problem, Remediation: remediation}
 			}
 			if !decision.AllowExecOnHost {
 				switch decision.Source {
 				case "--workspace-backend":
 					decision.AllowExecOnHost = true
 				case "workspace.backend":
-					return decision, fmt.Errorf("workspace.backend: host grants agent execution on this machine for %s; set workspace.allow_exec_on_host: true or use Docker", workspaceBackendReasonSummary(reasons))
+					return decision, &workspaceBackendDecisionError{
+						Problem:     fmt.Sprintf("workspace.backend: host grants agent execution on this machine for %s", workspaceBackendReasonSummary(reasons)),
+						Remediation: "Set `workspace.allow_exec_on_host: true` or use Docker",
+					}
 				default:
-					return decision, fmt.Errorf("workspace backend host cannot authorize unsafe host execution for %s; use --workspace-backend host for one command or workspace.backend: host with workspace.allow_exec_on_host: true", workspaceBackendReasonSummary(reasons))
+					return decision, &workspaceBackendDecisionError{
+						Problem:     fmt.Sprintf("workspace backend host cannot authorize unsafe host execution for %s", workspaceBackendReasonSummary(reasons)),
+						Remediation: "Use `--workspace-backend host` for one command, or set `workspace.backend: host` with `workspace.allow_exec_on_host: true`",
+					}
 				}
 			}
 			decision.UnsafeHost = true
@@ -167,20 +240,20 @@ func decideWorkspaceBackend(preference workspaceBackendSelection, cfg *config.Co
 	return decision, nil
 }
 
-func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview.Source) (workspaceCapabilityClass, []string, []string, error) {
+func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview.Source) (workspaceCapabilityClass, []workspaceCapabilityReason, error) {
 	if cfg == nil {
-		return "", nil, nil, fmt.Errorf("runtime config is required")
+		return "", nil, fmt.Errorf("runtime config is required")
 	}
 	if source == nil {
-		return "", nil, nil, fmt.Errorf("semantic source is required")
+		return "", nil, fmt.Errorf("semantic source is required")
 	}
 	profile, err := cfg.LLMBackendProfile()
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
 	entries := source.AgentEntries()
 	if len(entries) == 0 {
-		return workspaceCapabilityNone, []string{"selected contract source declares no agents"}, nil, nil
+		return workspaceCapabilityNone, []workspaceCapabilityReason{{Kind: workspaceReasonNoAgents}}, nil
 	}
 
 	agentIDs := make([]string, 0, len(entries))
@@ -190,31 +263,29 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 	sort.Strings(agentIDs)
 
 	class := workspaceCapabilityWorkspaceWrite
-	reasons := []string{"declared agents use runtime-mediated workspace lifecycle"}
-	hostUnsupported := []string{}
+	reasons := []workspaceCapabilityReason{{Kind: workspaceReasonLifecycle}}
 	for _, agentID := range agentIDs {
 		entry := entries[agentID]
 		label := workspaceBackendAgentLabel(agentID, entry.ID, entry.Role)
 		if profile.ID == llmselection.BackendClaudeCLI {
 			class = workspaceCapabilityExec
-			reasons = append(reasons, fmt.Sprintf("agent %s uses claude_cli backend", label))
-			hostUnsupported = append(hostUnsupported, fmt.Sprintf("agent %s uses claude_cli backend", label))
+			reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonClaudeCLI, AgentID: label})
 		}
 		if nativeToolEnabled(entry.NativeTools, "bash") {
 			class = workspaceCapabilityExec
-			reasons = append(reasons, fmt.Sprintf("agent %s has native_tools.bash", label))
+			reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonNativeBash, AgentID: label})
 		}
 		for _, tool := range entry.ConfiguredTools() {
 			if workspaceExecClassTool(tool) {
 				class = workspaceCapabilityExec
-				reasons = append(reasons, fmt.Sprintf("agent %s has exec-class tool %s", label, strings.TrimSpace(tool)))
+				reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonExecTool, AgentID: label, Tool: strings.TrimSpace(tool)})
 			}
 		}
 		if class != workspaceCapabilityExec && nativeToolEnabled(entry.NativeTools, "file_io") {
-			reasons = append(reasons, fmt.Sprintf("agent %s has native_tools.file_io", label))
+			reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonNativeFileIO, AgentID: label})
 		}
 	}
-	return class, uniqueNonEmptyStrings(reasons), uniqueNonEmptyStrings(hostUnsupported), nil
+	return class, uniqueWorkspaceCapabilityReasons(reasons), nil
 }
 
 func nativeToolEnabled(raw map[string]any, name string) bool {
@@ -244,11 +315,48 @@ func workspaceBackendAgentLabel(parts ...string) string {
 	return "<unknown>"
 }
 
-func workspaceBackendReasonSummary(reasons []string) string {
+func workspaceBackendReasonSummary(reasons []workspaceCapabilityReason) string {
 	if len(reasons) == 0 {
 		return "the selected contract"
 	}
-	return strings.Join(reasons, "; ")
+	formatted := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		formatted = append(formatted, reason.String())
+	}
+	return strings.Join(formatted, "; ")
+}
+
+func workspaceBackendExecReasonSummary(reasons []workspaceCapabilityReason) string {
+	execReasons := make([]workspaceCapabilityReason, 0, len(reasons))
+	for _, reason := range reasons {
+		if reason.isExec() {
+			execReasons = append(execReasons, reason)
+		}
+	}
+	return workspaceBackendReasonSummary(execReasons)
+}
+
+func workspaceBackendHasReason(reasons []workspaceCapabilityReason, kind workspaceCapabilityReasonKind) bool {
+	for _, reason := range reasons {
+		if reason.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceBackendExecReasonsAreClaudeOnly(reasons []workspaceCapabilityReason) bool {
+	found := false
+	for _, reason := range reasons {
+		if !reason.isExec() {
+			continue
+		}
+		found = true
+		if reason.Kind != workspaceReasonClaudeCLI {
+			return false
+		}
+	}
+	return found
 }
 
 func workspaceBackendDecisionDetail(decision workspaceBackendSelection) string {
@@ -273,14 +381,12 @@ func workspaceBackendUnsafeWarning(decision workspaceBackendSelection) string {
 	return fmt.Sprintf("UNSAFE: grants the agent execution on this machine via workspace backend host (%s)", workspaceBackendReasonSummary(decision.Reasons))
 }
 
-func uniqueNonEmptyStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
+func uniqueWorkspaceCapabilityReasons(values []workspaceCapabilityReason) []workspaceCapabilityReason {
+	seen := map[workspaceCapabilityReason]struct{}{}
+	out := make([]workspaceCapabilityReason, 0, len(values))
 	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
+		value.AgentID = strings.TrimSpace(value.AgentID)
+		value.Tool = strings.TrimSpace(value.Tool)
 		if _, ok := seen[value]; ok {
 			continue
 		}

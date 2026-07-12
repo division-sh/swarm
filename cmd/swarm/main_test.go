@@ -2338,6 +2338,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 				RetiredEnvVar        string   `yaml:"retired_env_var"`
 				SourceOrder          []string `yaml:"source_order"`
 				DefaultBackend       string   `yaml:"default_backend"`
+				CapabilityReasonRule string   `yaml:"capability_reason_rule"`
 				CapabilityClasses    map[string]struct {
 					Rule string `yaml:"rule"`
 				} `yaml:"capability_classes"`
@@ -2395,6 +2396,11 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	}
 	if authority.DefaultBackend != "capability-derived" {
 		t.Fatalf("workspace backend default = %q, want capability-derived", authority.DefaultBackend)
+	}
+	for _, want := range []string{"typed capability reasons", "MUST NOT parse", "llm.backend: anthropic", "every remaining exec reason", "workspace.allow_exec_on_host"} {
+		if !strings.Contains(authority.CapabilityReasonRule, want) {
+			t.Fatalf("workspace backend capability reason rule missing %q:\n%s", want, authority.CapabilityReasonRule)
+		}
 	}
 	for _, want := range []string{"none", "workspace_write", "exec"} {
 		if _, ok := authority.CapabilityClasses[want]; !ok {
@@ -2601,12 +2607,13 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 		} `yaml:"cli_specification"`
 		WorkspaceModel struct {
 			RuntimeImagePackaging struct {
-				PromotedBy           string `yaml:"promoted_by"`
-				ImplementationStatus string `yaml:"implementation_status"`
-				CanonicalOwner       string `yaml:"canonical_owner"`
-				Rule                 string `yaml:"rule"`
-				MountSourceRule      string `yaml:"mount_source_rule"`
-				SplitScope           string `yaml:"split_scope"`
+				PromotedBy           string            `yaml:"promoted_by"`
+				ImplementationStatus string            `yaml:"implementation_status"`
+				CanonicalOwner       string            `yaml:"canonical_owner"`
+				Rule                 string            `yaml:"rule"`
+				MountSourceRule      string            `yaml:"mount_source_rule"`
+				SplitScope           string            `yaml:"split_scope"`
+				RecoveryDiagnostics  map[string]string `yaml:"recovery_diagnostics"`
 			} `yaml:"runtime_image_packaging"`
 		} `yaml:"workspace_model"`
 	}
@@ -2670,6 +2677,9 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 		if !strings.Contains(packaging.MountSourceRule, want) {
 			t.Fatalf("runtime image packaging mount source rule missing %q:\n%s", want, packaging.MountSourceRule)
 		}
+	}
+	if !strings.Contains(packaging.RecoveryDiagnostics["docker_daemon"], "<configured-docker-bin> info") || !strings.Contains(packaging.RecoveryDiagnostics["workspace_image"], "swarm workspace build --backend claude_cli") || !strings.Contains(packaging.RecoveryDiagnostics["workspace_image"], "MUST NOT advertise pulling") {
+		t.Fatalf("runtime image recovery diagnostics incomplete: %#v", packaging.RecoveryDiagnostics)
 	}
 	for _, want := range []string{"#996", "#997"} {
 		if !strings.Contains(packaging.SplitScope, want) {
@@ -9593,7 +9603,7 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "docker is not available") {
+	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "Docker is not reachable") {
 		t.Fatalf("host workspace serve output shows Docker dependency despite host backend:\n%s", serve.outputString())
 	}
 }
@@ -9624,7 +9634,7 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 	if !strings.Contains(serve.outputString(), "workspace backend: none") {
 		t.Fatalf("serve output missing no-workspace decision:\n%s", serve.outputString())
 	}
-	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "docker is not available") {
+	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "Docker is not reachable") {
 		t.Fatalf("no-agent serve output shows Docker dependency despite no-workspace decision:\n%s", serve.outputString())
 	}
 }
@@ -9659,7 +9669,7 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 	if !strings.Contains(output, "workspace backend: host") {
 		t.Fatalf("serve output missing host workspace decision for API-backed agent:\n%s", output)
 	}
-	if strings.Contains(strings.ToLower(output), "docker is not available") {
+	if strings.Contains(strings.ToLower(output), "docker is not reachable") {
 		t.Fatalf("API-backed agent serve output shows Docker dependency despite host decision:\n%s", output)
 	}
 }
@@ -9690,7 +9700,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		t.Fatalf("runServeRuntime code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
 	}
 	output := out.String()
-	for _, want := range []string{"[5/22] runtime_context", "workspace backend: docker", "native_tools.bash", "docker is not available"} {
+	for _, want := range []string{"[5/22] runtime_context", "workspace backend: docker", "native_tools.bash", "Docker is not reachable", missingDocker + " info"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)
 		}

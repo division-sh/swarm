@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,16 +16,16 @@ import (
 
 func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 	tests := []struct {
-		name          string
-		cfg           *config.Config
-		agents        map[string]runtimecontracts.AgentRegistryEntry
-		preference    workspaceBackendSelection
-		wantBackend   string
-		wantClass     workspaceCapabilityClass
-		wantNo        bool
-		wantUnsafe    bool
-		wantErr       string
-		wantHostBlock string
+		name        string
+		cfg         *config.Config
+		agents      map[string]runtimecontracts.AgentRegistryEntry
+		preference  workspaceBackendSelection
+		wantBackend string
+		wantClass   workspaceCapabilityClass
+		wantNo      bool
+		wantUnsafe  bool
+		wantErr     string
+		wantReason  workspaceCapabilityReasonKind
 	}{
 		{
 			name:        "no agents defaults to no workspace lifecycle",
@@ -66,9 +67,9 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 			agents: map[string]runtimecontracts.AgentRegistryEntry{
 				"worker": {ID: "worker"},
 			},
-			wantBackend:   workspace.BackendDocker,
-			wantClass:     workspaceCapabilityExec,
-			wantHostBlock: "claude_cli",
+			wantBackend: workspace.BackendDocker,
+			wantClass:   workspaceCapabilityExec,
+			wantReason:  workspaceReasonClaudeCLI,
 		},
 		{
 			name: "flag host is loud unsafe opt out for host supported exec",
@@ -136,8 +137,73 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 			if decision.Backend != tt.wantBackend || decision.CapabilityClass != tt.wantClass || decision.NoWorkspace != tt.wantNo || decision.UnsafeHost != tt.wantUnsafe {
 				t.Fatalf("decision = %#v, want backend=%s class=%s no=%v unsafe=%v", decision, tt.wantBackend, tt.wantClass, tt.wantNo, tt.wantUnsafe)
 			}
-			if tt.wantHostBlock != "" && !joinedContains(decision.HostUnsupported, tt.wantHostBlock) {
-				t.Fatalf("host unsupported = %#v, want %q", decision.HostUnsupported, tt.wantHostBlock)
+			if tt.wantReason != "" && !workspaceBackendHasReason(decision.Reasons, tt.wantReason) {
+				t.Fatalf("reasons = %#v, want kind %q", decision.Reasons, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
+	tests := []struct {
+		name              string
+		agent             runtimecontracts.AgentRegistryEntry
+		wantProblem       []string
+		wantRemediation   []string
+		forbidRemediation string
+		wantClaudeOnly    bool
+	}{
+		{
+			name:            "claude only offers API backend as complete alternative",
+			agent:           runtimecontracts.AgentRegistryEntry{ID: "worker"},
+			wantProblem:     []string{"agent worker uses claude_cli backend"},
+			wantRemediation: []string{"Use Docker", "llm.backend: anthropic", "Docker-free local run"},
+			wantClaudeOnly:  true,
+		},
+		{
+			name:              "mixed native bash names every blocker and requires host authorization",
+			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", NativeTools: map[string]any{"bash": true}},
+			wantProblem:       []string{"agent worker uses claude_cli backend", "agent worker has native_tools.bash"},
+			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
+			forbidRemediation: "or switch to an API backend",
+		},
+		{
+			name:              "mixed exec tool names every blocker and requires host authorization",
+			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", Tools: []string{"shell"}},
+			wantProblem:       []string{"agent worker uses claude_cli backend", "agent worker has exec-class tool shell"},
+			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
+			forbidRemediation: "or switch to an API backend",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			preference := workspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend", PreferenceExplicit: true, AllowExecOnHost: true}
+			decision, err := decideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": tt.agent},
+			}))
+			if err == nil {
+				t.Fatal("decideWorkspaceBackend unexpectedly accepted claude_cli host execution")
+			}
+			var decisionErr *workspaceBackendDecisionError
+			if !errors.As(err, &decisionErr) {
+				t.Fatalf("error type = %T, want *workspaceBackendDecisionError", err)
+			}
+			for _, want := range tt.wantProblem {
+				if !strings.Contains(decisionErr.Problem, want) {
+					t.Fatalf("problem = %q, want %q", decisionErr.Problem, want)
+				}
+			}
+			for _, want := range tt.wantRemediation {
+				if !strings.Contains(decisionErr.Remediation, want) {
+					t.Fatalf("remediation = %q, want %q", decisionErr.Remediation, want)
+				}
+			}
+			if tt.forbidRemediation != "" && strings.Contains(decisionErr.Remediation, tt.forbidRemediation) {
+				t.Fatalf("remediation = %q, must not present API switch as a complete exit", decisionErr.Remediation)
+			}
+			if got := workspaceBackendExecReasonsAreClaudeOnly(decision.Reasons); got != tt.wantClaudeOnly {
+				t.Fatalf("typed Claude-only discrimination = %v, want %v; reasons=%#v", got, tt.wantClaudeOnly, decision.Reasons)
 			}
 		})
 	}

@@ -53,7 +53,7 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(strings.ToLower(output), "docker is not available") {
+	if strings.Contains(strings.ToLower(output), "docker is not reachable") {
 		t.Fatalf("host opt-out serve output shows Docker dependency despite explicit host backend:\n%s", output)
 	}
 }

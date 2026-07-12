@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/platform"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -126,7 +127,7 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		}
 	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "version", "--format", "{{.Server.Version}}"); err != nil {
-		return fmt.Errorf("workspace image build failed: Docker is not available via %q; start Docker, set workspace.docker_bin, or pass --docker-bin: %w", dockerBin, err)
+		return fmt.Errorf("workspace image build failed: Docker is not reachable via %q. Start the Docker daemon, then verify with `%s`: %w", dockerBin, workspace.DockerInfoCommand(dockerBin), err)
 	}
 
 	if out != nil {
