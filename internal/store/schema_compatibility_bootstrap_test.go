@@ -133,6 +133,47 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	}
 }
 
+func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
+	request := canonicalSchemaBootstrapTestRequest(t)
+	const createUnexpectedIndex = `CREATE UNIQUE INDEX drift_probe_idx ON timers(status) WHERE status = 'pending'`
+
+	t.Run("sqlite", func(t *testing.T) {
+		store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "unexpected-index.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		if err := store.BootstrapSchema(context.Background(), request); err != nil {
+			t.Fatalf("fresh bootstrap: %v", err)
+		}
+		if _, err := store.DB.Exec(createUnexpectedIndex); err != nil {
+			t.Fatal(err)
+		}
+		assertUnexpectedIndexRejected(t, store.BootstrapSchema(context.Background(), request))
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		store := &PostgresStore{DB: db}
+		if _, err := db.Exec(createUnexpectedIndex); err != nil {
+			t.Fatal(err)
+		}
+		assertUnexpectedIndexRejected(t, store.BootstrapSchema(context.Background(), request))
+	})
+}
+
+func assertUnexpectedIndexRejected(t *testing.T, err error) {
+	t.Helper()
+	var incompatible *SchemaCompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("unexpected-index bootstrap error = %v, want SchemaCompatibilityError", err)
+	}
+	if !strings.Contains(err.Error(), "unexpected index drift_probe_idx") {
+		t.Fatalf("unexpected-index bootstrap error = %v, want named index drift", err)
+	}
+}
+
 func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	dsn, db, cleanup := testutil.StartEmptyPostgres(t)

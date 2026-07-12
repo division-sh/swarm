@@ -380,6 +380,11 @@ func compareSchemaShapes(expected, actual schemaShape) []string {
 				drift = append(drift, fmt.Sprintf("index %s is %q, want %q", name, actualDefinition, definition))
 			}
 		}
+		for name := range got.Indexes {
+			if _, ok := want.Indexes[name]; !ok {
+				drift = append(drift, fmt.Sprintf("unexpected index %s", name))
+			}
+		}
 	}
 	sort.Strings(drift)
 	return drift
