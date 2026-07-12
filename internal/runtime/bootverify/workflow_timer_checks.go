@@ -251,7 +251,7 @@ func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontr
 	if strings.TrimSpace(initial) == "" {
 		return
 	}
-	activationStates := timerActivationStates(c.source, timer, startTrigger, initial, declaredStates)
+	activationStates := timerActivationStates(c.source, timer, startTrigger, declaredStates)
 	if len(activationStates) == 0 {
 		c.timerFindings = append(c.timerFindings, Finding{
 			CheckID:  "timer_validation",
@@ -261,7 +261,7 @@ func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontr
 		})
 		return
 	}
-	edges := timerCancelStateGraphEdges(c.source, timer, initial, declaredStates)
+	edges := timerCancelStateGraphEdges(c.source, timer)
 	unreachableActivationStates := timerActivationStatesWithoutPostActivationReachability(edges, activationStates, cancelState)
 	if len(unreachableActivationStates) == 0 {
 		return
@@ -282,7 +282,7 @@ func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontr
 	})
 }
 
-func timerActivationStates(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, startTrigger timeridentity.Trigger, initial string, declaredStates map[string]struct{}) map[string]struct{} {
+func timerActivationStates(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, startTrigger timeridentity.Trigger, declaredStates map[string]struct{}) map[string]struct{} {
 	out := map[string]struct{}{}
 	if source == nil || !startTrigger.Valid() {
 		return out
@@ -296,23 +296,20 @@ func timerActivationStates(source semanticview.Source, timer runtimecontracts.Wo
 	case timeridentity.TriggerKindEvent:
 		flowID := strings.TrimSpace(timer.FlowID)
 		ref := semanticview.ResolveFlowEventProof(source, flowID, startTrigger.Name)
-		nonTerminalStates := authoredNonTerminalStates(source, flowID, declaredStates)
-		for nodeID, node := range source.NodeEntries() {
-			nodeID = strings.TrimSpace(nodeID)
-			if nodeID == "" || strings.TrimSpace(nodeFlowID(source, nodeID)) != flowID {
+		topology, ok := semanticview.WorkflowStageTopology(source, flowID)
+		if !ok {
+			return out
+		}
+		for _, handler := range topology.Handlers {
+			if !timerHandlerMatchesEvent(source, flowID, handler.EventType, ref) {
 				continue
 			}
-			for eventType, handler := range node.EventHandlers {
-				if !timerHandlerMatchesEvent(source, flowID, eventType, ref) {
-					continue
-				}
-				targets := authoredReachabilityTargets(handler)
-				if len(targets) == 0 {
-					addTimerActivationStates(out, declaredStates, authoredHandlerSourceStates(initial, nonTerminalStates, handler))
-					continue
-				}
-				addTimerActivationStates(out, declaredStates, targets)
+			targets := topology.HandlerTargets(handler.NodeID, handler.EventType)
+			if len(targets) == 0 {
+				addTimerActivationStates(out, declaredStates, handler.Stages)
+				continue
 			}
+			addTimerActivationStates(out, declaredStates, targets)
 		}
 	}
 	return out
@@ -331,11 +328,12 @@ func addTimerActivationStates(out map[string]struct{}, declaredStates map[string
 	}
 }
 
-func timerCancelStateGraphEdges(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, initial string, declaredStates map[string]struct{}) map[string]map[string]struct{} {
+func timerCancelStateGraphEdges(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) map[string]map[string]struct{} {
 	flowID := strings.TrimSpace(timer.FlowID)
 	fireRef := semanticview.ResolveFlowEventProof(source, flowID, timer.Event)
-	return authoredStateGraphEdgesFiltered(source, flowID, initial, declaredStates, func(_ string, eventType string, _ runtimecontracts.SystemNodeEventHandler) bool {
-		return !timerHandlerMatchesEvent(source, flowID, eventType, fireRef)
+	return workflowStageGraphEdges(source, flowID, func(edge runtimecontracts.WorkflowStageTopologyEdge) bool {
+		handlerEvent := strings.TrimSpace(edge.HandlerEvent)
+		return handlerEvent == "" || !timerHandlerMatchesEvent(source, flowID, handlerEvent, fireRef)
 	})
 }
 

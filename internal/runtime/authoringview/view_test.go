@@ -277,6 +277,9 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 	if !timedEdge.Timed || timedEdge.After != "{{marginal_park_days}}d" || timedEdge.To != "expired" {
 		t.Fatalf("timed edge = %#v, want after-labeled transition to expired", timedEdge)
 	}
+	if timedEdge.HandlerEvent != "" {
+		t.Fatalf("timed edge handler origin = %q, want empty", timedEdge.HandlerEvent)
+	}
 }
 
 func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
@@ -384,6 +387,9 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 	}
 	if len(timeout.From) != 1 || timeout.From[0] != "awaiting" || timeout.To != "attention" || !timeout.Timed || timeout.After != "24h" || timeout.TimerID != "line_items" {
 		t.Fatalf("timeout edge = %#v", timeout)
+	}
+	if timeout.HandlerEvent != "item.completed" || timeout.EventType != "platform.join_timeout" {
+		t.Fatalf("timeout provenance = %#v", timeout)
 	}
 }
 

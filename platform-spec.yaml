@@ -383,6 +383,14 @@ contract_formats:
         declared text revision field. Verify requires one start, at least one
         repeat and close, and disjoint flat regions. Nested, overlapping,
         computed, unbounded, or arbitrary loops are rejected and belong to #1671.
+        Every handler-derived typed edge preserves the originating handler event
+        separately from its effective execution event. They are equal for
+        ordinary handler carriers; a join-timeout edge retains its originating
+        handler while its effective event is platform.join_timeout. Loop escape
+        edges retain the operation handler, and stage-timer edges have no handler
+        origin. Edge identity and every verifier/projection consumer use this
+        typed provenance rather than reconstructing ownership from node, source,
+        or timer strings.
       identity_and_admission: >
         Activation and revision IDs are deterministic run/entity/flow/loop facts.
         Exact delivery identity remains idempotent. A prior or post-close revision

@@ -113,6 +113,7 @@ type StageGraphEdgeView struct {
 	To            string   `json:"to"`
 	Source        string   `json:"source"`
 	NodeID        string   `json:"node_id,omitempty"`
+	HandlerEvent  string   `json:"handler_event,omitempty"`
 	EventType     string   `json:"event_type,omitempty"`
 	TimerID       string   `json:"timer_id,omitempty"`
 	After         string   `json:"after,omitempty"`
@@ -550,6 +551,7 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID string) []St
 			To:            edge.To,
 			Source:        edge.Source,
 			NodeID:        edge.NodeID,
+			HandlerEvent:  edge.HandlerEvent,
 			EventType:     edge.EventType,
 			Timed:         edge.Timed,
 			TimerID:       edge.TimerID,

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -93,9 +94,15 @@ func (c *checkerContext) eventWarnings() []Finding {
 	}
 	emitted := topologyWarningEndpoints(census.Producers(), true)
 	subscribed := topologyWarningEndpoints(append(census.Consumers(), census.InputPins()...), false)
+	generatedActivityEvents := generatedActivityResultEventNamesLocal(c.source)
 	for _, key := range sortedSetKeysLocal(emitted) {
 		entry := emitted[key]
 		ref := entry.Event
+		if _, generated := generatedActivityEvents[eventidentity.Normalize(ref.Canonical)]; generated {
+			// The generated schema and durable attempt journal own these results;
+			// authors neither declare their schemas nor need to subscribe to them.
+			continue
+		}
 		if !ref.HasSchema {
 			if strings.HasPrefix(ref.DisplayName(), "timer.") || strings.HasPrefix(ref.DisplayName(), "platform.") {
 				continue
@@ -173,6 +180,28 @@ func (c *checkerContext) eventWarnings() []Finding {
 		})
 	}
 	return c.eventWarningFindings
+}
+
+func generatedActivityResultEventNamesLocal(source semanticview.Source) map[string]struct{} {
+	out := map[string]struct{}{}
+	if source == nil {
+		return out
+	}
+	for _, nodeID := range sortedNodeIDs(source) {
+		flowID := ""
+		if contractSource, ok := source.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(contractSource.FlowID)
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, source.NodeEventHandlers(nodeID)) {
+			results := runtimecontracts.ActivityResultEventsForSite(site)
+			for _, eventType := range []string{results.SuccessEvent, results.FailureEvent} {
+				if normalized := eventidentity.Normalize(eventType); normalized != "" {
+					out[normalized] = struct{}{}
+				}
+			}
+		}
+	}
+	return out
 }
 
 func legacyQualifiedConsumersForEvent(topology routingtopology.Topology, canonical string) []routingtopology.LegacyQualifiedSubscription {

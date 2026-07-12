@@ -362,6 +362,7 @@ type WorkflowStageTopologyEdge struct {
 	To            string
 	Source        string
 	NodeID        string
+	HandlerEvent  string
 	EventType     string
 	LoopID        string
 	LoopOperation LoopOperationKind

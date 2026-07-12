@@ -117,6 +117,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 				tc.mutate(&h, bundle)
 				bundle.Nodes["join-node"].EventHandlers["item.completed"] = h
 			}
+			rebuildJoinValidationTopology(bundle)
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 			if tc.wantError == "" {
 				if reportContains(report.HardInvalidities(), joinValidationCheckID, "") {
@@ -183,7 +184,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		TimeoutFound: true,
 		Timeout:      runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention", Emit: runtimecontracts.EmitSpec{Event: "join.timed_out", Fields: map[string]runtimecontracts.ExpressionValue{"missing": runtimecontracts.CELExpression("join.missing")}}}},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
 		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -196,5 +197,38 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 			InitialStage: "awaiting", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"attention"},
 			Transitions: []runtimecontracts.WorkflowTransitionContract{{ID: "complete", From: []string{"awaiting"}, To: "ready"}, {ID: "timeout", From: []string{"awaiting"}, To: "attention"}},
 		},
+	}
+	rebuildJoinValidationTopology(bundle)
+	return bundle
+}
+
+func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
+	transitions := []runtimecontracts.HandlerTransitionSemantic{}
+	for nodeID, node := range bundle.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
+				NodeID:       nodeID,
+				EventType:    eventType,
+				CreateEntity: handler.CreateEntity,
+				AdvancesTo:   handler.AdvancesTo,
+				OnComplete:   handler.OnComplete,
+				Rules:        handler.Rules,
+				Accumulate:   handler.Accumulate,
+				Join:         handler.Join,
+				Loop:         handler.Loop,
+			})
+		}
+	}
+	bundle.Semantics.HandlerTransitions = transitions
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
+		"": runtimecontracts.BuildWorkflowStageTopology(
+			"",
+			"awaiting",
+			[]string{"awaiting", "ready", "attention"},
+			[]string{"attention"},
+			transitions,
+			nil,
+			nil,
+		),
 	}
 }

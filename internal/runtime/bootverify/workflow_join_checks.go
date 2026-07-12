@@ -244,8 +244,7 @@ func joinDelayValid(source semanticview.Source, flowID, raw string) bool {
 }
 
 func joinStageCanReenter(source semanticview.Source, flowID, stage string) bool {
-	states := declaredStatesForFlow(source, flowID)
-	edges := authoredStateGraphEdges(source, flowID, source.FlowInitialStage(flowID), states)
+	edges := workflowStageGraphEdges(source, flowID, nil)
 	stage = strings.TrimSpace(stage)
 	seen := map[string]struct{}{}
 	queue := make([]string, 0, len(edges[stage]))

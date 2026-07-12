@@ -1,0 +1,6 @@
+issue: 2005
+impact: minor
+platform_train: 0.7.0
+summary: Preserve handler-origin provenance on canonical lifecycle topology edges.
+spec_sections:
+  - contract_formats.flow_schema.bounded_loops.topology
