@@ -174,6 +174,90 @@ func assertUnexpectedIndexRejected(t *testing.T, err error) {
 	}
 }
 
+func TestSQLiteSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
+	request := canonicalSchemaBootstrapTestRequest(t)
+	path := filepath.Join(t.TempDir(), "malformed-origin.db")
+	store, err := NewSQLiteRuntimeStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.BootstrapSchema(context.Background(), request); err != nil {
+		t.Fatalf("fresh bootstrap: %v", err)
+	}
+	cases := []malformedStoredOriginCase{
+		{name: "blank swarm version", update: `UPDATE runtime_store_metadata SET swarm_version = ' ' WHERE id = 1`, wantDrift: "stored Swarm version is required"},
+		{name: "blank platform version", update: `UPDATE runtime_store_metadata SET platform_version = ' ' WHERE id = 1`, wantDrift: "stored platform version is required"},
+		{name: "zero creation time", update: `UPDATE runtime_store_metadata SET created_at = '0001-01-01T00:00:00Z' WHERE id = 1`, wantDrift: "stored creation time must be non-zero"},
+		{name: "invalid creation time", update: `UPDATE runtime_store_metadata SET created_at = 'not-a-time' WHERE id = 1`, wantDrift: "parse runtime store creation time"},
+	}
+	assertMalformedStoredOrigins(t, cases, func(statement string) error {
+		_, err := store.DB.Exec(statement)
+		return err
+	}, func() error {
+		_, err := store.DB.Exec(`UPDATE runtime_store_metadata SET swarm_version = ?, platform_version = ?, created_at = ? WHERE id = 1`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
+		return err
+	}, func() error {
+		return store.BootstrapSchema(context.Background(), request)
+	}, SchemaDialectSQLite, path, request.Origin)
+}
+
+func TestPostgresSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
+	request := canonicalSchemaBootstrapTestRequest(t)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	store := &PostgresStore{DB: db}
+	var target string
+	if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
+		t.Fatal(err)
+	}
+	cases := []malformedStoredOriginCase{
+		{name: "blank swarm version", update: `UPDATE runtime_store_metadata SET swarm_version = ' ' WHERE id = 1`, wantDrift: "stored Swarm version is required"},
+		{name: "blank platform version", update: `UPDATE runtime_store_metadata SET platform_version = ' ' WHERE id = 1`, wantDrift: "stored platform version is required"},
+		{name: "zero creation time", update: `UPDATE runtime_store_metadata SET created_at = TIMESTAMPTZ '0001-01-01 00:00:00+00' WHERE id = 1`, wantDrift: "stored creation time must be non-zero"},
+	}
+	assertMalformedStoredOrigins(t, cases, func(statement string) error {
+		_, err := db.Exec(statement)
+		return err
+	}, func() error {
+		_, err := db.Exec(`UPDATE runtime_store_metadata SET swarm_version = $1, platform_version = $2, created_at = $3 WHERE id = 1`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt)
+		return err
+	}, func() error {
+		return store.BootstrapSchema(context.Background(), request)
+	}, SchemaDialectPostgres, target, request.Origin)
+}
+
+type malformedStoredOriginCase struct {
+	name      string
+	update    string
+	wantDrift string
+}
+
+func assertMalformedStoredOrigins(
+	t *testing.T,
+	cases []malformedStoredOriginCase,
+	update func(string) error,
+	restore func() error,
+	bootstrap func() error,
+	backend SchemaDialect,
+	target string,
+	current RuntimeStoreOrigin,
+) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := update(tc.update); err != nil {
+				t.Fatal(err)
+			}
+			bootstrapErr := bootstrap()
+			if err := restore(); err != nil {
+				t.Fatalf("restore canonical origin: %v", err)
+			}
+			assertSchemaCompatibilityDiagnostic(t, bootstrapErr, backend, target, current, nil, tc.wantDrift)
+		})
+	}
+}
+
 func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	dsn, db, cleanup := testutil.StartEmptyPostgres(t)
@@ -285,12 +369,14 @@ func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 	if err := store.BootstrapSchema(context.Background(), request); err != nil {
 		t.Fatalf("create generated state: %v", err)
 	}
+	storedOrigin, err := readRuntimeStoreOrigin(context.Background(), store.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.DB.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BootstrapSchema(context.Background(), request); err == nil {
-		t.Fatal("incompatible generated state table was accepted")
-	}
+	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), request), SchemaDialectSQLite, store.path, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
 }
 
 func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
@@ -299,14 +385,54 @@ func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
+	var target string
+	if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.BootstrapSchema(context.Background(), request); err != nil {
 		t.Fatalf("create generated state: %v", err)
+	}
+	storedOrigin, err := readRuntimeStoreOrigin(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BootstrapSchema(context.Background(), request); err == nil {
-		t.Fatal("incompatible generated state table was accepted")
+	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), request), SchemaDialectPostgres, target, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+}
+
+func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend SchemaDialect, target string, current RuntimeStoreOrigin, wantOrigin *RuntimeStoreOrigin, wantDrift ...string) {
+	t.Helper()
+	var incompatible *SchemaCompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("bootstrap error = %v (%T), want SchemaCompatibilityError", err, err)
+	}
+	if incompatible.Backend != backend || incompatible.Target != target {
+		t.Fatalf("diagnostic backend/target = %s/%q, want %s/%q", incompatible.Backend, incompatible.Target, backend, target)
+	}
+	if incompatible.Current != current {
+		t.Fatalf("diagnostic current origin = %#v, want %#v", incompatible.Current, current)
+	}
+	if wantOrigin != nil {
+		if incompatible.Origin == nil || *incompatible.Origin != *wantOrigin {
+			t.Fatalf("diagnostic stored origin = %#v, want %#v", incompatible.Origin, wantOrigin)
+		}
+	} else if incompatible.Origin != nil {
+		t.Fatalf("malformed stored origin was exposed as valid evidence: %#v", incompatible.Origin)
+	}
+	drift := strings.Join(incompatible.Drift, "; ")
+	for _, want := range wantDrift {
+		if !strings.Contains(drift, want) {
+			t.Fatalf("diagnostic drift = %v, want evidence %q", incompatible.Drift, want)
+		}
+	}
+	wantRemediation := "create and select a fresh PostgreSQL database (for example: createdb swarm_fresh, then set database.name to swarm_fresh)"
+	if backend == SchemaDialectSQLite {
+		wantRemediation = "stop Swarm and remove the incompatible local store with: rm -f -- " + shellQuote(target) + " " + shellQuote(target+"-wal") + " " + shellQuote(target+"-shm")
+	}
+	if !strings.Contains(err.Error(), "remediation: "+wantRemediation) {
+		t.Fatalf("diagnostic = %v, want remediation %q", err, wantRemediation)
 	}
 }
 

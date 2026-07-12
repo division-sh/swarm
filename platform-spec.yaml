@@ -11161,6 +11161,11 @@ platform_tables:
     status: pre_1_0_no_migration
     compatibility_authority: actual_selected_backend_catalog_shape
     origin_evidence: runtime_store_metadata
+    origin_validity: >
+      Creation-origin evidence is valid only when the required id=1 row has non-blank Swarm and platform versions after
+      trimming and created_at decodes to a non-zero timestamp. Missing, malformed, blank, invalid, or zero-valued evidence
+      makes the selected store incompatible and must use the same typed backend-specific diagnostic and fresh-store
+      remediation as catalog drift.
     rule: >
       Origin versions are immutable diagnostic evidence, never a compatibility verdict. Existing selected stores are
       inspected before any persistent schema or data mutation. A non-empty un-stamped store is not adopted. A stamped store
@@ -11173,7 +11178,8 @@ platform_tables:
       immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
     generated_node_state: >
       Contract-generated node-state tables are classified only after platform acceptance. Missing tables may be created;
-      existing incompatible tables fail before node-state mutation.
+      existing incompatible tables fail before node-state mutation through the same typed backend-specific compatibility
+      diagnostic, including selected-store target, running and stored origin evidence, exact drift, and fresh-store remediation.
   test_bootstrap:
     description: After legacy SQL deletion, normal runtime/test bootstrap creates only platform tables plus generated
       node-state tables. Product-specific typed entity table DDL is explicit future/legacy optimization-test input, not

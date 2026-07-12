@@ -40,6 +40,7 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 	if err != nil {
 		return err
 	}
+	diagnostic := schemaCompatibilityDiagnostic{Backend: SchemaDialectSQLite, Target: s.path, Current: request.Origin, Origin: report.Origin}
 	switch report.State {
 	case schemaStateFresh:
 		if err := executeSQLitePlans(ctx, conn, request.PlatformPlans); err != nil {
@@ -50,11 +51,11 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 		}
 	case schemaStateCompatible:
 	case schemaStateIncompatible:
-		return &SchemaCompatibilityError{Backend: SchemaDialectSQLite, Target: s.path, Current: request.Origin, Origin: report.Origin, Drift: report.Drift}
+		return diagnostic.failure(report.Drift)
 	default:
 		return fmt.Errorf("unknown sqlite schema compatibility state %q", report.State)
 	}
-	if err := ensureSQLiteStatePlans(ctx, conn, request.StatePlans); err != nil {
+	if err := ensureSQLiteStatePlans(ctx, conn, request.StatePlans, diagnostic); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -154,7 +155,7 @@ func executeSQLitePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTable
 	return nil
 }
 
-func ensureSQLiteStatePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTableDDL) error {
+func ensureSQLiteStatePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
 	for _, plan := range plans {
 		expected, err := expectedSchemaShape([]SchemaTableDDL{plan}, SchemaDialectSQLite)
 		if err != nil {
@@ -175,7 +176,7 @@ func ensureSQLiteStatePlans(ctx context.Context, conn *sql.Conn, plans []SchemaT
 			return err
 		}
 		if drift := compareSchemaShapes(expected, actual); len(drift) > 0 {
-			return fmt.Errorf("generated state table %s is incompatible: %s", plan.TableName, strings.Join(drift, "; "))
+			return diagnostic.failure(generatedStateDrift(plan.TableName, drift))
 		}
 	}
 	return nil

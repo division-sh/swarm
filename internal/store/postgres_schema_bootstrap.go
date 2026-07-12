@@ -47,6 +47,7 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 		return err
 	}
 	report.Target = target
+	diagnostic := schemaCompatibilityDiagnostic{Backend: SchemaDialectPostgres, Target: target, Current: request.Origin, Origin: report.Origin}
 	switch report.State {
 	case schemaStateFresh:
 		if err := platformschema.BootstrapFreshPostgres(ctx, tx, request.PlatformPlans, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt); err != nil {
@@ -54,11 +55,11 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 		}
 	case schemaStateCompatible:
 	case schemaStateIncompatible:
-		return &SchemaCompatibilityError{Backend: SchemaDialectPostgres, Target: target, Current: request.Origin, Origin: report.Origin, Drift: report.Drift}
+		return diagnostic.failure(report.Drift)
 	default:
 		return fmt.Errorf("unknown postgres schema compatibility state %q", report.State)
 	}
-	if err := ensurePostgresStatePlans(ctx, tx, request.StatePlans); err != nil {
+	if err := ensurePostgresStatePlans(ctx, tx, request.StatePlans, diagnostic); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -244,7 +245,7 @@ func executePostgresPlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDD
 	return nil
 }
 
-func ensurePostgresStatePlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDDL) error {
+func ensurePostgresStatePlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
 	for _, plan := range plans {
 		expected, err := expectedSchemaShape([]SchemaTableDDL{plan}, SchemaDialectPostgres)
 		if err != nil {
@@ -265,7 +266,7 @@ func ensurePostgresStatePlans(ctx context.Context, tx *sql.Tx, plans []SchemaTab
 			return err
 		}
 		if drift := compareSchemaShapes(expected, actual); len(drift) > 0 {
-			return fmt.Errorf("generated state table %s is incompatible: %s", plan.TableName, strings.Join(drift, "; "))
+			return diagnostic.failure(generatedStateDrift(plan.TableName, drift))
 		}
 	}
 	return nil
