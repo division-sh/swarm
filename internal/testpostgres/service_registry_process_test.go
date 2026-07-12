@@ -322,17 +322,17 @@ if args[0] == "ps":
         else: print(value["Id"])
     sys.exit(0)
 if args[0] == "create":
+    cidfile = args[args.index("--cidfile") + 1]
+    with open(cidfile, "w") as f: f.write("container-id\n")
     with open(path("create-count"), "a") as f: f.write("1\n")
     open(path("create-started"), "w").close()
     while not os.path.exists(path("release-create")): time.sleep(.02)
-    cidfile = args[args.index("--cidfile") + 1]
     name = args[args.index("--name") + 1]
     labels = {}
     for i, value in enumerate(args):
         if value == "--label":
             key, label_value = args[i + 1].split("=", 1); labels[key] = label_value
     value = {"Id":"container-id", "Name":"/" + name, "Image":"image-id", "Config":{"Labels":labels}, "State":{"Running":False}}
-    with open(cidfile, "w") as f: f.write("container-id\n")
     with open(path("inspect.json"), "w") as f: json.dump([value], f)
     print("container-id"); sys.exit(0)
 if args[0] == "inspect":

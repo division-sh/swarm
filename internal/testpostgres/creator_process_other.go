@@ -11,6 +11,8 @@ func validateCreatorProcessSupport() error {
 	return fmt.Errorf("Postgres test service creator handoff is unsupported on this platform")
 }
 
+func restrictCreatorProcessFileMode() {}
+
 func creatorProcessCommand(string, string, string, *fileLock) (*exec.Cmd, error) {
 	return nil, validateCreatorProcessSupport()
 }
