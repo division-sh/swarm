@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -37,7 +36,7 @@ func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 
 	t.Run("classification excludes sibling classes", func(t *testing.T) {
 		readOnly := complianceStringSet(methods)
-		for _, sibling := range []string{"event.publish", "mailbox.reject", "event.subscribe", "rpc.unsubscribe"} {
+		for _, sibling := range []string{"event.publish", "mailbox.decide", "event.subscribe", "rpc.unsubscribe"} {
 			if _, ok := readOnly[sibling]; ok {
 				t.Fatalf("%s classified into read-only HTTP runtime probes; sibling methods belong to their approved probe class", sibling)
 			}
@@ -297,7 +296,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"event.list":                     {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
 		"health.check":                   {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
 		"health.ping":                    {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
-		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "mailbox-1"}, ResultKeys: []string{"item", "payload", "history", "decision_sheet"}},
+		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "card-1"}, ResultKeys: []string{"kind", "decision_card"}},
 		"mailbox.list":                   {Params: map[string]any{}, ResultKeys: []string{"items"}},
 		"run.diagnose":                   {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics", "test_quiescence"}},
 		"run.get":                        {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
@@ -512,6 +511,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 		State:     "active",
 		Turns:     []store.OperatorConversationTurn{},
 	}
+	decisionProbeState := &mutatingRuntimeProbeState{now: now}
 	return OperatorReadOptions{
 		Now:      func() time.Time { return now },
 		Ready:    func() bool { return true },
@@ -921,8 +921,9 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			listResult: store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}},
 			viewResult: fork,
 		},
-		Idempotency: newMutatingProbeIdempotencyStore(),
-		Mailbox:     newReadOnlyMailboxProbeStore(now),
+		Idempotency:   newMutatingProbeIdempotencyStore(),
+		Mailbox:       newReadOnlyMailboxProbeStore(now),
+		DecisionCards: newMutatingProbeDecisionCardStore(decisionProbeState),
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
@@ -1265,10 +1266,6 @@ func (s *readOnlyMailboxProbeStore) GetV1MailboxItem(_ context.Context, mailboxI
 		return store.MailboxV1ItemDetail{}, store.ErrMailboxV1NotFound
 	}
 	return detail, nil
-}
-
-func (s *readOnlyMailboxProbeStore) DecideV1MailboxItem(context.Context, store.MailboxV1DecisionRequest) (store.MailboxV1DecisionOutcome, error) {
-	return store.MailboxV1DecisionOutcome{}, errors.New("read-only runtime probe does not support mailbox decisions")
 }
 
 var _ MailboxAPIStore = (*readOnlyMailboxProbeStore)(nil)

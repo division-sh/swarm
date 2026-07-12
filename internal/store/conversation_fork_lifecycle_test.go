@@ -277,12 +277,6 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 				},
 				{
 					ToolUseID: "tool-4",
-					Name:      "mailbox_approve",
-					Arguments: json.RawMessage(`{"mailbox_id":"mb-1"}`),
-					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"mailbox.approve","live_mutation":false}`),
-				},
-				{
-					ToolUseID: "tool-5",
 					Name:      "run_start",
 					Arguments: json.RawMessage(`{"event_name":"scan.requested"}`),
 					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"run.start","live_mutation":false}`),
@@ -316,14 +310,14 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
 		t.Fatalf("snapshot read tool result = %#v", readResult)
 	}
-	for _, toolName := range []string{"save_entity_field", "emit_event", "mailbox_approve", "run_start"} {
+	for _, toolName := range []string{"save_entity_field", "emit_event", "run_start"} {
 		call := requireConversationForkToolCall(t, result.Turn.ToolCalls, toolName)
 		stub := conversationForkToolCallMap(t, call.Result)
 		if stub["status"] != "stubbed" || stub["owner"] != ConversationForkChatSandboxOwner || stub["live_mutation"] != false {
 			t.Fatalf("%s stub result = %#v", toolName, stub)
 		}
 	}
-	if len(result.Turn.ToolCalls) != 5 {
+	if len(result.Turn.ToolCalls) != 4 {
 		t.Fatalf("tool calls = %#v, want only requested snapshot/stub tool evidence", result.Turn.ToolCalls)
 	}
 	if call := findConversationForkToolCall(result.Turn.ToolCalls, "run_stop"); call != nil {

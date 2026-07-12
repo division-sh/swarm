@@ -13,8 +13,7 @@ type fakeStore struct{}
 func (fakeStore) InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error) {
 	return "m1", nil
 }
-func (fakeStore) DecideMailboxItem(context.Context, string, string, string, string) error { return nil }
-func (fakeStore) CountMailboxItems(context.Context, string) (int, error)                  { return 2, nil }
+func (fakeStore) CountMailboxItems(context.Context, string) (int, error) { return 2, nil }
 func (fakeStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
 	return runtimetools.MailboxItem{ID: id, Type: "spend_request", Status: "pending"}, nil
 }
@@ -56,15 +55,5 @@ func TestPrintPending(t *testing.T) {
 	}
 	if b.Len() == 0 {
 		t.Fatal("expected output")
-	}
-}
-
-func TestNormalizeDecisionAction(t *testing.T) {
-	out, err := NormalizeDecisionAction("more-data")
-	if err != nil {
-		t.Fatalf("normalize: %v", err)
-	}
-	if out.Status != "decided" || out.Decision != "more-data" {
-		t.Fatalf("unexpected outcome: %+v", out)
 	}
 }

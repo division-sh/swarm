@@ -121,8 +121,8 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	if matrix.IssueRole != "provenance" {
 		t.Fatalf("matrix issue_role = %q, want provenance", matrix.IssueRole)
 	}
-	if len(doc.Methods) != 59 {
-		t.Fatalf("generated OpenRPC methods = %d, want 59", len(doc.Methods))
+	if len(doc.Methods) != 62 {
+		t.Fatalf("generated OpenRPC methods = %d, want 62", len(doc.Methods))
 	}
 	if len(matrix.Methods) != len(doc.Methods) {
 		t.Fatalf("matrix rows = %d, want generated method count %d", len(matrix.Methods), len(doc.Methods))
@@ -242,7 +242,7 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 		{
 			name: "stale tracker",
 			mutate: func(matrix *openRPCComplianceMatrix) {
-				row := complianceMatrixRow(t, matrix, "mailbox.reject")
+				row := complianceMatrixRow(t, matrix, "mailbox.decide")
 				row.HappyPath.ProofRefs = []complianceProofRef{{Kind: "tracker", Issue: 835, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}}
 			},
 			want: "tracker proof_ref issue #835 is the provenance issue",
@@ -250,7 +250,7 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 		{
 			name: "unknown tracker",
 			mutate: func(matrix *openRPCComplianceMatrix) {
-				row := complianceMatrixRow(t, matrix, "mailbox.reject")
+				row := complianceMatrixRow(t, matrix, "mailbox.decide")
 				row.HappyPath.ProofRefs = []complianceProofRef{{Kind: "tracker", Issue: 999999, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}}
 			},
 			want: "tracker proof_ref issue #999999 watchlist \"operator_surfaces.v1_openrpc_api_conformance\" is not in active_trackers",

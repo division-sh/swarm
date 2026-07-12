@@ -24,6 +24,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
 		Loops:                  nil,
+		Gates:                  deriveWorkflowGatePlans(bundle),
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		Actions:                deriveWorkflowActionEntries(bundle),
 		GuardByID:              map[string]GuardActionEntry{},
@@ -198,6 +199,26 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	bundle.Semantics = semantics
 }
 
+func deriveWorkflowGatePlans(bundle *WorkflowContractBundle) []WorkflowGatePlan {
+	if bundle == nil {
+		return nil
+	}
+	out := make([]WorkflowGatePlan, 0)
+	if bundle.RootSchema != nil {
+		out = append(out, bundle.RootSchema.StageDeclarations.GatePlans("")...)
+	}
+	flowIDs := make([]string, 0, len(bundle.FlowSchemas))
+	for flowID := range bundle.FlowSchemas {
+		flowIDs = append(flowIDs, flowID)
+	}
+	sort.Strings(flowIDs)
+	for _, flowID := range flowIDs {
+		schema := bundle.FlowSchemas[flowID]
+		out = append(out, schema.StageDeclarations.GatePlans(flowID)...)
+	}
+	return out
+}
+
 func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []HandlerTransitionSemantic) []WorkflowLoopPlan {
 	if bundle == nil {
 		return nil
@@ -271,7 +292,7 @@ func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]Wo
 			}
 			timers = append(timers, timer)
 		}
-		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops)
+		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops, semantics.Gates)
 	}
 	build("", semantics.InitialStage, rootStages, semantics.TerminalStages)
 	for flowID, stages := range semantics.FlowStates {

@@ -22,7 +22,6 @@ const (
 	RequestEvent        = "provider.requested"
 	ReplyEvent          = "provider.replied"
 	CorrelationKey      = "provider_request_id"
-	ContinuationMailbox = "mailbox"
 	ContinuationHuman   = "human_task"
 )
 
@@ -181,12 +180,6 @@ pins:
 
 func providerContinuationInputsYAML(opts Options) string {
 	switch opts.ProviderContinuation {
-	case ContinuationMailbox:
-		return `      - name: mailbox_deferred
-        event: mailbox.item_deferred
-      - name: mailbox_decided
-        event: mailbox.item_decided
-`
 	case ContinuationHuman:
 		return `      - name: human_task_deferred
         event: human_task.deferred
@@ -200,37 +193,6 @@ func providerContinuationInputsYAML(opts Options) string {
 
 func providerNodesYAML(opts Options) string {
 	switch opts.ProviderContinuation {
-	case ContinuationMailbox:
-		return `
-provider-node:
-  id: provider-node
-  execution_type: system_node
-  subscribes_to: [provider.requested, mailbox.item_deferred, mailbox.item_decided]
-  produces: [provider.replied]
-  event_handlers:
-    provider.requested:
-      action:
-        id: mailbox_write
-        mailbox:
-          item_type:
-            literal: approval
-          summary:
-            literal: Review provider response
-          payload:
-            provider_request_id:
-              ref: payload.provider_request_id
-            account_id:
-              ref: payload.account_id
-    mailbox.item_deferred: {}
-    mailbox.item_decided:
-      emit:
-        event: provider.replied
-        fields:
-          provider_request_id: payload.mailbox_payload.provider_request_id
-          account_id: payload.mailbox_payload.account_id
-          result:
-            literal: approved
-`
 	case ContinuationHuman:
 		requestKey := opts.ContinuationRequestKey
 		if requestKey == "" {

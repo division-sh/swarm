@@ -1029,13 +1029,13 @@ func TestRun_DoesNotWarnForPlatformEmittedEventCatalogSubscription(t *testing.T)
 	}{
 		{
 			name:      "mailbox item decided",
-			eventType: "mailbox.item_decided",
+			eventType: "mailbox.card_decided",
 			nodeID:    "approval-handler",
 			node: runtimecontracts.SystemNodeContract{
 				ID:           "approval-handler",
-				SubscribesTo: []string{"mailbox.item_decided"},
+				SubscribesTo: []string{"mailbox.card_decided"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.item_decided": {},
+					"mailbox.card_decided": {},
 				},
 			},
 			catalog: platformEventCatalogTestNode(t, `
@@ -1118,7 +1118,7 @@ payload:
 func TestRun_RejectsProductRedeclarationOfPlatformEmittedEvent(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"mailbox.item_decided": {
+			"mailbox.card_decided": {
 				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 			},
 		},
@@ -1126,7 +1126,7 @@ func TestRun_RejectsProductRedeclarationOfPlatformEmittedEvent(t *testing.T) {
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
-		"mailbox.item_decided": platformEventCatalogTestNode(t, `
+		"mailbox.card_decided": platformEventCatalogTestNode(t, `
 payload:
   mailbox_id: uuid
 `),
@@ -1134,7 +1134,7 @@ payload:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "platform_namespace_violation", "Event mailbox.item_decided is platform-emitted and auto-registered; remove the local redeclaration.") {
+	if !reportContains(report.Errors(), "platform_namespace_violation", "Event mailbox.card_decided is platform-emitted and auto-registered; remove the local redeclaration.") {
 		t.Fatalf("expected platform-emitted event redeclaration error, got %#v", report.Errors())
 	}
 }
@@ -1145,7 +1145,7 @@ func TestRun_RejectsFlowOutputPinClaimOfPlatformEmittedEvent(t *testing.T) {
 			Name: "approval",
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"mailbox.item_decided"},
+					Events: []string{"mailbox.card_decided"},
 				},
 			},
 		},
@@ -1153,7 +1153,7 @@ func TestRun_RejectsFlowOutputPinClaimOfPlatformEmittedEvent(t *testing.T) {
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
-		"mailbox.item_decided": platformEventCatalogTestNode(t, `
+		"mailbox.card_decided": platformEventCatalogTestNode(t, `
 payload:
   mailbox_id: uuid
 `),
@@ -1161,7 +1161,7 @@ payload:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs.events references platform-emitted event mailbox.item_decided; platform owns this event") {
+	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs.events references platform-emitted event mailbox.card_decided; platform owns this event") {
 		t.Fatalf("expected platform-emitted event output pin error, got %#v", report.Errors())
 	}
 }
@@ -6403,8 +6403,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 78 {
-		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
+	if got := len(bootCheckRegistry); got != 79 {
+		t.Fatalf("bootCheckRegistry count = %d, want 79", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

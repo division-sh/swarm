@@ -84,6 +84,8 @@ type scenarioStep struct {
 	Payload            any
 	Match              map[string]any
 	Reason             any
+	Verdict            any
+	Fields             any
 	Until              any
 	IdempotencyKey     any
 	Emitter            any
@@ -692,7 +694,7 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 		}
 		for cfgKey := range cfg {
 			switch cfgKey {
-			case "match", "payload", "reason", "until", "idempotency_key":
+			case "match", "verdict", "fields", "until", "idempotency_key":
 			default:
 				return scenarioStep{}, fmt.Errorf("unsupported %s step field %q", key, cfgKey)
 			}
@@ -705,7 +707,8 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 			Action:         action,
 			Match:          match,
 			Payload:        cfg["payload"],
-			Reason:         cfg["reason"],
+			Verdict:        cfg["verdict"],
+			Fields:         cfg["fields"],
 			Until:          cfg["until"],
 			IdempotencyKey: cfg["idempotency_key"],
 		}, nil
@@ -715,11 +718,9 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 
 func normalizeScenarioMailboxAction(value string) string {
 	switch strings.TrimSpace(value) {
-	case "mailbox.approve", "approve_mailbox":
-		return "mailbox.approve"
-	case "mailbox.reject", "reject_mailbox":
-		return "mailbox.reject"
-	case "mailbox.defer", "defer_mailbox":
+	case "mailbox.decide":
+		return "mailbox.decide"
+	case "mailbox.defer":
 		return "mailbox.defer"
 	default:
 		return ""
@@ -1404,7 +1405,7 @@ func (r scenarioRunner) runScenarioStep(ctx context.Context, file scenarioTestFi
 	switch step.Action {
 	case "publish":
 		return r.runPublishStep(ctx, file, evaluator, state, step)
-	case "mailbox.approve", "mailbox.reject", "mailbox.defer":
+	case "mailbox.decide", "mailbox.defer":
 		return r.runMailboxStep(ctx, evaluator, state, step)
 	default:
 		return fmt.Errorf("unsupported action %q", step.Action)
@@ -1689,28 +1690,27 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 		params["idempotency_key"] = text
 	}
 	switch step.Action {
-	case "mailbox.approve":
-		payload, err := evaluator.evalValue(step.Payload)
+	case "mailbox.decide":
+		verdict, err := evaluator.evalValue(step.Verdict)
 		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("payload: %w", err)}
+			return scenarioTestValidationError{err: fmt.Errorf("verdict: %w", err)}
 		}
-		if payload != nil {
-			m, ok := payload.(map[string]any)
+		if text := optionalScenarioString(verdict); text != "" {
+			params["verdict"] = text
+		} else {
+			return scenarioTestValidationError{err: fmt.Errorf("mailbox.decide verdict is required")}
+		}
+		fields, err := evaluator.evalValue(step.Fields)
+		if err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("fields: %w", err)}
+		}
+		if fields != nil {
+			m, ok := fields.(map[string]any)
 			if !ok {
-				return scenarioTestValidationError{err: fmt.Errorf("mailbox.approve payload must be an object")}
+				return scenarioTestValidationError{err: fmt.Errorf("mailbox.decide fields must be an object")}
 			}
-			params["decision_payload"] = m
+			params["fields"] = m
 		}
-	case "mailbox.reject":
-		reason, err := evaluator.evalValue(step.Reason)
-		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("reason: %w", err)}
-		}
-		text := optionalScenarioString(reason)
-		if text == "" {
-			return scenarioTestValidationError{err: fmt.Errorf("mailbox.reject reason is required")}
-		}
-		params["reason"] = text
 	case "mailbox.defer":
 		until, err := evaluator.evalValue(step.Until)
 		if err != nil {
@@ -1725,25 +1725,25 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 		}
 		params["until"] = text
 	}
-	mailboxID, err := r.findMailboxID(ctx, evaluator, state.RunID, step.Match)
+	cardID, contentHash, err := r.findDecisionCard(ctx, evaluator, state.RunID, step.Match)
 	if err != nil {
 		return err
 	}
-	params["mailbox_id"] = mailboxID
-	var result mailboxDecisionResult
+	params["card_id"] = cardID
+	if step.Action == "mailbox.decide" {
+		params["observed_content_hash"] = contentHash
+	}
+	var result mailboxMutationResult
 	if err := r.client.call(ctx, step.Action, params, &result); err != nil {
 		return err
 	}
-	if err := validateMailboxDecisionResult(strings.TrimPrefix(step.Action, "mailbox."), result); err != nil {
-		return err
-	}
-	if result.DownstreamEventID != "" {
-		state.LastEventID = result.DownstreamEventID
+	if !result.OK || result.CardID != cardID || result.ChangeID <= 0 {
+		return fmt.Errorf("malformed %s result", step.Action)
 	}
 	return nil
 }
 
-func (r scenarioRunner) findMailboxID(ctx context.Context, evaluator *scenarioExpressionEvaluator, runID string, match map[string]any) (string, error) {
+func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenarioExpressionEvaluator, runID string, match map[string]any) (string, string, error) {
 	params := map[string]any{
 		"status": "pending",
 		"run_id": runID,
@@ -1752,34 +1752,64 @@ func (r scenarioRunner) findMailboxID(ctx context.Context, evaluator *scenarioEx
 	for key, value := range match {
 		evaluated, err := evaluator.evalValue(value)
 		if err != nil {
-			return "", fmt.Errorf("match.%s: %w", key, err)
+			return "", "", fmt.Errorf("match.%s: %w", key, err)
 		}
 		text := strings.TrimSpace(fmt.Sprint(evaluated))
 		if text == "" {
 			continue
 		}
 		switch key {
-		case "type":
-			params["type"] = text
-		case "priority":
-			params["priority"] = text
 		case "entity_id":
 			params["entity_id"] = text
+		case "decision", "stage":
 		default:
-			return "", fmt.Errorf("unsupported mailbox match field %q", key)
+			return "", "", fmt.Errorf("unsupported decision-card match field %q", key)
 		}
 	}
 	var result mailboxListResult
 	if err := r.client.call(ctx, "mailbox.list", params, &result); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := validateMailboxListResult(result); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if len(result.Items) != 1 {
-		return "", fmt.Errorf("mailbox match for run %s returned %d items, want exactly one", runID, len(result.Items))
+	matches := make([]mailboxDecisionCardSummary, 0)
+	for _, item := range result.Items {
+		if item.Kind != "decision_card" || item.DecisionCard == nil {
+			continue
+		}
+		card := *item.DecisionCard
+		if value, ok := match["decision"]; ok {
+			expected, err := evaluator.evalValue(value)
+			if err != nil {
+				return "", "", err
+			}
+			if card.DecisionID != optionalScenarioString(expected) {
+				continue
+			}
+		}
+		if value, ok := match["stage"]; ok {
+			expected, err := evaluator.evalValue(value)
+			if err != nil {
+				return "", "", err
+			}
+			if card.Stage != optionalScenarioString(expected) {
+				continue
+			}
+		}
+		matches = append(matches, card)
 	}
-	return result.Items[0].MailboxID, nil
+	if len(matches) != 1 {
+		return "", "", fmt.Errorf("decision-card match for run %s returned %d items, want exactly one", runID, len(matches))
+	}
+	var detail mailboxDetailProjection
+	if err := r.client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": matches[0].CardID}, &detail); err != nil {
+		return "", "", err
+	}
+	if err := validateMailboxDetailResult(detail); err != nil {
+		return "", "", err
+	}
+	return matches[0].CardID, detail.DecisionCard.CardContentHash, nil
 }
 
 func (r scenarioRunner) waitForQuiescence(ctx context.Context, runID string) error {
@@ -2177,7 +2207,8 @@ func scenarioTestAPIErrorExitCode(err error) int {
 			"RUN_ALREADY_TERMINAL",
 			"IDEMPOTENCY_CONFLICT",
 			"MAILBOX_ALREADY_DECIDED",
-			"MAILBOX_DECISION_EVENT_UNCONFIGURED",
+			"MAILBOX_CARD_SUPERSEDED",
+			"MAILBOX_STALE_CARD",
 		},
 	})
 }

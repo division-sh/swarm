@@ -81,6 +81,7 @@ type WorkflowSemanticView struct {
 	Timers                 []WorkflowTimerContract
 	Joins                  []WorkflowJoinPlan
 	Loops                  []WorkflowLoopPlan
+	Gates                  []WorkflowGatePlan
 	Guards                 []GuardActionEntry
 	Actions                []GuardActionEntry
 	GuardByID              map[string]GuardActionEntry
@@ -340,6 +341,29 @@ type WorkflowLoopPlan struct {
 	Operations    []WorkflowLoopOperationPlan
 }
 
+type WorkflowGatePlan struct {
+	FlowID   string
+	Stage    string
+	Decision string
+	Title    string
+	Context  map[string]ExpressionValue
+	Outcomes map[string]WorkflowGateOutcomePlan
+}
+
+type WorkflowGateOutcomePlan struct {
+	Verdict    string
+	Label      string
+	Input      map[string]WorkflowGateInputField
+	AdvancesTo string
+	Emit       EmitSpec
+}
+
+type WorkflowGateInputField struct {
+	Type     string `yaml:"type" json:"type"`
+	Required bool   `yaml:"required" json:"required"`
+	Label    string `yaml:"label,omitempty" json:"label,omitempty"`
+}
+
 // WorkflowStageTopology is the canonical lowered lifecycle graph for one flow.
 // Verifier, runtime loop plans, and authoring projections consume this graph.
 type WorkflowStageTopology struct {
@@ -369,6 +393,8 @@ type WorkflowStageTopologyEdge struct {
 	TimerID       string
 	After         string
 	Timed         bool
+	DecisionID    string
+	Verdict       string
 }
 
 type WorkflowLoopOperationPlan struct {

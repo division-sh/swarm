@@ -325,6 +325,10 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	if err != nil {
 		return fmt.Errorf("fork loop state for entity %s: %w", entityID, err)
 	}
+	forkAccumulator, gateBindings, err := forkGateActivationState(forkAccumulator, forkRunID, meta.FlowInstance, entityID)
+	if err != nil {
+		return fmt.Errorf("fork gate state for entity %s: %w", entityID, err)
+	}
 	accJSON, err := jsonMapArg(forkAccumulator)
 	if err != nil {
 		return fmt.Errorf("encode fork accumulator for entity %s: %w", entityID, err)
@@ -343,6 +347,9 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	`, forkRunID, entityID, meta.FlowInstance, meta.EntityType, meta.Slug, meta.Name,
 		currentState, gatesJSON, fieldsJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
+	}
+	if err := materializeRunForkDecisionCards(ctx, tx, forkRunID, entityID, gateBindings, now); err != nil {
+		return err
 	}
 	return mutationlog.InsertEntityStateDiff(ctx, tx, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
 		CurrentState: currentState,

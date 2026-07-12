@@ -771,7 +771,7 @@ func classifyWorkflowInstanceStoreSpecCallSite(site runtimeWriterCallSite) (runt
 		if site.Kind == primitiveBegin {
 			return classDifferentConcept, "Postgres workflow instance helper opens a local transaction; SQLite writes consume the selected runtime mutation boundary", true
 		}
-	case "MarkTerminated", "upsertSpec", "createSpec":
+	case "MarkTerminated", "markWorkflowInstanceTerminatedSpecTx", "upsertSpec", "createSpec":
 		if site.CallReceiver == "tx" {
 			return classDifferentConcept, "named Postgres/spec workflow instance writer uses a local transaction after SQLite has delegated to the canonical path", true
 		}
@@ -858,7 +858,6 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 		}
 		switch site.Function {
 		case "sqliteLockAgentDeliveryTx", "sqliteEnsureRunRow", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
-			"appendSQLiteMailboxV1DecisionEventTx", "normalizeSQLiteMailboxV1DecisionReplayResult",
 			"loadSQLiteMailboxV1RowTx", "sqliteMarkRunTerminalTx", "sqliteNormalRunCompletionRunReadyTx",
 			"sqliteNormalRunCompletionSessionLeasesSettledTx", "ensureSQLiteTaskConversationAuditRowTx":
 			return true
@@ -875,6 +874,14 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
+		{
+			name:           "decision card transactional helpers",
+			path:           rx(`^internal/store/decision_cards\.go$`),
+			function:       rx(`^(insertDecisionCard|decideDecisionCard|deferDecisionCard|beginDecisionCardInput|updateDecisionCardDraftStatus|expireAndReplaceDecisionCardDrafts|supersedeDecisionCardsForStage|supersedeDecisionCardsForRun)$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "decision-card helpers write only through a selected-store or workflow pipeline transaction supplied by their canonical mutation owner",
+		},
 		{
 			name:           "managed external effect attempt admission",
 			path:           rx(`^internal/runtime/(llm/(api_runtime|openai_compatible_runtime|openai_responses_runtime|cli_runtime|cli_runtime_process|cli_tool_result_relay)|managedcredentials/store|mcp/client|tools/(executor_http|executor_native|tool_result_relay))\.go$`),

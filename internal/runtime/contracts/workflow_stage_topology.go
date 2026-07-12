@@ -13,6 +13,7 @@ func BuildWorkflowStageTopology(
 	transitions []HandlerTransitionSemantic,
 	timers []WorkflowTimerContract,
 	loops []WorkflowLoopPlan,
+	gates ...[]WorkflowGatePlan,
 ) WorkflowStageTopology {
 	flowID = strings.TrimSpace(flowID)
 	initial = strings.TrimSpace(initial)
@@ -118,6 +119,19 @@ func BuildWorkflowStageTopology(
 			After:     strings.TrimSpace(timer.Delay),
 			Timed:     true,
 		})
+	}
+	if len(gates) > 0 {
+		for _, gate := range gates[0] {
+			if strings.TrimSpace(gate.FlowID) != flowID || strings.TrimSpace(gate.Stage) == "" {
+				continue
+			}
+			for verdict, outcome := range gate.Outcomes {
+				topology.Edges = appendTopologyEdge(topology.Edges, stageSet, WorkflowStageTopologyEdge{
+					From: strings.TrimSpace(gate.Stage), To: strings.TrimSpace(outcome.AdvancesTo), Source: "gate",
+					NodeID: "runtime", EventType: "mailbox.card_decided", DecisionID: strings.TrimSpace(gate.Decision), Verdict: strings.TrimSpace(verdict),
+				})
+			}
+		}
 	}
 	sort.Slice(topology.Edges, func(i, j int) bool {
 		left, right := topology.Edges[i], topology.Edges[j]
@@ -244,7 +258,7 @@ func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvance
 }
 
 func topologyEdgeSortKey(edge WorkflowStageTopologyEdge) string {
-	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.NodeID, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After}, "\x00")
+	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.NodeID, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
 }
 
 func normalizedStringSet(values []string) map[string]struct{} {

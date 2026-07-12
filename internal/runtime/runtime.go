@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -58,6 +59,7 @@ type Stores struct {
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
+	DecisionCards       decisioncard.Store
 	StartupOwnership    runtimestartupownership.Store
 	MailboxStore        runtimetools.MailboxPersistence
 	ToolEntityStore     runtimetools.EntityPersistence
@@ -686,6 +688,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			TimerScheduler:                   rt.Scheduler,
 			TimerScheduleStore:               stores.ScheduleStore,
 			MailboxMaterializer:              stores.MailboxMaterializer,
+			DecisionCards:                    stores.DecisionCards,
 			EventReceiptsCapability:          boot.EventReceiptCapability,
 			Credentials:                      rt.Credentials,
 			ManagedCredentials:               rt.ManagedCredentials,

@@ -67,6 +67,24 @@ func (b *WorkflowContractBundle) WorkflowLoops() []WorkflowLoopPlan {
 	}
 	return append([]WorkflowLoopPlan(nil), b.Semantics.Loops...)
 }
+func (b *WorkflowContractBundle) WorkflowGates() []WorkflowGatePlan {
+	if b == nil {
+		return nil
+	}
+	return append([]WorkflowGatePlan(nil), b.Semantics.Gates...)
+}
+func (b *WorkflowContractBundle) WorkflowGateForStage(flowID, stage string) (WorkflowGatePlan, bool) {
+	flowID, stage = strings.TrimSpace(flowID), strings.TrimSpace(stage)
+	if b == nil || stage == "" {
+		return WorkflowGatePlan{}, false
+	}
+	for _, plan := range b.Semantics.Gates {
+		if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.Stage) == stage {
+			return plan, true
+		}
+	}
+	return WorkflowGatePlan{}, false
+}
 func (b *WorkflowContractBundle) WorkflowStageTopology(flowID string) (WorkflowStageTopology, bool) {
 	if b == nil {
 		return WorkflowStageTopology{}, false

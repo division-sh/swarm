@@ -35,8 +35,10 @@ const (
 	ScenarioAgentDirectiveOutcomeLifecycle       = "agent_directive_outcome_lifecycle"
 	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
 	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
-	ScenarioMailboxApproveDecisionLifecycle      = "mailbox_approve_decision_lifecycle"
-	ScenarioMailboxRejectDecisionLifecycle       = "mailbox_reject_decision_lifecycle"
+	ScenarioMailboxNoticeAcknowledgmentLifecycle = "mailbox_notice_acknowledgment_lifecycle"
+	ScenarioMailboxBeginInputLifecycle           = "mailbox_begin_input_lifecycle"
+	ScenarioMailboxCancelInputLifecycle          = "mailbox_cancel_input_lifecycle"
+	ScenarioMailboxDecisionCardLifecycle         = "mailbox_decision_card_lifecycle"
 	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
 	ScenarioTestSetupEntitiesLifecycle           = "test_setup_entities_lifecycle"
 	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
@@ -81,8 +83,10 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioAgentDirectiveOutcomeLifecycle, "agent.send_directive", "TestServedParityHarnessAgentDirectiveOutcomeLifecycle"),
 		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
 		servedControlScenario(ScenarioRuntimeResumeIngressLifecycle, "runtime.resume", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
-		servedMailboxDecisionScenario(ScenarioMailboxApproveDecisionLifecycle, "mailbox.approve"),
-		servedMailboxDecisionScenario(ScenarioMailboxRejectDecisionLifecycle, "mailbox.reject"),
+		servedMailboxDecisionScenario(ScenarioMailboxNoticeAcknowledgmentLifecycle, "mailbox.acknowledge"),
+		servedMailboxDecisionScenario(ScenarioMailboxBeginInputLifecycle, "mailbox.begin_input"),
+		servedMailboxDecisionScenario(ScenarioMailboxCancelInputLifecycle, "mailbox.cancel_input"),
+		servedMailboxDecisionScenario(ScenarioMailboxDecisionCardLifecycle, "mailbox.decide"),
 		servedMailboxDecisionScenario(ScenarioMailboxDeferDecisionLifecycle, "mailbox.defer"),
 		servedControlScenario(ScenarioTestSetupEntitiesLifecycle, "test.setup_entities", "TestServedParityHarnessTestSetupEntitiesLifecycle"),
 		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),

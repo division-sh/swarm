@@ -3,953 +3,101 @@ package apiv1
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	ctx := context.Background()
-	runID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	base := time.Date(2026, 5, 10, 11, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'empire/review', 'review_case', 'review-case-1', 'Review Case 1',
-			'awaiting_decision', '{"ready":true}'::jsonb, '{"score":9}'::jsonb, '{"notes":["needs approval"]}'::jsonb, 7,
-			$3, $3, $3
-		)
-	`, runID, entityID, base); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-		sourceEventID,
-		"review.requested",
-		"",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
-		time.Time{},
-	)); err != nil {
-		t.Fatalf("append source event: %v", err)
-	}
-	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:   sourceEventID,
-		EntityID:  entityID,
-		FromAgent: "empire-agent",
-		Type:      "review_request",
-		Priority:  "high",
-		Context:   []byte(`{"title":"review this"}`),
-		Summary:   "needs approval",
-	})
-	if err != nil {
-		t.Fatalf("insert mailbox: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
-		t.Fatalf("set flow instance: %v", err)
-	}
-	bundle := runStartTestBundle("mailbox.item_decided")
-	delete(bundle.Events, "mailbox.item_decided")
-	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
-		"mailbox.item_decided":  {},
-		"mailbox.item_deferred": {},
-	}
-	bundle.Semantics.EventOwners = map[string][]string{
-		"mailbox.item_decided":  {"approval-agent", "review-agent"},
-		"mailbox.item_deferred": {"review-agent"},
-	}
-	source := semanticview.Wrap(bundle)
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-			Ready: func() bool {
-				return true
-			},
-			Database:    fakePinger{},
-			Entities:    pg,
-			Mailbox:     pg,
-			Idempotency: pg,
-			Events:      bus,
-			Source:      source,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-			Bundle: runtimecontracts.BundleIdentity{
-				WorkflowName:    "empire",
-				WorkflowVersion: "1.0.0",
-				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-			},
-		}),
-	})
+	state := newMutatingRuntimeProbeState(t, "mailbox.decide")
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorReadHandlers(state.options(t))})
 
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"mailbox.list","params":{"status":"pending","run_id":"`+runID+`","entity_id":"`+entityID+`","type":"review_request","priority":"high","limit":1}}`)
-	if list.Error != nil {
-		t.Fatalf("mailbox.list error = %#v", list.Error)
+	listed := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"mailbox.list","params":{}}`)
+	if listed.Error != nil {
+		t.Fatalf("mailbox.list error = %#v", listed.Error)
 	}
-	items := asMap(t, list.Result)["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("mailbox.list items = %#v", items)
-	}
-	item := asMap(t, items[0])
-	if item["mailbox_id"] != mailboxID || item["source_flow"] != "empire/review" || item["priority"] != "high" {
-		t.Fatalf("mailbox.list item = %#v", item)
+	items := asSlice(t, asMap(t, listed.Result)["items"])
+	if len(items) != 2 {
+		t.Fatalf("mailbox.list items = %#v, want one notice and one decision card", items)
 	}
 
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"mailbox.get","params":{"mailbox_id":"`+mailboxID+`"}}`)
-	if get.Error != nil {
-		t.Fatalf("mailbox.get error = %#v", get.Error)
+	got := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"mailbox.get","params":{"mailbox_id":"card-1"}}`)
+	if got.Error != nil {
+		t.Fatalf("mailbox.get error = %#v", got.Error)
 	}
-	if got := asMap(t, asMap(t, get.Result)["item"])["mailbox_id"]; got != mailboxID {
-		t.Fatalf("mailbox.get mailbox_id = %v", got)
-	}
-	if history := asMap(t, get.Result)["history"].([]any); len(history) != 1 {
-		t.Fatalf("mailbox.get history = %#v", history)
-	}
-	decisionSheet := asMap(t, asMap(t, get.Result)["decision_sheet"])
-	entityContext := asMap(t, decisionSheet["entity_context"])
-	if entityContext["available"] != true {
-		t.Fatalf("mailbox.get entity_context = %#v", entityContext)
-	}
-	entityFull := asMap(t, entityContext["entity"])
-	entity := asMap(t, entityFull["entity"])
-	if entity["entity_id"] != entityID || entity["run_id"] != runID || entity["current_state"] != "awaiting_decision" {
-		t.Fatalf("mailbox.get decision_sheet entity = %#v", entityFull)
-	}
-	if fields := asMap(t, entityFull["fields"]); fields["score"] != float64(9) {
-		t.Fatalf("mailbox.get decision_sheet fields = %#v", fields)
-	}
-	downstream := asMap(t, decisionSheet["downstream_preview"])
-	if downstream["available"] != true || downstream["event_name"] != "mailbox.item_decided" || downstream["subscriber_source"] != "event_catalog" {
-		t.Fatalf("mailbox.get downstream_preview = %#v", downstream)
-	}
-	subscribers := downstream["subscribers"].([]any)
-	if len(subscribers) != 2 || subscribers[0] != "approval-agent" || subscribers[1] != "review-agent" {
-		t.Fatalf("mailbox.get downstream subscribers = %#v", subscribers)
+	if result := asMap(t, got.Result); result["kind"] != "decision_card" {
+		t.Fatalf("mailbox.get result = %#v, want decision_card", result)
 	}
 
-	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-approve"}}`
-	approved := rpcCall(t, handler, approveBody)
-	if approved.Error != nil {
-		t.Fatalf("mailbox.approve error = %#v", approved.Error)
+	beginBody := `{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":"card-1","verdict":"reject","observed_content_hash":"content-1","idempotency_key":"idem-begin"}}`
+	begin := rpcCall(t, handler, beginBody)
+	if begin.Error != nil || asMap(t, begin.Result)["status"] != "active" {
+		t.Fatalf("mailbox.begin_input = result %#v error %#v", begin.Result, begin.Error)
 	}
-	approvedResult := asMap(t, approved.Result)
-	downstreamID, _ := approvedResult["downstream_event_id"].(string)
-	if downstreamID == "" || approvedResult["status"] != "decided" {
-		t.Fatalf("mailbox.approve result = %#v", approvedResult)
-	}
-	if approvedResult["idempotency_replayed"] != false || approvedResult["downstream_event_name"] != "mailbox.item_decided" || approvedResult["downstream_subscriber_source"] != "event_catalog" {
-		t.Fatalf("mailbox.approve promoted result fields = %#v", approvedResult)
-	}
-	approvedSubscribers := approvedResult["downstream_subscribers"].([]any)
-	if len(approvedSubscribers) != 2 || approvedSubscribers[0] != "approval-agent" || approvedSubscribers[1] != "review-agent" {
-		t.Fatalf("mailbox.approve downstream_subscribers = %#v", approvedSubscribers)
-	}
-	replay := rpcCall(t, handler, approveBody)
-	if replay.Error != nil {
-		t.Fatalf("mailbox.approve replay error = %#v", replay.Error)
-	}
-	replayResult := asMap(t, replay.Result)
-	if got := replayResult["downstream_event_id"]; got != downstreamID {
-		t.Fatalf("idempotency replay downstream_event_id = %v, want %s", got, downstreamID)
-	}
-	if replayResult["idempotency_replayed"] != true || replayResult["downstream_event_name"] != "mailbox.item_decided" || replayResult["downstream_subscriber_source"] != "event_catalog" {
-		t.Fatalf("mailbox.approve replay promoted result fields = %#v", replayResult)
-	}
-	replaySubscribers := replayResult["downstream_subscribers"].([]any)
-	if len(replaySubscribers) != 2 || replaySubscribers[0] != "approval-agent" || replaySubscribers[1] != "review-agent" {
-		t.Fatalf("mailbox.approve replay downstream_subscribers = %#v", replaySubscribers)
-	}
-	legacyReplayResponse, err := json.Marshal(map[string]any{
-		"ok":                  true,
-		"mailbox_decision_id": approvedResult["mailbox_decision_id"],
-		"downstream_event_id": downstreamID,
-		"status":              "decided",
-	})
-	if err != nil {
-		t.Fatalf("marshal legacy replay response: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE api_idempotency
-		SET response = $1::jsonb
-		WHERE method = 'mailbox.approve'
-		  AND idempotency_key = 'idem-approve'
-	`, string(legacyReplayResponse)); err != nil {
-		t.Fatalf("rewrite legacy idempotency response: %v", err)
-	}
-	legacyReplay := rpcCall(t, handler, approveBody)
-	if legacyReplay.Error != nil {
-		t.Fatalf("mailbox.approve legacy replay error = %#v", legacyReplay.Error)
-	}
-	legacyReplayResult := asMap(t, legacyReplay.Result)
-	if legacyReplayResult["idempotency_replayed"] != true ||
-		legacyReplayResult["downstream_event_id"] != downstreamID ||
-		legacyReplayResult["downstream_event_name"] != "mailbox.item_decided" ||
-		legacyReplayResult["downstream_subscriber_source"] != "unavailable" {
-		t.Fatalf("mailbox.approve legacy replay result = %#v", legacyReplayResult)
-	}
-	legacyReplaySubscribers := legacyReplayResult["downstream_subscribers"].([]any)
-	if len(legacyReplaySubscribers) != 0 {
-		t.Fatalf("mailbox.approve legacy replay downstream_subscribers = %#v, want empty", legacyReplaySubscribers)
-	}
-	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
-		t.Fatalf("mailbox.item_decided event count = %d, want 1", count)
-	}
-	approvalPayload := loadEventPayload(t, db, downstreamID)
-	assertMailboxItemDecidedPayloadShape(t, approvalPayload, "review this", true)
-
-	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conflict","method":"mailbox.approve","params":{"mailbox_id":"`+mailboxID+`","decision_payload":{"approved":false},"idempotency_key":"idem-approve"}}`)
-	if conflict.Error == nil {
-		t.Fatal("mailbox.approve conflicting idempotency error = nil")
-	}
-	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
-		t.Fatalf("idempotency conflict data = %#v", data)
+	beginReplay := rpcCall(t, handler, beginBody)
+	if beginReplay.Error != nil || asMap(t, beginReplay.Result)["idempotency_replayed"] != true {
+		t.Fatalf("mailbox.begin_input replay = result %#v error %#v", beginReplay.Result, beginReplay.Error)
 	}
 
-	rejectAlready := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"reject","method":"mailbox.reject","params":{"mailbox_id":"`+mailboxID+`","reason":"too late"}}`)
-	if rejectAlready.Error == nil {
-		t.Fatal("mailbox.reject already-decided error = nil")
-	}
-	if data := asMap(t, rejectAlready.Error.Data); data["code"] != MailboxAlreadyDecidedCode {
-		t.Fatalf("already decided data = %#v", data)
+	cancel := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"cancel","method":"mailbox.cancel_input","params":{"card_id":"card-1","input_draft_id":"draft-1","idempotency_key":"idem-cancel"}}`)
+	if cancel.Error != nil || asMap(t, cancel.Result)["status"] != "cancelled" {
+		t.Fatalf("mailbox.cancel_input = result %#v error %#v", cancel.Result, cancel.Error)
 	}
 
-	deferID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:  sourceEventID,
-		EntityID: entityID,
-		Type:     "approval",
-		Summary:  "defer me",
-		Context:  []byte(`{"title":"defer"}`),
-	})
-	if err != nil {
-		t.Fatalf("insert defer mailbox: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, deferID); err != nil {
-		t.Fatalf("set defer flow instance: %v", err)
-	}
-	past := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"past","method":"mailbox.defer","params":{"mailbox_id":"`+deferID+`","until":"2026-05-10T11:59:59Z","idempotency_key":"idem-past"}}`)
-	if past.Error == nil {
-		t.Fatal("mailbox.defer in past error = nil")
-	}
-	if data := asMap(t, past.Error.Data); data["code"] != InvalidDeferUntilCode {
-		t.Fatalf("invalid defer data = %#v", data)
-	}
-	deferred := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"defer","method":"mailbox.defer","params":{"mailbox_id":"`+deferID+`","until":"2026-05-10T13:00:00Z","idempotency_key":"idem-defer"}}`)
-	if deferred.Error != nil {
-		t.Fatalf("mailbox.defer error = %#v", deferred.Error)
-	}
-	deferredResult := asMap(t, deferred.Result)
-	if status := deferredResult["status"]; status != "deferred" {
-		t.Fatalf("mailbox.defer status = %v, want deferred", status)
-	}
-	if deferredResult["idempotency_replayed"] != false ||
-		deferredResult["downstream_event_name"] != "mailbox.item_deferred" ||
-		deferredResult["downstream_event_id"] == "" ||
-		deferredResult["downstream_subscriber_source"] != "event_catalog" {
-		t.Fatalf("mailbox.defer result = %#v", deferredResult)
-	}
-	laterHandler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now: func() time.Time { return time.Date(2026, 5, 10, 14, 0, 0, 0, time.UTC) },
-			Ready: func() bool {
-				return true
-			},
-			Database:    fakePinger{},
-			Mailbox:     pg,
-			Idempotency: pg,
-			Events:      bus,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-			Bundle: runtimecontracts.BundleIdentity{
-				WorkflowName:    "empire",
-				WorkflowVersion: "1.0.0",
-				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-			},
-		}),
-	})
-	deferReplay := rpcCall(t, laterHandler, `{"jsonrpc":"2.0","id":"defer-replay","method":"mailbox.defer","params":{"mailbox_id":"`+deferID+`","until":"2026-05-10T13:00:00Z","idempotency_key":"idem-defer"}}`)
-	if deferReplay.Error != nil {
-		t.Fatalf("mailbox.defer replay after until passed error = %#v", deferReplay.Error)
-	}
-	deferReplayResult := asMap(t, deferReplay.Result)
-	if status := deferReplayResult["status"]; status != "deferred" {
-		t.Fatalf("mailbox.defer replay status = %v, want deferred", status)
-	}
-	if deferReplayResult["idempotency_replayed"] != true ||
-		deferReplayResult["downstream_event_name"] != "mailbox.item_deferred" ||
-		deferReplayResult["downstream_event_id"] != deferredResult["downstream_event_id"] {
-		t.Fatalf("mailbox.defer replay result = %#v", deferReplayResult)
+	deferred := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"defer","method":"mailbox.defer","params":{"card_id":"card-1","until":"2023-11-14T23:13:20Z","idempotency_key":"idem-defer"}}`)
+	if deferred.Error != nil || asMap(t, deferred.Result)["status"] != "pending" {
+		t.Fatalf("mailbox.defer = result %#v error %#v", deferred.Result, deferred.Error)
 	}
 
-	rejectID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:  sourceEventID,
-		EntityID: entityID,
-		Type:     "approval",
-		Summary:  "reject me",
-		Context:  []byte(`{"title":"reject"}`),
-	})
-	if err != nil {
-		t.Fatalf("insert reject mailbox: %v", err)
+	decideBody := `{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":"card-1","verdict":"approve","fields":{},"observed_content_hash":"content-1","idempotency_key":"idem-decide"}}`
+	decided := rpcCall(t, handler, decideBody)
+	if decided.Error != nil || asMap(t, decided.Result)["status"] != "decided" {
+		t.Fatalf("mailbox.decide = result %#v error %#v", decided.Result, decided.Error)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, rejectID); err != nil {
-		t.Fatalf("set reject flow instance: %v", err)
-	}
-	rejectBody := `{"jsonrpc":"2.0","id":"reject-fresh","method":"mailbox.reject","params":{"mailbox_id":"` + rejectID + `","reason":"not enough evidence","idempotency_key":"idem-reject"}}`
-	rejected := rpcCall(t, handler, rejectBody)
-	if rejected.Error != nil {
-		t.Fatalf("mailbox.reject error = %#v", rejected.Error)
-	}
-	rejectedResult := asMap(t, rejected.Result)
-	if rejectedResult["status"] != "decided" ||
-		rejectedResult["idempotency_replayed"] != false ||
-		rejectedResult["downstream_event_name"] != "mailbox.item_decided" ||
-		rejectedResult["downstream_event_id"] == "" {
-		t.Fatalf("mailbox.reject result = %#v", rejectedResult)
-	}
-	rejectReplay := rpcCall(t, handler, rejectBody)
-	if rejectReplay.Error != nil {
-		t.Fatalf("mailbox.reject replay error = %#v", rejectReplay.Error)
-	}
-	rejectReplayResult := asMap(t, rejectReplay.Result)
-	if rejectReplayResult["status"] != "decided" ||
-		rejectReplayResult["idempotency_replayed"] != true ||
-		rejectReplayResult["downstream_event_name"] != "mailbox.item_decided" ||
-		rejectReplayResult["downstream_event_id"] != rejectedResult["downstream_event_id"] {
-		t.Fatalf("mailbox.reject replay result = %#v", rejectReplayResult)
-	}
-	rejectPayload := loadEventPayload(t, db, rejectedResult["downstream_event_id"].(string))
-	if rejectPayload["decision"] != "rejected" || rejectPayload["reason"] != "not enough evidence" {
-		t.Fatalf("mailbox.reject event payload = %#v", rejectPayload)
+	decideReplay := rpcCall(t, handler, decideBody)
+	if decideReplay.Error != nil || asMap(t, decideReplay.Result)["idempotency_replayed"] != true {
+		t.Fatalf("mailbox.decide replay = result %#v error %#v", decideReplay.Result, decideReplay.Error)
 	}
 
-	empty := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"empty","method":"mailbox.list","params":{"status":"pending","type":"review_request"}}`)
-	if empty.Error != nil {
-		t.Fatalf("empty mailbox.list error = %#v", empty.Error)
-	}
-	if items := asMap(t, empty.Result)["items"].([]any); len(items) != 0 {
-		t.Fatalf("empty mailbox.list items = %#v", items)
-	}
-}
-
-func TestOperatorMailboxGetDegradesEntityContextReadFailure(t *testing.T) {
-	now := time.Unix(1700000000, 0).UTC()
-	mailbox := newReadOnlyMailboxProbeStore(now)
-	detail := mailbox.details["mailbox-1"]
-	detail.Item.SourceEntityID = "entity-1"
-	detail.Item.SourceRunID = "run-1"
-	mailbox.details["mailbox-1"] = detail
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Mailbox:  mailbox,
-			Entities: &fakeEntityReadStore{getErr: errors.New("entity reader temporarily unavailable")},
-		}),
-	})
-
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"mailbox.get","params":{"mailbox_id":"mailbox-1"}}`)
-	if get.Error != nil {
-		t.Fatalf("mailbox.get error = %#v", get.Error)
-	}
-	sheet := asMap(t, asMap(t, get.Result)["decision_sheet"])
-	entityContext := asMap(t, sheet["entity_context"])
-	if entityContext["available"] != false || entityContext["reason"] != "entity_reader_unavailable" {
-		t.Fatalf("entity_context = %#v, want unavailable entity_reader_unavailable", entityContext)
-	}
-}
-
-func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(false)),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-
-	ctx := context.Background()
-	sourceEventID := uuid.NewString()
-	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-		sourceEventID,
-		"review.requested",
-		"",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		uuid.NewString(),
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Time{},
-	)); err != nil {
-		t.Fatalf("append source event: %v", err)
-	}
-	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:  sourceEventID,
-		EntityID: entityID,
-		Type:     "review_request",
-		Summary:  "needs approval",
-		Context:  []byte(`{"title":"review this"}`),
-	})
-	if err != nil {
-		t.Fatalf("insert mailbox: %v", err)
-	}
-
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:         func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-			Ready:       func() bool { return true },
-			Database:    fakePinger{},
-			Mailbox:     pg,
-			Idempotency: pg,
-			Events:      bus,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-		}),
-	})
-
-	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-schema-reject"}}`
-	rejected := rpcCall(t, handler, approveBody)
-	if rejected.Error == nil {
-		t.Fatal("mailbox.approve schema rejection error = nil")
-	}
-	detail, err := pg.GetV1MailboxItem(ctx, mailboxID)
-	if err != nil {
-		t.Fatalf("get mailbox after schema rejection: %v", err)
-	}
-	if detail.Item.Status != "pending" {
-		t.Fatalf("mailbox status after schema rejection = %s, want pending", detail.Item.Status)
-	}
-	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 0 {
-		t.Fatalf("mailbox.item_decided event count after schema rejection = %d, want 0", count)
-	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
-		t.Fatalf("api_idempotency rows after schema rejection = %d, want 0", count)
-	}
-
-	oldShape := validMailboxItemDecidedPayload()
-	oldShape["payload"] = map[string]any{"title": "review this"}
-	if err := runtimetools.ValidatePayloadAgainstSchema(mailboxItemDecidedStrictPayloadSchema(true), oldShape); err == nil {
-		t.Fatal("old mailbox.item_decided payload field unexpectedly passed strict schema")
-	}
-}
-
-func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
-	sourceEventID := uuid.NewString()
-	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-		sourceEventID,
-		"review.requested",
-		"",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		uuid.NewString(),
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Time{},
-	)); err != nil {
-		t.Fatalf("append source event: %v", err)
-	}
-	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:  sourceEventID,
-		EntityID: entityID,
-		Type:     "review_request",
-		Summary:  "needs approval",
-		Context:  []byte(`{"title":"review this"}`),
-	})
-	if err != nil {
-		t.Fatalf("insert mailbox: %v", err)
-	}
-	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	failingHandler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:      func() time.Time { return now },
-			Ready:    func() bool { return true },
-			Database: fakePinger{},
-			Mailbox:  pg,
-			Events:   failingMutationPublisher{},
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-		}),
-	})
-	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-publish-fails"}}`
-	failed := rpcCall(t, failingHandler, approveBody)
-	if failed.Error == nil {
-		t.Fatal("mailbox.approve with failing publisher error = nil")
-	}
-	detail, err := pg.GetV1MailboxItem(ctx, mailboxID)
-	if err != nil {
-		t.Fatalf("get mailbox after failed publish: %v", err)
-	}
-	if detail.Item.Status != "pending" {
-		t.Fatalf("mailbox status after failed publish = %s, want pending", detail.Item.Status)
-	}
-	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 0 {
-		t.Fatalf("mailbox.item_decided event count after failed publish = %d, want 0", count)
-	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
-		t.Fatalf("api_idempotency rows after failed publish = %d, want 0", count)
-	}
-
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	successHandler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:      func() time.Time { return now },
-			Ready:    func() bool { return true },
-			Database: fakePinger{},
-			Mailbox:  pg,
-			Events:   bus,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-		}),
-	})
-	succeeded := rpcCall(t, successHandler, approveBody)
-	if succeeded.Error != nil {
-		t.Fatalf("mailbox.approve retry after failed publish error = %#v", succeeded.Error)
-	}
-	if status := asMap(t, succeeded.Result)["status"]; status != "decided" {
-		t.Fatalf("mailbox.approve retry status = %v, want decided", status)
-	}
-	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
-		t.Fatalf("mailbox.item_decided event count after retry = %d, want 1", count)
-	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
-		t.Fatalf("api_idempotency rows after retry = %d, want 1", count)
-	}
-}
-
-func TestOperatorMailboxRejectAndDeferPublishFailureLeavesItemRetryable(t *testing.T) {
-	cases := []struct {
-		name      string
-		method    string
-		params    func(string, time.Time) string
-		eventName string
-	}{
-		{
-			name:   "reject",
-			method: "mailbox.reject",
-			params: func(mailboxID string, _ time.Time) string {
-				return `{"mailbox_id":"` + mailboxID + `","reason":"not enough evidence","idempotency_key":"idem-reject-publish-fails"}`
-			},
-			eventName: "mailbox.item_decided",
-		},
-		{
-			name:   "defer",
-			method: "mailbox.defer",
-			params: func(mailboxID string, now time.Time) string {
-				return `{"mailbox_id":"` + mailboxID + `","until":"` + now.Add(time.Hour).Format(time.RFC3339) + `","idempotency_key":"idem-defer-publish-fails"}`
-			},
-			eventName: "mailbox.item_deferred",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pg := &store.PostgresStore{DB: db}
-			ctx := context.Background()
-			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-			sourceEventID := uuid.NewString()
-			entityID := uuid.NewString()
-			if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-				sourceEventID,
-				"review.requested",
-				"",
-				"",
-				json.RawMessage(`{"request":true}`),
-				0,
-				uuid.NewString(),
-				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-				time.Time{},
-			)); err != nil {
-				t.Fatalf("append source event: %v", err)
-			}
-			mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-				EventID:  sourceEventID,
-				EntityID: entityID,
-				Type:     "approval",
-				Summary:  "needs decision",
-				Context:  []byte(`{"title":"review this"}`),
-			})
-			if err != nil {
-				t.Fatalf("insert mailbox: %v", err)
-			}
-
-			handler := testHandler(t, Options{
-				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
-					Now:         func() time.Time { return now },
-					Ready:       func() bool { return true },
-					Database:    fakePinger{},
-					Mailbox:     pg,
-					Idempotency: pg,
-					Events:      failingMutationPublisher{},
-					MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-						"approval": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-					},
-				}),
-			})
-
-			body := `{"jsonrpc":"2.0","id":"decision","method":"` + tc.method + `","params":` + tc.params(mailboxID, now) + `}`
-			failed := rpcCall(t, handler, body)
-			if failed.Error == nil {
-				t.Fatalf("%s with failing publisher error = nil", tc.method)
-			}
-			detail, err := pg.GetV1MailboxItem(ctx, mailboxID)
-			if err != nil {
-				t.Fatalf("get mailbox after failed publish: %v", err)
-			}
-			if detail.Item.Status != "pending" || detail.Item.Decision != "" || detail.Item.DeferredUntil != "" {
-				t.Fatalf("mailbox after failed publish = %+v, want retryable pending item", detail.Item)
-			}
-			if count := countEventsByName(t, db, tc.eventName); count != 0 {
-				t.Fatalf("%s event count after failed publish = %d, want 0", tc.eventName, count)
-			}
-			if count := countAPIIdempotencyRows(t, db); count != 0 {
-				t.Fatalf("api_idempotency rows after failed publish = %d, want 0", count)
-			}
-		})
-	}
-}
-
-func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
-	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-	bus.SetRuntimeIngressDispatchGate(controller)
-
-	ctx := context.Background()
-	agentID := "mailbox-approval-agent"
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, agentID)
-	ch := bus.Subscribe(agentID, events.EventType("mailbox.item_decided"))
-	defer bus.Unsubscribe(agentID)
-
-	interceptorCalls := 0
-	bus.SetInterceptors(interceptorFunc(func(_ context.Context, evt events.Event) (bool, []events.Event, error) {
-		if evt.Type() == events.EventType("mailbox.item_decided") {
-			interceptorCalls++
+	for _, retired := range []string{"mailbox." + "approve", "mailbox." + "reject"} {
+		resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"retired","method":"`+retired+`","params":{}}`)
+		if resp.Error == nil || resp.Error.Code != codeMethodNotFound {
+			t.Fatalf("%s error = %#v, want method not found", retired, resp.Error)
 		}
-		return true, nil, nil
-	}))
-
-	now := time.Now().UTC()
-	runID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-		sourceEventID,
-		"review.requested",
-		"",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
-		time.Time{},
-	)); err != nil {
-		t.Fatalf("append source event: %v", err)
 	}
-	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:   sourceEventID,
-		EntityID:  entityID,
-		FromAgent: "empire-agent",
-		Type:      "review_request",
-		Priority:  "high",
-		Context:   []byte(`{"title":"review this"}`),
-		Summary:   "needs approval",
-	})
-	if err != nil {
-		t.Fatalf("insert mailbox: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
-		t.Fatalf("set flow instance: %v", err)
-	}
-	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
-		Reason:       "test_pause",
-		ControlledBy: "test",
-		Now:          now,
-	}); err != nil {
-		t.Fatalf("Pause: %v", err)
-	}
-
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:      func() time.Time { return now },
-			Ready:    func() bool { return true },
-			Database: fakePinger{},
-			Mailbox:  pg,
-			Events:   bus,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-			Bundle: runtimecontracts.BundleIdentity{
-				WorkflowName:    "empire",
-				WorkflowVersion: "1.0.0",
-				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-			},
-		}),
-	})
-
-	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-paused-approve"}}`
-	approved := rpcCall(t, handler, approveBody)
-	if approved.Error != nil {
-		t.Fatalf("mailbox.approve while paused error = %#v", approved.Error)
-	}
-	downstreamID, _ := asMap(t, approved.Result)["downstream_event_id"].(string)
-	if downstreamID == "" {
-		t.Fatalf("mailbox.approve downstream event id = %#v", approved.Result)
-	}
-	if interceptorCalls != 0 {
-		t.Fatalf("interceptor calls while paused = %d, want 0", interceptorCalls)
-	}
-	requireNoAPIV1RuntimeBusEvent(t, ch, "paused mailbox approval before resume")
-	if got := countEventDeliveriesForEvent(t, ctx, db, downstreamID); got != 1 {
-		t.Fatalf("mailbox approval event deliveries while paused = %d, want 1", got)
-	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 0 {
-		t.Fatalf("mailbox approval pipeline receipts while paused = %d, want 0", got)
-	}
-	if got := countAPIIdempotencyRows(t, db); got != 1 {
-		t.Fatalf("api_idempotency rows after paused approve = %d, want 1", got)
-	}
-
-	replay := rpcCall(t, handler, approveBody)
-	if replay.Error != nil {
-		t.Fatalf("mailbox.approve paused replay error = %#v", replay.Error)
-	}
-	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
-		t.Fatalf("paused replay downstream_event_id = %v, want %s", got, downstreamID)
-	}
-	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
-		t.Fatalf("mailbox.item_decided event count after replay = %d, want 1", count)
-	}
-
-	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
-		Reason:       "test_resume",
-		ControlledBy: "test",
-		Now:          now.Add(time.Second),
-	})
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-	if resumed.ReleasedCount != 1 {
-		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
-	}
-	got := requireAPIV1RuntimeBusEvent(t, ch, "queued mailbox approval release")
-	if got.ID() != downstreamID {
-		t.Fatalf("released mailbox approval event = %s, want %s", got.ID(), downstreamID)
-	}
-	if interceptorCalls != 0 {
-		t.Fatalf("interceptor calls after resume release = %d, want 0", interceptorCalls)
-	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 1 {
-		t.Fatalf("mailbox approval pipeline receipts after resume = %d, want 1", got)
-	}
-	approvalPayload := loadEventPayload(t, db, downstreamID)
-	assertMailboxItemDecidedPayloadShape(t, approvalPayload, "review this", true)
 }
 
-func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
-
-	ctx := context.Background()
-	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	runID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
-		sourceEventID,
-		"review.requested",
-		"",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
-		time.Time{},
-	)); err != nil {
-		t.Fatalf("append source event: %v", err)
-	}
-	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:   sourceEventID,
-		EntityID:  entityID,
-		FromAgent: "empire-agent",
-		Type:      "review_request",
-		Priority:  "high",
-		Context:   []byte(`{"title":"review this"}`),
-		Summary:   "needs approval",
-	})
+func TestMailboxListTaggedCursorAdvancesOwnersIndependently(t *testing.T) {
+	state := newMutatingRuntimeProbeState(t, "mailbox.list")
+	opts := state.options(t)
+	firstRaw, err := listMailboxProjection(context.Background(), Request{Params: map[string]any{"limit": 1}}, opts)
 	if err != nil {
-		t.Fatalf("insert mailbox: %v", err)
+		t.Fatalf("first list: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
-		t.Fatalf("set flow instance: %v", err)
+	first := firstRaw.(mailboxProjectionListResult)
+	if len(first.Items) != 1 || first.NextCursor == "" {
+		t.Fatalf("first page = %#v, want one item and cursor", first)
+	}
+	firstItem := first.Items[0].(map[string]any)
+	if firstItem["kind"] != decisioncard.KindDecisionCard {
+		t.Fatalf("first page kind = %#v, want deterministic decision_card tie-break", firstItem["kind"])
 	}
 
-	interceptorCalls := make(chan string, 1)
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
-		Interceptors: []runtimebus.EventInterceptor{interceptorFunc(func(interceptCtx context.Context, evt events.Event) (bool, []events.Event, error) {
-			if evt.Type() != events.EventType("mailbox.item_decided") {
-				return true, nil, nil
-			}
-			if tx, ok := runtimepipeline.PipelineSQLTxFromContext(interceptCtx); ok && tx != nil {
-				t.Fatal("mailbox approval dispatch ran with mailbox decision sql tx still in context")
-			}
-			var status string
-			if err := db.QueryRowContext(interceptCtx, `SELECT status FROM mailbox WHERE item_id = $1::uuid`, mailboxID).Scan(&status); err != nil {
-				t.Fatalf("query mailbox status from interceptor: %v", err)
-			}
-			if status != "decided" {
-				t.Fatalf("mailbox status visible to interceptor = %s, want decided", status)
-			}
-			var idempotencyRows int
-			if err := db.QueryRowContext(interceptCtx, `
-				SELECT COUNT(*)
-				FROM api_idempotency
-				WHERE method = 'mailbox.approve'
-				  AND idempotency_key = 'idem-post-commit-approve'
-			`).Scan(&idempotencyRows); err != nil {
-				t.Fatalf("query idempotency from interceptor: %v", err)
-			}
-			if idempotencyRows != 1 {
-				t.Fatalf("api_idempotency rows visible to interceptor = %d, want 1", idempotencyRows)
-			}
-			select {
-			case interceptorCalls <- evt.ID():
-			default:
-			}
-			return true, nil, nil
-		})},
-	})
+	secondRaw, err := listMailboxProjection(context.Background(), Request{Params: map[string]any{"limit": 1, "cursor": first.NextCursor}}, opts)
 	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
+		t.Fatalf("second list: %v", err)
 	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:      func() time.Time { return now },
-			Ready:    func() bool { return true },
-			Database: fakePinger{},
-			Mailbox:  pg,
-			Events:   bus,
-			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
-				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
-			},
-			Bundle: runtimecontracts.BundleIdentity{
-				WorkflowName:    "empire",
-				WorkflowVersion: "1.0.0",
-				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-			},
-		}),
-	})
-
-	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-post-commit-approve"}}`
-	approved := rpcCall(t, handler, approveBody)
-	if approved.Error != nil {
-		t.Fatalf("mailbox.approve error = %#v", approved.Error)
+	second := secondRaw.(mailboxProjectionListResult)
+	if len(second.Items) != 1 || second.NextCursor != "" {
+		t.Fatalf("second page = %#v, want final singleton page", second)
 	}
-	downstreamID, _ := asMap(t, approved.Result)["downstream_event_id"].(string)
-	if downstreamID == "" {
-		t.Fatalf("mailbox.approve downstream event id = %#v", approved.Result)
-	}
-	got := requireAPIV1RuntimeBusSignal(t, interceptorCalls, "mailbox approval post-commit dispatch")
-	if got != downstreamID {
-		t.Fatalf("interceptor event id = %s, want %s", got, downstreamID)
-	}
-	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
-		t.Fatalf("mailbox.item_decided event count = %d, want 1", got)
-	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 1 {
-		t.Fatalf("mailbox approval pipeline receipts = %d, want 1", got)
-	}
-	approvalPayload := loadEventPayload(t, db, downstreamID)
-	assertMailboxItemDecidedPayloadShape(t, approvalPayload, "review this", true)
-
-	replay := rpcCall(t, handler, approveBody)
-	if replay.Error != nil {
-		t.Fatalf("mailbox.approve replay error = %#v", replay.Error)
-	}
-	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
-		t.Fatalf("replay downstream_event_id = %v, want %s", got, downstreamID)
-	}
-	requireNoAPIV1RuntimeBusSignal(t, interceptorCalls, "mailbox approval idempotency replay")
-	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
-		t.Fatalf("mailbox.item_decided event count after replay = %d, want 1", got)
+	secondItem := second.Items[0].(map[string]any)
+	if secondItem["kind"] != decisioncard.KindNotice {
+		t.Fatalf("second page kind = %#v, want notice without duplicate card", secondItem["kind"])
 	}
 }
 
@@ -962,28 +110,10 @@ func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 	return count
 }
 
-func loadEventPayload(t *testing.T, db *sql.DB, eventID string) map[string]any {
-	t.Helper()
-	var raw []byte
-	if err := db.QueryRow(`SELECT payload FROM events WHERE event_id = $1::uuid`, eventID).Scan(&raw); err != nil {
-		t.Fatalf("load event payload %s: %v", eventID, err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("decode event payload %s: %v", eventID, err)
-	}
-	return payload
-}
-
 func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-	`, eventID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'agent'`, eventID).Scan(&count); err != nil {
 		t.Fatalf("count event deliveries for %s: %v", eventID, err)
 	}
 	return count
@@ -992,13 +122,7 @@ func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB,
 func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
 		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
 	}
 	return count
@@ -1013,162 +137,11 @@ func countAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func mailboxItemDecidedPayloadValidator(t *testing.T, schema map[string]any) runtimebus.PayloadValidator {
-	t.Helper()
-	return func(eventType string, payload []byte) error {
-		if eventType != "mailbox.item_decided" {
-			return nil
-		}
-		if len(payload) == 0 {
-			payload = []byte("{}")
-		}
-		decoded := map[string]any{}
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			return err
-		}
-		return runtimetools.ValidatePayloadAgainstSchema(schema, decoded)
-	}
-}
-
-func mailboxItemDecidedStrictPayloadSchema(includeMailboxPayload bool) map[string]any {
-	properties := map[string]any{
-		"mailbox_id": map[string]any{
-			"type":   "string",
-			"format": "uuid",
-		},
-		"mailbox_decision_id": map[string]any{
-			"type":   "string",
-			"format": "uuid",
-		},
-		"decision": map[string]any{
-			"type": "string",
-		},
-		"decision_payload": map[string]any{
-			"type":                 "object",
-			"additionalProperties": true,
-		},
-		"reason": map[string]any{
-			"type": "string",
-		},
-		"item_type": map[string]any{
-			"type": "string",
-		},
-		"source_event_id": map[string]any{
-			"type":   "string",
-			"format": "uuid",
-		},
-		"source_flow": map[string]any{
-			"type": "string",
-		},
-		"source_entity_id": map[string]any{
-			"type":   "string",
-			"format": "uuid",
-		},
-		"decided_by": map[string]any{
-			"type": "string",
-		},
-		"decided_at": map[string]any{
-			"type": "string",
-		},
-	}
-	required := []any{
-		"mailbox_id",
-		"mailbox_decision_id",
-		"decision",
-		"decision_payload",
-		"item_type",
-		"source_event_id",
-		"source_flow",
-		"source_entity_id",
-		"decided_by",
-		"decided_at",
-	}
-	if includeMailboxPayload {
-		properties["mailbox_payload"] = map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"title": map[string]any{"type": "string"},
-			},
-			"required":             []any{"title"},
-			"additionalProperties": false,
-		}
-		required = append(required, "mailbox_payload")
-	}
-	return map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"required":             required,
-		"additionalProperties": false,
-	}
-}
-
-func validMailboxItemDecidedPayload() map[string]any {
-	return map[string]any{
-		"mailbox_id":          uuid.NewString(),
-		"mailbox_decision_id": uuid.NewString(),
-		"decision":            "approved",
-		"decision_payload":    map[string]any{"approved": true},
-		"item_type":           "review_request",
-		"mailbox_payload":     map[string]any{"title": "review this"},
-		"source_event_id":     uuid.NewString(),
-		"source_flow":         "empire/review",
-		"source_entity_id":    uuid.NewString(),
-		"decided_by":          "agent-d-run-token",
-		"decided_at":          "2026-05-10T12:00:00Z",
-	}
-}
-
-func assertMailboxItemDecidedPayloadShape(t *testing.T, payload map[string]any, wantTitle string, wantApproved bool) {
-	t.Helper()
-	if _, ok := payload["payload"]; ok {
-		t.Fatalf("mailbox.item_decided retained retired payload field: %#v", payload)
-	}
-	mailboxPayload, ok := payload["mailbox_payload"].(map[string]any)
-	if !ok {
-		t.Fatalf("mailbox_payload = %#v, want object", payload["mailbox_payload"])
-	}
-	if mailboxPayload["title"] != wantTitle {
-		t.Fatalf("mailbox_payload.title = %#v, want %q", mailboxPayload["title"], wantTitle)
-	}
-	decisionPayload, ok := payload["decision_payload"].(map[string]any)
-	if !ok {
-		t.Fatalf("decision_payload = %#v, want object", payload["decision_payload"])
-	}
-	if decisionPayload["approved"] != wantApproved {
-		t.Fatalf("decision_payload.approved = %#v, want %v", decisionPayload["approved"], wantApproved)
-	}
-}
-
-type failingMutationPublisher struct{}
-
-func (failingMutationPublisher) Publish(context.Context, events.Event) error {
-	return nil
-}
-
-func (failingMutationPublisher) PublishInMutation(context.Context, events.Event) error {
-	return errors.New("publish failed")
-}
-
-type interceptorFunc func(context.Context, events.Event) (bool, []events.Event, error)
-
-func (f interceptorFunc) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
-	return f(ctx, evt)
-}
-
 func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
 	t.Helper()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "observer",
-			Mode:   "global",
-			Type:   "stub",
-			Model:  "regular",
-			Config: []byte(`{}`),
-		},
-		Status:    "active",
-		HiredBy:   "test",
-		StartedAt: time.Now().UTC(),
+		Config: runtimeactors.AgentConfig{ID: agentID, Role: "observer", Mode: "global", Type: "stub", Model: "regular", Config: []byte(`{}`)},
+		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}

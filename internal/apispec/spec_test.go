@@ -18,20 +18,20 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 59 {
-		t.Fatalf("method count = %d, want 59", report.MethodCount)
+	if report.MethodCount != 62 {
+		t.Fatalf("method count = %d, want 62", report.MethodCount)
 	}
-	if report.SchemaCount != 116 {
-		t.Fatalf("schema count = %d, want 116", report.SchemaCount)
+	if report.SchemaCount != 126 {
+		t.Fatalf("schema count = %d, want 126", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 43 {
-		t.Fatalf("error code count = %d, want 43", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 46 {
+		t.Fatalf("error code count = %d, want 46", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 23 {
-		t.Fatalf("mutating method count = %d, want 23", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 25 {
+		t.Fatalf("mutating method count = %d, want 25", report.MutatingMethodCount)
 	}
-	if report.SubscriptionMethodCnt != 4 {
-		t.Fatalf("subscription method count = %d, want 4", report.SubscriptionMethodCnt)
+	if report.SubscriptionMethodCnt != 5 {
+		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
 	}
 	if _, ok := api.MethodCatalog["rpc.unsubscribe"]; !ok {
 		t.Fatal("rpc.unsubscribe missing from method catalog")
@@ -81,14 +81,14 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 59 {
-		t.Fatalf("generated OpenRPC methods = %d, want 59", len(doc.Methods))
+	if len(doc.Methods) != 62 {
+		t.Fatalf("generated OpenRPC methods = %d, want 62", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 116 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 116", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 126 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 126", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 43 {
-		t.Fatalf("generated OpenRPC errors = %d, want 43", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 46 {
+		t.Fatalf("generated OpenRPC errors = %d, want 46", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -230,6 +230,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	expectedNotifications := map[string]string{
 		"event.subscribe":        "#/components/schemas/EventFull",
 		"health.subscribe":       "#/components/schemas/HealthCheckResult",
+		"mailbox.subscribe":      "#/components/schemas/DecisionCardChange",
 		"run.subscribe_trace":    "#/components/schemas/RunTraceRow",
 		"runtime.subscribe_logs": "#/components/schemas/LogEntry",
 	}
@@ -974,8 +975,9 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		"platform.boot",
 		"platform.inbound_recorded",
 		"platform.recovery_failed",
-		"mailbox.item_decided",
-		"mailbox.item_deferred",
+		"mailbox.card_decided",
+		"mailbox.card_deferred",
+		"mailbox.card_superseded",
 	} {
 		entry := mustMappingValue(t, catalog, eventName)
 		if scalarValue(mappingValue(entry, "schema_authority")) == "" {
@@ -1000,44 +1002,38 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		}
 	}
 
-	mailbox := mustMappingValue(t, catalog, "mailbox.item_decided")
+	mailbox := mustMappingValue(t, catalog, "mailbox.card_decided")
 	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "decision_event_payload_contract")
 	assertScalarValue(t, mappingValue(mailbox, "routing_class"), "event_loop_routable")
 	payload := mustMappingValue(t, mailbox, "payload")
 	required := mustMappingValue(t, mailbox, "required")
 	for _, field := range []string{
-		"mailbox_id",
-		"mailbox_decision_id",
-		"decision",
-		"decision_payload",
-		"item_type",
-		"mailbox_payload",
-		"source_event_id",
-		"source_flow",
-		"source_entity_id",
-		"decided_by",
-		"decided_at",
+		"card_id",
+		"stage_activation_id",
+		"decision_id",
+		"verdict",
+		"fields",
+		"card_content_hash",
+		"decision_schema_hash",
+		"bundle_hash",
 	} {
 		if mappingValue(payload, field) == nil {
-			t.Fatalf("mailbox.item_decided payload missing %s", field)
+			t.Fatalf("mailbox.card_decided payload missing %s", field)
 		}
 		if !sequenceContainsScalar(required, field) {
-			t.Fatalf("mailbox.item_decided required missing %s", field)
+			t.Fatalf("mailbox.card_decided required missing %s", field)
 		}
 	}
-	if !sequenceContainsScalar(mustMappingValue(t, mailbox, "forbidden_fields"), "payload") {
-		t.Fatal("mailbox.item_decided must forbid retired payload field")
-	}
-	deferred := mustMappingValue(t, catalog, "mailbox.item_deferred")
+	deferred := mustMappingValue(t, catalog, "mailbox.card_deferred")
 	assertScalarContains(t, mappingValue(deferred, "schema_authority"), "decision_event_payload_contract")
 	deferredPayload := mustMappingValue(t, deferred, "payload")
 	deferredRequired := mustMappingValue(t, deferred, "required")
-	for _, field := range []string{"mailbox_id", "mailbox_decision_id", "until", "item_type", "mailbox_payload", "source_event_id", "source_flow", "source_entity_id", "deferred_by", "deferred_at"} {
+	for _, field := range []string{"card_id", "until"} {
 		if mappingValue(deferredPayload, field) == nil {
-			t.Fatalf("mailbox.item_deferred payload missing %s", field)
+			t.Fatalf("mailbox.card_deferred payload missing %s", field)
 		}
 		if !sequenceContainsScalar(deferredRequired, field) {
-			t.Fatalf("mailbox.item_deferred required missing %s", field)
+			t.Fatalf("mailbox.card_deferred required missing %s", field)
 		}
 	}
 }

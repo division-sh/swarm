@@ -282,6 +282,50 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsDecisionGateOutcomes(t *testing.T) {
+	gates := []runtimecontracts.WorkflowGatePlan{{
+		Stage: "awaiting_launch_approval", Decision: "launch_review", Title: "Launch review",
+		Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {Verdict: "approve", Label: "Approve", AdvancesTo: "operating", Emit: runtimecontracts.EmitSpec{Event: "opco.launched"}},
+			"reject":  {Verdict: "reject", Label: "Reject", AdvancesTo: "building", Emit: runtimecontracts.EmitSpec{Event: "launch.rejected"}},
+		},
+	}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+			{ID: "awaiting_launch_approval", Initial: true}, {ID: "operating", Terminal: true}, {ID: "building"},
+		}}},
+		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting_launch_approval", Gates: gates},
+	}
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
+		"", "awaiting_launch_approval", []string{"awaiting_launch_approval", "operating", "building"}, []string{"operating"}, nil, nil, nil, gates,
+	)}
+
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := view.StageGraphs[0]
+	if len(graph.Gates) != 1 {
+		t.Fatalf("graph gates = %#v, want launch_review", graph.Gates)
+	}
+	gate := graph.Gates[0]
+	if gate.Stage != "awaiting_launch_approval" || gate.Decision != "launch_review" || gate.Authority != "stage_activation_cas" || gate.ReminderInterval != "24h" || gate.InputDraftTTL != "15m" {
+		t.Fatalf("gate = %#v, want effective authority and cadence", gate)
+	}
+	if len(gate.Outcomes) != 2 || gate.Outcomes[0].Verdict != "approve" || gate.Outcomes[0].AdvancesTo != "operating" || gate.Outcomes[0].Emit != "opco.launched" || gate.Outcomes[1].Verdict != "reject" || gate.Outcomes[1].AdvancesTo != "building" || gate.Outcomes[1].Emit != "launch.rejected" {
+		t.Fatalf("gate outcomes = %#v, want sorted authored outcomes", gate.Outcomes)
+	}
+	edges := map[string]StageGraphEdgeView{}
+	for _, edge := range graph.Edges {
+		if edge.Source == "gate" {
+			edges[edge.Verdict] = edge
+		}
+	}
+	if edges["approve"].To != "operating" || edges["approve"].DecisionID != "launch_review" || edges["reject"].To != "building" || edges["reject"].DecisionID != "launch_review" {
+		t.Fatalf("gate edges = %#v, want one labeled edge per verdict", edges)
+	}
+}
+
 func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

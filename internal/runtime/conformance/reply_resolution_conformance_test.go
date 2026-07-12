@@ -466,7 +466,7 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 			},
 		},
 	} {
-		for _, continuationKind := range []string{templatereply.ContinuationMailbox, templatereply.ContinuationHuman} {
+		for _, continuationKind := range []string{templatereply.ContinuationHuman} {
 			t.Run(backendCase.name+"/"+continuationKind, func(t *testing.T) {
 				ctx := context.Background()
 				requestKey := continuationKind + "-request"
@@ -506,8 +506,6 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 
 				rowID := ""
 				switch continuationKind {
-				case templatereply.ContinuationMailbox:
-					rowID = loadReplyContinuationRowID(t, ctx, backend, requestID, "approval")
 				case templatereply.ContinuationHuman:
 					rowID, err = continuations.CreateHumanTask(events.WithDeliveryContext(ctx, deliveryContext), runtimetools.HumanTaskCreateRecord{
 						ActorID:       "provider-agent",
@@ -541,18 +539,6 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 				}
 				deferAt := time.Now().UTC()
 				switch continuationKind {
-				case templatereply.ContinuationMailbox:
-					if _, err := continuations.DecideV1MailboxItem(ctx, store.MailboxV1DecisionRequest{
-						MailboxID:            rowID,
-						Action:               "deferred",
-						ActorTokenID:         "operator",
-						DeferUntil:           deferAt.Add(10 * time.Minute),
-						Now:                  deferAt,
-						DecisionEventType:    "mailbox.item_deferred",
-						DecisionEventPublish: resumedBus.PublishInMutation,
-					}); err != nil {
-						t.Fatalf("defer mailbox continuation: %v", err)
-					}
 				case templatereply.ContinuationHuman:
 					if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
 						TaskID:               rowID,
@@ -574,17 +560,6 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 
 				finalAt := deferAt.Add(time.Second)
 				switch continuationKind {
-				case templatereply.ContinuationMailbox:
-					if _, err := continuations.DecideV1MailboxItem(ctx, store.MailboxV1DecisionRequest{
-						MailboxID:            rowID,
-						Action:               "approved",
-						ActorTokenID:         "operator",
-						Now:                  finalAt,
-						DecisionEventType:    "mailbox.item_decided",
-						DecisionEventPublish: resumedBus.PublishInMutation,
-					}); err != nil {
-						t.Fatalf("approve mailbox continuation: %v", err)
-					}
 				case templatereply.ContinuationHuman:
 					if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
 						TaskID:               rowID,
@@ -634,8 +609,6 @@ func proveReplyContinuationStaleOrigin(t *testing.T, ctx context.Context, backen
 	continuations := backend.(replyContinuationConformanceStore)
 	rowID := ""
 	switch continuationKind {
-	case templatereply.ContinuationMailbox:
-		rowID = loadReplyContinuationRowID(t, ctx, backend, requestID, "approval")
 	case templatereply.ContinuationHuman:
 		rowID, err = continuations.CreateHumanTask(events.WithDeliveryContext(ctx, deliveryContext), runtimetools.HumanTaskCreateRecord{
 			ActorID:       "provider-agent",
@@ -658,17 +631,6 @@ func proveReplyContinuationStaleOrigin(t *testing.T, ctx context.Context, backen
 	repliesBefore := countReplyConformanceEvents(t, ctx, backend, replyType)
 	now := time.Now().UTC()
 	switch continuationKind {
-	case templatereply.ContinuationMailbox:
-		if _, err := continuations.DecideV1MailboxItem(ctx, store.MailboxV1DecisionRequest{
-			MailboxID:            rowID,
-			Action:               "approved",
-			ActorTokenID:         "operator",
-			Now:                  now,
-			DecisionEventType:    "mailbox.item_decided",
-			DecisionEventPublish: staleBus.PublishInMutation,
-		}); err != nil {
-			t.Fatalf("approve stale-origin mailbox continuation: %v", err)
-		}
 	case templatereply.ContinuationHuman:
 		if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
 			TaskID:               rowID,
@@ -706,7 +668,6 @@ type replyContinuationConformanceStore interface {
 	runtimepipeline.MailboxWriteMaterializationStore
 	runtimetools.HumanTaskPersistence
 	GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error)
-	DecideV1MailboxItem(context.Context, store.MailboxV1DecisionRequest) (store.MailboxV1DecisionOutcome, error)
 }
 
 func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) *bus.EventBus {

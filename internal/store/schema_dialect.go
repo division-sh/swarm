@@ -298,6 +298,9 @@ func sqliteRenderType(raw string) (string, error) {
 		return "INTEGER", nil
 	case "BIGINT":
 		return "INTEGER", nil
+	case "BIGSERIAL":
+		// INTEGER PRIMARY KEY is SQLite's rowid-backed monotonic sequence owner.
+		return "INTEGER", nil
 	case "DOUBLE PRECISION":
 		return "REAL", nil
 	case "BOOLEAN":

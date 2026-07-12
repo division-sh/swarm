@@ -208,10 +208,6 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if items, err := pg.ListMailboxItems(ctx, "pending", 10); err != nil || len(items) == 0 {
 		t.Fatalf("list mailbox err=%v len=%d", err, len(items))
 	}
-	if err := pg.DecideMailboxItem(ctx, mbID, "decided", "approve", "ok"); err != nil {
-		t.Fatalf("decide mailbox: %v", err)
-	}
-
 	// Inbound dedupe record.
 	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", entityID, "chat"); err != nil || !ok {
 		t.Fatalf("record inbound err=%v ok=%v", err, ok)

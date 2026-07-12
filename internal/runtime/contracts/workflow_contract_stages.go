@@ -18,6 +18,21 @@ type FlowStageDeclaration struct {
 	Terminal    bool                        `yaml:"terminal"`
 	Description string                      `yaml:"description"`
 	Timers      []FlowStageTimerDeclaration `yaml:"timers"`
+	Gate        *FlowStageGateDeclaration   `yaml:"gate"`
+}
+
+type FlowStageGateDeclaration struct {
+	Decision string                                     `yaml:"decision"`
+	Title    string                                     `yaml:"title"`
+	Context  map[string]ExpressionValue                 `yaml:"context"`
+	Outcomes map[string]FlowStageGateOutcomeDeclaration `yaml:"outcomes"`
+}
+
+type FlowStageGateOutcomeDeclaration struct {
+	Label      string                            `yaml:"label"`
+	Input      map[string]WorkflowGateInputField `yaml:"input"`
+	AdvancesTo string                            `yaml:"advances_to"`
+	Emit       EmitSpec                          `yaml:"emit"`
 }
 
 type FlowStageTimerDeclaration struct {
@@ -32,6 +47,7 @@ var stageDeclarationFieldOptions = map[string]struct{}{
 	"terminal":    {},
 	"description": {},
 	"timers":      {},
+	"gate":        {},
 }
 
 var stageTimerFieldOptions = map[string]struct{}{
@@ -39,6 +55,26 @@ var stageTimerFieldOptions = map[string]struct{}{
 	"after":       {},
 	"emit":        {},
 	"advances_to": {},
+}
+
+var stageGateFieldOptions = map[string]struct{}{
+	"decision": {},
+	"title":    {},
+	"context":  {},
+	"outcomes": {},
+}
+
+var stageGateOutcomeFieldOptions = map[string]struct{}{
+	"label":       {},
+	"input":       {},
+	"advances_to": {},
+	"emit":        {},
+}
+
+var stageGateInputFieldOptions = map[string]struct{}{
+	"type":     {},
+	"required": {},
+	"label":    {},
 }
 
 func (d *FlowStageDeclarations) UnmarshalYAML(node *yaml.Node) error {
@@ -151,6 +187,159 @@ func (t *FlowStageTimerDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	t.Emit = strings.TrimSpace(t.Emit)
 	t.AdvancesTo = strings.TrimSpace(t.AdvancesTo)
 	return nil
+}
+
+func (g *FlowStageGateDeclaration) UnmarshalYAML(node *yaml.Node) error {
+	if g == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || (node.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(node.Tag), "!!null")) {
+		return fmt.Errorf("stage gate must be a mapping")
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("stage gate must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := stageGateFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("stage gate", key, stageGateFieldOptions)
+		}
+	}
+	var out FlowStageGateDeclaration
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "decision":
+			if err := value.Decode(&out.Decision); err != nil {
+				return err
+			}
+		case "title":
+			if err := value.Decode(&out.Title); err != nil {
+				return err
+			}
+		case "context":
+			contextFields, err := decodeExpressionValueMapNode(value, "stage gate context")
+			if err != nil {
+				return err
+			}
+			for name, expression := range contextFields {
+				if expression.Kind == ExpressionKindLiteral {
+					if text, ok := expression.Literal.(string); ok {
+						expression = CELExpression(text)
+						contextFields[name] = expression
+					}
+				}
+			}
+			out.Context = contextFields
+		case "outcomes":
+			if err := value.Decode(&out.Outcomes); err != nil {
+				return err
+			}
+		}
+	}
+	out.Decision = strings.TrimSpace(out.Decision)
+	out.Title = strings.TrimSpace(out.Title)
+	if out.Decision == "" {
+		return fmt.Errorf("stage gate decision is required")
+	}
+	if len(out.Outcomes) == 0 {
+		return fmt.Errorf("stage gate %s requires at least one outcome", out.Decision)
+	}
+	for verdict, outcome := range out.Outcomes {
+		verdict = strings.TrimSpace(verdict)
+		if verdict == "" {
+			return fmt.Errorf("stage gate %s contains an empty verdict", out.Decision)
+		}
+		outcome.AdvancesTo = strings.TrimSpace(outcome.AdvancesTo)
+		if outcome.AdvancesTo == "" {
+			return fmt.Errorf("stage gate %s outcome %s requires advances_to; use defer to keep waiting", out.Decision, verdict)
+		}
+		out.Outcomes[verdict] = outcome
+	}
+	*g = out
+	return nil
+}
+
+func (o *FlowStageGateOutcomeDeclaration) UnmarshalYAML(node *yaml.Node) error {
+	if o == nil {
+		return nil
+	}
+	if node == nil || node.Kind != yaml.MappingNode {
+		return fmt.Errorf("stage gate outcome must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := stageGateOutcomeFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("stage gate outcome", key, stageGateOutcomeFieldOptions)
+		}
+	}
+	type alias FlowStageGateOutcomeDeclaration
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	out.Label = strings.TrimSpace(out.Label)
+	out.AdvancesTo = strings.TrimSpace(out.AdvancesTo)
+	*o = FlowStageGateOutcomeDeclaration(out)
+	return nil
+}
+
+func (f *WorkflowGateInputField) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	if node == nil || node.Kind != yaml.MappingNode {
+		return fmt.Errorf("stage gate input field must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := stageGateInputFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("stage gate input field", key, stageGateInputFieldOptions)
+		}
+	}
+	type alias WorkflowGateInputField
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	normalized, err := NormalizeNodeStateFieldType(out.Type)
+	if err != nil {
+		return fmt.Errorf("stage gate input type: %w", err)
+	}
+	out.Type = normalized
+	out.Label = strings.TrimSpace(out.Label)
+	*f = WorkflowGateInputField(out)
+	return nil
+}
+
+func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
+	out := make([]WorkflowGatePlan, 0)
+	for _, stage := range d.Entries {
+		if stage.Gate == nil {
+			continue
+		}
+		plan := WorkflowGatePlan{
+			FlowID:   strings.TrimSpace(flowID),
+			Stage:    strings.TrimSpace(stage.ID),
+			Decision: strings.TrimSpace(stage.Gate.Decision),
+			Title:    strings.TrimSpace(stage.Gate.Title),
+			Context:  cloneExpressionValueMap(stage.Gate.Context),
+			Outcomes: map[string]WorkflowGateOutcomePlan{},
+		}
+		for verdict, outcome := range stage.Gate.Outcomes {
+			input := make(map[string]WorkflowGateInputField, len(outcome.Input))
+			for name, field := range outcome.Input {
+				input[strings.TrimSpace(name)] = field
+			}
+			plan.Outcomes[strings.TrimSpace(verdict)] = WorkflowGateOutcomePlan{
+				Verdict: strings.TrimSpace(verdict), Label: strings.TrimSpace(outcome.Label), Input: input,
+				AdvancesTo: strings.TrimSpace(outcome.AdvancesTo), Emit: cloneEmitSpec(outcome.Emit),
+			}
+		}
+		out = append(out, plan)
+	}
+	return out
 }
 
 func (s *FlowStageDeclaration) normalizeTimerIDs() error {

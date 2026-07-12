@@ -234,6 +234,11 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	if endedAt.IsZero() {
 		endedAt = s.now()
 	}
+	if status != "completed" {
+		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, s.AppendEventTx); err != nil {
+			return storerunlifecycle.Snapshot{}, err
+		}
+	}
 	if err := sqliteSyncRunCounts(ctx, tx, runID); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
@@ -360,6 +365,7 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		sqliteNormalRunCompletionDeliveriesSettledTx,
 		sqliteNormalRunCompletionTimersSettledTx,
 		s.sqliteNormalRunCompletionSessionLeasesSettledTx,
+		sqliteNormalRunCompletionGateObligationsSettledTx,
 	}
 	for _, check := range checks {
 		ready, err := check(ctx, tx, runID)
@@ -368,6 +374,21 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		}
 	}
 	return sqliteNormalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func sqliteNormalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var active bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM entity_state es, json_each(COALESCE(json_extract(es.accumulator, '$.stage_gates'), '{}')) gate
+			WHERE es.run_id = ?
+			  AND COALESCE(json_extract(gate.value, '$.status'), '') IN ('open', 'decision_committed')
+		)
+	`, runID).Scan(&active); err != nil {
+		return false, fmt.Errorf("check sqlite normal run gate obligations: %w", err)
+	}
+	return !active, nil
 }
 
 func sqliteNormalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

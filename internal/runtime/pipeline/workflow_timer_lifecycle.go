@@ -259,6 +259,12 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 			if err := pc.applyWorkflowTimerIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID); err != nil {
 				return err
 			}
+			if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentStage, nextStage); err != nil {
+				return err
+			}
+			if err := pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID); err != nil {
+				return err
+			}
 			return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)
 		}
 		return nil

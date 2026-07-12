@@ -34,6 +34,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -148,6 +149,7 @@ type storeBundle struct {
 	BudgetSpendStore             budgetspend.Store
 	InboundStore                 runtime.InboundPersistence
 	MailboxAPIStore              apiv1.MailboxAPIStore
+	DecisionCards                decisioncard.Store
 	ObservabilityStore           apiv1.ObservabilityReadStore
 	AgentUsageStore              apiv1.AgentUsageReadStore
 	AgentDeliveryLifecycleStore  apiv1.AgentDeliveryLifecycleReadStore
@@ -311,6 +313,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		BudgetSpendStore:            pg,
 		InboundStore:                pg,
 		MailboxAPIStore:             pg,
+		DecisionCards:               pg,
 		ObservabilityStore:          pg,
 		AgentUsageStore:             pg,
 		AgentDeliveryLifecycleStore: pg,
@@ -1191,11 +1194,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		storeClosed = true
 		presenter.shutdown(shutdownErr)
 	}()
-	mailboxDecisionRoutes, err := apiv1.MailboxDecisionRoutesFromSpec(resolvedPlatformSpecPath)
-	if err != nil {
-		presenter.fail(5, "mailbox_routes", err)
-		return 1
-	}
 	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
@@ -1239,6 +1237,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		RunFork:                   apiStoreCaps.RunFork,
 		AgentControl:              dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:                   stores.MailboxAPIStore,
+		DecisionCards:             stores.DecisionCards,
+		WorkflowStore:             stores.PipelineStore,
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,
@@ -1249,7 +1249,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ResetCleaner:              apiStoreCaps.ResetCleaner,
 		ResetContainers:           runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
 		Source:                    source,
-		MailboxDecisionRoutes:     mailboxDecisionRoutes,
 		Bundle:                    bootBundleIdentity,
 		RuntimeIdentity: apiv1.RuntimeIdentityResult{
 			RuntimeInstanceID:   runtimeInstanceID,
@@ -2611,6 +2610,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			BudgetSpendStore:            sqliteStore,
 			InboundStore:                sqliteStore,
 			MailboxAPIStore:             sqliteStore,
+			DecisionCards:               sqliteStore,
 			ObservabilityStore:          sqliteStore,
 			AgentUsageStore:             sqliteStore,
 			AgentDeliveryLifecycleStore: sqliteStore,

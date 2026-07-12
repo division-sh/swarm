@@ -111,6 +111,7 @@ func (f selectedRuntimeStoreFacade) runtimeStores() runtime.Stores {
 		ManagerStore:        s.ManagerStore,
 		ScheduleStore:       s.ScheduleStore,
 		MailboxMaterializer: s.MailboxMaterializer,
+		DecisionCards:       s.DecisionCards,
 		StartupOwnership:    s.StartupOwnership,
 		MailboxStore:        s.MailboxStore,
 		ToolEntityStore:     s.ToolEntityStore,

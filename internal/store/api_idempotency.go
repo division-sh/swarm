@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const apiIdempotencyLockNamespace = "swarm:api-idempotency:"
@@ -73,6 +75,9 @@ func (s *PostgresStore) WithAPIIdempotency(
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return withPostgresAPIIdempotencyTx(ctx, tx, req, execute)
+	}
 
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {
@@ -121,6 +126,40 @@ func (s *PostgresStore) WithAPIIdempotency(
 		completion.ResourceID = req.ResourceID
 	}
 	if err := storeAPIIdempotency(ctx, conn, req, completion); err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	return completion, false, nil
+}
+
+func withPostgresAPIIdempotencyTx(ctx context.Context, tx *sql.Tx, req APIIdempotencyRequest, execute func(context.Context) (APIIdempotencyCompletion, error)) (APIIdempotencyCompletion, bool, error) {
+	lockKey := apiIdempotencyLockKey(req.Method, req.ActorTokenID, req.IdempotencyKey)
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("lock api idempotency key: %w", err)
+	}
+	if err := purgeExpiredAPIIdempotency(ctx, tx, req.Now); err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	existing, ok, err := loadAPIIdempotency(ctx, tx, req)
+	if err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	if ok {
+		if existing.RequestHash != req.RequestHash {
+			return APIIdempotencyCompletion{}, false, &APIIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, Method: req.Method, ResourceID: existing.ResourceID}
+		}
+		return APIIdempotencyCompletion{ResourceID: existing.ResourceID, Response: append(json.RawMessage(nil), existing.Response...)}, true, nil
+	}
+	completion, err := execute(ctx)
+	if err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	if len(completion.Response) == 0 {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency response is required")
+	}
+	if strings.TrimSpace(completion.ResourceID) == "" {
+		completion.ResourceID = req.ResourceID
+	}
+	if err := storeAPIIdempotency(ctx, tx, req, completion); err != nil {
 		return APIIdempotencyCompletion{}, false, err
 	}
 	return completion, false, nil

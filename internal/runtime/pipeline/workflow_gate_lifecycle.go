@@ -1,0 +1,237 @@
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/google/uuid"
+)
+
+type workflowGateMutationPublisher interface {
+	PublishInMutation(context.Context, events.Event) error
+}
+
+type workflowGateIntent struct {
+	activation gateruntime.Activation
+	card       decisioncard.Card
+}
+
+func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.SemanticSource() == nil {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	currentStage = strings.TrimSpace(currentStage)
+	nextStage = strings.TrimSpace(nextStage)
+	if entityID == "" || nextStage == "" || currentStage == nextStage {
+		return nil
+	}
+	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
+		return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+			return pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, sourceEvent)
+		})
+	}
+
+	var create *workflowGateIntent
+	superseded := []gateruntime.Activation{}
+	now := time.Now().UTC()
+	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+		if err != nil {
+			return fmt.Errorf("decode gate state: %w", err)
+		}
+		activations, err := gateruntime.List(carrier.StateBuckets)
+		if err != nil {
+			return fmt.Errorf("list gate activations: %w", err)
+		}
+		for _, activation := range activations {
+			if activation.Stage != currentStage || activation.Stage == nextStage {
+				continue
+			}
+			if activation.Supersede(firstNonEmptyString(sourceEvent, "stage_exited"), now) {
+				if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+					return err
+				}
+				superseded = append(superseded, activation)
+			}
+		}
+
+		flowID, plan, ok := workflowGatePlanForInstance(pc, *instance, nextStage)
+		if !ok {
+			instance.StateBuckets = carrier.PersistedStateBuckets()
+			return nil
+		}
+		if pc.decisionCards == nil {
+			return fmt.Errorf("decision card store is required before entering gated stage %s", nextStage)
+		}
+		if existing, found, err := gateruntime.Load(carrier.StateBuckets, flowID, plan.Decision); err != nil {
+			return err
+		} else if found && existing.Stage == nextStage && (existing.Status == gateruntime.StatusOpen || existing.Status == gateruntime.StatusDecisionCommitted) {
+			instance.StateBuckets = carrier.PersistedStateBuckets()
+			return nil
+		}
+
+		runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+		if runID == "" {
+			runID = strings.TrimSpace(asString(instance.Metadata["run_id"]))
+		}
+		if runID == "" {
+			return fmt.Errorf("run identity is required before entering gated stage %s", nextStage)
+		}
+		bundleHash := workflowGateBundleHash(ctx, pc)
+		if bundleHash == "" {
+			return fmt.Errorf("bundle identity is required before entering gated stage %s", nextStage)
+		}
+		enteredAt := instance.EnteredStageAt.UTC()
+		if enteredAt.IsZero() {
+			enteredAt = now
+		}
+		identity := StoredFlowInstance(pc.SemanticSource(), *instance)
+		activation, err := gateruntime.New(runID, identity.InstancePath, entityID, flowID, nextStage, plan.Decision, bundleHash, sourceEvent, enteredAt)
+		if err != nil {
+			return err
+		}
+		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+			return err
+		}
+		card, err := pc.buildWorkflowDecisionCard(ctx, entityID, *instance, identity.InstancePath, activation, plan)
+		if err != nil {
+			return err
+		}
+		instance.StateBuckets = carrier.PersistedStateBuckets()
+		create = &workflowGateIntent{activation: activation, card: card}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, activation := range superseded {
+		if pc.decisionCards == nil {
+			return fmt.Errorf("decision card store is required to supersede gate activation %s", activation.ActivationID)
+		}
+		if err := pc.decisionCards.SupersedeDecisionCardsForStage(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activation.ActivationID, activation.SupersededReason, now); err != nil {
+			return err
+		}
+		if err := pc.publishWorkflowGateSuperseded(ctx, entityID, activation, now); err != nil {
+			return err
+		}
+	}
+	if create != nil {
+		if err := pc.decisionCards.CreateDecisionCard(ctx, create.card); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, entityID string, activation gateruntime.Activation, now time.Time) error {
+	publisher, ok := pc.bus.(workflowGateMutationPublisher)
+	if !ok || publisher == nil {
+		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" && pc.decisionCards != nil {
+		if card, err := pc.decisionCards.GetDecisionCard(ctx, activation.CardID); err == nil {
+			runID = card.RunID
+		}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
+	})
+	if err != nil {
+		return err
+	}
+	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, runID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.UTC())
+	if err := publisher.PublishInMutation(ctx, evt); err != nil {
+		return fmt.Errorf("publish decision card superseded event: %w", err)
+	}
+	return nil
+}
+
+func workflowGatePlanForInstance(pc *PipelineCoordinator, instance WorkflowInstance, stage string) (string, runtimecontracts.WorkflowGatePlan, bool) {
+	if pc == nil || pc.SemanticSource() == nil {
+		return "", runtimecontracts.WorkflowGatePlan{}, false
+	}
+	flowID := strings.TrimSpace(instance.WorkflowName)
+	if plan, ok := pc.SemanticSource().WorkflowGateForStage(flowID, stage); ok {
+		return flowID, plan, true
+	}
+	if flowID == strings.TrimSpace(pc.SemanticSource().WorkflowName()) {
+		if plan, ok := pc.SemanticSource().WorkflowGateForStage("", stage); ok {
+			return "", plan, true
+		}
+	}
+	return "", runtimecontracts.WorkflowGatePlan{}, false
+}
+
+func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string {
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		if value := strings.TrimSpace(firstNonEmptyString(fact.BundleHash, fact.BundleFingerprint)); value != "" {
+			return value
+		}
+	}
+	if pc != nil {
+		return strings.TrimSpace(pc.bundleFingerprint)
+	}
+	return ""
+}
+
+func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, entityID string, instance WorkflowInstance, flowInstance string, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan) (decisioncard.Card, error) {
+	contextSnapshot := make(map[string]any, len(plan.Context))
+	for name, expression := range plan.Context {
+		value, err := evalWorkflowGateContext(expression, instance, pc.SemanticSource(), plan.FlowID)
+		if err != nil {
+			return decisioncard.Card{}, fmt.Errorf("evaluate gate %s context %s: %w", plan.Decision, name, err)
+		}
+		contextSnapshot[name] = value
+	}
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if runID == "" {
+		runID = asString(instance.Metadata["run_id"])
+	}
+	card := decisioncard.Card{
+		CardID: activation.CardID, RunID: runID, FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"), FlowID: plan.FlowID,
+		EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
+		StageActivationID: activation.ActivationID, DecisionID: plan.Decision,
+		Snapshot:   decisioncard.Snapshot{Decision: plan.Decision, Title: plan.Title, Context: contextSnapshot, Outcomes: plan.Outcomes},
+		BundleHash: activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
+		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+		Provenance:       map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage},
+		CreatedAt:        activation.OpenedAt,
+	}
+	return decisioncard.New(card)
+}
+
+func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, instance WorkflowInstance, source semanticview.Source, flowID string) (any, error) {
+	if expression.HasLiteralValue() {
+		return expression.Literal, nil
+	}
+	raw := strings.TrimSpace(expression.CEL)
+	if raw == "" {
+		raw = strings.TrimSpace(expression.Ref)
+	}
+	policy := map[string]any{}
+	if source != nil {
+		policy = workflowTimerPolicy(source, flowID)
+	}
+	return workflowexpr.EvalValueExpression(raw, workflowexpr.ValueContext{
+		Entity: instance.Metadata,
+		PlatformEntity: map[string]any{
+			"entity_id": instance.StorageRef, "flow_instance": asString(instance.Metadata["flow_path"]), "current_state": instance.CurrentState,
+		},
+		Policy:   policy,
+		Computed: payloadMap(instance.Metadata["computed"]),
+	})
+}

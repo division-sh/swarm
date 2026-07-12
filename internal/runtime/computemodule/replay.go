@@ -1,14 +1,12 @@
 package computemodule
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"runtime"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
 
 const (
@@ -247,32 +245,11 @@ func replayFinding(kind ReplayFindingKind, field string, expected, actual Replay
 }
 
 func CanonicalJSONBytes(v any) ([]byte, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return CanonicalizeJSON(raw)
+	return canonicaljson.Bytes(v)
 }
 
 func CanonicalizeJSON(raw []byte) ([]byte, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var value any
-	if err := dec.Decode(&value); err != nil {
-		return nil, err
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("trailing JSON content")
-		}
-		return nil, fmt.Errorf("trailing JSON content")
-	}
-	out, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return canonicaljson.Canonicalize(raw)
 }
 
 func CanonicalJSONHash(v any) (string, error) {
@@ -280,7 +257,7 @@ func CanonicalJSONHash(v any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return HashBytes(raw), nil
+	return canonicaljson.HashBytes(raw), nil
 }
 
 func CanonicalJSONHashRaw(raw []byte) (string, error) {
@@ -288,12 +265,11 @@ func CanonicalJSONHashRaw(raw []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return HashBytes(canonical), nil
+	return canonicaljson.HashBytes(canonical), nil
 }
 
 func HashBytes(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return canonicaljson.HashBytes(raw)
 }
 
 func firstNonEmpty(values ...string) string {

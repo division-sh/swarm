@@ -17,6 +17,8 @@ type Source interface {
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan
 	ResolveFanOutEffectiveSemantics(flowID, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error)
+	WorkflowGates() []runtimecontracts.WorkflowGatePlan
+	WorkflowGateForStage(flowID, stage string) (runtimecontracts.WorkflowGatePlan, bool)
 	WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool)
 	GuardInstructions() []runtimeregistry.GuardInstruction
 	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)

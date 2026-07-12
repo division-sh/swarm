@@ -1,7 +1,6 @@
 package mailbox
 
 import (
-	"bytes"
 	"context"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"net/http"
@@ -173,15 +172,6 @@ func (m *fakeMailboxStore) GetMailboxItem(_ context.Context, id string) (runtime
 	return it, nil
 }
 
-func (m *fakeMailboxStore) DecideMailboxItem(_ context.Context, id, status, decision, notes string) error {
-	it := m.items[id]
-	it.Status = status
-	it.Decision = decision
-	it.DecisionNotes = notes
-	m.items[id] = it
-	return nil
-}
-
 func (m *fakeMailboxStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
@@ -191,88 +181,6 @@ func (m *fakeMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, i
 }
 
 func (m *fakeMailboxStore) MarkMailboxItemNotified(context.Context, string) error { return nil }
-
-func TestMailbox_NormalizeDecisionAction(t *testing.T) {
-	for _, tc := range []struct {
-		in     string
-		status string
-		dec    string
-	}{
-		{"approve", "decided", "approve"},
-		{"reject", "decided", "reject"},
-		{"more-data", "decided", "more-data"},
-		{"deferred", "decided", "deferred"},
-		{"timeout", "expired", "timeout"},
-	} {
-		out, err := NormalizeDecisionAction(tc.in)
-		if err != nil {
-			t.Fatalf("NormalizeDecisionAction(%q): %v", tc.in, err)
-		}
-		if out.Status != tc.status || out.Decision != tc.dec {
-			t.Fatalf("NormalizeDecisionAction(%q) got=%+v", tc.in, out)
-		}
-	}
-}
-
-func TestMailbox_DecideAndPrints(t *testing.T) {
-	ctx := context.Background()
-	store := newFakeMailbox(runtimetools.MailboxItem{
-		ID:        "m1",
-		Type:      "manual_review",
-		Priority:  "critical",
-		Status:    "pending",
-		FromAgent: "a",
-		EntityID:  "v",
-		Summary:   strings.Repeat("x", 200),
-		TimeoutAt: time.Now().Add(10 * time.Minute),
-	})
-
-	out, err := Decide(ctx, store, "m1", "approve", "ok")
-	if err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-	if out.Status != "decided" || out.Decision != "approve" {
-		t.Fatalf("unexpected outcome: %+v", out)
-	}
-
-	var buf bytes.Buffer
-	if err := PrintStatus(ctx, store, &buf); err != nil {
-		t.Fatalf("PrintStatus: %v", err)
-	}
-	if !strings.Contains(buf.String(), "mailbox: pending=") {
-		t.Fatalf("unexpected PrintStatus output: %q", buf.String())
-	}
-
-	buf.Reset()
-	if err := PrintPendingWithOptions(ctx, store, &buf, ListOptions{Limit: 10, CriticalOnly: true}); err != nil {
-		t.Fatalf("PrintPendingWithOptions: %v", err)
-	}
-	if !strings.Contains(buf.String(), "mailbox: no pending items") {
-		t.Fatalf("expected no pending items after approve, got %q", buf.String())
-	}
-
-	_, _ = store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		ID:        "m2",
-		Type:      "ops_review",
-		Priority:  "normal",
-		Status:    "pending",
-		FromAgent: "a2",
-		EntityID:  "v2",
-		Summary:   "hello",
-	})
-	buf.Reset()
-	if err := PrintPendingWithOptions(ctx, store, &buf, ListOptions{Limit: 10, ReviewsOnly: true}); err != nil {
-		t.Fatalf("PrintPending with review filter: %v", err)
-	}
-
-	buf.Reset()
-	if err := PrintItem(ctx, store, &buf, "m2"); err != nil {
-		t.Fatalf("PrintItem: %v", err)
-	}
-	if !strings.Contains(buf.String(), "mailbox item") || !strings.Contains(buf.String(), "id: m2") {
-		t.Fatalf("unexpected PrintItem output: %q", buf.String())
-	}
-}
 
 func TestMailbox_FilterHelpers(t *testing.T) {
 	items := []runtimetools.MailboxItem{

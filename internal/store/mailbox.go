@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -117,26 +118,6 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 		return s.getMailboxItemSpec(ctx, id)
 	}
 	return runtimetools.MailboxItem{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
-}
-
-func (s *PostgresStore) DecideMailboxItem(ctx context.Context, id, status, decision, notes string) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(status) == "" || strings.TrimSpace(decision) == "" {
-		return fmt.Errorf("mailbox id, status, and decision are required")
-	}
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return err
-	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.decideMailboxItemSpec(ctx, id, status, decision, notes)
-	}
-	return unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
@@ -299,26 +280,6 @@ func (s *PostgresStore) getMailboxItemSpec(ctx context.Context, id string) (runt
 	return items[0], nil
 }
 
-func (s *PostgresStore) decideMailboxItemSpec(ctx context.Context, id, status, decision, notes string) error {
-	rowStatus, rowDecision := mailboxDecisionState(status, decision)
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE mailbox
-		SET status = $2,
-		    decision = $3,
-		    decision_notes = NULLIF($4,''),
-		    decided_at = now()
-		WHERE item_id = $1::uuid
-		  AND status = 'pending'
-	`, id, rowStatus, rowDecision, notes)
-	if err != nil {
-		return fmt.Errorf("decide mailbox item: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("mailbox item is not pending or not found: %s", id)
-	}
-	return nil
-}
-
 func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		WITH due AS (
@@ -394,12 +355,24 @@ func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Conte
 }
 
 func (s *PostgresStore) markMailboxItemNotifiedSpec(ctx context.Context, id string) error {
-	if _, err := s.DB.ExecContext(ctx, `
+	db := interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		db = tx
+	}
+	result, err := db.ExecContext(ctx, `
 		UPDATE mailbox
 		SET notified = true
 		WHERE item_id = $1::uuid
-	`, id); err != nil {
+	`, id)
+	if err != nil {
 		return fmt.Errorf("mark mailbox item notified: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return err
+	} else if rows == 0 {
+		return ErrMailboxV1NotFound
 	}
 	return nil
 }
@@ -485,15 +458,6 @@ func mailboxStateForStoredStatus(status, decision string) (rowStatus string, row
 		return strings.TrimSpace(status), strings.TrimSpace(decision)
 	default:
 		return "pending", strings.TrimSpace(decision)
-	}
-}
-
-func mailboxDecisionState(status, decision string) (rowStatus string, rowDecision string) {
-	switch strings.TrimSpace(status) {
-	case "decided", "expired", "cancelled":
-		return strings.TrimSpace(status), strings.TrimSpace(decision)
-	default:
-		return "decided", strings.TrimSpace(coalesce(strings.TrimSpace(decision), strings.TrimSpace(status)))
 	}
 }
 

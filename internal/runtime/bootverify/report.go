@@ -93,6 +93,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"single_node_per_event":                   "Ensure only one system node owns the exact event handler or split the event ownership.",
 	"singleton_coordinator_validation":        "Fix the singleton coordinator declaration so it names supported contained state fields.",
 	"state_machine_coherence":                 "Fix the state machine declarations so initial, terminal, and transition states are declared consistently.",
+	"stage_gate_validation":                   "Fix the stage gate so every typed verdict has one valid direct route and one schema-compatible immutable decision contract.",
 	"template_instance_validation":            "Fix the template instance declaration so instance keys and policies are valid.",
 	"timer_validation":                        "Use only supported timer start_on/cancel_on forms and ensure referenced states/events are declared and reachable.",
 	"transition_ownership_validation":         "Move the transition owner to the handler that owns the triggering event or change the transition.",

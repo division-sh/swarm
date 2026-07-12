@@ -12,14 +12,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
-	"github.com/google/uuid"
 )
 
 var ErrMailboxV1NotFound = errors.New("mailbox item not found")
 var ErrMailboxV1InvalidCursor = errors.New("invalid mailbox cursor")
-var ErrMailboxV1DecisionRouteUnconfigured = errors.New("mailbox decision event route is not configured")
 
 type MailboxV1ListOptions struct {
 	Status   string
@@ -79,70 +75,6 @@ type MailboxV1DownstreamPreview struct {
 	EventName        string   `json:"event_name,omitempty"`
 	Subscribers      []string `json:"subscribers"`
 	SubscriberSource string   `json:"subscriber_source"`
-}
-
-type MailboxV1DecisionRequest struct {
-	MailboxID                     string
-	Action                        string
-	ActorTokenID                  string
-	Reason                        string
-	DecisionPayload               json.RawMessage
-	DeferUntil                    time.Time
-	Now                           time.Time
-	DecisionEventType             string
-	DecisionEventSubscribers      []string
-	DecisionEventSubscriberSource string
-	DecisionEventPublish          func(context.Context, events.Event) error
-	Idempotency                   *APIIdempotencyRequest
-}
-
-type MailboxV1DecisionResult struct {
-	OK                         bool      `json:"ok"`
-	MailboxDecisionID          string    `json:"mailbox_decision_id"`
-	DownstreamEventID          string    `json:"downstream_event_id,omitempty"`
-	DownstreamEventName        string    `json:"downstream_event_name,omitempty"`
-	DownstreamSubscribers      *[]string `json:"downstream_subscribers,omitempty"`
-	DownstreamSubscriberSource string    `json:"downstream_subscriber_source,omitempty"`
-	Status                     string    `json:"status"`
-	IdempotencyReplayed        bool      `json:"idempotency_replayed"`
-}
-
-type MailboxV1DecisionOutcome struct {
-	Result        MailboxV1DecisionResult
-	DecisionEvent *events.Event
-	Replayed      bool
-}
-
-type MailboxV1AlreadyDecidedError struct {
-	MailboxID        string
-	ExistingDecision string
-	DecidedAt        time.Time
-}
-
-func (e *MailboxV1AlreadyDecidedError) Error() string {
-	return "mailbox item is already decided"
-}
-
-type MailboxV1InvalidDeferUntilError struct {
-	Reason   string
-	MaxUntil *time.Time
-}
-
-func (e *MailboxV1InvalidDeferUntilError) Error() string {
-	return "invalid mailbox defer timestamp"
-}
-
-type MailboxV1DecisionRouteError struct {
-	MailboxID string
-	ItemType  string
-}
-
-func (e *MailboxV1DecisionRouteError) Error() string {
-	return "mailbox decision event route is not configured"
-}
-
-func (e *MailboxV1DecisionRouteError) Is(target error) bool {
-	return target == ErrMailboxV1DecisionRouteUnconfigured
 }
 
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
@@ -242,317 +174,12 @@ func (s *PostgresStore) GetV1MailboxItem(ctx context.Context, id string) (Mailbo
 	return row.projectDetail(), nil
 }
 
-func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1DecisionRequest) (MailboxV1DecisionOutcome, error) {
-	if s == nil || s.DB == nil {
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("postgres store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return MailboxV1DecisionOutcome{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
-	}
-	if input.Now.IsZero() {
-		input.Now = time.Now().UTC()
-	}
-	input.Now = input.Now.UTC()
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-
-	action := strings.TrimSpace(strings.ToLower(input.Action))
-	switch action {
-	case "approve", "approved":
-		action = "approved"
-	case "reject", "rejected":
-		action = "rejected"
-	case "defer", "deferred":
-		action = "deferred"
-	default:
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("unsupported mailbox decision action %q", input.Action)
-	}
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("begin v1 mailbox decision tx: %w", err)
-	}
-	postCommitActions := make([]func(), 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	idempotencyReq, hasIdempotency, err := prepareMailboxV1IdempotencyRequest(input)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	if hasIdempotency {
-		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, apiIdempotencyLockKey(idempotencyReq.Method, idempotencyReq.ActorTokenID, idempotencyReq.IdempotencyKey)); err != nil {
-			return MailboxV1DecisionOutcome{}, fmt.Errorf("lock api idempotency key: %w", err)
-		}
-		if err := purgeExpiredAPIIdempotency(txctx, tx, idempotencyReq.Now); err != nil {
-			return MailboxV1DecisionOutcome{}, err
-		}
-		existing, ok, err := loadAPIIdempotency(txctx, tx, idempotencyReq)
-		if err != nil {
-			return MailboxV1DecisionOutcome{}, err
-		}
-		if ok {
-			if existing.RequestHash != idempotencyReq.RequestHash {
-				return MailboxV1DecisionOutcome{}, &APIIdempotencyConflictError{
-					OriginalRequestHash:    existing.RequestHash,
-					ConflictingRequestHash: idempotencyReq.RequestHash,
-					Method:                 idempotencyReq.Method,
-					ResourceID:             existing.ResourceID,
-				}
-			}
-			var result MailboxV1DecisionResult
-			if err := json.Unmarshal(existing.Response, &result); err != nil {
-				return MailboxV1DecisionOutcome{}, fmt.Errorf("decode api idempotency mailbox response: %w", err)
-			}
-			if err := normalizeMailboxV1DecisionReplayResult(txctx, tx, &result); err != nil {
-				return MailboxV1DecisionOutcome{}, err
-			}
-			if err := tx.Commit(); err != nil {
-				return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox idempotency replay tx: %w", err)
-			}
-			committed = true
-			return MailboxV1DecisionOutcome{Result: result, Replayed: true}, nil
-		}
-	}
-	if action == "deferred" && !input.DeferUntil.After(input.Now) {
-		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
-	}
-
-	row, err := s.loadMailboxV1RowTx(txctx, tx, input.MailboxID, true)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	if row.Status != "pending" {
-		return MailboxV1DecisionOutcome{}, &MailboxV1AlreadyDecidedError{
-			MailboxID:        row.ID,
-			ExistingDecision: row.existingDecision(),
-			DecidedAt:        row.decisionTime(input.Now),
-		}
-	}
-	if strings.TrimSpace(input.DecisionEventType) == "" {
-		return MailboxV1DecisionOutcome{}, &MailboxV1DecisionRouteError{MailboxID: row.ID, ItemType: row.Type}
-	}
-	if action == "deferred" && row.ExpiresAt.Valid && input.DeferUntil.After(row.ExpiresAt.Time.UTC()) {
-		maxUntil := row.ExpiresAt.Time.UTC()
-		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "beyond_expiry", MaxUntil: &maxUntil}
-	}
-
-	decisionID := uuid.NewString()
-	resultStatus := "decided"
-	if action == "deferred" {
-		resultStatus = "deferred"
-	}
-	outcome := MailboxV1DecisionOutcome{
-		Result: MailboxV1DecisionResult{
-			OK:                true,
-			MailboxDecisionID: decisionID,
-			Status:            resultStatus,
-		},
-	}
-	notes := strings.TrimSpace(input.Reason)
-	if action == "deferred" {
-		if notes == "" {
-			notes = "Deferred until " + input.DeferUntil.UTC().Format(time.RFC3339Nano)
-		}
-	}
-	eventID := uuid.NewString()
-	evt, err := row.decisionEvent(eventID, decisionID, strings.TrimSpace(input.DecisionEventType), action, strings.TrimSpace(input.ActorTokenID), strings.TrimSpace(input.Reason), input.DecisionPayload, input.DeferUntil, input.Now)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	subscribers := append([]string(nil), input.DecisionEventSubscribers...)
-	if subscribers == nil {
-		subscribers = []string{}
-	}
-	subscriberSource := strings.TrimSpace(input.DecisionEventSubscriberSource)
-	if subscriberSource == "" {
-		subscriberSource = "unavailable"
-	}
-	outcome.Result.DownstreamEventID = eventID
-	outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
-	outcome.Result.DownstreamSubscribers = &subscribers
-	outcome.Result.DownstreamSubscriberSource = subscriberSource
-	deliveryContext := replyDeliveryContext(row.ReplyContextID)
-	if !deliveryContext.Empty() {
-		evt = evt.WithDeliveryContext(deliveryContext)
-	}
-	outcome.DecisionEvent = &evt
-
-	var res sql.Result
-	if action == "deferred" {
-		res, err = tx.ExecContext(txctx, `
-		UPDATE mailbox
-		SET status = 'pending',
-		    decision = NULL,
-		    decision_notes = NULLIF($2, ''),
-		    decided_by = NULLIF($3, ''),
-		    decided_at = $4,
-		    deferred_until = $5
-		WHERE item_id = $1::uuid
-		  AND status = 'pending'
-	`, row.ID, notes, strings.TrimSpace(input.ActorTokenID), input.Now, input.DeferUntil.UTC())
-	} else {
-		res, err = tx.ExecContext(txctx, `
-		UPDATE mailbox
-		SET status = 'decided',
-		    decision = $2,
-		    decision_notes = NULLIF($3, ''),
-		    decided_by = NULLIF($4, ''),
-		    decided_at = $5,
-		    deferred_until = NULL
-		WHERE item_id = $1::uuid
-		  AND status = 'pending'
-	`, row.ID, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now)
-	}
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("decide v1 mailbox item: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		latest, latestErr := s.loadMailboxV1RowTx(txctx, tx, row.ID, false)
-		if latestErr != nil {
-			return MailboxV1DecisionOutcome{}, latestErr
-		}
-		return MailboxV1DecisionOutcome{}, &MailboxV1AlreadyDecidedError{
-			MailboxID:        latest.ID,
-			ExistingDecision: latest.existingDecision(),
-			DecidedAt:        latest.decisionTime(input.Now),
-		}
-	}
-	if outcome.DecisionEvent != nil {
-		publishCtx := txctx
-		if !deliveryContext.Empty() {
-			publishCtx = events.WithDeliveryContext(txctx, deliveryContext)
-		}
-		publish := input.DecisionEventPublish
-		if publish == nil {
-			publish = func(ctx context.Context, evt events.Event) error {
-				return s.appendMailboxV1DecisionEventTx(ctx, tx, evt)
-			}
-		}
-		if err := publish(publishCtx, *outcome.DecisionEvent); err != nil {
-			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox decision event: %w", err)
-		}
-	}
-	if hasIdempotency {
-		raw, err := json.Marshal(outcome.Result)
-		if err != nil {
-			return MailboxV1DecisionOutcome{}, err
-		}
-		if err := storeAPIIdempotency(txctx, tx, idempotencyReq, APIIdempotencyCompletion{
-			ResourceID: row.ID,
-			Response:   raw,
-		}); err != nil {
-			return MailboxV1DecisionOutcome{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox decision tx: %w", err)
-	}
-	committed = true
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	return outcome, nil
-}
-
 func replyDeliveryContext(replyContextID string) events.DeliveryContext {
 	replyContextID = strings.TrimSpace(replyContextID)
 	if replyContextID == "" {
 		return events.DeliveryContext{}
 	}
 	return events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}.Normalized()
-}
-
-func prepareMailboxV1IdempotencyRequest(input MailboxV1DecisionRequest) (APIIdempotencyRequest, bool, error) {
-	if input.Idempotency == nil || strings.TrimSpace(input.Idempotency.IdempotencyKey) == "" {
-		return APIIdempotencyRequest{}, false, nil
-	}
-	req := *input.Idempotency
-	req.Method = strings.TrimSpace(req.Method)
-	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
-	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
-	req.RequestHash = strings.TrimSpace(req.RequestHash)
-	req.ResourceID = strings.TrimSpace(req.ResourceID)
-	if req.ResourceID == "" {
-		req.ResourceID = strings.TrimSpace(input.MailboxID)
-	}
-	if req.Method == "" || req.ActorTokenID == "" || req.RequestHash == "" {
-		return APIIdempotencyRequest{}, false, fmt.Errorf("method, actor token id, and request hash are required")
-	}
-	if req.TTL <= 0 {
-		req.TTL = 24 * time.Hour
-	}
-	if req.Now.IsZero() {
-		req.Now = input.Now
-	}
-	if req.Now.IsZero() {
-		req.Now = time.Now().UTC()
-	}
-	req.Now = req.Now.UTC()
-	return req, true, nil
-}
-
-func normalizeMailboxV1DecisionReplayResult(ctx context.Context, q execQueryer, result *MailboxV1DecisionResult) error {
-	if result == nil || strings.TrimSpace(result.DownstreamEventID) == "" {
-		return nil
-	}
-	if strings.TrimSpace(result.DownstreamEventName) == "" {
-		eventName, err := loadMailboxV1DecisionReplayEventName(ctx, q, result.DownstreamEventID)
-		if err != nil {
-			return err
-		}
-		result.DownstreamEventName = eventName
-	}
-	if result.DownstreamSubscribers == nil {
-		subscribers := []string{}
-		result.DownstreamSubscribers = &subscribers
-	}
-	if strings.TrimSpace(result.DownstreamSubscriberSource) == "" {
-		result.DownstreamSubscriberSource = "unavailable"
-	}
-	return nil
-}
-
-func loadMailboxV1DecisionReplayEventName(ctx context.Context, q execQueryer, eventID string) (string, error) {
-	var eventName string
-	err := q.QueryRowContext(ctx, `
-		SELECT event_name
-		FROM events
-		WHERE event_id = $1::uuid
-	`, strings.TrimSpace(eventID)).Scan(&eventName)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", fmt.Errorf("load mailbox idempotency replay event name: event %s not found", strings.TrimSpace(eventID))
-	case err != nil:
-		return "", fmt.Errorf("load mailbox idempotency replay event name: %w", err)
-	}
-	eventName = strings.TrimSpace(eventName)
-	if eventName == "" {
-		return "", fmt.Errorf("load mailbox idempotency replay event name: event %s has empty event_name", strings.TrimSpace(eventID))
-	}
-	return eventName, nil
-}
-
-func (s *PostgresStore) appendMailboxV1DecisionEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
-		return err
-	}
-	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		return err
-	}
-	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil); err != nil {
-		return err
-	}
-	return nil
 }
 
 type mailboxV1Cursor struct {
@@ -582,6 +209,13 @@ func decodeMailboxV1Cursor(raw string) (mailboxV1Cursor, error) {
 func encodeMailboxV1Cursor(createdAt time.Time, mailboxID string) string {
 	raw, _ := json.Marshal(mailboxV1Cursor{CreatedAt: createdAt.UTC(), MailboxID: strings.TrimSpace(mailboxID)})
 	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// EncodeMailboxV1Cursor returns the opaque continuation token for an item in
+// the canonical mailbox creation order. Tagged mailbox projections use it to
+// advance notice and decision-card owners independently.
+func EncodeMailboxV1Cursor(createdAt time.Time, mailboxID string) string {
+	return encodeMailboxV1Cursor(createdAt, mailboxID)
 }
 
 func mailboxV1ListWhere(opts MailboxV1ListOptions, cursor mailboxV1Cursor) (string, []any) {
@@ -791,85 +425,6 @@ func (r mailboxV1Row) projectDetail() MailboxV1ItemDetail {
 		Payload: cloneMailboxV1Payload(r.Payload),
 		History: history,
 	}
-}
-
-func (r mailboxV1Row) existingDecision() string {
-	if decision := mailboxV1Decision(r.Status, r.Decision); decision != "" {
-		return decision
-	}
-	if strings.TrimSpace(r.Status) == "expired" {
-		return "expired"
-	}
-	return "expired"
-}
-
-func (r mailboxV1Row) decisionTime(fallback time.Time) time.Time {
-	if r.DecidedAt.Valid {
-		return r.DecidedAt.Time.UTC()
-	}
-	if !fallback.IsZero() {
-		return fallback.UTC()
-	}
-	return time.Now().UTC()
-}
-
-func (r mailboxV1Row) decisionEvent(eventID, decisionID, eventType, action, actorTokenID, reason string, decisionPayload json.RawMessage, deferUntil time.Time, now time.Time) (events.Event, error) {
-	action = strings.TrimSpace(strings.ToLower(action))
-	payloadMap := map[string]any{}
-	if len(decisionPayload) > 0 {
-		if err := json.Unmarshal(decisionPayload, &payloadMap); err != nil {
-			return events.EmptyEvent(), fmt.Errorf("decode decision payload: %w", err)
-		}
-	}
-	if payloadMap == nil {
-		payloadMap = map[string]any{}
-	}
-	eventPayload := map[string]any{
-		"mailbox_id":          strings.TrimSpace(r.ID),
-		"mailbox_decision_id": strings.TrimSpace(decisionID),
-		"item_type":           strings.TrimSpace(r.Type),
-		"mailbox_payload":     cloneMailboxV1Payload(r.Payload),
-		"source_event_id":     strings.TrimSpace(r.SourceEventID),
-		"source_flow":         mailboxV1SourceFlow(r.FlowInstance),
-		"source_entity_id":    strings.TrimSpace(r.EntityID),
-	}
-	if generation, ok := attemptgeneration.FromPayload(r.Payload); ok {
-		eventPayload[generation.RevisionField] = generation.RevisionID
-	}
-	if action == "deferred" {
-		eventPayload["until"] = deferUntil.UTC().Format(time.RFC3339Nano)
-		eventPayload["deferred_by"] = strings.TrimSpace(actorTokenID)
-		eventPayload["deferred_at"] = now.UTC().Format(time.RFC3339Nano)
-	} else {
-		eventPayload["decision"] = action
-		eventPayload["decision_payload"] = payloadMap
-		eventPayload["decided_by"] = strings.TrimSpace(actorTokenID)
-		eventPayload["decided_at"] = now.UTC().Format(time.RFC3339Nano)
-		if action == "rejected" {
-			eventPayload["reason"] = strings.TrimSpace(reason)
-		}
-	}
-	raw, err := json.Marshal(eventPayload)
-	if err != nil {
-		return events.EmptyEvent(), err
-	}
-	envelope := events.EventEnvelope{
-		EntityID:     strings.TrimSpace(r.EntityID),
-		FlowInstance: strings.TrimSpace(r.FlowInstance),
-	}
-	evt := events.NewRuntimeControlEvent(
-		strings.TrimSpace(eventID),
-		events.EventType(strings.TrimSpace(eventType)),
-		"runtime",
-		"",
-		raw,
-		0,
-		strings.TrimSpace(r.RunID),
-		strings.TrimSpace(r.SourceEventID),
-		envelope,
-		now.UTC(),
-	)
-	return evt, nil
 }
 
 func mailboxV1APIStatus(status, decision string, deferredUntil sql.NullTime) string {

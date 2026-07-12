@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -158,6 +159,8 @@ type WorkflowInstanceStore struct {
 	db              *sql.DB
 	dialect         workflowStoreDialect
 	runtimeMutation RuntimeMutationRunner
+	decisionCards   decisioncard.Store
+	gateEvents      workflowGateMutationPublisher
 }
 
 type RuntimeMutationRunner interface {
@@ -200,6 +203,15 @@ func NewSQLiteWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 
 func NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner RuntimeMutationRunner) *WorkflowInstanceStore {
 	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
+}
+
+func (s *WorkflowInstanceStore) ConfigureDecisionCardLifecycle(cards decisioncard.Store, publishers ...workflowGateMutationPublisher) {
+	if s != nil {
+		s.decisionCards = cards
+		if len(publishers) > 0 {
+			s.gateEvents = publishers[0]
+		}
+	}
 }
 
 func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
@@ -412,6 +424,19 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 	if s == nil || s.db == nil {
 		return nil
 	}
+	if s.decisionCards != nil {
+		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := s.MutateE(txctx, storageRef, func(instance *WorkflowInstance) error {
+				return s.supersedeWorkflowInstanceGates(txctx, instance, "flow_terminated", terminatedAt)
+			}); err != nil {
+				return err
+			}
+			if s.isSQLite() {
+				return s.markTerminatedSQLiteTx(txctx, tx, storageRef, terminatedAt)
+			}
+			return markWorkflowInstanceTerminatedSpecTx(txctx, tx, storageRef, terminatedAt)
+		})
+	}
 	if s.isSQLite() {
 		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.markTerminatedSQLiteTx(txctx, tx, storageRef, terminatedAt)
@@ -457,6 +482,32 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 			return err
 		}
 		committed = true
+	}
+	return nil
+}
+
+func markWorkflowInstanceTerminatedSpecTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
+	storageRef = strings.TrimSpace(storageRef)
+	if storageRef == "" {
+		return fmt.Errorf("workflow instance storage_ref is required")
+	}
+	if terminatedAt.IsZero() {
+		terminatedAt = time.Now().UTC()
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE flow_instances
+		SET status = 'terminated', terminated_at = COALESCE(terminated_at, $2)
+		WHERE instance_id = $1
+	`, storageRef, terminatedAt)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("flow instance not found: %s", storageRef)
 	}
 	return nil
 }

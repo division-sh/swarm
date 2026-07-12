@@ -155,7 +155,7 @@ func TestOpenRPCWebSocketRuntimeProbes(t *testing.T) {
 		}
 	}
 
-	for _, methodName := range []string{"health.subscribe", "event.subscribe", "run.subscribe_trace", "runtime.subscribe_logs"} {
+	for _, methodName := range []string{"health.subscribe", "event.subscribe", "mailbox.subscribe", "run.subscribe_trace", "runtime.subscribe_logs"} {
 		methodName := methodName
 		t.Run(methodName+"/success_and_notification_envelope", func(t *testing.T) {
 			base := time.Unix(1700001400, 0).UTC()
@@ -285,6 +285,7 @@ func approvedWebSocketRuntimeMethods() []string {
 	return []string{
 		"event.subscribe",
 		"health.subscribe",
+		"mailbox.subscribe",
 		"rpc.unsubscribe",
 		"run.subscribe_trace",
 		"runtime.subscribe_logs",
@@ -356,6 +357,7 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 		Ready:         func() bool { return true },
 		Database:      fakePinger{err: nil},
 		Observability: observability,
+		DecisionCards: newMutatingProbeDecisionCardStore(&mutatingRuntimeProbeState{now: time.Unix(1700001410, 0).UTC()}),
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",
@@ -434,6 +436,7 @@ func webSocketRuntimeProbeFixtures(base time.Time) map[string]webSocketRuntimePr
 			"filter":       map[string]any{"run_id": "run-1"},
 			"replay_since": base.Format(time.RFC3339Nano),
 		}},
+		"mailbox.subscribe": {Params: map[string]any{}},
 		"run.subscribe_trace": {Params: map[string]any{
 			"run_id":       "run-1",
 			"replay_since": base.Format(time.RFC3339Nano),

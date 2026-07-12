@@ -223,6 +223,91 @@ stages:
 	}
 }
 
+func TestFlowSchemaDocumentDecodeTypedStageGate(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: launch
+stages:
+  awaiting_launch_approval:
+    initial: true
+    gate:
+      decision: launch_review
+      context:
+        staging: entity.staging_url
+        qa_summary: entity.qa_summary
+      outcomes:
+        approve:
+          advances_to: operating
+          emit: opco.launched
+        reject:
+          input:
+            feedback: {type: text, required: true}
+          advances_to: building
+          emit:
+            event: launch.rejected
+            fields:
+              feedback: decision.feedback
+  building: {}
+  operating: {terminal: true}
+`), &doc)
+	if err != nil {
+		t.Fatalf("decode gate: %v", err)
+	}
+	plans := doc.StageDeclarations.GatePlans("launch")
+	if len(plans) != 1 {
+		t.Fatalf("gate plans = %#v", plans)
+	}
+	plan := plans[0]
+	if plan.FlowID != "launch" || plan.Stage != "awaiting_launch_approval" || plan.Decision != "launch_review" {
+		t.Fatalf("gate identity = %#v", plan)
+	}
+	if got := plan.Context["staging"]; got.Kind != ExpressionKindCEL || got.CEL != "entity.staging_url" {
+		t.Fatalf("context staging = %#v", got)
+	}
+	if got := plan.Outcomes["reject"].Input["feedback"]; got.Type != "text" || !got.Required {
+		t.Fatalf("feedback schema = %#v", got)
+	}
+	if got := plan.Outcomes["reject"].Emit.Fields["feedback"]; got.CEL != "decision.feedback" {
+		t.Fatalf("reject emit feedback = %#v", got)
+	}
+}
+
+func TestFlowSchemaDocumentRejectsGateOutcomeWithoutAdvance(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: launch
+stages:
+  awaiting:
+    initial: true
+    gate:
+      decision: launch_review
+      outcomes:
+        approve: {emit: opco.launched}
+  operating: {terminal: true}
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "requires advances_to") {
+		t.Fatalf("decode error = %v, want direct outcome closure", err)
+	}
+}
+
+func TestFlowSchemaDocumentRejectsUnknownGateField(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: launch
+stages:
+  awaiting:
+    gate:
+      decision: launch_review
+      authority: operator
+      outcomes:
+        approve: {advances_to: operating}
+  operating: {terminal: true}
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "authority") {
+		t.Fatalf("decode error = %v, want unknown-field rejection", err)
+	}
+}
+
 func TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`

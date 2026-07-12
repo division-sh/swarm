@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
@@ -79,5 +80,36 @@ func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
 	forkedHandle, ok := timeridentity.ParseTimerHandle(forkedPayload)
 	if !ok || !forkedHandle.Generation.Equal(forked.Generation()) || forkedRow.TimerName == row.TimerName {
 		t.Fatalf("forked timer = row %#v handle %#v", forkedRow, forkedHandle)
+	}
+}
+
+func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	source, err := gateruntime.New("source-run", "launch/review", "entity-1", "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:"+strings.Repeat("a", 64), "event-1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := gateruntime.Store(buckets, source); err != nil {
+		t.Fatal(err)
+	}
+	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
+	forkedRaw, bindings, err := forkGateActivationState(raw, "fork-run", "launch/review", "entity-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].Source.ActivationID != source.ActivationID {
+		t.Fatalf("bindings = %#v", bindings)
+	}
+	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, forkedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forked, found, err := gateruntime.Load(forkedCarrier.StateBuckets, "launch", "launch_review")
+	if err != nil || !found {
+		t.Fatalf("forked gate = %#v found=%v err=%v", forked, found, err)
+	}
+	if forked.ActivationID == source.ActivationID || forked.CardID == source.CardID || forked.Status != gateruntime.StatusOpen {
+		t.Fatalf("forked gate retained source authority: fork=%#v source=%#v", forked, source)
 	}
 }

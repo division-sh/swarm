@@ -666,7 +666,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32033,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -1215,7 +1215,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1253,7 +1253,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32038,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2332,7 +2332,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32041,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2370,7 +2370,7 @@
           }
         },
         {
-          "code": -32039,
+          "code": -32042,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2904,7 +2904,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32041,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2981,7 +2981,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32041,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3019,7 +3019,7 @@
           }
         },
         {
-          "code": -32039,
+          "code": -32042,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3709,7 +3709,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32043,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -3744,7 +3744,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32045,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -3893,7 +3893,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32033,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -3951,7 +3951,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4027,7 +4027,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32038,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4413,7 +4413,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32033,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -4616,8 +4616,8 @@
       }
     },
     {
-      "name": "mailbox.approve",
-      "description": "Approve a pending mailbox item. Triggers `mailbox.item_decided` using api_specification.conventions.mailbox.decision_event_routes.\nThe mailbox row decision, `mailbox.item_decided` event persistence, delivery/replay-scope evidence, and API idempotency completion commit atomically. Route or publish failure fails closed without row-only success. Downstream subscriber/interceptor/runtime work from the transactional decision publish runs only after that decision transaction commits, or remains queued while ingress is paused.\n",
+      "name": "mailbox.acknowledge",
+      "description": "Acknowledge a notice. Decision cards reject this operation with a teaching error.",
       "params": [
         {
           "name": "mailbox_id",
@@ -4627,18 +4627,10 @@
           }
         },
         {
-          "name": "decision_payload",
-          "required": false,
-          "description": "Additional decision context attached to the downstream event.",
-          "schema": {
-            "additionalProperties": true,
-            "type": "object"
-          }
-        },
-        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
+            "minLength": 1,
             "type": "string"
           }
         }
@@ -4647,12 +4639,13 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/MailboxDecisionResult"
+          "additionalProperties": true,
+          "type": "object"
         }
       },
       "errors": [
         {
-          "code": -32028,
+          "code": -32030,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4667,12 +4660,246 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
                   "mailbox_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
                 "required": [
-                  "mailbox_id"
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.begin_input",
+      "description": "Start a durable actor/card/verdict-scoped input draft. This operation never creates a verdict.",
+      "params": [
+        {
+          "name": "card_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "verdict",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "observed_content_hash",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "delivery_receipt_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/DecisionCardInputResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32030,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32031,
+          "message": "Application error: MAILBOX_STALE_CARD",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_STALE_CARD",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "card_id",
+                  "remediation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: MAILBOX_INVALID_VERDICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_INVALID_VERDICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "card_id",
+                  "reason"
                 ],
                 "type": "object"
               },
@@ -4705,25 +4932,516 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "decided_at": {
-                    "$ref": "#/components/schemas/Timestamp"
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "card_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
-                  "existing_decision": {
-                    "enum": [
-                      "approved",
-                      "rejected",
-                      "expired"
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.cancel_input",
+      "description": "Cancel the caller's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed.",
+      "params": [
+        {
+          "name": "card_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "input_draft_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/DecisionCardInputResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32030,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
                   },
                   "mailbox_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
                 "required": [
-                  "mailbox_id",
-                  "existing_decision",
-                  "decided_at"
+                  "card_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.decide",
+      "description": "Commit one authored verdict against a pending typed decision card. The current stage activation, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit.\n",
+      "params": [
+        {
+          "name": "card_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "verdict",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "fields",
+          "required": false,
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        {
+          "name": "observed_content_hash",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "delivery_receipt_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "delivery_render_hash",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "input_draft_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/DecisionCardMutationResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32030,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32026,
+          "message": "Application error: MAILBOX_ALREADY_DECIDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_ALREADY_DECIDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "card_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32031,
+          "message": "Application error: MAILBOX_STALE_CARD",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_STALE_CARD",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "card_id",
+                  "remediation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: MAILBOX_INVALID_VERDICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_INVALID_VERDICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "card_id",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "card_id"
                 ],
                 "type": "object"
               },
@@ -4742,12 +5460,12 @@
         },
         {
           "code": -32027,
-          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
+          "message": "Application error: MAILBOX_CARD_SUPERSEDED",
           "data": {
             "additionalProperties": false,
             "properties": {
               "code": {
-                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
+                "const": "MAILBOX_CARD_SUPERSEDED",
                 "type": "string"
               },
               "correlation_id": {
@@ -4756,16 +5474,12 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "item_type": {
-                    "type": "string"
-                  },
-                  "mailbox_id": {
+                  "card_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
                 "required": [
-                  "mailbox_id",
-                  "item_type"
+                  "card_id"
                 ],
                 "type": "object"
               },
@@ -4845,10 +5559,10 @@
     },
     {
       "name": "mailbox.defer",
-      "description": "Defer a pending mailbox item until a specified time. Defer is non-terminal: the row remains pending with `deferred_until` set and `expires_at` unchanged. Triggers `mailbox.item_deferred`; route or publish failure fails closed without row-only success. `until` must be in the future and must not exceed `expires_at` when the item has an expiry deadline.\n",
+      "description": "Defer a pending typed decision card. Defer is non-terminal: status remains pending and only deferred_until changes. It never chooses a verdict or routes the stage.\n",
       "params": [
         {
-          "name": "mailbox_id",
+          "name": "card_id",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -4865,6 +5579,7 @@
           "name": "idempotency_key",
           "required": false,
           "schema": {
+            "minLength": 1,
             "type": "string"
           }
         }
@@ -4873,12 +5588,12 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/MailboxDecisionResult"
+          "$ref": "#/components/schemas/DecisionCardMutationResult"
         }
       },
       "errors": [
         {
-          "code": -32028,
+          "code": -32030,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4893,13 +5608,13 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
                   "mailbox_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
-                "required": [
-                  "mailbox_id"
-                ],
                 "type": "object"
               },
               "retryable": {
@@ -4931,67 +5646,12 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "decided_at": {
-                    "$ref": "#/components/schemas/Timestamp"
-                  },
-                  "existing_decision": {
-                    "enum": [
-                      "approved",
-                      "rejected",
-                      "expired"
-                    ],
-                    "type": "string"
-                  },
-                  "mailbox_id": {
+                  "card_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
                 "required": [
-                  "mailbox_id",
-                  "existing_decision",
-                  "decided_at"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32027,
-          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "item_type": {
-                    "type": "string"
-                  },
-                  "mailbox_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "mailbox_id",
-                  "item_type"
+                  "card_id"
                 ],
                 "type": "object"
               },
@@ -5131,12 +5791,12 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/MailboxItemDetail"
+          "$ref": "#/components/schemas/MailboxProjectionDetail"
         }
       },
       "errors": [
         {
-          "code": -32028,
+          "code": -32030,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5151,13 +5811,13 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
                   "mailbox_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
-                "required": [
-                  "mailbox_id"
-                ],
                 "type": "object"
               },
               "retryable": {
@@ -5240,7 +5900,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/components/schemas/MailboxItem"
+                "$ref": "#/components/schemas/MailboxProjection"
               },
               "type": "array"
             },
@@ -5256,29 +5916,15 @@
       }
     },
     {
-      "name": "mailbox.reject",
-      "description": "Reject a pending mailbox item with a stated reason. Triggers `mailbox.item_decided` with `decision = rejected` and schema-visible `reason`; route or publish failure fails closed without row-only success.\n",
+      "name": "mailbox.subscribe",
+      "description": "Resumable at-least-once decision-card change feed. Reconnect requires mailbox.list reconciliation.",
       "params": [
         {
-          "name": "mailbox_id",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/OpaqueId"
-          }
-        },
-        {
-          "name": "reason",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "name": "idempotency_key",
+          "name": "cursor",
           "required": false,
           "schema": {
-            "type": "string"
+            "minimum": 0,
+            "type": "integer"
           }
         }
       ],
@@ -5286,201 +5932,12 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/MailboxDecisionResult"
+          "$ref": "#/components/schemas/SubscriptionId"
         }
       },
-      "errors": [
-        {
-          "code": -32028,
-          "message": "Application error: MAILBOX_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "MAILBOX_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "mailbox_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "mailbox_id"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32026,
-          "message": "Application error: MAILBOX_ALREADY_DECIDED",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "MAILBOX_ALREADY_DECIDED",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "decided_at": {
-                    "$ref": "#/components/schemas/Timestamp"
-                  },
-                  "existing_decision": {
-                    "enum": [
-                      "approved",
-                      "rejected",
-                      "expired"
-                    ],
-                    "type": "string"
-                  },
-                  "mailbox_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "mailbox_id",
-                  "existing_decision",
-                  "decided_at"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32027,
-          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "item_type": {
-                    "type": "string"
-                  },
-                  "mailbox_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "mailbox_id",
-                  "item_type"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32024,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
+      "notification_schema": {
+        "$ref": "#/components/schemas/DecisionCardChange"
+      }
     },
     {
       "name": "rpc.unsubscribe",
@@ -5530,7 +5987,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5568,7 +6025,7 @@
           }
         },
         {
-          "code": -32037,
+          "code": -32040,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5691,7 +6148,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5878,7 +6335,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6044,7 +6501,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6185,7 +6642,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6223,7 +6680,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32038,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -6265,7 +6722,7 @@
           }
         },
         {
-          "code": -32034,
+          "code": -32037,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -6635,7 +7092,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32043,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -6670,7 +7127,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32045,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -6819,7 +7276,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32033,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -6965,7 +7422,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7003,7 +7460,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32038,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -7154,7 +7611,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7264,7 +7721,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32039,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7564,7 +8021,7 @@
       },
       "errors": [
         {
-          "code": -32033,
+          "code": -32036,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -7683,7 +8140,7 @@
       },
       "errors": [
         {
-          "code": -32031,
+          "code": -32034,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -7795,7 +8252,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32035,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -8207,7 +8664,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32043,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -10197,6 +10654,279 @@
         ],
         "type": "object"
       },
+      "DecisionCard": {
+        "additionalProperties": true,
+        "properties": {
+          "bundle_hash": {
+            "type": "string"
+          },
+          "card_content_hash": {
+            "type": "string"
+          },
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "decision_id": {
+            "type": "string"
+          },
+          "decision_schema_hash": {
+            "type": "string"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "snapshot": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "stage_activation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "card_id",
+          "run_id",
+          "entity_id",
+          "stage",
+          "stage_activation_id",
+          "decision_id",
+          "status",
+          "snapshot",
+          "card_content_hash",
+          "decision_schema_hash",
+          "bundle_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "DecisionCardChange": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "change_type": {
+            "enum": [
+              "created",
+              "decided",
+              "deferred",
+              "superseded",
+              "input_draft_started",
+              "input_draft_cancelled",
+              "input_draft_expired"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "sequence": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "card_id",
+          "run_id",
+          "change_type",
+          "payload",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DecisionCardDetailProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "decision_card": {
+            "$ref": "#/components/schemas/DecisionCard"
+          },
+          "kind": {
+            "const": "decision_card",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "decision_card"
+        ],
+        "type": "object"
+      },
+      "DecisionCardInputResult": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          },
+          "input_draft_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "cancelled",
+              "consumed",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "card_id",
+          "input_draft_id",
+          "verdict",
+          "status",
+          "expires_at",
+          "idempotency_replayed"
+        ],
+        "type": "object"
+      },
+      "DecisionCardMutationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "change_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "decision_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "card_id",
+          "status",
+          "change_id",
+          "idempotency_replayed"
+        ],
+        "type": "object"
+      },
+      "DecisionCardProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "decision_card": {
+            "$ref": "#/components/schemas/DecisionCardSummary"
+          },
+          "kind": {
+            "const": "decision_card",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "decision_card"
+        ],
+        "type": "object"
+      },
+      "DecisionCardSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "decision_id": {
+            "type": "string"
+          },
+          "deferred_until": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "kind": {
+            "const": "decision_card",
+            "type": "string"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "kind",
+          "card_id",
+          "run_id",
+          "flow_instance",
+          "entity_id",
+          "stage",
+          "decision_id",
+          "title",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "DeliveryStatus": {
         "description": "Canonical delivery lifecycle persisted in event_deliveries.status. pending is queued/not started; in_progress is claimed or executing; delivered is successful settlement; failed is retry-visible failure; dead_letter is terminal failure.",
         "enum": [
@@ -11184,6 +11914,24 @@
         ],
         "type": "object"
       },
+      "MailboxNoticeProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "notice",
+            "type": "string"
+          },
+          "notice": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "notice"
+        ],
+        "type": "object"
+      },
       "MailboxPriority": {
         "enum": [
           "normal",
@@ -11192,10 +11940,31 @@
         ],
         "type": "string"
       },
+      "MailboxProjection": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MailboxNoticeProjection"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionCardProjection"
+          }
+        ]
+      },
+      "MailboxProjectionDetail": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MailboxNoticeProjection"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionCardDetailProjection"
+          }
+        ]
+      },
       "MailboxStatus": {
         "enum": [
           "pending",
           "decided",
+          "superseded",
           "expired",
           "deferred"
         ],
@@ -11848,7 +12617,8 @@
           "read:bundles",
           "write:bundles",
           "read:mailbox",
-          "approve:mailbox",
+          "decide:mailbox",
+          "acknowledge:mailbox",
           "read:agents",
           "control:agents",
           "read:conversations",
@@ -13403,25 +14173,12 @@
             "details": {
               "additionalProperties": false,
               "properties": {
-                "decided_at": {
-                  "$ref": "#/components/schemas/Timestamp"
-                },
-                "existing_decision": {
-                  "enum": [
-                    "approved",
-                    "rejected",
-                    "expired"
-                  ],
-                  "type": "string"
-                },
-                "mailbox_id": {
+                "card_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 }
               },
               "required": [
-                "mailbox_id",
-                "existing_decision",
-                "decided_at"
+                "card_id"
               ],
               "type": "object"
             },
@@ -13438,14 +14195,14 @@
           "type": "object"
         }
       },
-      "MAILBOX_DECISION_EVENT_UNCONFIGURED": {
+      "MAILBOX_CARD_SUPERSEDED": {
         "code": -32027,
-        "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
+        "message": "Application error: MAILBOX_CARD_SUPERSEDED",
         "data": {
           "additionalProperties": false,
           "properties": {
             "code": {
-              "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
+              "const": "MAILBOX_CARD_SUPERSEDED",
               "type": "string"
             },
             "correlation_id": {
@@ -13454,16 +14211,92 @@
             "details": {
               "additionalProperties": false,
               "properties": {
-                "item_type": {
-                  "type": "string"
-                },
-                "mailbox_id": {
+                "card_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 }
               },
               "required": [
-                "mailbox_id",
-                "item_type"
+                "card_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY": {
+        "code": -32028,
+        "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "card_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "card_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_INVALID_VERDICT": {
+        "code": -32029,
+        "message": "Application error: MAILBOX_INVALID_VERDICT",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_INVALID_VERDICT",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "card_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "card_id",
+                "reason"
               ],
               "type": "object"
             },
@@ -13481,7 +14314,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32028,
+        "code": -32030,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13496,12 +14329,54 @@
             "details": {
               "additionalProperties": false,
               "properties": {
+                "card_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
                 "mailbox_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 }
               },
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_STALE_CARD": {
+        "code": -32031,
+        "message": "Application error: MAILBOX_STALE_CARD",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_STALE_CARD",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "card_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "remediation": {
+                  "type": "string"
+                }
+              },
               "required": [
-                "mailbox_id"
+                "card_id",
+                "remediation"
               ],
               "type": "object"
             },
@@ -13519,7 +14394,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32029,
+        "code": -32032,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -13557,7 +14432,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32030,
+        "code": -32033,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -13615,7 +14490,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32031,
+        "code": -32034,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13646,7 +14521,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32032,
+        "code": -32035,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13677,7 +14552,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32033,
+        "code": -32036,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -13715,7 +14590,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32034,
+        "code": -32037,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13753,7 +14628,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32035,
+        "code": -32038,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -13795,7 +14670,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32036,
+        "code": -32039,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13833,7 +14708,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32037,
+        "code": -32040,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13875,7 +14750,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32038,
+        "code": -32041,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13913,7 +14788,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32039,
+        "code": -32042,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13956,7 +14831,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32040,
+        "code": -32043,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -13991,7 +14866,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32041,
+        "code": -32044,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,
@@ -14041,7 +14916,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32042,
+        "code": -32045,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

@@ -26,12 +26,11 @@ type replyContinuationStoreTestSurface interface {
 	runtimetools.MailboxPersistence
 	runtimetools.HumanTaskPersistence
 	MaterializeMailboxWrite(context.Context, runtimepipeline.MailboxWriteMaterialization) error
-	DecideV1MailboxItem(context.Context, MailboxV1DecisionRequest) (MailboxV1DecisionOutcome, error)
 	UpsertSchedule(context.Context, runtimepipeline.Schedule) error
 	LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error)
 }
 
-func TestReplyContinuationRows_BackendParityMailboxAndHumanTaskRestoreContext(t *testing.T) {
+func TestReplyContinuationRows_BackendParityNoticesAndHumanTaskRestoreContext(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
@@ -141,35 +140,6 @@ func TestReplyContinuationRows_BackendParityMailboxAndHumanTaskRestoreContext(t 
 			recurring.Cron = "@every 1h"
 			if err := store.UpsertSchedule(ctx, recurring); err == nil {
 				t.Fatal("recurring schedule with open reply context unexpectedly accepted")
-			}
-
-			var mailboxEvents []events.Event
-			mailboxPublisher := func(publishCtx context.Context, evt events.Event) error {
-				if _, ok := runtimepipeline.PipelineSQLTxFromContext(publishCtx); !ok {
-					t.Fatal("mailbox decision publish escaped row transaction")
-				}
-				if got := events.DeliveryContextFromContext(publishCtx).ReplyContextID(); got != record.ID {
-					t.Fatalf("mailbox decision context = %q, want %q", got, record.ID)
-				}
-				mailboxEvents = append(mailboxEvents, evt)
-				return nil
-			}
-			deferUntil := now.Add(time.Hour)
-			deferred, err := store.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
-				MailboxID:            agentMailboxID,
-				Action:               "deferred",
-				ActorTokenID:         "operator",
-				DeferUntil:           deferUntil,
-				Now:                  now,
-				DecisionEventType:    "mailbox.item_deferred",
-				DecisionEventPublish: mailboxPublisher,
-			})
-			if err != nil || deferred.Result.Status != "deferred" || len(mailboxEvents) != 1 || mailboxEvents[0].DeliveryContext().ReplyContextID() != record.ID {
-				t.Fatalf("mailbox defer outcome=%#v events=%#v err=%v", deferred, mailboxEvents, err)
-			}
-			item, err = store.GetMailboxItem(ctx, agentMailboxID)
-			if err != nil || item.Status != "pending" || item.ReplyContextID != record.ID {
-				t.Fatalf("deferred mailbox row = %#v err=%v", item, err)
 			}
 
 			humanTaskID, err := store.CreateHumanTask(ctx, runtimetools.HumanTaskCreateRecord{

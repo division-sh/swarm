@@ -85,8 +85,6 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm mailbox":                "exception",
 	"swarm mailbox list":           "split",
 	"swarm mailbox view":           "split",
-	"swarm mailbox approve":        "split",
-	"swarm mailbox reject":         "split",
 	"swarm mailbox defer":          "split",
 	"swarm control":                "exception",
 	"swarm control pause":          "split",
