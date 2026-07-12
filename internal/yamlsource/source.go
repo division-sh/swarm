@@ -236,7 +236,7 @@ func (s Snapshot) Decode(target any) error {
 	if s.entry == nil {
 		return fmt.Errorf("empty YAML snapshot")
 	}
-	root := cloneNode(&s.entry.root, make(map[*yaml.Node]*yaml.Node))
+	root := cloneNode(&s.entry.root)
 	return root.Decode(target)
 }
 
@@ -251,25 +251,71 @@ func (s Snapshot) NodeCopy() yaml.Node {
 	if s.entry == nil {
 		return yaml.Node{}
 	}
-	return *cloneNode(&s.entry.root, make(map[*yaml.Node]*yaml.Node))
+	return *cloneNode(&s.entry.root)
 }
 
-func cloneNode(source *yaml.Node, seen map[*yaml.Node]*yaml.Node) *yaml.Node {
+func cloneNode(source *yaml.Node) *yaml.Node {
 	if source == nil {
 		return nil
 	}
-	if existing := seen[source]; existing != nil {
+	nodeCount, edgeCount := nodeTreeSize(source)
+	cloner := nodeGraphCloner{
+		nodes: make([]yaml.Node, nodeCount),
+		edges: make([]*yaml.Node, edgeCount),
+		seen:  make(map[*yaml.Node]*yaml.Node, nodeCount),
+	}
+	return cloner.clone(source)
+}
+
+func nodeTreeSize(source *yaml.Node) (nodes, edges int) {
+	if source == nil {
+		return 0, 0
+	}
+	nodes = 1
+	edges = len(source.Content)
+	for _, child := range source.Content {
+		childNodes, childEdges := nodeTreeSize(child)
+		nodes += childNodes
+		edges += childEdges
+	}
+	// yaml.v3 parser aliases point at anchored nodes already present in the
+	// document Content tree, so they do not require additional arena slots.
+	return nodes, edges
+}
+
+type nodeGraphCloner struct {
+	nodes    []yaml.Node
+	edges    []*yaml.Node
+	seen     map[*yaml.Node]*yaml.Node
+	nextNode int
+	nextEdge int
+}
+
+func (c *nodeGraphCloner) clone(source *yaml.Node) *yaml.Node {
+	if source == nil {
+		return nil
+	}
+	if existing := c.seen[source]; existing != nil {
 		return existing
 	}
-	clone := *source
+
+	clone := &c.nodes[c.nextNode]
+	c.nextNode++
+	*clone = *source
 	clone.Content = nil
 	clone.Alias = nil
-	seen[source] = &clone
-	for _, child := range source.Content {
-		clone.Content = append(clone.Content, cloneNode(child, seen))
+	c.seen[source] = clone
+
+	if len(source.Content) > 0 {
+		start := c.nextEdge
+		c.nextEdge += len(source.Content)
+		clone.Content = c.edges[start:c.nextEdge]
+		for i, child := range source.Content {
+			clone.Content[i] = c.clone(child)
+		}
 	}
-	clone.Alias = cloneNode(source.Alias, seen)
-	return &clone
+	clone.Alias = c.clone(source.Alias)
+	return clone
 }
 
 func (s Snapshot) LookupMapPath(parts ...string) (Node, bool) {
