@@ -575,7 +575,7 @@ func (c *routeAuthorityDriftValidationCorpus) withFile(file routeAuthorityDriftR
 func routeAuthorityDriftMatchingFiles(corpus *routeAuthorityDriftValidationCorpus, pattern string, re *regexp.Regexp) []string {
 	var matches []string
 	for _, path := range corpus.snapshot.matchingFiles(pattern, re) {
-		if routeAuthorityDriftSelfAuditFile(path) {
+		if routeAuthorityDriftExcludedFile(path) {
 			continue
 		}
 		if _, replaced := corpus.overlays[path]; !replaced {
@@ -583,12 +583,21 @@ func routeAuthorityDriftMatchingFiles(corpus *routeAuthorityDriftValidationCorpu
 		}
 	}
 	for path, raw := range corpus.overlays {
-		if !routeAuthorityDriftSelfAuditFile(path) && re.Match(raw) {
+		if !routeAuthorityDriftExcludedFile(path) && re.Match(raw) {
 			matches = append(matches, path)
 		}
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+func routeAuthorityDriftExcludedFile(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if part == "tmp" || part == "test-results" {
+			return true
+		}
+	}
+	return routeAuthorityDriftSelfAuditFile(path)
 }
 
 func routeAuthorityDriftSelfAuditFile(path string) bool {

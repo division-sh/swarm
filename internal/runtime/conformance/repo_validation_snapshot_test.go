@@ -18,9 +18,8 @@ import (
 )
 
 type conformanceRepoSnapshotFile struct {
-	Path      string
-	Raw       []byte
-	Scannable bool
+	Path string
+	Raw  []byte
 }
 
 type conformanceRepoSnapshotIO struct {
@@ -123,9 +122,12 @@ func buildConformanceRepoSnapshot(root string, source conformanceRepoSnapshotIO)
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "vendor", "node_modules", "tmp", "test-results":
+			case ".git", "vendor", "node_modules":
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if !conformanceRepoSnapshotScannableFile(path) {
 			return nil
 		}
 		rel, err := source.relPath(root, path)
@@ -133,20 +135,14 @@ func buildConformanceRepoSnapshot(root string, source conformanceRepoSnapshotIO)
 			return fmt.Errorf("derive repository-relative path for %s: %w", path, err)
 		}
 		rel = filepath.ToSlash(filepath.Clean(rel))
-		scannable := conformanceRepoSnapshotScannableFile(path)
 		raw, err := source.readFile(path)
 		if err != nil {
-			kind := "repository file"
-			if scannable {
-				kind = "scannable repository file"
-			}
-			return fmt.Errorf("read %s %s: %w", kind, rel, err)
+			return fmt.Errorf("read scannable repository file %s: %w", rel, err)
 		}
 		raw = append([]byte(nil), raw...)
 		files = append(files, conformanceRepoSnapshotFile{
-			Path:      rel,
-			Raw:       raw,
-			Scannable: scannable,
+			Path: rel,
+			Raw:  raw,
 		})
 		filesByPath[rel] = raw
 
@@ -210,7 +206,7 @@ func (s *conformanceRepoSnapshot) file(path string) ([]byte, error) {
 func (s *conformanceRepoSnapshot) fileList() []conformanceRepoSnapshotFile {
 	out := make([]conformanceRepoSnapshotFile, len(s.files))
 	for i, file := range s.files {
-		out[i] = conformanceRepoSnapshotFile{Path: file.Path, Raw: append([]byte(nil), file.Raw...), Scannable: file.Scannable}
+		out[i] = conformanceRepoSnapshotFile{Path: file.Path, Raw: append([]byte(nil), file.Raw...)}
 	}
 	return out
 }
@@ -220,7 +216,7 @@ func (s *conformanceRepoSnapshot) matchingFiles(pattern string, re *regexp.Regex
 	entry := loaded.(*conformanceRepoSnapshotMatch)
 	entry.once.Do(func() {
 		for _, file := range s.files {
-			if file.Scannable && re.Match(file.Raw) {
+			if re.Match(file.Raw) {
 				entry.matches = append(entry.matches, file.Path)
 			}
 		}
@@ -324,6 +320,72 @@ func TestBuildConformanceRepoSnapshotRejectsInvalidGoTest(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "parse Go test file broken_test.go") {
 		t.Fatalf("error = %v, want fail-closed Go parse diagnostic", err)
+	}
+}
+
+func TestBuildConformanceRepoSnapshotReadsOnlyScannableInputs(t *testing.T) {
+	root := t.TempDir()
+	writeConformanceSnapshotFixture(t, root, "fixture.go", "package fixture\n")
+	writeConformanceSnapshotFixture(t, root, "artifact.zip", "not a semantic input")
+
+	source := defaultConformanceRepoSnapshotIO()
+	readFile := source.readFile
+	relPath := source.relPath
+	nonScannableReads := 0
+	nonScannableRelPaths := 0
+	source.relPath = func(root, path string) (string, error) {
+		if filepath.Ext(path) == ".zip" {
+			nonScannableRelPaths++
+			return "", errors.New("irrelevant path must not be derived")
+		}
+		return relPath(root, path)
+	}
+	source.readFile = func(path string) ([]byte, error) {
+		if filepath.Ext(path) == ".zip" {
+			nonScannableReads++
+			return nil, errors.New("irrelevant file must not be read")
+		}
+		return readFile(path)
+	}
+	snapshot, err := buildConformanceRepoSnapshot(root, source)
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+	if nonScannableReads != 0 {
+		t.Fatalf("non-scannable reads = %d, want 0", nonScannableReads)
+	}
+	if nonScannableRelPaths != 0 {
+		t.Fatalf("non-scannable relative-path derivations = %d, want 0", nonScannableRelPaths)
+	}
+	if _, err := snapshot.file("artifact.zip"); err == nil {
+		t.Fatal("non-scannable artifact unexpectedly became a semantic snapshot input")
+	}
+	if _, err := snapshot.file("fixture.go"); err != nil {
+		t.Fatalf("scannable fixture unavailable: %v", err)
+	}
+}
+
+func TestConformanceRepoSnapshotSeparatesCanonicalAndRouteExclusions(t *testing.T) {
+	root := t.TempDir()
+	writeConformanceSnapshotFixture(t, root, "tmp/hidden_test.go", "package fixture\n// route-needle\nfunc TestHiddenInTmp(t *testing.T) {}\n")
+	writeConformanceSnapshotFixture(t, root, "test-results/hidden_test.go", "package fixture\n// route-needle\nfunc TestHiddenInResults(t *testing.T) {}\n")
+	writeConformanceSnapshotFixture(t, root, "visible.go", "package fixture\n// route-needle\n")
+
+	snapshot, err := buildConformanceRepoSnapshot(root, defaultConformanceRepoSnapshotIO())
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+	names := snapshot.goTestNames()
+	for _, name := range []string{"TestHiddenInTmp", "TestHiddenInResults"} {
+		if !names[name] {
+			t.Fatalf("canonical Go-test index omitted %s", name)
+		}
+	}
+
+	corpus := &routeAuthorityDriftValidationCorpus{snapshot: snapshot, overlays: map[string][]byte{}}
+	matches := routeAuthorityDriftMatchingFiles(corpus, "route-needle", regexp.MustCompile("route-needle"))
+	if len(matches) != 1 || matches[0] != "visible.go" {
+		t.Fatalf("route matches = %#v, want only visible.go", matches)
 	}
 }
 
