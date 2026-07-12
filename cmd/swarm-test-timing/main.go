@@ -33,6 +33,7 @@ type config struct {
 	event           string
 	profile         string
 	headSHA         string
+	executionSHA    string
 	unitID          string
 	attempt         string
 	sourceRunID     string
@@ -45,6 +46,7 @@ type config struct {
 	evaluateBudget  bool
 	updateWeights   bool
 	validatePublish bool
+	assertExecution bool
 }
 
 func main() {
@@ -64,6 +66,7 @@ func main() {
 	flag.StringVar(&cfg.event, "event", "", "GitHub event name")
 	flag.StringVar(&cfg.profile, "profile", "", "explicit proof profile")
 	flag.StringVar(&cfg.headSHA, "head-sha", "", "exact tested commit SHA")
+	flag.StringVar(&cfg.executionSHA, "execution-sha", "", "actual checked-out commit SHA")
 	flag.StringVar(&cfg.unitID, "unit", "", "proof unit ID")
 	flag.StringVar(&cfg.attempt, "attempt", "", "primary or confirmation")
 	flag.StringVar(&cfg.sourceRunID, "source-run-id", "", "successful source run for generated weights")
@@ -76,6 +79,7 @@ func main() {
 	flag.BoolVar(&cfg.evaluateBudget, "evaluate-budget", false, "evaluate complete evidence against the emitted plan")
 	flag.BoolVar(&cfg.updateWeights, "update-weight-model", false, "update generated weights from successful plan evidence")
 	flag.BoolVar(&cfg.validatePublish, "validate-publish-diff", false, "fail unless changed-files contains only the generated model")
+	flag.BoolVar(&cfg.assertExecution, "assert-execution-sha", false, "fail unless the checked-out commit matches the run plan")
 	flag.Parse()
 
 	if err := run(cfg); err != nil {
@@ -86,7 +90,7 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.checkConfirm, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish} {
+	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.checkConfirm, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
@@ -111,6 +115,15 @@ func run(cfg config) error {
 			return err
 		}
 		return testplanning.ValidatePublicationDiff(paths)
+	case cfg.assertExecution:
+		if cfg.planPath == "" || cfg.executionSHA == "" {
+			return fmt.Errorf("-plan and -execution-sha are required with -assert-execution-sha")
+		}
+		plan, err := readPlan(cfg.planPath)
+		if err != nil {
+			return err
+		}
+		return plan.ValidateExecutionSHA(cfg.executionSHA)
 	default:
 		return writeTimingReport(cfg)
 	}

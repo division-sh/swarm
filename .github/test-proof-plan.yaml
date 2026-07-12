@@ -4,7 +4,6 @@ planning:
   target_seconds: 240
   max_shards: 12
   unknown_package_seconds: 30
-  max_imbalance: 0.25
 escalation_paths:
   - ^internal/runtime/cataloge2e/
   - ^internal/runtime/conformance/
