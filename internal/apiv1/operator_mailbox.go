@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -82,7 +83,7 @@ func mailboxListOptionsFromParams(params map[string]any) (store.MailboxV1ListOpt
 		return out, err
 	}
 	out.Status = strings.TrimSpace(strings.ToLower(out.Status))
-	if out.Status != "" && out.Status != "pending" && out.Status != "decided" && out.Status != "expired" && out.Status != "deferred" {
+	if out.Status != "" && out.Status != "pending" && out.Status != "decided" && out.Status != decisioncard.StatusSuperseded && out.Status != "expired" && out.Status != "deferred" {
 		return out, NewInvalidParamsError(map[string]any{"field": "status", "reason": "must be a valid MailboxStatus"})
 	}
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {

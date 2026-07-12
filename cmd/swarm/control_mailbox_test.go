@@ -50,6 +50,29 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	}
 }
 
+func TestMailboxListSendsSupersededStatus(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{"items": []any{}})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"mailbox", "list", "--status", "superseded",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != "mailbox.list" || captured.Params["status"] != "superseded" {
+		t.Fatalf("request = %#v, want mailbox.list superseded filter", captured)
+	}
+}
+
 func TestMailboxViewRendersTaggedResources(t *testing.T) {
 	for _, tc := range []struct {
 		name, id string
