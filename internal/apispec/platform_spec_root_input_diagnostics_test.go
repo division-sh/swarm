@@ -16,6 +16,7 @@ func TestPlatformSpecOwnsRootInputRejectionDiagnostics(t *testing.T) {
 		"none",
 		"MUST NOT reload contracts",
 		"non-canonical",
+		"exact scalar facts",
 		"reason-inconsistent",
 	} {
 		assertScalarContains(t, rendering, want)

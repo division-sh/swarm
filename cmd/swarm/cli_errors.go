@@ -141,10 +141,11 @@ type cliRootInputDiagnostic struct {
 
 func cliRootInputDiagnosticParts(err error) (cliRootInputDiagnostic, bool) {
 	var rpcErr *jsonRPCError
-	if !errors.As(err, &rpcErr) || rpcErr == nil || applicationErrorCode(rpcErr.Data) != "EVENT_NOT_DECLARED" {
+	if !errors.As(err, &rpcErr) || rpcErr == nil {
 		return cliRootInputDiagnostic{}, false
 	}
 	var data struct {
+		Code    string `json:"code"`
 		Details struct {
 			EventName      string    `json:"event_name"`
 			Reason         string    `json:"reason"`
@@ -155,14 +156,14 @@ func cliRootInputDiagnosticParts(err error) (cliRootInputDiagnostic, bool) {
 	if json.Unmarshal(rpcErr.Data, &data) != nil {
 		return cliRootInputDiagnostic{}, false
 	}
-	reason := runtimerunstart.RootInputValidationReason(strings.TrimSpace(data.Details.Reason))
+	if data.Code != "EVENT_NOT_DECLARED" || !validCanonicalCLIScalar(data.Details.Reason) || !validCanonicalCLIScalar(data.Details.EventName) {
+		return cliRootInputDiagnostic{}, false
+	}
+	reason := runtimerunstart.RootInputValidationReason(data.Details.Reason)
 	if reason != runtimerunstart.RootInputNotDeclared && reason != runtimerunstart.RootInputNotRoutable {
 		return cliRootInputDiagnostic{}, false
 	}
-	eventName := strings.TrimSpace(data.Details.EventName)
-	if eventName == "" {
-		return cliRootInputDiagnostic{}, false
-	}
+	eventName := data.Details.EventName
 	if data.Details.DeclaredEvents == nil || data.Details.RoutableEvents == nil {
 		return cliRootInputDiagnostic{}, false
 	}
@@ -196,6 +197,10 @@ func formatCLIRootInputDiagnostic(err error, diagnostic cliRootInputDiagnostic) 
 		"  Remediation: " + remediation,
 		"  Code: EVENT_NOT_DECLARED.",
 	}, "\n")
+}
+
+func validCanonicalCLIScalar(value string) bool {
+	return value != "" && value == strings.TrimSpace(value)
 }
 
 func validCanonicalCLIStringDomain(values []string) bool {
