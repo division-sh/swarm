@@ -8651,10 +8651,14 @@ flow_model:
             source-relative local identity paired with its source-qualified canonical identity; these identities must not be
             flattened into independent candidates. The authored consumer pattern may match either identity according to its
             namespace, while the normalized grant pattern matches the canonical identity. For a static source, runtime route
-            matching uses that canonical identity. For a template source, the same finite base witness projects a constrained
-            `{template_path}/*/{local_event}` runtime pattern: it becomes active only for concrete event paths added by
-            flow-instance route materialization and is removed with that instance route. The static witness remains the sole
-            authorization and ambiguity proof; runtime projection cannot broaden it to another local event or static flow.
+            matching uses that canonical identity. For a template source, the finite witness retains the authorized source
+            template identity and concrete source-local event. RouteTable registers that relation as deferred authority and
+            materializes an exact `{instance_path}/{local_event}` route only from lifecycle proof that the instance belongs to
+            that same source template; it removes the exact route with the source or consumer instance lifecycle. Concrete path
+            shape or presence in the global authored event-path inventory is not instance-ownership proof. An authored static
+            descendant remains unauthorized even when its path has the same segment shape as a template instance. The static
+            witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
+            event or static flow.
             That paired witness drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
             distinct proofs for one relation are a typed ambiguity and produce an issue, not an edge. Authorization-conflict
             enumeration also evaluates every declared materializable event independently of current producer-census membership,
