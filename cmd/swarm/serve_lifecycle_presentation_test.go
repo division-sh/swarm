@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,22 @@ func TestServeLifecyclePresenterFailureNeverPrintsReadiness(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("failure output contains %q:\n%s", forbidden, text)
 		}
+	}
+}
+
+func TestServeLifecyclePresenterUnhandledDiagnosticFallsBackToGenericFailure(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Dev: true, Output: &out})
+	presenter.failWithDiagnostic(5, "runtime_context", errors.New("construct runtime graph"), func(io.Writer) bool {
+		return false
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "serve failed · runtime context · construct runtime graph") {
+		t.Fatalf("unhandled diagnostic dropped generic failure:\n%s", text)
+	}
+	if strings.Contains(text, "ready in") {
+		t.Fatalf("unhandled diagnostic rendered readiness:\n%s", text)
 	}
 }
 
