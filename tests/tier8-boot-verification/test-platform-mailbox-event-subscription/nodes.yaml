@@ -1,9 +1,9 @@
 review-orchestrator:
   id: review-orchestrator
   execution_type: system_node
-  subscribes_to: [review.requested, mailbox.item_decided]
+  subscribes_to: [review.requested, mailbox.card_decided]
   event_handlers:
     review.requested:
       advances_to: awaiting_decision
-    mailbox.item_decided:
+    mailbox.card_decided:
       advances_to: done

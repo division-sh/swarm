@@ -72,12 +72,18 @@ func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
 
 func workflowRuntimeSubscriptions(nodes []WorkflowNode) []events.EventType {
 	subscriptions := workflowSubscriptions(nodes)
-	for _, eventType := range subscriptions {
-		if eventType == activityRequestEventType {
-			return subscriptions
+	for _, required := range []events.EventType{activityRequestEventType, workflowGateDecisionEventType} {
+		found := false
+		for _, eventType := range subscriptions {
+			if eventType == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			subscriptions = append(subscriptions, required)
 		}
 	}
-	subscriptions = append(subscriptions, activityRequestEventType)
 	sort.Slice(subscriptions, func(i, j int) bool { return strings.Compare(string(subscriptions[i]), string(subscriptions[j])) < 0 })
 	return subscriptions
 }

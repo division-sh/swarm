@@ -48,7 +48,6 @@ const (
 	RunAlreadyPausedCode                   = "RUN_ALREADY_PAUSED"
 	MailboxNotFoundCode                    = "MAILBOX_NOT_FOUND"
 	MailboxAlreadyDecidedCode              = "MAILBOX_ALREADY_DECIDED"
-	MailboxDecisionEventUnconfiguredCode   = "MAILBOX_DECISION_EVENT_UNCONFIGURED"
 	InvalidDeferUntilCode                  = "INVALID_DEFER_UNTIL"
 	IdempotencyConflictCode                = "IDEMPOTENCY_CONFLICT"
 	RuntimeAlreadyPausedCode               = "RUNTIME_ALREADY_PAUSED"
@@ -122,31 +121,6 @@ func (r *Registry) ApplicationErrorCode(code string) (int, bool) {
 	return numeric, ok
 }
 
-type MailboxDecisionEventRoute struct {
-	TerminalEventName string
-	DeferredEventName string
-}
-
-func (r *Registry) MailboxDecisionEventRoutes() map[string]MailboxDecisionEventRoute {
-	out := map[string]MailboxDecisionEventRoute{}
-	if r == nil || r.api == nil {
-		return out
-	}
-	for _, route := range r.api.Conventions.Mailbox.DecisionEventRoutes {
-		itemType := strings.TrimSpace(route.ItemType)
-		terminalEventName := strings.TrimSpace(route.TerminalEventName)
-		deferredEventName := strings.TrimSpace(route.DeferredEventName)
-		if itemType == "" || terminalEventName == "" || deferredEventName == "" {
-			continue
-		}
-		out[itemType] = MailboxDecisionEventRoute{
-			TerminalEventName: terminalEventName,
-			DeferredEventName: deferredEventName,
-		}
-	}
-	return out
-}
-
 func OpenRPCMethodNames(path string) ([]string, error) {
 	raw, err := os.ReadFile(strings.TrimSpace(path))
 	if err != nil {
@@ -162,12 +136,4 @@ func OpenRPCMethodNames(path string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
-}
-
-func MailboxDecisionRoutesFromSpec(path string) (map[string]MailboxDecisionEventRoute, error) {
-	registry, err := LoadRegistry(path)
-	if err != nil {
-		return nil, err
-	}
-	return registry.MailboxDecisionEventRoutes(), nil
 }

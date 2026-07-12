@@ -540,24 +540,6 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		t.Fatalf("agent singleton calls restart/replay = %d/%d, want 0/0", agentControl.restartCalls, agentControl.replayCalls)
 	}
 
-	mailbox := &recordingRuntimeContextMailboxStore{}
-	mailboxHandler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Mailbox:         mailbox,
-			RuntimeContexts: fixture.manager,
-		}),
-	})
-	mailboxResp := rpcCall(t, mailboxHandler, `{"jsonrpc":"2.0","id":"mailbox-approve","method":"mailbox.approve","params":{"mailbox_id":"mailbox-1","decision_payload":{"approved":true},"idempotency_key":"idem-mailbox-context"}}`)
-	if mailboxResp.Error == nil {
-		t.Fatal("mailbox.approve error = nil")
-	}
-	if data := asMap(t, mailboxResp.Error.Data); data["code"] != BundleScopeRequiredCode {
-		t.Fatalf("mailbox.approve error data = %#v, want %s", data, BundleScopeRequiredCode)
-	}
-	if mailbox.decideCalls != 0 {
-		t.Fatalf("mailbox decision calls = %d, want 0", mailbox.decideCalls)
-	}
 }
 
 type operatorRuntimeContextFixture struct {
@@ -744,23 +726,6 @@ func (*recordingRuntimeContextRunControlStore) RunDispatchBlocked(context.Contex
 
 func (s *recordingRuntimeContextRunControlStore) totalCalls() int {
 	return s.stopCalls + s.pauseCalls + s.continueCalls
-}
-
-type recordingRuntimeContextMailboxStore struct {
-	decideCalls int
-}
-
-func (*recordingRuntimeContextMailboxStore) ListV1MailboxItems(context.Context, store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error) {
-	return nil, "", nil
-}
-
-func (*recordingRuntimeContextMailboxStore) GetV1MailboxItem(context.Context, string) (store.MailboxV1ItemDetail, error) {
-	return store.MailboxV1ItemDetail{}, store.ErrMailboxV1NotFound
-}
-
-func (s *recordingRuntimeContextMailboxStore) DecideV1MailboxItem(context.Context, store.MailboxV1DecisionRequest) (store.MailboxV1DecisionOutcome, error) {
-	s.decideCalls++
-	return store.MailboxV1DecisionOutcome{Result: store.MailboxV1DecisionResult{OK: true, MailboxDecisionID: uuid.NewString(), Status: "approved"}}, nil
 }
 
 func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) *runtimebus.EventBus {

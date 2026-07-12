@@ -119,36 +119,6 @@ func (s *SQLiteRuntimeStore) GetMailboxItem(ctx context.Context, id string) (run
 	return items[0], nil
 }
 
-func (s *SQLiteRuntimeStore) DecideMailboxItem(ctx context.Context, id, status, decision, notes string) error {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.TrimSpace(status) == "" || strings.TrimSpace(decision) == "" {
-		return fmt.Errorf("mailbox id, status, and decision are required")
-	}
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return err
-	}
-	rowStatus, rowDecision := mailboxDecisionState(status, decision)
-	var rows int64
-	if err := s.runRuntimeMutation(ctx, "sqlite mailbox decision", func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `
-			UPDATE mailbox
-			SET status = ?, decision = ?, decision_notes = ?, decided_at = ?
-			WHERE item_id = ? AND status = 'pending'
-		`, rowStatus, rowDecision, sqliteNullString(notes), time.Now().UTC(), id)
-		if err != nil {
-			return err
-		}
-		rows, _ = res.RowsAffected()
-		return nil
-	}); err != nil {
-		return fmt.Errorf("decide sqlite mailbox item: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("mailbox item is not pending or not found: %s", id)
-	}
-	return nil
-}
-
 func (s *SQLiteRuntimeStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if limit <= 0 {
 		limit = 200
@@ -209,8 +179,16 @@ func (s *SQLiteRuntimeStore) MarkMailboxItemNotified(ctx context.Context, id str
 		return fmt.Errorf("mailbox id is required")
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite mailbox notified", func(txctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(txctx, `UPDATE mailbox SET notified = true WHERE item_id = ?`, id)
-		return err
+		result, err := tx.ExecContext(txctx, `UPDATE mailbox SET notified = true WHERE item_id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if rows, err := result.RowsAffected(); err != nil {
+			return err
+		} else if rows == 0 {
+			return ErrMailboxV1NotFound
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("mark sqlite mailbox item notified: %w", err)
 	}
@@ -534,6 +512,9 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	}
 	abandoned, err := s.sqliteAbandonPendingRunDeliveriesTx(ctx, tx, state.RunID)
 	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), false, s.AppendEventTx); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', failure = NULL, ended_at = COALESCE(ended_at, ?) WHERE run_id = ?`, req.Now.UTC(), state.RunID); err != nil {

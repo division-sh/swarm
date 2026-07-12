@@ -13,6 +13,7 @@ import (
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -75,6 +76,11 @@ type TestSetupStore interface {
 	SetupScenarioEntities(context.Context, store.ScenarioSetupRequest) (store.ScenarioSetupResult, error)
 }
 
+type DecisionCardWorkflowStore interface {
+	RunPipelineMutation(context.Context, func(context.Context) error) error
+	CommitGateDecision(context.Context, decisioncard.Card, string, time.Time) error
+}
+
 type OperatorReadOptions struct {
 	Now                       func() time.Time
 	Ready                     func() bool
@@ -97,6 +103,8 @@ type OperatorReadOptions struct {
 	RunFork                   RunForkExecutor
 	AgentControl              AgentControlController
 	Mailbox                   MailboxAPIStore
+	DecisionCards             decisioncard.Store
+	WorkflowStore             DecisionCardWorkflowStore
 	TestSetup                 TestSetupStore
 	Idempotency               APIIdempotencyStore
 	Events                    EventPublisher
@@ -108,7 +116,6 @@ type OperatorReadOptions struct {
 	ResetCleaner              DestructiveResetCleaner
 	ResetContainers           DestructiveResetContainerStopper
 	Source                    semanticview.Source
-	MailboxDecisionRoutes     map[string]MailboxDecisionEventRoute
 	Bundle                    runtimecontracts.BundleIdentity
 	RuntimeIdentity           RuntimeIdentityResult
 }

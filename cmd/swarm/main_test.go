@@ -35,9 +35,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -59,6 +61,8 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"gopkg.in/yaml.v3"
 )
 
 type delayedRunStatusAgent struct {
@@ -4573,8 +4577,10 @@ func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
 
 func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
-		servedparity.MustScenario(servedparity.ScenarioMailboxApproveDecisionLifecycle),
-		servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioMailboxBeginInputLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioMailboxCancelInputLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioMailboxDecisionCardLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioMailboxDeferDecisionLifecycle),
 	}
 	servedparity.RunScenarioGroup(t, scenarios, runServedMailboxDecisionBackendProof)
@@ -5476,119 +5482,135 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
-type servedMailboxDecisionFixture struct {
-	RunID         string
-	EntityID      string
-	SourceEventID string
-	SourceFlow    string
-	ApproveID     string
-	RejectID      string
-	DeferID       string
-	DeferUntil    time.Time
-	DeferExpires  time.Time
+type servedDecisionCardFixture struct {
+	RunID, EntityID, CardID, ContentHash, NoticeID string
+	Workflow                                       *runtimepipeline.WorkflowInstanceStore
 }
 
 func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	runServedMailboxApproveDecisionLifecycleProof(t, rt)
-	runServedMailboxRejectDecisionLifecycleProof(t, rt)
-	runServedMailboxDeferDecisionLifecycleProof(t, rt)
-}
-
-func runServedMailboxApproveDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
-	t.Helper()
-	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
-	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
-
-	approveKey := keyPrefix + "-approve"
-	approved := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.approve", map[string]any{
-		"mailbox_id":       fixture.ApproveID,
-		"decision_payload": map[string]any{"approved": true},
-		"idempotency_key":  approveKey,
-	})
-	requireServedMailboxDecisionResultShape(t, approved, "decided", "mailbox.item_decided", false)
-	requireServedMailboxRawTerminalState(t, rt.DB, rt.Backend, fixture.ApproveID, "approved")
-	requireServedMailboxDetailState(t, rt.Endpoint, fixture.ApproveID, "decided", "approved", "approved")
-	requireServedMailboxTerminalEvent(t, rt.DB, rt.Backend, fixture, approved.DownstreamEventID, fixture.ApproveID, "approved", "", map[string]any{"approved": true})
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, approved.DownstreamEventID, "platform", "pipeline", "success", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.approve", approveKey, 1)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.ApproveID, 1)
-	approveReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.approve", map[string]any{
-		"mailbox_id":       fixture.ApproveID,
-		"decision_payload": map[string]any{"approved": true},
-		"idempotency_key":  approveKey,
-	})
-	requireServedMailboxReplay(t, approveReplay, approved)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.ApproveID, 1)
-	already := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.reject", map[string]any{
-		"mailbox_id": fixture.ApproveID,
-		"reason":     "already approved",
-	})
-	if already.Data["code"] != apiv1.MailboxAlreadyDecidedCode {
-		t.Fatalf("%s mailbox.reject already-decided data = %#v, want %s", rt.Backend, already.Data, apiv1.MailboxAlreadyDecidedCode)
+	fixture := seedServedDecisionCardFixture(t, rt)
+	var listed map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.list", map[string]any{"run_id": fixture.RunID, "status": "pending"}, &listed)
+	items, ok := listed["items"].([]any)
+	if !ok || len(items) < 2 {
+		t.Fatalf("%s mailbox.list items = %#v, want notice and decision card", rt.Backend, listed["items"])
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxApproveDecisionLifecycle))
-}
 
-func runServedMailboxRejectDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
-	t.Helper()
-	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
-	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
+	var detail map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &detail)
+	if detail["kind"] != decisioncard.KindDecisionCard {
+		t.Fatalf("%s mailbox.get kind = %#v", rt.Backend, detail)
+	}
 
-	rejectKey := keyPrefix + "-reject"
-	rejected := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.reject", map[string]any{
-		"mailbox_id":      fixture.RejectID,
-		"reason":          "not enough evidence",
-		"idempotency_key": rejectKey,
-	})
-	requireServedMailboxDecisionResultShape(t, rejected, "decided", "mailbox.item_decided", false)
-	requireServedMailboxRawTerminalState(t, rt.DB, rt.Backend, fixture.RejectID, "rejected")
-	requireServedMailboxDetailState(t, rt.Endpoint, fixture.RejectID, "decided", "rejected", "rejected")
-	requireServedMailboxTerminalEvent(t, rt.DB, rt.Backend, fixture, rejected.DownstreamEventID, fixture.RejectID, "rejected", "not enough evidence", nil)
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, rejected.DownstreamEventID, "platform", "pipeline", "success", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.reject", rejectKey, 1)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.RejectID, 1)
-	rejectReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.reject", map[string]any{
-		"mailbox_id":      fixture.RejectID,
-		"reason":          "not enough evidence",
-		"idempotency_key": rejectKey,
-	})
-	requireServedMailboxReplay(t, rejectReplay, rejected)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.RejectID, 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle))
-}
+	var draft map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{
+		"card_id": fixture.CardID, "verdict": "reject", "observed_content_hash": fixture.ContentHash,
+		"idempotency_key": "begin-" + fixture.CardID,
+	}, &draft)
+	draftID := strings.TrimSpace(fmt.Sprint(draft["input_draft_id"]))
+	if draftID == "" || draft["status"] != decisioncard.DraftStatusActive {
+		t.Fatalf("%s begin_input = %#v", rt.Backend, draft)
+	}
+	var cancelled map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{
+		"card_id": fixture.CardID, "input_draft_id": draftID, "idempotency_key": "cancel-" + fixture.CardID,
+	}, &cancelled)
+	if cancelled["status"] != decisioncard.DraftStatusCancelled {
+		t.Fatalf("%s cancel_input = %#v", rt.Backend, cancelled)
+	}
 
-func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
-	t.Helper()
-	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
-	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
+	deferUntil := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	var deferred map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
+		"card_id": fixture.CardID, "until": deferUntil.Format(time.RFC3339Nano), "idempotency_key": "defer-" + fixture.CardID,
+	}, &deferred)
+	if deferred["status"] != decisioncard.StatusPending {
+		t.Fatalf("%s mailbox.defer = %#v", rt.Backend, deferred)
+	}
 
-	deferKey := keyPrefix + "-defer"
-	deferred := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
-		"mailbox_id":      fixture.DeferID,
-		"until":           fixture.DeferUntil.Format(time.RFC3339Nano),
-		"idempotency_key": deferKey,
-	})
-	requireServedMailboxDecisionResultShape(t, deferred, "deferred", "mailbox.item_deferred", false)
-	requireServedMailboxRawDeferredState(t, rt.DB, rt.Backend, fixture)
-	requireServedMailboxDetailState(t, rt.Endpoint, fixture.DeferID, "deferred", "", "deferred")
-	requireServedMailboxDeferredEvent(t, rt.DB, rt.Backend, fixture, deferred.DownstreamEventID)
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, deferred.DownstreamEventID, "platform", "pipeline", "success", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.defer", deferKey, 1)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
-	deferReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
-		"mailbox_id":      fixture.DeferID,
-		"until":           fixture.DeferUntil.Format(time.RFC3339Nano),
-		"idempotency_key": deferKey,
-	})
-	requireServedMailboxReplay(t, deferReplay, deferred)
-	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
+	var decided map[string]any
+	decideParams := map[string]any{
+		"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash,
+		"idempotency_key": "decide-" + fixture.CardID,
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", decideParams, &decided)
+	if decided["status"] != decisioncard.StatusDecided || strings.TrimSpace(fmt.Sprint(decided["decision_event_id"])) == "" {
+		t.Fatalf("%s mailbox.decide = %#v", rt.Backend, decided)
+	}
+	var replay map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", decideParams, &replay)
+	if replay["idempotency_replayed"] != true || replay["decision_event_id"] != decided["decision_event_id"] {
+		t.Fatalf("%s mailbox.decide replay = %#v, original %#v", rt.Backend, replay, decided)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), fixture.EntityID)
+		if err == nil && ok && instance.CurrentState == "done" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s decision route did not reach done: instance=%#v ok=%v err=%v", rt.Backend, instance, ok, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	requireServedMailboxSubscription(t, rt.Endpoint, fixture.CardID)
+	var acknowledged map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", map[string]any{
+		"mailbox_id": fixture.NoticeID, "idempotency_key": "ack-" + fixture.NoticeID,
+	}, &acknowledged)
+	if acknowledged["kind"] != decisioncard.KindNotice || acknowledged["ok"] != true {
+		t.Fatalf("%s mailbox.acknowledge = %#v", rt.Backend, acknowledged)
+	}
 	for _, scenarioID := range []string{
-		servedparity.ScenarioMailboxApproveDecisionLifecycle,
-		servedparity.ScenarioMailboxRejectDecisionLifecycle,
+		servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle,
+		servedparity.ScenarioMailboxBeginInputLifecycle,
+		servedparity.ScenarioMailboxCancelInputLifecycle,
+		servedparity.ScenarioMailboxDecisionCardLifecycle,
 		servedparity.ScenarioMailboxDeferDecisionLifecycle,
 	} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+	}
+}
+
+func requireServedMailboxSubscription(t *testing.T, endpoint, cardID string) {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(strings.TrimSuffix(endpoint, "/v1/rpc"), "http") + "/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer " + apiv1.DefaultLoopbackAPIToken}})
+	if err != nil {
+		t.Fatalf("dial served mailbox subscription: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": "mailbox-subscribe-proof", "method": "mailbox.subscribe", "params": map[string]any{"cursor": 0}}); err != nil {
+		t.Fatalf("write mailbox subscription: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var response struct {
+		Result struct {
+			SubscriptionID string `json:"subscription_id"`
+		} `json:"result"`
+		Error *servedJSONRPCError `json:"error"`
+	}
+	if err := conn.ReadJSON(&response); err != nil {
+		t.Fatalf("read mailbox subscription response: %v", err)
+	}
+	if response.Error != nil || strings.TrimSpace(response.Result.SubscriptionID) == "" {
+		t.Fatalf("mailbox subscription response = %#v", response)
+	}
+	var notification struct {
+		Method string `json:"method"`
+		Params struct {
+			Subscription string         `json:"subscription"`
+			Result       map[string]any `json:"result"`
+		} `json:"params"`
+	}
+	if err := conn.ReadJSON(&notification); err != nil {
+		t.Fatalf("read mailbox subscription notification: %v", err)
+	}
+	if notification.Method != "rpc.subscription" || notification.Params.Subscription != response.Result.SubscriptionID || notification.Params.Result["card_id"] != cardID {
+		t.Fatalf("mailbox subscription notification = %#v", notification)
 	}
 }
 
@@ -5762,496 +5784,92 @@ func jsonScalarInt(value any, want int64) bool {
 	}
 }
 
-func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) servedMailboxDecisionFixture {
+func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) servedDecisionCardFixture {
 	t.Helper()
-	now := time.Now().UTC().Add(-2 * time.Minute)
-	fixture := servedMailboxDecisionFixture{
-		RunID:         uuid.NewString(),
-		EntityID:      uuid.NewString(),
-		SourceEventID: uuid.NewString(),
-		SourceFlow:    "empire/review",
-		ApproveID:     uuid.NewString(),
-		RejectID:      uuid.NewString(),
-		DeferID:       uuid.NewString(),
-		DeferUntil:    time.Now().UTC().Add(1 * time.Hour).Truncate(time.Second),
-		DeferExpires:  time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second),
-	}
 	ctx := context.Background()
-	switch backend {
+	now := time.Now().UTC().Add(-time.Minute)
+	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	var cards decisioncard.Store
+	var workflow *runtimepipeline.WorkflowInstanceStore
+	var appendEvent func(context.Context, events.Event) error
+	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
+	switch rt.Backend {
 	case "postgres":
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatalf("seed postgres mailbox proof tx: %v", err)
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+			t.Fatalf("seed postgres decision-card run: %v", err)
 		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, fixture.RunID, now); err != nil {
-			t.Fatalf("seed postgres mailbox proof run: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (
-				event_id, run_id, event_name, entity_id, flow_instance, scope,
-				payload, produced_by, produced_by_type, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'review.requested', $3::uuid, $4, 'entity',
-				'{"request":true}'::jsonb, 'operator', 'external', $5
-		)
-	`, fixture.SourceEventID, fixture.RunID, fixture.EntityID, fixture.SourceFlow, now); err != nil {
-			t.Fatalf("seed postgres mailbox proof source event: %v", err)
-		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", nil); err != nil {
-			t.Fatalf("seed postgres mailbox proof source event pipeline receipt: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit postgres mailbox proof seed: %v", err)
-		}
-		committed = true
-		seedServedMailboxDecisionItem(t, db, backend, fixture.ApproveID, fixture, "review_request", "approve item", `{"title":"approve item"}`, nil)
-		seedServedMailboxDecisionItem(t, db, backend, fixture.RejectID, fixture, "approval", "reject item", `{"title":"reject item"}`, nil)
-		seedServedMailboxDecisionItem(t, db, backend, fixture.DeferID, fixture, "operational_decision", "defer item", `{"title":"defer item"}`, &fixture.DeferExpires)
+		pg := &store.PostgresStore{DB: rt.DB}
+		cards, workflow, appendEvent, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.AppendEvent, pg.InsertMailboxItem
 	case "sqlite":
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatalf("seed sqlite mailbox proof tx: %v", err)
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+			t.Fatalf("seed sqlite decision-card run: %v", err)
 		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, fixture.RunID, now); err != nil {
-			t.Fatalf("seed sqlite mailbox proof run: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (
-				event_id, run_id, event_name, entity_id, flow_instance, scope,
-				payload, produced_by, produced_by_type, created_at
-			) VALUES (
-				?, ?, 'review.requested', ?, ?, 'entity',
-				'{"request":true}', 'operator', 'external', ?
-		)
-	`, fixture.SourceEventID, fixture.RunID, fixture.EntityID, fixture.SourceFlow, now); err != nil {
-			t.Fatalf("seed sqlite mailbox proof source event: %v", err)
-		}
-		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", nil); err != nil {
-			t.Fatalf("seed sqlite mailbox proof source event pipeline receipt: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit sqlite mailbox proof seed: %v", err)
-		}
-		committed = true
-		seedServedMailboxDecisionItem(t, db, backend, fixture.ApproveID, fixture, "review_request", "approve item", `{"title":"approve item"}`, nil)
-		seedServedMailboxDecisionItem(t, db, backend, fixture.RejectID, fixture, "approval", "reject item", `{"title":"reject item"}`, nil)
-		seedServedMailboxDecisionItem(t, db, backend, fixture.DeferID, fixture, "operational_decision", "defer item", `{"title":"defer item"}`, &fixture.DeferExpires)
+		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		cards = sqlite
+		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
+		appendEvent, insertNotice = sqlite.AppendEvent, sqlite.InsertMailboxItem
 	default:
-		t.Fatalf("unknown mailbox proof backend %q", backend)
+		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
-	return fixture
-}
-
-func seedServedMailboxDecisionSourceEvent(ctx context.Context, store runtimebus.EventMutationRunner, fixture servedMailboxDecisionFixture, createdAt time.Time) error {
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, fixture.EntityID), fixture.SourceFlow)
-	evt := eventtest.PersistedProjection(
-		fixture.SourceEventID,
-		events.EventType("review.requested"),
-		"operator",
-		"",
-		json.RawMessage(`{"request":true}`),
-		0,
-		fixture.RunID,
-		"",
-		envelope,
-		createdAt,
-	)
-	return store.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		if err := mutation.AppendEvent(ctx, evt); err != nil {
-			return err
-		}
-		if err := mutation.UpsertCommittedReplayScope(ctx, fixture.SourceEventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-			return err
-		}
-		return mutation.UpsertPipelineReceipt(ctx, fixture.SourceEventID, "processed", nil)
+	evt := eventtest.RootIngress(sourceEventID, "review.requested", "", "", json.RawMessage(`{"review":true}`), 0, runID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
+	if err := appendEvent(ctx, evt); err != nil {
+		t.Fatalf("seed decision-card source event: %v", err)
+	}
+	receiptQuery := `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at)
+		VALUES (?, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}', ?)`
+	if rt.Backend == "postgres" {
+		receiptQuery = `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at)
+			VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}'::jsonb, $2)`
+	}
+	if _, err := rt.DB.ExecContext(ctx, receiptQuery, sourceEventID, now); err != nil {
+		t.Fatalf("seed decision-card source receipt: %v", err)
+	}
+	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{
+		EventID: sourceEventID, EntityID: entityID, FlowInstance: "root", FromAgent: "review-agent",
+		Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`),
 	})
-}
+	if err != nil {
+		t.Fatalf("seed mailbox notice: %v", err)
+	}
 
-func seedServedMailboxDecisionItem(t *testing.T, db *sql.DB, backend, mailboxID string, fixture servedMailboxDecisionFixture, itemType, summary, payload string, expiresAt *time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	var expires any
-	if expiresAt != nil {
-		expires = expiresAt.UTC()
+	bundleHash := strings.TrimSpace(rt.BundleHash)
+	if bundleHash == "" {
+		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	}
-	switch backend {
-	case "postgres":
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO mailbox (
-				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-				from_agent, severity, summary, payload, status, notified, expires_at, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, $3, 'entity', $4, $5::uuid,
-				'agent-g', 'urgent', $6, $7::jsonb, 'pending', false, $8, $9
-			)
-		`, mailboxID, fixture.EntityID, fixture.SourceFlow, itemType, fixture.SourceEventID, summary, payload, expires, time.Now().UTC().Add(-time.Minute)); err != nil {
-			t.Fatalf("seed postgres mailbox item %s: %v", itemType, err)
-		}
-	case "sqlite":
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO mailbox (
-				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-				from_agent, severity, summary, payload, status, notified, expires_at, created_at
-			) VALUES (
-				?, ?, ?, 'entity', ?, ?,
-				'agent-g', 'urgent', ?, ?, 'pending', 0, ?, ?
-			)
-		`, mailboxID, fixture.EntityID, fixture.SourceFlow, itemType, fixture.SourceEventID, summary, payload, expires, time.Now().UTC().Add(-time.Minute)); err != nil {
-			t.Fatalf("seed sqlite mailbox item %s: %v", itemType, err)
-		}
-	default:
-		t.Fatalf("unknown mailbox proof backend %q", backend)
+	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, sourceEventID, now)
+	if err != nil {
+		t.Fatalf("new gate activation: %v", err)
 	}
-}
-
-func requireServedMailboxDecisionResult(t *testing.T, endpoint, method string, params map[string]any) store.MailboxV1DecisionResult {
-	t.Helper()
-	var result store.MailboxV1DecisionResult
-	requireServedJSONRPCResult(t, endpoint, method, params, &result)
-	return result
-}
-
-func requireServedMailboxDecisionResultShape(t *testing.T, result store.MailboxV1DecisionResult, wantStatus, wantEventName string, wantReplayed bool) {
-	t.Helper()
-	if !result.OK || result.Status != wantStatus || result.DownstreamEventName != wantEventName || result.DownstreamEventID == "" || result.MailboxDecisionID == "" {
-		t.Fatalf("mailbox decision result = %#v, want ok status=%s event=%s with ids", result, wantStatus, wantEventName)
+	carrier := runtimeengine.NewStateCarrier(map[string]any{"run_id": runID}, nil, nil)
+	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+		t.Fatalf("store gate activation: %v", err)
 	}
-	if result.IdempotencyReplayed != wantReplayed {
-		t.Fatalf("mailbox decision replay = %v, want %v: %#v", result.IdempotencyReplayed, wantReplayed, result)
+	if err := workflow.Upsert(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
+		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+	}); err != nil {
+		t.Fatalf("seed gated workflow instance: %v", err)
 	}
-	if result.DownstreamSubscribers == nil || len(*result.DownstreamSubscribers) != 0 {
-		t.Fatalf("mailbox decision subscribers = %#v, want empty explicit subscriber list", result.DownstreamSubscribers)
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: activation.CardID, RunID: runID, FlowInstance: "root", EntityID: entityID,
+		Stage: activation.Stage, StageActivationID: activation.ActivationID, DecisionID: activation.DecisionID,
+		Snapshot: decisioncard.Snapshot{Decision: activation.DecisionID, Title: "Launch review", Context: map[string]any{"environment": "staging"},
+			Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				"approve": {Verdict: "approve", AdvancesTo: "done"},
+				"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+			}},
+		BundleHash: bundleHash, WorkflowVersion: "1.0.0",
+		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+		Provenance:       map[string]any{"source_event": sourceEventID}, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("new decision card: %v", err)
 	}
-	if result.DownstreamSubscriberSource != "event_catalog" {
-		t.Fatalf("mailbox decision subscriber source = %q, want event_catalog", result.DownstreamSubscriberSource)
+	if err := cards.CreateDecisionCard(runtimecorrelation.WithRunID(ctx, runID), card); err != nil {
+		t.Fatalf("seed decision card: %v", err)
 	}
-}
-
-func requireServedMailboxReplay(t *testing.T, replay, original store.MailboxV1DecisionResult) {
-	t.Helper()
-	requireServedMailboxDecisionResultShape(t, replay, original.Status, original.DownstreamEventName, true)
-	if replay.DownstreamEventID != original.DownstreamEventID || replay.MailboxDecisionID != original.MailboxDecisionID {
-		t.Fatalf("mailbox replay result = %#v, want decision/event ids from %#v", replay, original)
-	}
-}
-
-type servedMailboxRawState struct {
-	Status        string
-	Decision      string
-	Notes         string
-	DecidedBy     string
-	DecidedAt     sql.NullTime
-	DeferredUntil sql.NullTime
-	ExpiresAt     sql.NullTime
-}
-
-func loadServedMailboxRawState(t *testing.T, db *sql.DB, backend, mailboxID string) servedMailboxRawState {
-	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `
-			SELECT status, COALESCE(decision, ''), COALESCE(decision_notes, ''),
-			       COALESCE(decided_by, ''), decided_at, deferred_until, expires_at
-			FROM mailbox
-			WHERE item_id = $1::uuid
-		`
-		args = []any{mailboxID}
-	case "sqlite":
-		query = `
-			SELECT status, COALESCE(decision, ''), COALESCE(decision_notes, ''),
-			       COALESCE(decided_by, ''), decided_at, deferred_until, expires_at
-			FROM mailbox
-			WHERE item_id = ?
-		`
-		args = []any{mailboxID}
-	default:
-		t.Fatalf("unknown mailbox proof backend %q", backend)
-	}
-	var state servedMailboxRawState
-	var decidedAtRaw any
-	var deferredUntilRaw any
-	var expiresAtRaw any
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(
-		&state.Status,
-		&state.Decision,
-		&state.Notes,
-		&state.DecidedBy,
-		&decidedAtRaw,
-		&deferredUntilRaw,
-		&expiresAtRaw,
-	); err != nil {
-		t.Fatalf("%s load mailbox raw state %s: %v", backend, mailboxID, err)
-	}
-	state.DecidedAt = servedMailboxSQLNullTime(t, backend, "decided_at", decidedAtRaw)
-	state.DeferredUntil = servedMailboxSQLNullTime(t, backend, "deferred_until", deferredUntilRaw)
-	state.ExpiresAt = servedMailboxSQLNullTime(t, backend, "expires_at", expiresAtRaw)
-	return state
-}
-
-func servedMailboxSQLNullTime(t *testing.T, backend, field string, raw any) sql.NullTime {
-	t.Helper()
-	switch v := raw.(type) {
-	case nil:
-		return sql.NullTime{}
-	case time.Time:
-		if v.IsZero() {
-			return sql.NullTime{}
-		}
-		return sql.NullTime{Time: v.UTC(), Valid: true}
-	case string:
-		return servedMailboxParseSQLTimeString(t, backend, field, v)
-	case []byte:
-		return servedMailboxParseSQLTimeString(t, backend, field, string(v))
-	default:
-		t.Fatalf("%s mailbox %s unsupported timestamp value %T", backend, field, raw)
-		return sql.NullTime{}
-	}
-}
-
-func servedMailboxParseSQLTimeString(t *testing.T, backend, field, raw string) sql.NullTime {
-	t.Helper()
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return sql.NullTime{}
-	}
-	formats := []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05.999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700 MST",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999Z07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05Z07:00",
-		"2006-01-02 15:04:05",
-	}
-	var lastErr error
-	for _, layout := range formats {
-		parsed, err := time.Parse(layout, raw)
-		if err == nil {
-			return sql.NullTime{Time: parsed.UTC(), Valid: true}
-		}
-		lastErr = err
-	}
-	t.Fatalf("%s mailbox %s parse timestamp %q: %v", backend, field, raw, lastErr)
-	return sql.NullTime{}
-}
-
-func requireServedMailboxRawTerminalState(t *testing.T, db *sql.DB, backend, mailboxID, wantDecision string) {
-	t.Helper()
-	state := loadServedMailboxRawState(t, db, backend, mailboxID)
-	if state.Status != "decided" || state.Decision != wantDecision || !state.DecidedAt.Valid || strings.TrimSpace(state.DecidedBy) == "" || state.DeferredUntil.Valid {
-		t.Fatalf("%s mailbox %s raw terminal state = %#v, want decided/%s with decided metadata and no deferred_until", backend, mailboxID, state, wantDecision)
-	}
-}
-
-func requireServedMailboxRawDeferredState(t *testing.T, db *sql.DB, backend string, fixture servedMailboxDecisionFixture) {
-	t.Helper()
-	state := loadServedMailboxRawState(t, db, backend, fixture.DeferID)
-	if state.Status != "pending" || state.Decision != "" || !state.DecidedAt.Valid || strings.TrimSpace(state.DecidedBy) == "" || !state.DeferredUntil.Valid || !state.ExpiresAt.Valid {
-		t.Fatalf("%s mailbox %s raw deferred state = %#v, want pending with deferred_until and unchanged expires_at", backend, fixture.DeferID, state)
-	}
-	if !state.DeferredUntil.Time.UTC().Equal(fixture.DeferUntil.UTC()) {
-		t.Fatalf("%s deferred_until = %s, want %s", backend, state.DeferredUntil.Time.UTC(), fixture.DeferUntil.UTC())
-	}
-	if !state.ExpiresAt.Time.UTC().Equal(fixture.DeferExpires.UTC()) {
-		t.Fatalf("%s expires_at = %s, want unchanged %s", backend, state.ExpiresAt.Time.UTC(), fixture.DeferExpires.UTC())
-	}
-}
-
-func requireServedMailboxDetailState(t *testing.T, endpoint, mailboxID, wantStatus, wantDecision, wantHistoryAction string) {
-	t.Helper()
-	var detail store.MailboxV1ItemDetail
-	requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": mailboxID}, &detail)
-	if detail.Item.MailboxID != mailboxID || detail.Item.Status != wantStatus || detail.Item.Decision != wantDecision {
-		t.Fatalf("mailbox.get item = %#v, want id=%s status=%s decision=%s", detail.Item, mailboxID, wantStatus, wantDecision)
-	}
-	if wantStatus == "deferred" {
-		if detail.Item.DeferredUntil == "" || detail.Item.DecidedAt == "" {
-			t.Fatalf("mailbox.get deferred item missing deferred_until/decided_at: %#v", detail.Item)
-		}
-	} else if detail.Item.DecidedAt == "" {
-		t.Fatalf("mailbox.get terminal item missing decided_at: %#v", detail.Item)
-	}
-	if len(detail.History) < 2 {
-		t.Fatalf("mailbox.get history = %#v, want created plus decision/defer entry", detail.History)
-	}
-	last := detail.History[len(detail.History)-1]
-	if last.Action != wantHistoryAction || strings.TrimSpace(last.ActorTokenID) == "" || strings.TrimSpace(last.TS) == "" {
-		t.Fatalf("mailbox.get history last = %#v, want action=%s with actor/timestamp", last, wantHistoryAction)
-	}
-}
-
-type servedMailboxEventEvidence struct {
-	EventName      string
-	RunID          string
-	EntityID       string
-	FlowInstance   string
-	ProducedBy     string
-	ProducedByType string
-	SourceEventID  string
-	Payload        map[string]any
-}
-
-func loadServedMailboxEventEvidence(t *testing.T, db *sql.DB, backend, eventID string) servedMailboxEventEvidence {
-	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `
-			SELECT event_name, COALESCE(run_id::text, ''), COALESCE(entity_id::text, ''),
-			       COALESCE(flow_instance, ''), COALESCE(produced_by, ''),
-			       COALESCE(produced_by_type, ''), COALESCE(source_event_id::text, ''),
-			       payload::text
-			FROM events
-			WHERE event_id = $1::uuid
-		`
-		args = []any{eventID}
-	case "sqlite":
-		query = `
-			SELECT event_name, COALESCE(run_id, ''), COALESCE(entity_id, ''),
-			       COALESCE(flow_instance, ''), COALESCE(produced_by, ''),
-			       COALESCE(produced_by_type, ''), COALESCE(source_event_id, ''),
-			       COALESCE(payload, '{}')
-			FROM events
-			WHERE event_id = ?
-		`
-		args = []any{eventID}
-	default:
-		t.Fatalf("unknown mailbox proof backend %q", backend)
-	}
-	var evidence servedMailboxEventEvidence
-	var payloadRaw string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(
-		&evidence.EventName,
-		&evidence.RunID,
-		&evidence.EntityID,
-		&evidence.FlowInstance,
-		&evidence.ProducedBy,
-		&evidence.ProducedByType,
-		&evidence.SourceEventID,
-		&payloadRaw,
-	); err != nil {
-		t.Fatalf("%s load mailbox event evidence %s: %v", backend, eventID, err)
-	}
-	if err := json.Unmarshal([]byte(payloadRaw), &evidence.Payload); err != nil {
-		t.Fatalf("%s decode mailbox event payload %s: %v\n%s", backend, eventID, err, payloadRaw)
-	}
-	return evidence
-}
-
-func requireServedMailboxTerminalEvent(t *testing.T, db *sql.DB, backend string, fixture servedMailboxDecisionFixture, eventID, mailboxID, decision, reason string, decisionPayload map[string]any) {
-	t.Helper()
-	evidence := loadServedMailboxEventEvidence(t, db, backend, eventID)
-	if evidence.EventName != "mailbox.item_decided" || evidence.RunID != fixture.RunID || evidence.EntityID != fixture.EntityID || evidence.FlowInstance != fixture.SourceFlow || evidence.SourceEventID != fixture.SourceEventID {
-		t.Fatalf("%s terminal mailbox event evidence = %#v, want run/source/entity/flow lineage", backend, evidence)
-	}
-	if evidence.ProducedBy != "runtime" || evidence.ProducedByType != "platform" {
-		t.Fatalf("%s terminal mailbox event producer = %s/%s, want runtime/platform", backend, evidence.ProducedBy, evidence.ProducedByType)
-	}
-	payload := evidence.Payload
-	if _, ok := payload["payload"]; ok {
-		t.Fatalf("%s terminal mailbox event retained retired payload field: %#v", backend, payload)
-	}
-	if payload["mailbox_id"] != mailboxID || payload["decision"] != decision || payload["source_event_id"] != fixture.SourceEventID || payload["source_flow"] != fixture.SourceFlow || payload["source_entity_id"] != fixture.EntityID {
-		t.Fatalf("%s terminal mailbox event payload = %#v", backend, payload)
-	}
-	if payload["mailbox_decision_id"] == "" || payload["decided_by"] == "" || payload["decided_at"] == "" {
-		t.Fatalf("%s terminal mailbox event missing decision metadata: %#v", backend, payload)
-	}
-	mailboxPayload, ok := payload["mailbox_payload"].(map[string]any)
-	if !ok || strings.TrimSpace(fmt.Sprint(mailboxPayload["title"])) == "" {
-		t.Fatalf("%s terminal mailbox_payload = %#v, want object with title", backend, payload["mailbox_payload"])
-	}
-	if decision == "rejected" {
-		if payload["reason"] != reason {
-			t.Fatalf("%s reject reason = %#v, want %q in payload %#v", backend, payload["reason"], reason, payload)
-		}
-	} else if reasonField := strings.TrimSpace(fmt.Sprint(payload["reason"])); reasonField != "" && reasonField != "<nil>" {
-		t.Fatalf("%s approval payload unexpectedly has reason: %#v", backend, payload)
-	}
-	gotDecisionPayload, ok := payload["decision_payload"].(map[string]any)
-	if !ok {
-		t.Fatalf("%s decision_payload = %#v, want object", backend, payload["decision_payload"])
-	}
-	if decisionPayload != nil {
-		for key, want := range decisionPayload {
-			if gotDecisionPayload[key] != want {
-				t.Fatalf("%s decision_payload[%s] = %#v, want %#v in %#v", backend, key, gotDecisionPayload[key], want, gotDecisionPayload)
-			}
-		}
-	}
-}
-
-func requireServedMailboxDeferredEvent(t *testing.T, db *sql.DB, backend string, fixture servedMailboxDecisionFixture, eventID string) {
-	t.Helper()
-	evidence := loadServedMailboxEventEvidence(t, db, backend, eventID)
-	if evidence.EventName != "mailbox.item_deferred" || evidence.RunID != fixture.RunID || evidence.EntityID != fixture.EntityID || evidence.FlowInstance != fixture.SourceFlow || evidence.SourceEventID != fixture.SourceEventID {
-		t.Fatalf("%s deferred mailbox event evidence = %#v, want run/source/entity/flow lineage", backend, evidence)
-	}
-	if evidence.ProducedBy != "runtime" || evidence.ProducedByType != "platform" {
-		t.Fatalf("%s deferred mailbox event producer = %s/%s, want runtime/platform", backend, evidence.ProducedBy, evidence.ProducedByType)
-	}
-	payload := evidence.Payload
-	if _, ok := payload["payload"]; ok {
-		t.Fatalf("%s deferred mailbox event retained retired payload field: %#v", backend, payload)
-	}
-	if payload["mailbox_id"] != fixture.DeferID || payload["source_event_id"] != fixture.SourceEventID || payload["source_flow"] != fixture.SourceFlow || payload["source_entity_id"] != fixture.EntityID {
-		t.Fatalf("%s deferred mailbox event payload = %#v", backend, payload)
-	}
-	if _, ok := payload["decision"]; ok {
-		t.Fatalf("%s deferred mailbox event unexpectedly has terminal decision: %#v", backend, payload)
-	}
-	if payload["mailbox_decision_id"] == "" || payload["deferred_by"] == "" || payload["deferred_at"] == "" {
-		t.Fatalf("%s deferred mailbox event missing defer metadata: %#v", backend, payload)
-	}
-	if payload["until"] != fixture.DeferUntil.Format(time.RFC3339Nano) {
-		t.Fatalf("%s deferred until = %#v, want %s in payload %#v", backend, payload["until"], fixture.DeferUntil.Format(time.RFC3339Nano), payload)
-	}
-	mailboxPayload, ok := payload["mailbox_payload"].(map[string]any)
-	if !ok || mailboxPayload["title"] != "defer item" {
-		t.Fatalf("%s deferred mailbox_payload = %#v, want defer item", backend, payload["mailbox_payload"])
-	}
-}
-
-func requireServedMailboxEventCount(t *testing.T, db *sql.DB, backend, eventName, mailboxID string, want int) {
-	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = $1 AND payload->>'mailbox_id' = $2`
-		args = []any{eventName, mailboxID}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = ? AND json_extract(payload, '$.mailbox_id') = ?`
-		args = []any{eventName, mailboxID}
-	default:
-		t.Fatalf("unknown mailbox proof backend %q", backend)
-	}
-	var got int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&got); err != nil {
-		t.Fatalf("%s count mailbox event %s/%s: %v", backend, eventName, mailboxID, err)
-	}
-	if got != want {
-		t.Fatalf("%s mailbox event count %s/%s = %d, want %d", backend, eventName, mailboxID, got, want)
-	}
+	return servedDecisionCardFixture{RunID: runID, EntityID: entityID, CardID: card.CardID, ContentHash: card.CardContentHash, NoticeID: noticeID, Workflow: workflow}
 }
 
 func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Backend) {

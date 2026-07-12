@@ -43,9 +43,6 @@ func (*mailboxStoreStub) CountMailboxItems(context.Context, string) (int, error)
 func (*mailboxStoreStub) GetMailboxItem(context.Context, string) (MailboxItem, error) {
 	return MailboxItem{}, nil
 }
-func (*mailboxStoreStub) DecideMailboxItem(context.Context, string, string, string, string) error {
-	return nil
-}
 func (*mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]MailboxItem, error) {
 	return nil, nil
 }

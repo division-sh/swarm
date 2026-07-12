@@ -183,6 +183,9 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
+		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, true, s.AppendEventTx); err != nil {
+			return runtimerunquiescence.Result{}, err
+		}
 		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, runLifecycleOptions(caps)); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}
@@ -322,6 +325,9 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 		for _, run := range runs {
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
+			}
+			if err := supersedeDecisionCardsForRun(txctx, tx, run.RunID, "run_quiesced", now, false, s.AppendEventTx); err != nil {
+				return err
 			}
 			if err := sqliteMarkActiveRunQuiescenceRunTerminalTx(txctx, tx, run.RunID, now); err != nil {
 				return err

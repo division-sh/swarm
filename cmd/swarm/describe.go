@@ -339,6 +339,9 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 							detail += " escape"
 						}
 					}
+					if strings.TrimSpace(edge.DecisionID) != "" {
+						detail += " decision " + edge.DecisionID + " verdict " + edge.Verdict
+					}
 					fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
 				}
 			}
@@ -392,6 +395,19 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 						parts = append(parts, "("+strings.TrimSpace(detail)+")")
 					}
 					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+				}
+			}
+			if len(graph.Gates) > 0 {
+				fmt.Fprintln(out, "    gates:")
+				for _, gate := range graph.Gates {
+					fmt.Fprintf(out, "      - %s decision %s authority=%s reminder=%s draft_ttl=%s\n", gate.Stage, gate.Decision, gate.Authority, gate.ReminderInterval, gate.InputDraftTTL)
+					for _, outcome := range gate.Outcomes {
+						detail := outcome.Verdict + " -> " + outcome.AdvancesTo
+						if outcome.Emit != "" {
+							detail += " emit " + outcome.Emit
+						}
+						fmt.Fprintf(out, "        - %s\n", detail)
+					}
 				}
 			}
 		}

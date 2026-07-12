@@ -478,21 +478,17 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"status"},
 		Reason: "local context registry status is a separate local-targeting taxonomy",
 	},
-	"control_mailbox.go\x00writeMailboxDecisionResult": {
-		Names:  []string{"action", "status"},
-		Reason: "mailbox decision action/status are separate control taxonomies",
-	},
 	"control_mailbox.go\x00writeMailboxDetailResult": {
-		Names:  []string{"action", "status"},
-		Reason: "mailbox item/history action/status are separate control taxonomies",
+		Names:  []string{"status", "status"},
+		Reason: "typed mailbox notice/card status is a separate control taxonomy",
 	},
 	"control_mailbox.go\x00writeMailboxListResult": {
-		Names:  []string{"status"},
+		Names:  []string{"status", "status"},
 		Reason: "mailbox item status is a separate control taxonomy",
 	},
-	"control_mailbox.go\x00runMailboxDecisionCommand": {
-		Names:  []string{"action", "action"},
-		Reason: "mailbox decision action is a separate control taxonomy propagated through validation and result rendering",
+	"control_mailbox.go\x00runMailboxDeferCommand": {
+		Names:  []string{"status"},
+		Reason: "typed decision-card status is a separate control taxonomy",
 	},
 	"control_nuke.go\x00writeRuntimeNukeResult": {
 		Names:  []string{"status"},

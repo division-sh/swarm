@@ -444,7 +444,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 		"agent list", "agent deliveries", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
 		"conversation list", "conversation view", "conversation turn",
 		"entity list", "entity view", "entity aggregate",
-		"mailbox list", "mailbox view", "mailbox approve", "mailbox reject", "mailbox defer",
+		"mailbox list", "mailbox view", "mailbox defer",
 		"control pause", "control continue", "control stop", "control nuke",
 		"run fork", "forkchat new", "forkchat resume", "forkchat list", "forkchat view", "forkchat delete",
 		"version",

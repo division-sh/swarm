@@ -73,7 +73,10 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		if err := pc.reconcileWorkflowStageTimers(txctx, entityID, currentState, nextState, sourceEvent); err != nil {
 			return err
 		}
-		return pc.applyWorkflowJoinIntents(txctx, entityID, currentState, nextState)
+		if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentState, nextState); err != nil {
+			return err
+		}
+		return pc.applyWorkflowGateIntents(txctx, entityID, currentState, nextState, sourceEvent)
 	})
 }
 

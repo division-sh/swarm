@@ -196,7 +196,10 @@ func (pc *PipelineCoordinator) armWorkflowCurrentStageLifecycle(ctx context.Cont
 		if err := pc.applyWorkflowTimerIntents(txctx, entityID, "", stage, sourceEvent); err != nil {
 			return err
 		}
-		return pc.applyWorkflowJoinIntents(txctx, entityID, "", stage)
+		if err := pc.applyWorkflowJoinIntents(txctx, entityID, "", stage); err != nil {
+			return err
+		}
+		return pc.applyWorkflowGateIntents(txctx, entityID, "", stage, sourceEvent)
 	})
 }
 

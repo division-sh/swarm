@@ -234,6 +234,7 @@ func approvedNotificationSchemaRuntimeMethods() []string {
 	return []string{
 		"event.subscribe",
 		"health.subscribe",
+		"mailbox.subscribe",
 		"run.subscribe_trace",
 		"runtime.subscribe_logs",
 	}

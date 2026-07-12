@@ -6,193 +6,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
 
-func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		args       []string
-		wantMethod string
-		wantParams map[string]any
-		wantOutput []string
-	}{
-		{
-			name:       "approve",
-			args:       []string{"mailbox", "approve", "mailbox-1", "--idempotency-key", "idem-approve", "--decision-payload-json", `{"approved":true}`},
-			wantMethod: "mailbox.approve",
-			wantParams: map[string]any{
-				"mailbox_id":       "mailbox-1",
-				"idempotency_key":  "idem-approve",
-				"decision_payload": map[string]any{"approved": true},
-			},
-			wantOutput: []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "idempotency_replayed=false", "downstream_event_id=event-1", "downstream_event_name=mailbox.item_decided", "downstream_subscribers=approval-agent,review-agent", "downstream_subscriber_source=event_catalog"},
-		},
-		{
-			name:       "reject",
-			args:       []string{"mailbox", "reject", "mailbox-2", "--reason", "not enough evidence", "--idempotency-key", "idem-reject"},
-			wantMethod: "mailbox.reject",
-			wantParams: map[string]any{
-				"mailbox_id":      "mailbox-2",
-				"reason":          "not enough evidence",
-				"idempotency_key": "idem-reject",
-			},
-			wantOutput: []string{"mailbox reject ok:", "mailbox_id=mailbox-2", "status=decided", "decision_id=decision-1", "idempotency_replayed=false"},
-		},
-		{
-			name:       "defer",
-			args:       []string{"mailbox", "defer", "mailbox-3", "--until", "2026-05-13T12:30:00Z", "--idempotency-key", "idem-defer"},
-			wantMethod: "mailbox.defer",
-			wantParams: map[string]any{
-				"mailbox_id":      "mailbox-3",
-				"until":           "2026-05-13T12:30:00Z",
-				"idempotency_key": "idem-defer",
-			},
-			wantOutput: []string{"mailbox defer ok:", "mailbox_id=mailbox-3", "status=deferred", "decision_id=decision-1", "idempotency_replayed=false"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			var captured jsonRPCRequest
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/v1/rpc" {
-					t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
-				}
-				if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-					t.Errorf("Authorization = %q, want bearer token", got)
-				}
-				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-					t.Errorf("decode request: %v", err)
-				}
-				status := "decided"
-				downstream := ""
-				if tc.name == "defer" {
-					status = "deferred"
-				}
-				if tc.name == "approve" {
-					downstream = "event-1"
-				}
-				result := map[string]any{
-					"ok":                   true,
-					"mailbox_decision_id":  "decision-1",
-					"downstream_event_id":  downstream,
-					"status":               status,
-					"idempotency_replayed": false,
-				}
-				if tc.name == "approve" {
-					result["downstream_event_name"] = "mailbox.item_decided"
-					result["downstream_subscribers"] = []string{"approval-agent", "review-agent"}
-					result["downstream_subscriber_source"] = "event_catalog"
-				}
-				writeJSONRPCResult(t, w, captured.ID, result)
-			}))
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 0 {
-				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-			}
-			if captured.JSONRPC != "2.0" || captured.Method != tc.wantMethod {
-				t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/%s", captured.JSONRPC, captured.Method, tc.wantMethod)
-			}
-			if !reflect.DeepEqual(captured.Params, tc.wantParams) {
-				t.Fatalf("params = %#v, want %#v", captured.Params, tc.wantParams)
-			}
-			for _, want := range tc.wantOutput {
-				if !strings.Contains(stdout.String(), want) {
-					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-				}
-			}
-			if strings.TrimSpace(stderr.String()) != "" {
-				t.Fatalf("stderr = %q, want empty", stderr.String())
-			}
-		})
-	}
-}
-
-func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	payloadPath := filepath.Join(t.TempDir(), "decision-payload.json")
-	if err := os.WriteFile(payloadPath, []byte(`{"approved":true,"source":"file"}`), 0o600); err != nil {
-		t.Fatalf("write payload file: %v", err)
-	}
-
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/rpc" {
-			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Errorf("Authorization = %q, want bearer token", got)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"ok":                           true,
-			"mailbox_decision_id":          "decision-1",
-			"downstream_event_id":          "event-1",
-			"downstream_event_name":        "mailbox.item_decided",
-			"downstream_subscribers":       []string{"approval-agent", "review-agent"},
-			"downstream_subscriber_source": "event_catalog",
-			"status":                       "decided",
-			"idempotency_replayed":         false,
-		})
-	}))
-	defer server.Close()
-
-	args := []string{"mailbox", "approve", "mailbox-1", "--idempotency-key", "idem-file", "--decision-payload", payloadPath}
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	wantParams := map[string]any{
-		"mailbox_id":       "mailbox-1",
-		"idempotency_key":  "idem-file",
-		"decision_payload": map[string]any{"approved": true, "source": "file"},
-	}
-	if captured.JSONRPC != "2.0" || captured.Method != "mailbox.approve" {
-		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/mailbox.approve", captured.JSONRPC, captured.Method)
-	}
-	if !reflect.DeepEqual(captured.Params, wantParams) {
-		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
-	}
-	for _, want := range []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "idempotency_replayed=false", "downstream_event_id=event-1", "downstream_event_name=mailbox.item_decided", "downstream_subscribers=approval-agent,review-agent", "downstream_subscriber_source=event_catalog"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
+func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/rpc" {
-			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Errorf("Authorization = %q, want bearer token", got)
-		}
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
+			t.Fatalf("decode request: %v", err)
 		}
-		first := mailboxItemResult("mailbox-1", "pending", "high")
-		delete(first, "source_event_id")
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"items": []map[string]any{
-				first,
-				mailboxItemResult("mailbox-2", "decided", "normal"),
+			"items": []any{
+				map[string]any{"kind": "notice", "notice": mailboxNoticeResult("notice-1")},
+				map[string]any{"kind": "decision_card", "decision_card": mailboxCardSummaryResult("card-1")},
 			},
 			"next_cursor": "cursor-2",
 		})
@@ -201,702 +31,166 @@ func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"mailbox", "list",
-		"--all",
-		"--run-id", "run-1",
-		"--entity-id", "entity-1",
-		"--type", "review_request",
-		"--priority", "high",
-		"--limit", "25",
-		"--cursor", "cursor-1",
+		"mailbox", "list", "--all", "--run-id", "run-1", "--entity-id", "entity-1", "--limit", "25", "--cursor", "cursor-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if captured.JSONRPC != "2.0" || captured.Method != "mailbox.list" {
-		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/mailbox.list", captured.JSONRPC, captured.Method)
-	}
-	wantParams := map[string]any{
-		"run_id":    "run-1",
-		"entity_id": "entity-1",
-		"type":      "review_request",
-		"priority":  "high",
-		"limit":     float64(25),
-		"cursor":    "cursor-1",
-	}
-	if !reflect.DeepEqual(captured.Params, wantParams) {
-		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
-	}
-	for _, want := range []string{
-		"MAILBOX_ID",
-		"mailbox-1   pending  high      review_request  -",
-		"entity-1",
-		"mailbox-2   decided  normal    review_request",
-		"next_cursor=cursor-2",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestMailboxListDefaultsToPendingAndRendersEmptyResult(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		writeJSONRPCResult(t, w, captured.ID, map[string]any{"items": []any{}})
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "list"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.Method != "mailbox.list" {
 		t.Fatalf("method = %q, want mailbox.list", captured.Method)
 	}
-	if !reflect.DeepEqual(captured.Params, map[string]any{"status": "pending"}) {
-		t.Fatalf("params = %#v, want pending default", captured.Params)
+	wantParams := map[string]any{"run_id": "run-1", "entity_id": "entity-1", "limit": float64(25), "cursor": "cursor-1"}
+	if !reflect.DeepEqual(captured.Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	if !strings.Contains(stdout.String(), "No mailbox items match the current filters.") {
-		t.Fatalf("stdout = %q, want empty message", stdout.String())
-	}
-}
-
-func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Errorf("Authorization = %q, want bearer token", got)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		item := mailboxItemResult("mailbox-1", "pending", "high")
-		delete(item, "source_event_id")
-		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"item":           item,
-			"payload":        map[string]any{"summary": "needs review"},
-			"decision_sheet": mailboxDecisionSheetResult(),
-			"history": []map[string]any{
-				{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"},
-			},
-		})
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "view", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if captured.JSONRPC != "2.0" || captured.Method != "mailbox.get" {
-		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/mailbox.get", captured.JSONRPC, captured.Method)
-	}
-	if !reflect.DeepEqual(captured.Params, map[string]any{"mailbox_id": "mailbox-1"}) {
-		t.Fatalf("params = %#v, want mailbox id", captured.Params)
-	}
-	for _, want := range []string{
-		"Mailbox mailbox-1",
-		"status=pending priority=high type=review_request",
-		"source_event_id=- source_flow=validation",
-		"decision_sheet:",
-		"entity_context: entity_id=entity-1 run_id=run-1 flow=flows/review type=vertical state=collecting revision=3",
-		`entity_fields={"score":7}`,
-		`entity_gates={"ready":true}`,
-		`entity_accumulated={"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
-		"downstream_preview: event_name=mailbox.item_decided subscribers=approval-agent,review-agent subscriber_source=event_catalog",
-		`payload={"summary":"needs review"}`,
-		"history:",
-		"- action=created actor=system ts=2026-05-13T12:00:00Z",
-	} {
+	for _, want := range []string{"MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "next_cursor=cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
 }
 
-func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
+func TestMailboxViewRendersTaggedResources(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		args        []string
-		prepare     func(t *testing.T) []string
-		wantStderr  string
-		wantNoCalls bool
+		name, id string
+		result   map[string]any
+		wants    []string
 	}{
-		{name: "list extra arg", args: []string{"mailbox", "list", "extra"}, wantStderr: "unknown command", wantNoCalls: true},
-		{name: "list invalid status", args: []string{"mailbox", "list", "--status", "open"}, wantStderr: "--status must be one of", wantNoCalls: true},
-		{name: "list invalid priority", args: []string{"mailbox", "list", "--priority", "low"}, wantStderr: "--priority must be one of", wantNoCalls: true},
-		{name: "list invalid limit", args: []string{"mailbox", "list", "--limit", "201"}, wantStderr: "--limit must be an integer from 1 to 200", wantNoCalls: true},
-		{name: "list unsupported flag", args: []string{"mailbox", "list", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
-		{name: "view missing id", args: []string{"mailbox", "view"}, wantStderr: "requires <mailbox-item-id>", wantNoCalls: true},
-		{name: "view extra arg", args: []string{"mailbox", "view", "mailbox-1", "extra"}, wantStderr: "accepts one argument", wantNoCalls: true},
-		{name: "view blank id", args: []string{"mailbox", "view", "  "}, wantStderr: "mailbox item id is required", wantNoCalls: true},
-		{name: "view unsupported flag", args: []string{"mailbox", "view", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
-		{name: "approve missing id", args: []string{"mailbox", "approve"}, wantStderr: "requires <mailbox-item-id>", wantNoCalls: true},
-		{name: "approve extra arg", args: []string{"mailbox", "approve", "mailbox-1", "extra"}, wantStderr: "accepts one argument", wantNoCalls: true},
-		{name: "approve unsupported flag", args: []string{"mailbox", "approve", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
-		{name: "approve malformed payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "{"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
-		{name: "approve non-object payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "[]"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
-		{name: "approve blank inline payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", ""}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
-		{name: "approve blank payload file path", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload", ""}, wantStderr: "--decision-payload requires a file path", wantNoCalls: true},
-		{name: "approve missing payload file", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload", filepath.Join(t.TempDir(), "missing.json")}, wantStderr: "--decision-payload could not be read", wantNoCalls: true},
-		{
-			name: "approve malformed payload file",
-			prepare: func(t *testing.T) []string {
-				path := filepath.Join(t.TempDir(), "payload.json")
-				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
-					t.Fatalf("write payload file: %v", err)
-				}
-				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
-			},
-			wantStderr:  "--decision-payload must be a JSON object",
-			wantNoCalls: true,
-		},
-		{
-			name: "approve non-object payload file",
-			prepare: func(t *testing.T) []string {
-				path := filepath.Join(t.TempDir(), "payload.json")
-				if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
-					t.Fatalf("write payload file: %v", err)
-				}
-				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
-			},
-			wantStderr:  "--decision-payload must be a JSON object",
-			wantNoCalls: true,
-		},
-		{
-			name: "approve null payload file",
-			prepare: func(t *testing.T) []string {
-				path := filepath.Join(t.TempDir(), "payload.json")
-				if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
-					t.Fatalf("write payload file: %v", err)
-				}
-				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
-			},
-			wantStderr:  "--decision-payload must be a JSON object",
-			wantNoCalls: true,
-		},
-		{
-			name: "approve conflicting payload flags",
-			prepare: func(t *testing.T) []string {
-				path := filepath.Join(t.TempDir(), "payload.json")
-				if err := os.WriteFile(path, []byte(`{"approved":true}`), 0o600); err != nil {
-					t.Fatalf("write payload file: %v", err)
-				}
-				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path, "--decision-payload-json", `{"approved":true}`}
-			},
-			wantStderr:  "--decision-payload and --decision-payload-json are mutually exclusive",
-			wantNoCalls: true,
-		},
-		{
-			name: "approve conflicting payload flags with blank inline",
-			prepare: func(t *testing.T) []string {
-				path := filepath.Join(t.TempDir(), "payload.json")
-				if err := os.WriteFile(path, []byte(`{"approved":true}`), 0o600); err != nil {
-					t.Fatalf("write payload file: %v", err)
-				}
-				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path, "--decision-payload-json", ""}
-			},
-			wantStderr:  "--decision-payload and --decision-payload-json are mutually exclusive",
-			wantNoCalls: true,
-		},
-		{name: "reject missing reason", args: []string{"mailbox", "reject", "mailbox-1"}, wantStderr: "--reason is required", wantNoCalls: true},
-		{name: "reject blank reason", args: []string{"mailbox", "reject", "mailbox-1", "--reason", "  "}, wantStderr: "--reason is required", wantNoCalls: true},
-		{name: "defer missing until", args: []string{"mailbox", "defer", "mailbox-1"}, wantStderr: "--until is required", wantNoCalls: true},
-		{name: "defer invalid until", args: []string{"mailbox", "defer", "mailbox-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp", wantNoCalls: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := tc.args
-			if tc.prepare != nil {
-				args = tc.prepare(t)
-			}
-			before := calls.Load()
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
-			}
-			if tc.wantNoCalls && calls.Load() != before {
-				t.Fatalf("server calls changed from %d to %d, want no request", before, calls.Load())
-			}
-		})
-	}
-}
-
-func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{"ok": true})
-	}))
-	defer server.Close()
-	payloadPath := filepath.Join(t.TempDir(), "decision-payload.json")
-	if err := os.WriteFile(payloadPath, []byte(`{"approved":true}`), 0o600); err != nil {
-		t.Fatalf("write payload file: %v", err)
-	}
-
-	for _, args := range [][]string{
-		{"mailbox", "list"},
-		{"mailbox", "view", "mailbox-1"},
-		{"mailbox", "approve", "mailbox-1"},
-		{"mailbox", "approve", "mailbox-1", "--decision-payload", payloadPath},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "")
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 4 {
-				t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-			}
-			if !strings.Contains(stderr.String(), "API token source is required") {
-				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
-			}
-			if calls.Load() != 0 {
-				t.Fatalf("server calls = %d, want 0", calls.Load())
-			}
-		})
-	}
-}
-
-func TestControlMailboxRetiredAliasesFailClosedBeforeRequest(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
-	for _, args := range [][]string{
-		{"control", "mailbox", "list"},
-		{"control", "mailbox", "view", "mailbox-1"},
-		{"control", "mailbox", "approve", "mailbox-1"},
-		{"control", "mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
-		{"control", "mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			before := calls.Load()
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			for _, want := range []string{
-				"`swarm control mailbox` was removed in CLI v2",
-				"`swarm mailbox approve <mailbox-item-id>`",
-				"`swarm mailbox reject <mailbox-item-id> --reason <text>`",
-				"`swarm mailbox defer <mailbox-item-id> --until <RFC3339>`",
-			} {
-				if !strings.Contains(stderr.String(), want) {
-					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
-				}
-			}
-			if calls.Load() != before {
-				t.Fatalf("server calls changed from %d to %d, want no request", before, calls.Load())
-			}
-		})
-	}
-}
-
-func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		handler    http.HandlerFunc
-		wantCode   int
-		wantStderr string
-	}{
-		{
-			name: "http auth failure",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
-			},
-			wantCode:   4,
-			wantStderr: "rejected the request with status 401",
-		},
-		{
-			name: "malformed response",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				_, _ = w.Write([]byte(`{`))
-			},
-			wantCode:   3,
-			wantStderr: "returned an invalid API response",
-		},
-		{
-			name: "malformed result",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"ok": true})
-			},
-			wantCode:   3,
-			wantStderr: "mailbox_decision_id is required",
-		},
-		{
-			name: "mismatched json rpc id",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				writeJSONRPCResult(t, w, "swarm-cli:mailbox.reject", map[string]any{
-					"ok":                  true,
-					"mailbox_decision_id": "decision-1",
-					"status":              "decided",
-				})
-			},
-			wantCode:   3,
-			wantStderr: "returned an invalid API response",
-		},
-		{
-			name: "missing json rpc id",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("content-type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"jsonrpc": "2.0",
-					"result": map[string]any{
-						"ok":                  true,
-						"mailbox_decision_id": "decision-1",
-						"status":              "decided",
-					},
-				})
-			},
-			wantCode:   3,
-			wantStderr: "returned an invalid API response",
-		},
-		{
-			name: "json rpc application error",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"jsonrpc": "2.0",
-					"id":      req.ID,
-					"error": map[string]any{
-						"code":    -32010,
-						"message": "Application error: MAILBOX_NOT_FOUND",
-						"data": map[string]any{
-							"code":           "MAILBOX_NOT_FOUND",
-							"details":        map[string]any{"mailbox_id": "missing"},
-							"retryable":      false,
-							"correlation_id": "corr-1",
-						},
-					},
-				})
-			},
-			wantCode:   5,
-			wantStderr: "MAILBOX_NOT_FOUND",
-		},
+		{name: "notice", id: "notice-1", result: map[string]any{"kind": "notice", "notice": map[string]any{"item": mailboxNoticeResult("notice-1"), "payload": map[string]any{"summary": "review"}}}, wants: []string{"Mailbox notice notice-1", "status=pending", `payload={"summary":"review"}`}},
+		{name: "card", id: "card-1", result: map[string]any{"kind": "decision_card", "decision_card": mailboxCardDetailResult("card-1")}, wants: []string{"Decision card card-1", "decision=launch_review", "card_content_hash=content-hash", `"decision":"launch_review"`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(tc.handler)
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
-			if code != tc.wantCode {
-				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
-			}
-		})
-	}
-}
-
-func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		args       []string
-		handler    http.HandlerFunc
-		wantCode   int
-		wantStderr string
-	}{
-		{
-			name: "list http auth failure",
-			args: []string{"mailbox", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
-			},
-			wantCode:   4,
-			wantStderr: "rejected the request with status 401",
-		},
-		{
-			name: "list malformed missing items",
-			args: []string{"mailbox", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"next_cursor": "cursor-1"})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox.list result: items is required",
-		},
-		{
-			name: "list malformed item",
-			args: []string{"mailbox", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				item := mailboxItemResult("mailbox-1", "pending", "normal")
-				delete(item, "source_flow")
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []map[string]any{item}})
-			},
-			wantCode:   3,
-			wantStderr: "items[0]: source_flow is required",
-		},
-		{
-			name: "view malformed missing payload",
-			args: []string{"mailbox", "view", "mailbox-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"item":    mailboxItemResult("mailbox-1", "pending", "normal"),
-					"history": []map[string]any{{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"}},
-				})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox.get result: payload is required",
-		},
-		{
-			name: "view malformed missing decision sheet",
-			args: []string{"mailbox", "view", "mailbox-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"item":    mailboxItemResult("mailbox-1", "pending", "normal"),
-					"payload": map[string]any{"summary": "needs review"},
-					"history": []map[string]any{{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"}},
-				})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox.get result: decision_sheet is required",
-		},
-		{
-			name: "view mailbox not found",
-			args: []string{"mailbox", "view", "missing"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"jsonrpc": "2.0",
-					"id":      req.ID,
-					"error": map[string]any{
-						"code":    -32010,
-						"message": "Application error: MAILBOX_NOT_FOUND",
-						"data": map[string]any{
-							"code":    "MAILBOX_NOT_FOUND",
-							"details": map[string]any{"mailbox_id": "missing"},
-						},
-					},
-				})
-			},
-			wantCode:   5,
-			wantStderr: "MAILBOX_NOT_FOUND",
-		},
-		{
-			name: "approve malformed missing idempotency replayed",
-			args: []string{"mailbox", "approve", "mailbox-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"ok":                  true,
-					"mailbox_decision_id": "decision-1",
-					"status":              "decided",
-				})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox decision result: idempotency_replayed is required",
-		},
-		{
-			name: "approve malformed missing downstream subscribers",
-			args: []string{"mailbox", "approve", "mailbox-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"ok":                           true,
-					"mailbox_decision_id":          "decision-1",
-					"status":                       "decided",
-					"idempotency_replayed":         false,
-					"downstream_event_id":          "event-1",
-					"downstream_event_name":        "mailbox.item_decided",
-					"downstream_subscriber_source": "event_catalog",
-				})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox decision result: downstream_subscribers is required when downstream_event_id is present",
-		},
-		{
-			name: "approve malformed invalid downstream source",
-			args: []string{"mailbox", "approve", "mailbox-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"ok":                           true,
-					"mailbox_decision_id":          "decision-1",
-					"status":                       "decided",
-					"idempotency_replayed":         false,
-					"downstream_event_id":          "event-1",
-					"downstream_event_name":        "mailbox.item_decided",
-					"downstream_subscribers":       []string{"approval-agent"},
-					"downstream_subscriber_source": "local_guess",
-				})
-			},
-			wantCode:   3,
-			wantStderr: "malformed mailbox decision result: downstream_subscriber_source must be event_catalog, unavailable, or none",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(tc.handler)
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != tc.wantCode {
-				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
-			}
-		})
-	}
-}
-
-func TestMailboxRejectsMalformedStatusByAction(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		args   []string
-		status string
-		want   string
-	}{
-		{
-			name:   "approve invalid enum status",
-			args:   []string{"mailbox", "approve", "mailbox-1"},
-			status: "garbage",
-			want:   `status="garbage", want "decided" for mailbox approve`,
-		},
-		{
-			name:   "reject wrong action status",
-			args:   []string{"mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
-			status: "deferred",
-			want:   `status="deferred", want "decided" for mailbox reject`,
-		},
-		{
-			name:   "defer wrong action status",
-			args:   []string{"mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
-			status: "decided",
-			want:   `status="decided", want "deferred" for mailbox defer`,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
+			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"ok":                   true,
-					"mailbox_decision_id":  "decision-1",
-					"status":               tc.status,
-					"idempotency_replayed": false,
-				})
+				_ = json.NewDecoder(r.Body).Decode(&captured)
+				writeJSONRPCResult(t, w, captured.ID, tc.result)
 			}))
 			defer server.Close()
-
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 3 {
-				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "view", tc.id}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s", code, stderr.String())
 			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
+			if captured.Method != "mailbox.get" || captured.Params["mailbox_id"] != tc.id {
+				t.Fatalf("request = %#v", captured)
 			}
-			if !strings.Contains(stderr.String(), tc.want) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.want)
+			for _, want := range tc.wants {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
 			}
 		})
 	}
 }
 
-func mailboxItemResult(mailboxID, status, priority string) map[string]any {
-	return map[string]any{
-		"mailbox_id":       mailboxID,
-		"type":             "review_request",
-		"status":           status,
-		"priority":         priority,
-		"source_event_id":  "event-" + mailboxID,
-		"source_flow":      "validation",
-		"source_entity_id": "entity-1",
-		"payload":          map[string]any{"summary": "needs review"},
-		"created_at":       "2026-05-13T12:00:00Z",
-		"decision":         decisionForMailboxStatus(status),
+func TestMailboxDeferUsesTypedCardMutation(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{"ok": true, "card_id": "card-1", "status": "pending", "change_id": 7, "idempotency_replayed": false})
+	}))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "defer", "card-1", "--until", "2026-05-13T12:30:00Z", "--idempotency-key", "idem-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if captured.Method != "mailbox.defer" {
+		t.Fatalf("method = %q", captured.Method)
+	}
+	want := map[string]any{"card_id": "card-1", "until": "2026-05-13T12:30:00Z", "idempotency_key": "idem-1"}
+	if !reflect.DeepEqual(captured.Params, want) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, want)
+	}
+	if !strings.Contains(stdout.String(), "mailbox defer ok: card_id=card-1 status=pending change_id=7 idempotency_replayed=false") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
-func mailboxDecisionSheetResult() map[string]any {
-	return map[string]any{
-		"entity_context": map[string]any{
-			"available": true,
-			"entity":    validEntityFullResult("entity-1"),
-		},
-		"downstream_preview": map[string]any{
-			"available":         true,
-			"event_name":        "mailbox.item_decided",
-			"subscribers":       []string{"approval-agent", "review-agent"},
-			"subscriber_source": "event_catalog",
-		},
+func TestMailboxCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "list status", args: []string{"mailbox", "list", "--status", "unknown"}, want: "--status is invalid"},
+		{name: "list limit", args: []string{"mailbox", "list", "--limit", "0"}, want: "--limit must be an integer from 1 to 200"},
+		{name: "view missing", args: []string{"mailbox", "view"}, want: "requires <mailbox-id>"},
+		{name: "view blank", args: []string{"mailbox", "view", " "}, want: "mailbox id is required"},
+		{name: "defer missing", args: []string{"mailbox", "defer"}, want: "requires <card-id>"},
+		{name: "defer timestamp", args: []string{"mailbox", "defer", "card-1", "--until", "tomorrow"}, want: "--until must be an RFC3339 timestamp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := calls.Load()
+			var stdout, stderr bytes.Buffer
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server)); code != 2 {
+				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			if calls.Load() != before {
+				t.Fatalf("request was sent for invalid input")
+			}
+		})
 	}
 }
 
-func decisionForMailboxStatus(status string) string {
-	switch status {
-	case "decided":
-		return "approved"
-	case "deferred":
-		return "deferred"
-	case "expired":
-		return "expired"
-	default:
-		return ""
+func TestRetiredMailboxDecisionCommandsDoNotExist(t *testing.T) {
+	for _, action := range []string{"approve", "reject"} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", action, "card-1"}, &stdout, &stderr, defaultRootCommandOptions())
+		if code != 2 || !strings.Contains(stderr.String(), "unknown command") {
+			t.Fatalf("mailbox %s code=%d stderr=%q", action, code, stderr.String())
+		}
 	}
+}
+
+func TestControlMailboxNamespaceFailsClosedBeforeRequest(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "mailbox", "anything"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 2 || !strings.Contains(stderr.String(), "`swarm control mailbox` was removed") || calls.Load() != 0 {
+		t.Fatalf("code=%d calls=%d stderr=%q", code, calls.Load(), stderr.String())
+	}
+}
+
+func TestMailboxProjectionValidationFailsClosed(t *testing.T) {
+	if err := validateMailboxProjection(mailboxProjection{Kind: "decision_card"}); err == nil {
+		t.Fatal("missing decision card accepted")
+	}
+	if err := validateMailboxProjection(mailboxProjection{Kind: "legacy"}); err == nil {
+		t.Fatal("unknown projection kind accepted")
+	}
+	if err := validateMailboxDetailResult(mailboxDetailProjection{Kind: "decision_card", DecisionCard: &mailboxDecisionCard{}}); err == nil {
+		t.Fatal("malformed decision-card detail accepted")
+	}
+}
+
+func mailboxNoticeResult(id string) map[string]any {
+	return map[string]any{"mailbox_id": id, "type": "review_request", "status": "pending", "priority": "high", "source_event_id": "event-1", "source_flow": "validation", "source_entity_id": "entity-1", "payload": map[string]any{"summary": "review"}, "created_at": "2026-05-13T12:00:00Z"}
+}
+
+func mailboxCardSummaryResult(id string) map[string]any {
+	return map[string]any{"card_id": id, "run_id": "run-1", "flow_instance": "root", "entity_id": "entity-1", "stage": "launch_review", "decision_id": "launch_review", "title": "Launch review", "status": "pending", "created_at": "2026-05-13T12:00:01Z", "updated_at": "2026-05-13T12:00:01Z"}
+}
+
+func mailboxCardDetailResult(id string) map[string]any {
+	out := mailboxCardSummaryResult(id)
+	out["card_content_hash"] = "content-hash"
+	out["snapshot"] = map[string]any{"decision": "launch_review", "context": map[string]any{"qa": "passed"}, "outcomes": map[string]any{"approve": map[string]any{"advances_to": "done"}}}
+	return out
 }
 
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
@@ -906,7 +200,6 @@ func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 		hasTokenSource = true
 	}
 	if !hasTokenSource {
-		// Missing-token tests now prove fail-closed behavior on non-loopback targets.
 		opts.apiRPCEndpointOverride = "http://192.0.2.10:8081/v1/rpc"
 		return opts
 	}
@@ -918,11 +211,7 @@ func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 func writeJSONRPCResult(t *testing.T, w http.ResponseWriter, id string, result map[string]any) {
 	t.Helper()
 	w.Header().Set("content-type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"result":  result,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result}); err != nil {
 		t.Fatalf("encode response: %v", err)
 	}
 }

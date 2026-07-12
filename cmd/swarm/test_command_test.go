@@ -1235,7 +1235,7 @@ steps:
 	}
 }
 
-func TestSwarmTestMailboxApproveFindsExactlyOneThenMutates(t *testing.T) {
+func TestSwarmTestMailboxDecideFindsExactlyOneThenMutates(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
@@ -1244,11 +1244,11 @@ name: mailbox scenario
 steps:
   - publish: thing.created
     payload: {amount: 7, who: operator}
-  - mailbox.approve:
+  - mailbox.decide:
       match:
-        type: review_request
-      payload:
-        approved: true
+        decision: launch_review
+      verdict: approve
+      fields: {}
 `)
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1263,24 +1263,22 @@ steps:
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "mailbox.list":
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []map[string]any{mailboxItemResult("mailbox-1", "pending", "normal")}})
-		case "mailbox.approve":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []any{map[string]any{"kind": "decision_card", "decision_card": mailboxCardSummaryResult("card-1")}}})
+		case "mailbox.get":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"kind": "decision_card", "decision_card": mailboxCardDetailResult("card-1")})
+		case "mailbox.decide":
 			want := map[string]any{
-				"mailbox_id":       "mailbox-1",
-				"decision_payload": map[string]any{"approved": true},
+				"card_id":               "card-1",
+				"verdict":               "approve",
+				"fields":                map[string]any{},
+				"observed_content_hash": "content-hash",
 			}
 			if !reflect.DeepEqual(req.Params, want) {
-				t.Fatalf("mailbox.approve params = %#v, want %#v", req.Params, want)
+				t.Fatalf("mailbox.decide params = %#v, want %#v", req.Params, want)
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{
-				"ok":                           true,
-				"mailbox_decision_id":          "decision-1",
-				"status":                       "decided",
-				"idempotency_replayed":         false,
-				"downstream_event_id":          "event-2",
-				"downstream_event_name":        "thing.reviewed",
-				"downstream_subscribers":       []string{},
-				"downstream_subscriber_source": "none",
+				"ok": true, "card_id": "card-1", "status": "decided", "verdict": "approve",
+				"change_id": 1, "idempotency_replayed": false,
 			})
 		default:
 			t.Fatalf("unexpected method = %s", req.Method)
@@ -1304,24 +1302,25 @@ steps:
 		eventPublishMethod,
 		"run.diagnose",
 		"mailbox.list",
-		"mailbox.approve",
+		"mailbox.get",
+		"mailbox.decide",
 		"run.diagnose",
 		"run.diagnose",
 	})
 }
 
-func TestSwarmTestMailboxRejectMissingReasonFailsBeforeMailboxLookup(t *testing.T) {
+func TestSwarmTestMailboxDecideMissingVerdictFailsBeforeMailboxLookup(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"), `
-name: mailbox reject missing reason
+name: mailbox decide missing verdict
 steps:
   - publish: thing.created
     payload: {amount: 7, who: operator}
-  - mailbox.reject:
+  - mailbox.decide:
       match:
-        type: review_request
+        decision: launch_review
 `)
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1336,7 +1335,7 @@ steps:
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		default:
-			t.Fatalf("unexpected method before reject validation = %s", req.Method)
+			t.Fatalf("unexpected method before decide validation = %s", req.Method)
 		}
 	}))
 	defer server.Close()
@@ -1354,8 +1353,8 @@ steps:
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.diagnose"})
-	if !strings.Contains(stderr.String(), "mailbox.reject reason is required") {
-		t.Fatalf("stderr = %q, want reject reason validation failure", stderr.String())
+	if !strings.Contains(stderr.String(), "mailbox.decide verdict is required") {
+		t.Fatalf("stderr = %q, want decide verdict validation failure", stderr.String())
 	}
 }
 

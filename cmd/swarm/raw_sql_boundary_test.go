@@ -247,6 +247,21 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1848,
 			Reason:         "join stage arm, expected-zero intent, and timeout lifecycle consume the selected workflow instance RunPipelineMutation owner as one unit of work",
 		},
+		"internal/runtime/pipeline/workflow_gate_decision.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1986,
+			Reason:         "gate decision routing consumes the selected workflow mutation owner atomically with activation state",
+		},
+		"internal/runtime/pipeline/workflow_gate_fence.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1986,
+			Reason:         "gate activation and card fencing are explicit selected-store transaction owners",
+		},
+		"internal/runtime/pipeline/workflow_gate_lifecycle.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1986,
+			Reason:         "gate stage entry and exit require the selected pipeline transaction owner so activation and card state cannot commit separately",
+		},
 		"internal/runtime/pipeline/workflow_nodes.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
@@ -276,6 +291,16 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1951,
 			Reason:         "standing activation consumes the selected WorkflowInstanceStore RunPipelineMutation owner for atomic run, instance, entity, route, and timer creation",
+		},
+		"internal/apiv1/operator_decision_cards.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1986,
+			Reason:         "typed decision-card API mutations enter the selected workflow unit-of-work owner",
+		},
+		"internal/apiv1/operator_read.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1986,
+			Reason:         "operator dependency wiring names the selected workflow mutation capability",
 		},
 		"internal/runtime/sessions/postgres.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

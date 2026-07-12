@@ -1,0 +1,64 @@
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/google/uuid"
+)
+
+func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Context, instance *WorkflowInstance, reason string, now time.Time) error {
+	if s == nil || s.decisionCards == nil || instance == nil {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		return err
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return err
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		runID = strings.TrimSpace(asString(instance.Metadata["run_id"]))
+	}
+	entityID := strings.TrimSpace(instance.InstanceID)
+	for _, activation := range activations {
+		if !activation.Supersede(reason, now) {
+			continue
+		}
+		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+			return err
+		}
+		if err := s.decisionCards.SupersedeDecisionCardsForStage(ctx, runID, entityID, activation.ActivationID, activation.SupersededReason, now); err != nil {
+			return fmt.Errorf("supersede terminated flow decision card: %w", err)
+		}
+		if s.gateEvents == nil {
+			return fmt.Errorf("transactional event publisher is required to terminate gated flow %s", instance.InstanceID)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
+		})
+		if err != nil {
+			return err
+		}
+		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, runID, "",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.UTC())
+		if err := s.gateEvents.PublishInMutation(ctx, evt); err != nil {
+			return fmt.Errorf("publish terminated flow decision card supersession: %w", err)
+		}
+	}
+	instance.StateBuckets = carrier.PersistedStateBuckets()
+	return nil
+}

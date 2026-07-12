@@ -307,6 +307,7 @@ func newSelectedContractPipeline(bus *runtimebus.EventBus, store *store.Postgres
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, store.DB, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  loaded.Module,
 		MailboxMaterializer:     store,
+		DecisionCards:           store,
 		EventReceiptsCapability: store.CanonicalEventReceiptsCapability,
 		Credentials:             agentRuntime.Credentials,
 		ManagedCredentials:      agentRuntime.ManagedCredentials,

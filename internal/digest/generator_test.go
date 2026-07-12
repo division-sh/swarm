@@ -37,10 +37,7 @@ func (fakeMailbox) ExpireMailboxItems(context.Context, int) ([]runtimetools.Mail
 func (fakeMailbox) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (fakeMailbox) MarkMailboxItemNotified(context.Context, string) error { return nil }
-func (fakeMailbox) DecideMailboxItem(context.Context, string, string, string, string) error {
-	return nil
-}
+func (fakeMailbox) MarkMailboxItemNotified(context.Context, string) error  { return nil }
 func (fakeMailbox) CountMailboxItems(context.Context, string) (int, error) { return 3, nil }
 func (fakeMailbox) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return []runtimetools.MailboxItem{

@@ -56,10 +56,10 @@ required:
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
-		"mailbox.item_decided": *doc.Content[0],
+		"mailbox.card_decided": *doc.Content[0],
 	}
 
-	resolution := ResolveEventSchema(Wrap(bundle), "", "mailbox.item_decided")
+	resolution := ResolveEventSchema(Wrap(bundle), "", "mailbox.card_decided")
 	if !resolution.HasSchema {
 		t.Fatal("expected platform event schema resolution")
 	}
@@ -70,8 +70,8 @@ required:
 	if _, ok := properties["mailbox_payload"]; !ok {
 		t.Fatalf("properties missing mailbox_payload: %#v", properties)
 	}
-	if resolution.EventKey != "mailbox.item_decided" {
-		t.Fatalf("EventKey = %q, want mailbox.item_decided", resolution.EventKey)
+	if resolution.EventKey != "mailbox.card_decided" {
+		t.Fatalf("EventKey = %q, want mailbox.card_decided", resolution.EventKey)
 	}
 }
 

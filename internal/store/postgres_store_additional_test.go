@@ -2813,16 +2813,6 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatalf("expected inserted pending mailbox item %q in list", id)
 	}
 
-	if err := s.DecideMailboxItem(ctx, id, "decided", "approve", "ok"); err != nil {
-		t.Fatalf("decide: %v", err)
-	}
-	if err := s.DecideMailboxItem(ctx, id, "decided", "approve", "again"); err == nil {
-		t.Fatal("expected decide on non-pending to fail")
-	}
-	if err := s.DecideMailboxItem(ctx, uuid.NewString(), "nope", "approve", ""); err == nil {
-		t.Fatal("expected invalid status error")
-	}
-
 	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  entityID,
 		FromAgent: "control-plane",

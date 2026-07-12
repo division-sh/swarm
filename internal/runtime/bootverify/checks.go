@@ -237,6 +237,7 @@ var bootCheckRegistry = []Check{
 	{ID: fanOutValidationCheckID, Severity: SeverityHardInvalidity, Run: checkFanOutValidation},
 	{ID: joinValidationCheckID, Severity: SeverityHardInvalidity, Run: checkJoinValidation},
 	{ID: loopValidationCheckID, Severity: SeverityHardInvalidity, Run: checkLoopValidation},
+	{ID: stageGateValidationCheckID, Severity: SeverityHardInvalidity, Run: checkStageGateValidation},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
 	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},

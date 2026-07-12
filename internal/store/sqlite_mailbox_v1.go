@@ -4,13 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/google/uuid"
 )
 
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
@@ -108,208 +103,6 @@ func (s *SQLiteRuntimeStore) GetV1MailboxItem(ctx context.Context, id string) (M
 		return MailboxV1ItemDetail{}, err
 	}
 	return row.projectDetail(), nil
-}
-
-func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1DecisionRequest) (MailboxV1DecisionOutcome, error) {
-	if s == nil || s.DB == nil {
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("sqlite runtime store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return MailboxV1DecisionOutcome{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
-	}
-	if input.Now.IsZero() {
-		input.Now = time.Now().UTC()
-	}
-	input.Now = input.Now.UTC()
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-
-	action := strings.TrimSpace(strings.ToLower(input.Action))
-	switch action {
-	case "approve", "approved":
-		action = "approved"
-	case "reject", "rejected":
-		action = "rejected"
-	case "defer", "deferred":
-		action = "deferred"
-	default:
-		return MailboxV1DecisionOutcome{}, fmt.Errorf("unsupported mailbox decision action %q", input.Action)
-	}
-	idempotencyReq, hasIdempotency, err := prepareMailboxV1IdempotencyRequest(input)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	var outcome MailboxV1DecisionOutcome
-	if err := s.runRuntimeMutation(ctx, "sqlite v1 mailbox decision", func(txctx context.Context, tx *sql.Tx) error {
-		if hasIdempotency {
-			if _, err := tx.ExecContext(txctx, `DELETE FROM api_idempotency WHERE expires_at <= ?`, idempotencyReq.Now.UTC()); err != nil {
-				return fmt.Errorf("purge expired sqlite api idempotency: %w", err)
-			}
-			existing, ok, err := sqliteLoadAPIIdempotency(txctx, tx, idempotencyReq)
-			if err != nil {
-				return err
-			}
-			if ok {
-				if existing.RequestHash != idempotencyReq.RequestHash {
-					return &APIIdempotencyConflictError{
-						OriginalRequestHash:    existing.RequestHash,
-						ConflictingRequestHash: idempotencyReq.RequestHash,
-						Method:                 idempotencyReq.Method,
-						ResourceID:             existing.ResourceID,
-					}
-				}
-				var result MailboxV1DecisionResult
-				if err := json.Unmarshal(existing.Response, &result); err != nil {
-					return fmt.Errorf("decode sqlite api idempotency mailbox response: %w", err)
-				}
-				if err := normalizeSQLiteMailboxV1DecisionReplayResult(txctx, tx, &result); err != nil {
-					return err
-				}
-				outcome = MailboxV1DecisionOutcome{Result: result, Replayed: true}
-				return nil
-			}
-		}
-		if action == "deferred" && !input.DeferUntil.After(input.Now) {
-			return &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
-		}
-
-		row, err := s.loadSQLiteMailboxV1RowTx(txctx, tx, input.MailboxID)
-		if err != nil {
-			return err
-		}
-		if row.Status != "pending" {
-			return &MailboxV1AlreadyDecidedError{
-				MailboxID:        row.ID,
-				ExistingDecision: row.existingDecision(),
-				DecidedAt:        row.decisionTime(input.Now),
-			}
-		}
-		if strings.TrimSpace(input.DecisionEventType) == "" {
-			return &MailboxV1DecisionRouteError{MailboxID: row.ID, ItemType: row.Type}
-		}
-		if action == "deferred" && row.ExpiresAt.Valid && input.DeferUntil.After(row.ExpiresAt.Time.UTC()) {
-			maxUntil := row.ExpiresAt.Time.UTC()
-			return &MailboxV1InvalidDeferUntilError{Reason: "beyond_expiry", MaxUntil: &maxUntil}
-		}
-
-		decisionID := uuid.NewString()
-		resultStatus := "decided"
-		if action == "deferred" {
-			resultStatus = "deferred"
-		}
-		outcome = MailboxV1DecisionOutcome{
-			Result: MailboxV1DecisionResult{
-				OK:                true,
-				MailboxDecisionID: decisionID,
-				Status:            resultStatus,
-			},
-		}
-		notes := strings.TrimSpace(input.Reason)
-		if action == "deferred" {
-			if notes == "" {
-				notes = "Deferred until " + input.DeferUntil.UTC().Format(time.RFC3339Nano)
-			}
-		}
-		eventID := uuid.NewString()
-		evt, err := row.decisionEvent(eventID, decisionID, strings.TrimSpace(input.DecisionEventType), action, strings.TrimSpace(input.ActorTokenID), strings.TrimSpace(input.Reason), input.DecisionPayload, input.DeferUntil, input.Now)
-		if err != nil {
-			return err
-		}
-		subscribers := append([]string(nil), input.DecisionEventSubscribers...)
-		if subscribers == nil {
-			subscribers = []string{}
-		}
-		subscriberSource := strings.TrimSpace(input.DecisionEventSubscriberSource)
-		if subscriberSource == "" {
-			subscriberSource = "unavailable"
-		}
-		outcome.Result.DownstreamEventID = eventID
-		outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
-		outcome.Result.DownstreamSubscribers = &subscribers
-		outcome.Result.DownstreamSubscriberSource = subscriberSource
-		deliveryContext := replyDeliveryContext(row.ReplyContextID)
-		if !deliveryContext.Empty() {
-			evt = evt.WithDeliveryContext(deliveryContext)
-		}
-		outcome.DecisionEvent = &evt
-
-		var res sql.Result
-		if action == "deferred" {
-			res, err = tx.ExecContext(txctx, `
-			UPDATE mailbox
-			SET status = 'pending',
-			    decision = NULL,
-			    decision_notes = NULLIF(?, ''),
-			    decided_by = NULLIF(?, ''),
-			    decided_at = ?,
-			    deferred_until = ?
-			WHERE item_id = ?
-			  AND status = 'pending'
-		`, notes, strings.TrimSpace(input.ActorTokenID), input.Now, input.DeferUntil.UTC(), row.ID)
-		} else {
-			res, err = tx.ExecContext(txctx, `
-			UPDATE mailbox
-			SET status = 'decided',
-			    decision = ?,
-			    decision_notes = NULLIF(?, ''),
-			    decided_by = NULLIF(?, ''),
-			    decided_at = ?,
-			    deferred_until = NULL
-			WHERE item_id = ?
-			  AND status = 'pending'
-		`, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now, row.ID)
-		}
-		if err != nil {
-			return fmt.Errorf("decide sqlite v1 mailbox item: %w", err)
-		}
-		if rows, _ := res.RowsAffected(); rows == 0 {
-			latest, latestErr := s.loadSQLiteMailboxV1RowTx(txctx, tx, row.ID)
-			if latestErr != nil {
-				return latestErr
-			}
-			return &MailboxV1AlreadyDecidedError{
-				MailboxID:        latest.ID,
-				ExistingDecision: latest.existingDecision(),
-				DecidedAt:        latest.decisionTime(input.Now),
-			}
-		}
-		if outcome.DecisionEvent != nil {
-			publishCtx := txctx
-			if !deliveryContext.Empty() {
-				publishCtx = events.WithDeliveryContext(txctx, deliveryContext)
-			}
-			publish := input.DecisionEventPublish
-			if publish == nil {
-				publish = func(ctx context.Context, evt events.Event) error {
-					return s.appendSQLiteMailboxV1DecisionEventTx(ctx, tx, evt)
-				}
-			}
-			if err := publish(publishCtx, *outcome.DecisionEvent); err != nil {
-				return fmt.Errorf("publish sqlite v1 mailbox decision event: %w", err)
-			}
-		}
-		if hasIdempotency {
-			raw, err := json.Marshal(outcome.Result)
-			if err != nil {
-				return err
-			}
-			if err := sqliteStoreAPIIdempotency(txctx, tx, idempotencyReq, APIIdempotencyCompletion{
-				ResourceID: row.ID,
-				Response:   raw,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	return outcome, nil
 }
 
 func sqliteMailboxV1ListWhere(opts MailboxV1ListOptions, cursor mailboxV1Cursor) (string, []any) {
@@ -465,10 +258,6 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 	return out, nil
 }
 
-func (s *SQLiteRuntimeStore) appendSQLiteMailboxV1DecisionEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	return s.AppendEventTx(ctx, tx, evt)
-}
-
 func sqliteStoreAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempotencyRequest, completion APIIdempotencyCompletion) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO api_idempotency (
@@ -481,45 +270,4 @@ func sqliteStoreAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempo
 		return fmt.Errorf("store sqlite api idempotency response: %w", err)
 	}
 	return nil
-}
-
-func normalizeSQLiteMailboxV1DecisionReplayResult(ctx context.Context, q execQueryer, result *MailboxV1DecisionResult) error {
-	if result == nil || strings.TrimSpace(result.DownstreamEventID) == "" {
-		return nil
-	}
-	if strings.TrimSpace(result.DownstreamEventName) == "" {
-		eventName, err := loadSQLiteMailboxV1DecisionReplayEventName(ctx, q, result.DownstreamEventID)
-		if err != nil {
-			return err
-		}
-		result.DownstreamEventName = eventName
-	}
-	if result.DownstreamSubscribers == nil {
-		subscribers := []string{}
-		result.DownstreamSubscribers = &subscribers
-	}
-	if strings.TrimSpace(result.DownstreamSubscriberSource) == "" {
-		result.DownstreamSubscriberSource = "unavailable"
-	}
-	return nil
-}
-
-func loadSQLiteMailboxV1DecisionReplayEventName(ctx context.Context, q execQueryer, eventID string) (string, error) {
-	var eventName string
-	err := q.QueryRowContext(ctx, `
-		SELECT event_name
-		FROM events
-		WHERE event_id = ?
-	`, strings.TrimSpace(eventID)).Scan(&eventName)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", fmt.Errorf("load sqlite mailbox idempotency replay event name: event %s not found", strings.TrimSpace(eventID))
-	case err != nil:
-		return "", fmt.Errorf("load sqlite mailbox idempotency replay event name: %w", err)
-	}
-	eventName = strings.TrimSpace(eventName)
-	if eventName == "" {
-		return "", fmt.Errorf("load sqlite mailbox idempotency replay event name: event %s has empty event_name", strings.TrimSpace(eventID))
-	}
-	return eventName, nil
 }

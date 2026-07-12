@@ -143,6 +143,7 @@ func normalRunCompletionRunReadyTx(
 		normalRunCompletionDeliveriesSettledTx,
 		normalRunCompletionTimersSettledTx,
 		normalRunCompletionSessionLeasesSettledTx,
+		normalRunCompletionGateObligationsSettledTx,
 	}
 	for _, check := range checks {
 		ready, err := check(ctx, tx, runID)
@@ -151,6 +152,22 @@ func normalRunCompletionRunReadyTx(
 		}
 	}
 	return normalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func normalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var active bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM entity_state es
+			CROSS JOIN LATERAL jsonb_each(COALESCE(es.accumulator->'stage_gates', '{}'::jsonb)) gate
+			WHERE es.run_id = $1::uuid
+			  AND COALESCE(gate.value->>'status', '') IN ('open', 'decision_committed')
+		)
+	`, runID).Scan(&active); err != nil {
+		return false, fmt.Errorf("check normal run gate obligations: %w", err)
+	}
+	return !active, nil
 }
 
 func normalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

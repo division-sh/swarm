@@ -188,6 +188,12 @@ func platformTableOrder(name string) int {
 		return 95
 	case "mailbox":
 		return 100
+	case "decision_cards":
+		return 101
+	case "decision_card_input_drafts":
+		return 102
+	case "decision_card_changes":
+		return 103
 	case "api_idempotency":
 		return 105
 	case "runtime_ingress_state":

@@ -1630,6 +1630,11 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("begin run terminal tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if status != "completed" {
+		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, true, s.AppendEventTx); err != nil {
+			return runtimebus.RunLifecycleSnapshot{}, err
+		}
+	}
 	snap, err := storerunlifecycle.MarkTerminal(ctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err

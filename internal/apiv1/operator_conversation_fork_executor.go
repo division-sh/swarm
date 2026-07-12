@@ -236,12 +236,16 @@ func conversationForkChatCanonicalToolName(name string) string {
 	switch strings.TrimSpace(name) {
 	case "fork_snapshot_read_entities", "fork_snapshot.read_entities":
 		return "fork_snapshot.read_entities"
-	case "mailbox_approve":
-		return "mailbox.approve"
-	case "mailbox_reject":
-		return "mailbox.reject"
+	case "mailbox_decide":
+		return "mailbox.decide"
 	case "mailbox_defer":
 		return "mailbox.defer"
+	case "mailbox_begin_input":
+		return "mailbox.begin_input"
+	case "mailbox_cancel_input":
+		return "mailbox.cancel_input"
+	case "mailbox_acknowledge":
+		return "mailbox.acknowledge"
 	case "run_start":
 		return "run.start"
 	case "run_continue":

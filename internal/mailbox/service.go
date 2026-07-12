@@ -22,11 +22,6 @@ type ListOptions struct {
 	ReviewsOnly  bool
 }
 
-type DecisionOutcome struct {
-	Status   string
-	Decision string
-}
-
 func GetStatus(ctx context.Context, store runtimetools.MailboxPersistence) (Status, error) {
 	if store == nil {
 		return Status{}, fmt.Errorf("mailbox store is required")
@@ -129,40 +124,6 @@ func PrintItem(ctx context.Context, store runtimetools.MailboxPersistence, out i
 		item.ID, item.Type, item.Priority, item.Status, item.FromAgent, item.EffectiveEntityID(), timeout, item.Decision, item.DecisionNotes, strings.TrimSpace(item.Summary),
 	)
 	return err
-}
-
-func Decide(ctx context.Context, store runtimetools.MailboxPersistence, id, action, notes string) (DecisionOutcome, error) {
-	if store == nil {
-		return DecisionOutcome{}, fmt.Errorf("mailbox store is required")
-	}
-	outcome, err := DecisionOutcomeForAction(action)
-	if err != nil {
-		return DecisionOutcome{}, err
-	}
-	if err := store.DecideMailboxItem(ctx, id, outcome.Status, outcome.Decision, notes); err != nil {
-		return DecisionOutcome{}, err
-	}
-	return outcome, nil
-}
-
-func NormalizeDecisionAction(action string) (DecisionOutcome, error) {
-	return DecisionOutcomeForAction(action)
-}
-
-func DecisionOutcomeForAction(action string) (DecisionOutcome, error) {
-	raw := strings.TrimSpace(action)
-	if raw == "" {
-		return DecisionOutcome{}, fmt.Errorf("invalid mailbox decision action: %s", action)
-	}
-	normalized := strings.ToLower(raw)
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	normalized = strings.ReplaceAll(normalized, " ", "-")
-	switch normalized {
-	case "skip", "timed-out", "timeout", "expired":
-		return DecisionOutcome{Status: "expired", Decision: raw}, nil
-	default:
-		return DecisionOutcome{Status: "decided", Decision: raw}, nil
-	}
 }
 
 func filterPending(items []runtimetools.MailboxItem, opts ListOptions) []runtimetools.MailboxItem {

@@ -8,9 +8,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
+
+type runForkGateActivationBinding struct {
+	Source gateruntime.Activation
+	Fork   gateruntime.Activation
+}
 
 func forkAttemptGenerationState(raw map[string]any, forkRunID, entityID string) (map[string]any, error) {
 	if _, ok := raw[loopruntime.BucketKey]; !ok {
@@ -76,6 +82,62 @@ func forkAttemptGenerationState(raw map[string]any, forkRunID, entityID string) 
 		out[key] = value
 	}
 	return out, nil
+}
+
+func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entityID string) (map[string]any, []runForkGateActivationBinding, error) {
+	if _, ok := raw[gateruntime.BucketKey]; !ok {
+		return cloneForkLoopState(raw), nil, nil
+	}
+	structured := make(map[string]any, len(raw))
+	for key, value := range raw {
+		if _, ok := value.(map[string]any); ok {
+			structured[key] = value
+		}
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, structured)
+	if err != nil {
+		return nil, nil, err
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return nil, nil, err
+	}
+	bindings := make([]runForkGateActivationBinding, 0, len(activations))
+	for _, source := range activations {
+		forked, err := gateruntime.New(forkRunID, flowInstance, entityID, source.FlowID, source.Stage, source.DecisionID, source.BundleHash, source.StartedByEvent, source.OpenedAt)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch source.Status {
+		case gateruntime.StatusOpen:
+		case gateruntime.StatusDecisionCommitted:
+			if err := forked.CommitDecision(source.DecisionEventID, source.UpdatedAt); err != nil {
+				return nil, nil, err
+			}
+		case gateruntime.StatusRouted:
+			if err := forked.CommitDecision(source.DecisionEventID, source.UpdatedAt); err != nil {
+				return nil, nil, err
+			}
+			if err := forked.Route(source.DecisionEventID, source.UpdatedAt); err != nil {
+				return nil, nil, err
+			}
+		case gateruntime.StatusSuperseded:
+			if !forked.Supersede(source.SupersededReason, source.UpdatedAt) {
+				return nil, nil, fmt.Errorf("fork gate activation %s could not preserve supersession", source.ActivationID)
+			}
+		default:
+			return nil, nil, fmt.Errorf("fork gate activation %s has unsupported status %s", source.ActivationID, source.Status)
+		}
+		if err := gateruntime.Store(carrier.StateBuckets, forked); err != nil {
+			return nil, nil, err
+		}
+		bindings = append(bindings, runForkGateActivationBinding{Source: source, Fork: forked})
+	}
+	out := cloneForkLoopState(raw)
+	for key, value := range carrier.PersistedStateBuckets() {
+		out[key] = value
+	}
+	return out, bindings, nil
 }
 
 func forkAttemptGenerationTimer(row runForkTimerReconstructionRow, forkRunID string) (runForkTimerReconstructionRow, error) {

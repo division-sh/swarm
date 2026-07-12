@@ -692,6 +692,35 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if req.TTL <= 0 {
 		req.TTL = 24 * time.Hour
 	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := purgeExpiredSQLiteAPIIdempotency(ctx, tx, req.Now); err != nil {
+			return APIIdempotencyCompletion{}, false, err
+		}
+		existing, found, err := sqliteLoadAPIIdempotency(ctx, tx, req)
+		if err != nil {
+			return APIIdempotencyCompletion{}, false, err
+		}
+		if found {
+			if existing.RequestHash != req.RequestHash {
+				return APIIdempotencyCompletion{}, false, &APIIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, Method: req.Method, ResourceID: existing.ResourceID}
+			}
+			return APIIdempotencyCompletion{ResourceID: existing.ResourceID, Response: append(json.RawMessage(nil), existing.Response...)}, true, nil
+		}
+		completion, err := execute(ctx)
+		if err != nil {
+			return APIIdempotencyCompletion{}, false, err
+		}
+		if len(completion.Response) == 0 {
+			return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency response is required")
+		}
+		if strings.TrimSpace(completion.ResourceID) == "" {
+			completion.ResourceID = req.ResourceID
+		}
+		if err := sqliteStoreAPIIdempotency(ctx, tx, req, completion); err != nil {
+			return APIIdempotencyCompletion{}, false, err
+		}
+		return completion, false, nil
+	}
 
 	// SQLite is local-dev only here: serialize idempotent callbacks in-process
 	// per database file, but never keep a SQLite write transaction open while

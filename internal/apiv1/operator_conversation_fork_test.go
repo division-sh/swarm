@@ -496,9 +496,9 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			Owner:        store.ConversationForkChatSandboxOwner,
 			ReadPolicy:   "fork_snapshot_only",
 			WritePolicy:  "stub_record_only_no_live_mutation",
-			StubbedTools: []string{"save_entity_field", "emit_event", "mailbox.approve", "run.start", "run.stop"},
+			StubbedTools: []string{"save_entity_field", "emit_event", "run.start", "run.stop"},
 		},
-		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "mailbox_approve", "run_start", "run_stop"},
+		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start", "run_stop"},
 	}
 	rt := &forkChatScriptedRuntime{
 		responses: []*runtimellm.Response{
@@ -508,7 +508,6 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 					{Name: "fork_snapshot_read_entities", Arguments: map[string]any{"entity_id": "entity-1"}},
 					{Name: "save_entity_field", Arguments: map[string]any{"entity_id": "entity-1", "field": "name", "value": "Sandbox"}},
 					{Name: "emit_event", Arguments: map[string]any{"event_name": "forkchat.note"}},
-					{Name: "mailbox_approve", Arguments: map[string]any{"mailbox_id": "mb-1"}},
 					{Name: "run_start", Arguments: map[string]any{"event_name": "scan.requested"}},
 				},
 			},
@@ -528,7 +527,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
 		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
 	}
-	if got := forkChatToolNames(rt.tools); !stringSetContainsAll(got, "fork_snapshot_read_entities", "save_entity_field", "emit_event", "mailbox_approve", "run_start") {
+	if got := forkChatToolNames(rt.tools); !stringSetContainsAll(got, "fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start") {
 		t.Fatalf("runtime tools = %v", got)
 	}
 	if len(rt.messages) != 2 || rt.messages[0].Role != "user" || rt.messages[1].Role != "tool" {
@@ -537,8 +536,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if execution.AssistantMessage != "snapshot says Before; writes were stubbed" {
 		t.Fatalf("assistant message = %q", execution.AssistantMessage)
 	}
-	if len(execution.ToolCalls) != 5 {
-		t.Fatalf("tool calls = %#v, want only five runtime-requested calls", execution.ToolCalls)
+	if len(execution.ToolCalls) != 4 {
+		t.Fatalf("tool calls = %#v, want only four runtime-requested calls", execution.ToolCalls)
 	}
 	if findConversationForkToolCall(execution.ToolCalls, "run_stop") != nil {
 		t.Fatalf("unrequested run_stop was persisted: %#v", execution.ToolCalls)
@@ -548,7 +547,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != store.ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
 		t.Fatalf("snapshot read result = %#v", readResult)
 	}
-	for _, name := range []string{"save_entity_field", "emit_event", "mailbox_approve", "run_start"} {
+	for _, name := range []string{"save_entity_field", "emit_event", "run_start"} {
 		call := requireAPIForkToolCall(t, execution.ToolCalls, name)
 		result := decodeJSONMap(t, call.Result)
 		if result["status"] != "stubbed" || result["owner"] != store.ConversationForkChatSandboxOwner || result["live_mutation"] != false {
@@ -556,8 +555,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 		}
 	}
 	toolResults := decodeJSONArray(t, rt.messages[1].Content)
-	if len(toolResults) != 5 {
-		t.Fatalf("tool result payload = %#v, want five results", toolResults)
+	if len(toolResults) != 4 {
+		t.Fatalf("tool result payload = %#v, want four results", toolResults)
 	}
 }
 

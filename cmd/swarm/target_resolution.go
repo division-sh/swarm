@@ -619,8 +619,6 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 				"swarm agent directive",
 				"swarm bundle register",
 				"swarm bundle delete",
-				"swarm mailbox approve",
-				"swarm mailbox reject",
 				"swarm mailbox defer",
 				"swarm run fork",
 				"swarm forkchat new",

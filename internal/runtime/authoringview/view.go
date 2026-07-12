@@ -99,6 +99,7 @@ type StageGraphView struct {
 	Edges    []StageGraphEdgeView   `json:"edges"`
 	Timers   []StageGraphTimerView  `json:"timers,omitempty"`
 	FanOuts  []StageGraphFanOutView `json:"fan_outs,omitempty"`
+	Gates    []StageGraphGateView   `json:"gates,omitempty"`
 }
 
 type StageGraphNodeView struct {
@@ -122,6 +123,25 @@ type StageGraphEdgeView struct {
 	LoopOperation string   `json:"loop_operation,omitempty"`
 	MaxAttempts   string   `json:"max_attempts,omitempty"`
 	LoopEscape    bool     `json:"loop_escape,omitempty"`
+	DecisionID    string   `json:"decision_id,omitempty"`
+	Verdict       string   `json:"verdict,omitempty"`
+}
+
+type StageGraphGateView struct {
+	Stage            string                      `json:"stage"`
+	Decision         string                      `json:"decision"`
+	Title            string                      `json:"title"`
+	Authority        string                      `json:"authority"`
+	ReminderInterval string                      `json:"reminder_interval"`
+	InputDraftTTL    string                      `json:"input_draft_ttl"`
+	Outcomes         []StageGraphGateOutcomeView `json:"outcomes"`
+}
+
+type StageGraphGateOutcomeView struct {
+	Verdict    string `json:"verdict"`
+	Label      string `json:"label"`
+	AdvancesTo string `json:"advances_to"`
+	Emit       string `json:"emit,omitempty"`
 }
 
 type StageGraphTimerView struct {
@@ -454,7 +474,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 {
+	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
@@ -463,7 +483,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
-		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 {
+		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 			graphs = append(graphs, graph)
 		}
 	}
@@ -496,6 +516,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		Edges:    buildStageGraphEdgesForFlow(source, flowID),
 		Timers:   buildStageGraphTimersForFlow(source, flowID),
 		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
+		Gates:    buildStageGraphGatesForFlow(source, flowID),
 	}
 }
 
@@ -560,9 +581,45 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID string) []St
 			LoopOperation: string(edge.LoopOperation),
 			LoopEscape:    edge.Source == "loop.escape",
 			MaxAttempts:   limits[edge.LoopID],
+			DecisionID:    edge.DecisionID,
+			Verdict:       edge.Verdict,
 		})
 	}
 	return edges
+}
+
+func buildStageGraphGatesForFlow(source semanticview.Source, flowID string) []StageGraphGateView {
+	if source == nil {
+		return nil
+	}
+	out := make([]StageGraphGateView, 0)
+	for _, plan := range source.WorkflowGates() {
+		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		gate := StageGraphGateView{
+			Stage: strings.TrimSpace(plan.Stage), Decision: strings.TrimSpace(plan.Decision),
+			Title: strings.TrimSpace(plan.Title), Authority: "stage_activation_cas",
+			ReminderInterval: "24h", InputDraftTTL: "15m",
+		}
+		verdicts := make([]string, 0, len(plan.Outcomes))
+		for verdict := range plan.Outcomes {
+			verdicts = append(verdicts, verdict)
+		}
+		sort.Strings(verdicts)
+		for _, verdict := range verdicts {
+			outcome := plan.Outcomes[verdict]
+			gate.Outcomes = append(gate.Outcomes, StageGraphGateOutcomeView{
+				Verdict: verdict, Label: strings.TrimSpace(outcome.Label),
+				AdvancesTo: strings.TrimSpace(outcome.AdvancesTo), Emit: strings.TrimSpace(outcome.Emit.Event),
+			})
+		}
+		out = append(out, gate)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Stage+"\x00"+out[i].Decision < out[j].Stage+"\x00"+out[j].Decision
+	})
+	return out
 }
 
 func buildStageGraphTimersForFlow(source semanticview.Source, flowID string) []StageGraphTimerView {

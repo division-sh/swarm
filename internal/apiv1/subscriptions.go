@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -32,6 +33,7 @@ type SubscriptionRuntime struct {
 	ready          func() bool
 	database       Pinger
 	observability  ObservabilityReadStore
+	decisionCards  decisioncard.Store
 	bundle         runtimecontracts.BundleIdentity
 	pollInterval   time.Duration
 	healthInterval time.Duration
@@ -78,6 +80,7 @@ func OperatorSubscriptions(opts OperatorReadOptions, overrides ...SubscriptionRu
 		ready:         ready,
 		database:      opts.Database,
 		observability: opts.Observability,
+		decisionCards: opts.DecisionCards,
 		bundle:        opts.Bundle,
 	}
 	if len(overrides) > 0 {
@@ -123,9 +126,33 @@ func (r *SubscriptionRuntime) prepare(session *webSocketSession, req Request) (s
 		return r.prepareRunTraceSubscription(session, req)
 	case "runtime.subscribe_logs":
 		return r.prepareRuntimeLogSubscription(session, req)
+	case "mailbox.subscribe":
+		return r.prepareDecisionCardSubscription(session, req)
 	default:
 		return subscriptionPlan{}, NewApplicationError(MethodUnavailableCode, false, map[string]any{"method": req.Method})
 	}
+}
+
+func (r *SubscriptionRuntime) prepareDecisionCardSubscription(session *webSocketSession, req Request) (subscriptionPlan, error) {
+	if r.decisionCards == nil {
+		return subscriptionPlan{}, fmt.Errorf("decision card subscription store is required")
+	}
+	cursor := int64(0)
+	if raw, ok := req.Params["cursor"]; ok && !isEmptyParam(raw) {
+		value, valid := integerParam(raw)
+		if !valid || value < 0 {
+			return subscriptionPlan{}, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "must be a non-negative change sequence"})
+		}
+		cursor = int64(value)
+	}
+	id, ctx, cancel := session.newSubscriptionContext("mailbox")
+	return subscriptionPlan{
+		Result: subscriptionIDResult{SubscriptionID: id},
+		Start: func() {
+			go r.runDecisionCardSubscription(ctx, session, id, cursor)
+		},
+		Cancel: cancel,
+	}, nil
 }
 
 func (r *SubscriptionRuntime) prepareHealthSubscription(session *webSocketSession) subscriptionPlan {
@@ -314,6 +341,38 @@ func (r *SubscriptionRuntime) runEventSubscription(ctx context.Context, session 
 			return
 		case <-ticker.C:
 			if !r.emitEventNotifications(ctx, session, subscriptionID, reads, filter, since, seen) {
+				return
+			}
+		}
+	}
+}
+
+func (r *SubscriptionRuntime) runDecisionCardSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, cursor int64) {
+	emit := func() bool {
+		changes, err := r.decisionCards.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{After: cursor, Limit: 200})
+		if err != nil {
+			session.close()
+			return false
+		}
+		for _, change := range changes {
+			if !session.notify(subscriptionID, change) {
+				return false
+			}
+			cursor = change.Sequence
+		}
+		return true
+	}
+	if !emit() {
+		return
+	}
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !emit() {
 				return
 			}
 		}

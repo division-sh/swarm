@@ -270,10 +270,8 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm forkchat resume", Selector: "arg:fork-id", Family: cliIdentifierFamilyFork, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm forkchat delete", Selector: "arg:fork-id", Family: cliIdentifierFamilyFork, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
-	{Command: "swarm mailbox view", Selector: "arg:mailbox-item-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeSplit},
-	{Command: "swarm mailbox approve", Selector: "arg:mailbox-item-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
-	{Command: "swarm mailbox reject", Selector: "arg:mailbox-item-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
-	{Command: "swarm mailbox defer", Selector: "arg:mailbox-item-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm mailbox view", Selector: "arg:mailbox-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeSplit},
+	{Command: "swarm mailbox defer", Selector: "arg:card-id", Family: cliIdentifierFamilyMailbox, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm entity list", Selector: "flag:flow", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeSplit},
 	{Command: "swarm event publish", Selector: "flag:target-flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},

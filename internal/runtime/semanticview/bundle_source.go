@@ -67,6 +67,12 @@ func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 func (s bundleSource) ResolveFanOutEffectiveSemantics(flowID, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error) {
 	return s.bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, spec)
 }
+func (s bundleSource) WorkflowGates() []runtimecontracts.WorkflowGatePlan {
+	return s.bundle.WorkflowGates()
+}
+func (s bundleSource) WorkflowGateForStage(flowID, stage string) (runtimecontracts.WorkflowGatePlan, bool) {
+	return s.bundle.WorkflowGateForStage(flowID, stage)
+}
 func (s bundleSource) WorkflowLoops() []runtimecontracts.WorkflowLoopPlan {
 	return s.bundle.WorkflowLoops()
 }

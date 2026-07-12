@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -61,6 +62,7 @@ type PipelineCoordinator struct {
 	timerScheduler          *Scheduler
 	timerScheduleStore      SchedulePersistence
 	mailboxMaterializer     MailboxWriteMaterializationStore
+	decisionCards           decisioncard.Store
 	eventReceiptsCapability func(context.Context) (bool, error)
 	credentials             runtimecredentials.Store
 	managedCredentials      runtimemanagedcredentials.Store
@@ -85,6 +87,7 @@ type PipelineCoordinatorOptions struct {
 	TimerScheduler                   *Scheduler
 	TimerScheduleStore               SchedulePersistence
 	MailboxMaterializer              MailboxWriteMaterializationStore
+	DecisionCards                    decisioncard.Store
 	EventReceiptsCapability          func(context.Context) (bool, error)
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
@@ -108,6 +111,11 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if workflowStore == nil {
 		workflowStore = NewWorkflowInstanceStore(db)
 	}
+	if publisher, ok := bus.(workflowGateMutationPublisher); ok {
+		workflowStore.ConfigureDecisionCardLifecycle(opts.DecisionCards, publisher)
+	} else {
+		workflowStore.ConfigureDecisionCardLifecycle(opts.DecisionCards)
+	}
 	credentials := opts.Credentials
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
@@ -123,6 +131,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		timerScheduler:                   opts.TimerScheduler,
 		timerScheduleStore:               opts.TimerScheduleStore,
 		mailboxMaterializer:              opts.MailboxMaterializer,
+		decisionCards:                    opts.DecisionCards,
 		eventReceiptsCapability:          opts.EventReceiptsCapability,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
@@ -217,6 +226,10 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		return true, nil, nil
+	}
+	if evt.Type() == workflowGateDecisionEventType {
+		emitted, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
+		return false, emitted, err
 	}
 	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)
 	if err != nil {

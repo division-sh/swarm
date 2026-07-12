@@ -2,21 +2,17 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 type MailboxAPIStore interface {
 	ListV1MailboxItems(context.Context, store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error)
 	GetV1MailboxItem(context.Context, string) (store.MailboxV1ItemDetail, error)
-	DecideV1MailboxItem(context.Context, store.MailboxV1DecisionRequest) (store.MailboxV1DecisionOutcome, error)
 }
 
 type APIIdempotencyStore interface {
@@ -44,11 +40,7 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 	if opts.Mailbox == nil {
 		return nil
 	}
-	now := opts.Now
-	if now == nil {
-		now = func() time.Time { return time.Now().UTC() }
-	}
-	return map[string]MethodHandler{
+	handlers := map[string]MethodHandler{
 		"mailbox.list": func(ctx context.Context, req Request) (any, error) {
 			listOpts, err := mailboxListOptionsFromParams(req.Params)
 			if err != nil {
@@ -74,214 +66,13 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
-			detail.DecisionSheet = mailboxDecisionSheet(ctx, detail.Item, opts)
 			return detail, nil
 		},
-		"mailbox.approve": func(ctx context.Context, req Request) (any, error) {
-			payload, err := optionalObjectRaw(req.Params, "decision_payload")
-			if err != nil {
-				return nil, err
-			}
-			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "approved", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
-			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:                     stringParam(req.Params, "mailbox_id"),
-				Action:                        "approved",
-				ActorTokenID:                  req.ActorTokenID,
-				DecisionPayload:               payload,
-				Now:                           now().UTC(),
-				DecisionEventType:             eventName,
-				DecisionEventSubscribers:      subscribers,
-				DecisionEventSubscriberSource: subscriberSource,
-			})
-		},
-		"mailbox.reject": func(ctx context.Context, req Request) (any, error) {
-			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "rejected", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
-			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:                     stringParam(req.Params, "mailbox_id"),
-				Action:                        "rejected",
-				ActorTokenID:                  req.ActorTokenID,
-				Reason:                        stringParam(req.Params, "reason"),
-				Now:                           now().UTC(),
-				DecisionEventType:             eventName,
-				DecisionEventSubscribers:      subscribers,
-				DecisionEventSubscriberSource: subscriberSource,
-			})
-		},
-		"mailbox.defer": func(ctx context.Context, req Request) (any, error) {
-			until, err := requiredTimestampParam(req.Params, "until")
-			if err != nil {
-				return nil, err
-			}
-			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "deferred", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
-			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:                     stringParam(req.Params, "mailbox_id"),
-				Action:                        "deferred",
-				ActorTokenID:                  req.ActorTokenID,
-				DeferUntil:                    until,
-				Now:                           now().UTC(),
-				DecisionEventType:             eventName,
-				DecisionEventSubscribers:      subscribers,
-				DecisionEventSubscriberSource: subscriberSource,
-			})
-		},
 	}
-}
-
-func mailboxDecisionSheet(ctx context.Context, item store.MailboxV1Item, opts OperatorReadOptions) *store.MailboxV1DecisionSheet {
-	entityContext := mailboxEntityContext(ctx, item, opts.Entities)
-	return &store.MailboxV1DecisionSheet{
-		EntityContext:     entityContext,
-		DownstreamPreview: mailboxDownstreamPreview(item, opts),
+	for method, handler := range decisionCardHandlers(opts) {
+		handlers[method] = handler
 	}
-}
-
-func mailboxEntityContext(ctx context.Context, item store.MailboxV1Item, entities EntityReadStore) store.MailboxV1EntityContext {
-	entityID := strings.TrimSpace(item.SourceEntityID)
-	if entityID == "" {
-		return store.MailboxV1EntityContext{Available: false, Reason: "no_source_entity"}
-	}
-	if entities == nil {
-		return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}
-	}
-	entity, err := entities.LoadOperatorEntity(ctx, entityID, strings.TrimSpace(item.SourceRunID))
-	if err == nil {
-		return store.MailboxV1EntityContext{Available: true, Entity: &entity}
-	}
-	switch {
-	case errors.Is(err, store.ErrEntityNotFound):
-		return store.MailboxV1EntityContext{Available: false, Reason: "entity_not_found"}
-	case errors.Is(err, store.ErrAmbiguousEntityRunID):
-		return store.MailboxV1EntityContext{Available: false, Reason: "ambiguous_run_id"}
-	}
-	if paramErr := entityReadParamError(err); paramErr != nil {
-		return store.MailboxV1EntityContext{Available: false, Reason: "invalid_entity_ref"}
-	}
-	return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}
-}
-
-func mailboxDownstreamPreview(item store.MailboxV1Item, opts OperatorReadOptions) store.MailboxV1DownstreamPreview {
-	route := opts.MailboxDecisionRoutes[strings.TrimSpace(item.Type)]
-	eventName := strings.TrimSpace(route.TerminalEventName)
-	if eventName == "" {
-		return store.MailboxV1DownstreamPreview{
-			Available:        false,
-			Reason:           "no_decision_route",
-			Subscribers:      []string{},
-			SubscriberSource: "none",
-		}
-	}
-	subscribers, subscriberSource := mailboxDownstreamSubscribers(eventName, opts)
-	return store.MailboxV1DownstreamPreview{
-		Available:        true,
-		EventName:        eventName,
-		Subscribers:      subscribers,
-		SubscriberSource: subscriberSource,
-	}
-}
-
-func mailboxDownstreamSubscribers(eventName string, opts OperatorReadOptions) ([]string, string) {
-	if opts.Source == nil {
-		return []string{}, "unavailable"
-	}
-	_, hasProductEvent := opts.Source.EventEntry(eventName)
-	_, _, hasPlatformEvent := runtimecontracts.PlatformEventCatalogEntry(opts.Source.PlatformSpec(), eventName)
-	if !hasProductEvent && !hasPlatformEvent {
-		return []string{}, "unavailable"
-	}
-	subscribers := opts.Source.RuntimeEventOwners(eventName)
-	subscribers = uniqueNonEmptyStrings(subscribers)
-	sort.Strings(subscribers)
-	return subscribers, "event_catalog"
-}
-
-func uniqueNonEmptyStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
-}
-
-func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadOptions, decision store.MailboxV1DecisionRequest) (any, error) {
-	idempotencyKey := stringParam(req.Params, "idempotency_key")
-	action := strings.ToLower(strings.TrimSpace(decision.Action))
-	if action == "approved" || action == "approve" || action == "rejected" || action == "reject" || action == "deferred" || action == "defer" {
-		if multiRuntimeContextMode(opts) {
-			return nil, runtimeContextRequiredError(req.Method, "mailbox decision event publishing is not supported in multi-context DB-loaded mode without an explicit runtime context")
-		}
-		mutationPublisher, ok := opts.Events.(EventMutationPublisher)
-		if !ok || mutationPublisher == nil {
-			return nil, errors.New("event mutation publisher is required for mailbox decision")
-		}
-		decision.DecisionEventPublish = mutationPublisher.PublishInMutation
-	}
-	if strings.TrimSpace(idempotencyKey) != "" {
-		decision.Idempotency = &store.APIIdempotencyRequest{
-			Method:         req.Method,
-			ActorTokenID:   req.ActorTokenID,
-			IdempotencyKey: idempotencyKey,
-			RequestHash:    req.RequestHash,
-			ResourceID:     decision.MailboxID,
-			TTL:            24 * time.Hour,
-			Now:            decision.Now,
-		}
-	}
-	outcome, err := opts.Mailbox.DecideV1MailboxItem(ctx, decision)
-	if err != nil {
-		var conflict *store.APIIdempotencyConflictError
-		if errors.As(err, &conflict) {
-			return nil, NewApplicationError(IdempotencyConflictCode, false, map[string]any{
-				"original_request_hash":    conflict.OriginalRequestHash,
-				"conflicting_request_hash": conflict.ConflictingRequestHash,
-				"original_response_ref": map[string]any{
-					"method":      conflict.Method,
-					"resource_id": conflict.ResourceID,
-				},
-			})
-		}
-		return nil, mailboxDecisionError(decision.MailboxID, err)
-	}
-	outcome.Result.IdempotencyReplayed = outcome.Replayed
-	return outcome.Result, nil
-}
-
-func mailboxDecisionError(mailboxID string, err error) error {
-	if errors.Is(err, store.ErrMailboxV1NotFound) {
-		return NewApplicationError(MailboxNotFoundCode, false, map[string]any{"mailbox_id": mailboxID})
-	}
-	var already *store.MailboxV1AlreadyDecidedError
-	if errors.As(err, &already) {
-		return NewApplicationError(MailboxAlreadyDecidedCode, false, map[string]any{
-			"mailbox_id":        already.MailboxID,
-			"existing_decision": already.ExistingDecision,
-			"decided_at":        already.DecidedAt.UTC().Format(time.RFC3339Nano),
-		})
-	}
-	var invalidDefer *store.MailboxV1InvalidDeferUntilError
-	if errors.As(err, &invalidDefer) {
-		details := map[string]any{"reason": invalidDefer.Reason}
-		if invalidDefer.MaxUntil != nil {
-			details["max_until"] = invalidDefer.MaxUntil.UTC().Format(time.RFC3339Nano)
-		}
-		return NewApplicationError(InvalidDeferUntilCode, false, details)
-	}
-	var route *store.MailboxV1DecisionRouteError
-	if errors.As(err, &route) {
-		return NewApplicationError(MailboxDecisionEventUnconfiguredCode, false, map[string]any{
-			"mailbox_id": route.MailboxID,
-			"item_type":  route.ItemType,
-		})
-	}
-	return err
+	return handlers
 }
 
 func mailboxListOptionsFromParams(params map[string]any) (store.MailboxV1ListOptions, error) {
@@ -323,24 +114,6 @@ func mailboxListOptionsFromParams(params map[string]any) (store.MailboxV1ListOpt
 	return out, nil
 }
 
-func optionalObjectRaw(params map[string]any, name string) (json.RawMessage, error) {
-	if params == nil {
-		return nil, nil
-	}
-	value, ok := params[name]
-	if !ok || isEmptyParam(value) {
-		return nil, nil
-	}
-	if _, ok := value.(map[string]any); !ok {
-		return nil, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be an object"})
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
 func requiredTimestampParam(params map[string]any, name string) (time.Time, error) {
 	value, present, err := optionalStringParam(params, name)
 	if err != nil {
@@ -354,26 +127,4 @@ func requiredTimestampParam(params map[string]any, name string) (time.Time, erro
 		return time.Time{}, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be RFC3339 timestamp"})
 	}
 	return parsed.UTC(), nil
-}
-
-func mailboxDecisionEventEffect(routes map[string]MailboxDecisionEventRoute, action string, mailboxID string, mailbox MailboxAPIStore, ctx context.Context, opts OperatorReadOptions) (string, []string, string) {
-	if len(routes) == 0 || mailbox == nil {
-		return "", nil, ""
-	}
-	detail, err := mailbox.GetV1MailboxItem(ctx, mailboxID)
-	if err != nil {
-		return "", nil, ""
-	}
-	route := routes[detail.Item.Type]
-	var eventName string
-	if strings.TrimSpace(strings.ToLower(action)) == "deferred" || strings.TrimSpace(strings.ToLower(action)) == "defer" {
-		eventName = strings.TrimSpace(route.DeferredEventName)
-	} else {
-		eventName = strings.TrimSpace(route.TerminalEventName)
-	}
-	if eventName == "" {
-		return "", nil, ""
-	}
-	subscribers, subscriberSource := mailboxDownstreamSubscribers(eventName, opts)
-	return eventName, subscribers, subscriberSource
 }

@@ -440,7 +440,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 
 	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999913",
-		events.EventType("mailbox.item_decided"),
+		events.EventType("approval.completed"),
 		"",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
@@ -559,7 +559,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 
 	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999912",
-		events.EventType("mailbox.item_decided"),
+		events.EventType("approval.completed"),
 		"",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
@@ -1454,7 +1454,7 @@ flows:
     flow: operating
     mode: template
 `,
-		"events.yaml": `mailbox.item_decided:
+		"events.yaml": `approval.completed:
   entity_id: string
   instance_id: string
   product_id: string
@@ -1465,10 +1465,10 @@ opco.spinup_requested:
 		"nodes.yaml": `approval-router:
   id: approval-router
   execution_type: system_node
-  subscribes_to: [mailbox.item_decided]
+  subscribes_to: [approval.completed]
   produces: [opco.spinup_requested]
   event_handlers:
-    mailbox.item_decided:
+    approval.completed:
       emit:
         event: opco.spinup_requested
         broadcast: true

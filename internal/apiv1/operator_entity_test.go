@@ -261,13 +261,6 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
 
-	entityContext := mailboxEntityContext(ctx, store.MailboxV1Item{
-		SourceRunID:    runID,
-		SourceEntityID: entityA,
-	}, sqliteStore)
-	if !entityContext.Available || entityContext.Entity == nil || entityContext.Entity.Entity.EntityID != entityA {
-		t.Fatalf("mailbox entity context = %#v, want sqlite entity context", entityContext)
-	}
 }
 
 func TestOperatorEntityHandlersTypedErrors(t *testing.T) {

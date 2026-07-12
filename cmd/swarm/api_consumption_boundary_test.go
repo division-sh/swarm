@@ -173,8 +173,6 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "agent directive", args: []string{"agent", "directive", "agent-1", "continue"}},
 		{name: "mailbox list", args: []string{"mailbox", "list"}},
 		{name: "mailbox view", args: []string{"mailbox", "view", "mailbox-1"}},
-		{name: "mailbox approve", args: []string{"mailbox", "approve", "mailbox-1"}},
-		{name: "mailbox reject", args: []string{"mailbox", "reject", "mailbox-1", "--reason", "not approved"}},
 		{name: "mailbox defer", args: []string{"mailbox", "defer", "mailbox-1", "--until", "2026-05-23T00:00:00Z"}},
 		{name: "control pause", args: []string{"control", "pause", "run-1"}},
 		{name: "control continue", args: []string{"control", "continue", "run-1"}},

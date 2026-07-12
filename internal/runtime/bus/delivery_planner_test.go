@@ -1278,11 +1278,11 @@ func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *t
 		flowInstance string
 		want         string
 	}{
-		{name: "static", flowInstance: "provider", want: "provider/mailbox.item_decided"},
-		{name: "materialized template", flowInstance: "requester/account-a", want: "requester/account-a/mailbox.item_decided"},
+		{name: "static", flowInstance: "provider", want: "provider/mailbox.card_decided"},
+		{name: "materialized template", flowInstance: "requester/account-a", want: "requester/account-a/mailbox.card_decided"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RootIngress("", "mailbox.item_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), time.Time{})
+			evt := eventtest.RootIngress("", "mailbox.card_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), time.Time{})
 			keys := routedEventKeysForPlan(evt)
 			found := false
 			for _, key := range keys {

@@ -142,7 +142,7 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 	}
 
 	actionSteps := mustMappingValue(t, runner, "action_steps")
-	for _, key := range []string{"run_context", "publish", "mailbox_approve", "mailbox_reject", "mailbox_defer"} {
+	for _, key := range []string{"run_context", "publish", "mailbox_decide", "mailbox_defer"} {
 		if !hasMappingKey(actionSteps, key) {
 			t.Fatalf("deterministic scenario runner action_steps.%s missing", key)
 		}
@@ -206,10 +206,11 @@ func TestPlatformEventsCatalogSchemaAuthorityRefsResolve(t *testing.T) {
 
 	const prefix = "platform-spec.yaml#"
 	expectedSimpleRefs := map[string]string{
-		"platform.dead_letter":  "platform-spec.yaml#engine.error_model.dead_letter_schema",
-		"platform.runtime_log":  "platform-spec.yaml#platform_tables.diagnostics_encoding",
-		"mailbox.item_decided":  "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
-		"mailbox.item_deferred": "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
+		"platform.dead_letter":    "platform-spec.yaml#engine.error_model.dead_letter_schema",
+		"platform.runtime_log":    "platform-spec.yaml#platform_tables.diagnostics_encoding",
+		"mailbox.card_decided":    "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
+		"mailbox.card_deferred":   "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
+		"mailbox.card_superseded": "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
 	}
 
 	var checked []string
