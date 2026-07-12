@@ -1,0 +1,22 @@
+portfolio.opened:
+  portfolio_id: text
+  required: [portfolio_id]
+portfolio.account.register.requested:
+  portfolio_id: text
+  account_id: text
+  required: [portfolio_id, account_id]
+portfolio.membership.seeded:
+  portfolio_id: text
+  account_ids: "[text]"
+  required: [portfolio_id, account_ids]
+portfolio.notify.requested:
+  portfolio_id: text
+  command: text
+  required: [portfolio_id, command]
+account.registered:
+  account_id: text
+  required: [account_id]
+account.notify.requested:
+  account_id: text
+  command: text
+  required: [account_id, command]

@@ -100,7 +100,7 @@ func validatePolicySheetLookupValueRow(source semanticview.Source, ref policyShe
 		findings = append(findings, policySheetLookupFinding(ref, "lookup.default currently supports only fail"))
 	}
 	findings = append(findings, validatePolicySheetLookupKeyTypes(source, ref, spec)...)
-	if !policySheetLookupBindingConsumed(handler, rule, strings.TrimSpace(rule.Compute.StoreAs)) {
+	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.EventType, handler, rule, strings.TrimSpace(rule.Compute.StoreAs)) {
 		findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", strings.TrimSpace(rule.Compute.StoreAs))))
 	}
 	return findings
@@ -244,7 +244,7 @@ func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType s
 	}
 }
 
-func policySheetLookupBindingConsumed(handler runtimecontracts.SystemNodeEventHandler, lookupRule runtimecontracts.HandlerRuleEntry, target string) bool {
+func policySheetLookupBindingConsumed(source semanticview.Source, flowID, eventType string, handler runtimecontracts.SystemNodeEventHandler, lookupRule runtimecontracts.HandlerRuleEntry, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return false
@@ -260,7 +260,7 @@ func policySheetLookupBindingConsumed(handler runtimecontracts.SystemNodeEventHa
 	if policySheetLookupActivityConsumes(handler.Activity, target) {
 		return true
 	}
-	if handler.FanOut != nil && policySheetLookupFanOutConsumes(*handler.FanOut, target) {
+	if handler.FanOut != nil && policySheetLookupFanOutConsumes(source, flowID, eventType, *handler.FanOut, target) {
 		return true
 	}
 	for _, rule := range handler.Rules {
@@ -270,7 +270,7 @@ func policySheetLookupBindingConsumed(handler runtimecontracts.SystemNodeEventHa
 		if policySheetLookupActivityConsumes(rule.Activity, target) {
 			return true
 		}
-		if rule.FanOut != nil && policySheetLookupFanOutConsumes(*rule.FanOut, target) {
+		if rule.FanOut != nil && policySheetLookupFanOutConsumes(source, flowID, eventType, *rule.FanOut, target) {
 			return true
 		}
 	}
@@ -297,11 +297,12 @@ func policySheetLookupActivityConsumes(activity runtimecontracts.ActivitySpec, t
 	return false
 }
 
-func policySheetLookupFanOutConsumes(spec runtimecontracts.FanOutSpec, target string) bool {
+func policySheetLookupFanOutConsumes(source semanticview.Source, flowID, eventType string, spec runtimecontracts.FanOutSpec, target string) bool {
 	if policySheetLookupExpressionConsumes(spec.ItemsFrom, target) {
 		return true
 	}
-	if policySheetLookupExpressionConsumes(spec.Identity, target) {
+	effective, err := source.ResolveFanOutEffectiveSemantics(flowID, eventType, spec)
+	if err == nil && policySheetLookupExpressionConsumes(effective.Identity, target) {
 		return true
 	}
 	for _, expr := range spec.Emit.Fields {

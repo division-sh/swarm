@@ -132,6 +132,7 @@ type StageGraphFanOutView struct {
 	ItemsFrom string   `json:"items_from"`
 	ItemAlias string   `json:"as"`
 	Identity  string   `json:"identity"`
+	MaxItems  int      `json:"max_items"`
 	Source    string   `json:"source"`
 	NodeID    string   `json:"node_id,omitempty"`
 	EventType string   `json:"event_type,omitempty"`
@@ -606,7 +607,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 					from = []string{strings.TrimSpace(initial)}
 				}
 			}
-			out = append(out, fanOutViewsForHandler(from, strings.TrimSpace(nodeID), eventType, handler)...)
+			out = append(out, fanOutViewsForHandler(source, flowID, from, strings.TrimSpace(nodeID), eventType, handler)...)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -637,9 +638,9 @@ func authoringNodeBelongsToFlow(source semanticview.Source, nodeID, flowID strin
 	return strings.TrimSpace(flowID) == ""
 }
 
-func fanOutViewsForHandler(from []string, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
+func fanOutViewsForHandler(source semanticview.Source, flowID string, from []string, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
 	out := make([]StageGraphFanOutView, 0, 5)
-	add := func(source string, spec *runtimecontracts.FanOutSpec) {
+	add := func(siteSource string, spec *runtimecontracts.FanOutSpec) {
 		if spec == nil {
 			return
 		}
@@ -647,13 +648,18 @@ func fanOutViewsForHandler(from []string, nodeID, eventType string, handler runt
 		if emit == "" {
 			return
 		}
+		effective, err := source.ResolveFanOutEffectiveSemantics(flowID, eventType, *spec)
+		if err != nil {
+			return
+		}
 		out = append(out, StageGraphFanOutView{
 			From:      append([]string{}, from...),
 			Emit:      emit,
-			ItemsFrom: strings.TrimSpace(spec.ItemsFrom),
-			ItemAlias: strings.TrimSpace(spec.As),
-			Identity:  strings.TrimSpace(spec.Identity),
-			Source:    strings.TrimSpace(source),
+			ItemsFrom: effective.ItemsFrom,
+			ItemAlias: effective.ItemAlias,
+			Identity:  effective.Identity,
+			MaxItems:  effective.MaxItems,
+			Source:    strings.TrimSpace(siteSource),
 			NodeID:    strings.TrimSpace(nodeID),
 			EventType: strings.TrimSpace(eventType),
 		})

@@ -153,6 +153,10 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	errs := make([]error, 0, 8)
 	for nodeID, node := range bundle.Nodes {
 		nodeID = strings.TrimSpace(nodeID)
+		flowID := ""
+		if source, ok := bundle.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(source.FlowID)
+		}
 		if authoredID := strings.TrimSpace(node.ID); !SystemNodeIDMatchesKey(nodeID, authoredID) {
 			errs = append(errs, fmt.Errorf("%w: node %s id %q must match map key", ErrInvalidField, nodeID, authoredID))
 		}
@@ -163,6 +167,11 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
+			for _, site := range HandlerFanOutSites(handler) {
+				if _, err := bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, *site.Spec); err != nil {
+					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s: %v", ErrInvalidField, nodeID, eventType, site.Source, err))
+				}
+			}
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s declares both on_complete and rules", ErrConflictingCompletion, nodeID, eventType))
 			}

@@ -107,7 +107,7 @@
     "github.com/division-sh/swarm/internal/runtime/startuprecovery": 0.007,
     "github.com/division-sh/swarm/internal/runtime/swarmflowtest": 7.047,
     "github.com/division-sh/swarm/internal/runtime/testcases": 1.001,
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/fanoutpinroute": 0,
+    "github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/sealedpackage": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot": 0,

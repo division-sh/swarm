@@ -64,6 +64,9 @@ func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract 
 func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return s.bundle.WorkflowJoins()
 }
+func (s bundleSource) ResolveFanOutEffectiveSemantics(flowID, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error) {
+	return s.bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, spec)
+}
 func (s bundleSource) WorkflowLoops() []runtimecontracts.WorkflowLoopPlan {
 	return s.bundle.WorkflowLoops()
 }

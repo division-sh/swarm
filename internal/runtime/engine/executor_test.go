@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1153,6 +1154,7 @@ func accumulatorProjectionTestSource() semanticview.Source {
 					"score":       {Type: "integer"},
 					"evidence":    {Type: "text"},
 					"confidence":  {Type: "text"},
+					"targets":     {Type: "[text]"},
 				}},
 			},
 		},
@@ -4192,7 +4194,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -4225,6 +4227,16 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	}
 	if runtimeErr.Failure.Class != failures.ClassFanOutBoundExceeded || runtimeErr.Failure.Retryable {
 		t.Fatalf("runtime error = %#v, want non-retryable %s", runtimeErr, failures.ClassFanOutBoundExceeded)
+	}
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("bound failure emitted partial prefix: %#v", result.EmitIntents)
+	}
+	attributes := runtimeErr.Failure.Detail.Attributes
+	if fmt.Sprint(attributes["actual"]) != "2" || fmt.Sprint(attributes["authored_limit"]) != "1" || fmt.Sprint(attributes["effective_limit"]) != "1" {
+		t.Fatalf("bound failure attributes = %#v, want actual/authored/effective 2/1/1", attributes)
+	}
+	if got := fmt.Sprint(attributes["remediation"]); got != "raise max_items or split the batch" {
+		t.Fatalf("bound failure remediation attribute = %q", got)
 	}
 	if got := FailureDispositionFor(err); got != FailureDispositionTerminal {
 		t.Fatalf("FailureDispositionFor = %v, want terminal", got)

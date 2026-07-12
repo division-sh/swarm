@@ -1,0 +1,3 @@
+portfolio_state:
+  portfolio_id: text
+  account_ids: "[text]"

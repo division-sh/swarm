@@ -1658,16 +1658,15 @@ const (
 )
 
 type EmitTargetSpec struct {
-	Kind        EmitTargetKind             `yaml:"-"`
-	InstanceID  string                     `yaml:"instance_id,omitempty"`
-	Flow        string                     `yaml:"flow,omitempty"`
-	Match       map[string]ExpressionValue `yaml:"match,omitempty"`
-	AllowFanout bool                       `yaml:"allow_fanout,omitempty"`
+	Kind       EmitTargetKind             `yaml:"-"`
+	InstanceID string                     `yaml:"instance_id,omitempty"`
+	Flow       string                     `yaml:"flow,omitempty"`
+	Match      map[string]ExpressionValue `yaml:"match,omitempty"`
 }
 
 func (t EmitTargetSpec) Empty() bool {
 	t = t.Normalized()
-	return t.Kind == "" && t.InstanceID == "" && t.Flow == "" && len(t.Match) == 0 && !t.AllowFanout
+	return t.Kind == "" && t.InstanceID == "" && t.Flow == "" && len(t.Match) == 0
 }
 
 func (t EmitTargetSpec) Normalized() EmitTargetSpec {
@@ -1721,11 +1720,10 @@ func cloneEmitSpec(spec EmitSpec) EmitSpec {
 func cloneEmitTargetSpec(spec EmitTargetSpec) EmitTargetSpec {
 	spec = spec.Normalized()
 	return EmitTargetSpec{
-		Kind:        spec.Kind,
-		InstanceID:  strings.TrimSpace(spec.InstanceID),
-		Flow:        strings.TrimSpace(spec.Flow),
-		Match:       cloneExpressionValueMap(spec.Match),
-		AllowFanout: spec.AllowFanout,
+		Kind:       spec.Kind,
+		InstanceID: strings.TrimSpace(spec.InstanceID),
+		Flow:       strings.TrimSpace(spec.Flow),
+		Match:      cloneExpressionValueMap(spec.Match),
 	}
 }
 

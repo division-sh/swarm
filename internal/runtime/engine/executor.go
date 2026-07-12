@@ -1749,20 +1749,18 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	spec := active.Spec
-	if err := runtimecontracts.ValidateFanOutAlias(spec.As); err != nil {
-		return false, fmt.Errorf("%w: fan_out.%v", ErrInvalidConfig, err)
+	if e.deps.Source == nil {
+		return false, fmt.Errorf("%w: semantic source is required for fan_out", ErrInvalidConfig)
 	}
-	if strings.TrimSpace(spec.Identity) == "" {
-		return false, fmt.Errorf("%w: fan_out.identity is required", ErrInvalidConfig)
+	handlerEvent := strings.TrimSpace(frame.req.HandlerEventKey)
+	if handlerEvent == "" {
+		handlerEvent = strings.TrimSpace(string(frame.req.Event.Type()))
 	}
-	itemsPath, err := runtimecontracts.ValidateFanOutItemsSource(*spec)
+	effective, err := e.deps.Source.ResolveFanOutEffectiveSemantics(strings.TrimSpace(string(frame.req.FlowID)), handlerEvent, *spec)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if err := runtimecontracts.ValidateFanOutMaxItems(*spec); err != nil {
-		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
-	}
-	itemsValue, _ := resolveContractPath(frame.base, frame.state, itemsPath, spec.ItemsFrom)
+	itemsValue, _ := resolveContractPath(frame.base, frame.state, effective.ItemsPath, effective.ItemsFrom)
 	items := sliceFromAny(itemsValue)
 	frame.result.FanOutCount = len(items)
 	frame.state.FanOut = map[string]any{}
@@ -1771,7 +1769,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	// entity write target.
 	frame.state.State.SetMetadata("fan_out_count", len(items))
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	limit := runtimecontracts.EffectiveFanOutMaxItems(*spec)
+	limit := effective.MaxItems
 	if len(items) > limit {
 		return false, failures.Wrap(
 			failures.ClassFanOutBoundExceeded,
@@ -1779,10 +1777,12 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 			"runtime.engine",
 			string(StepFanOut),
 			map[string]any{
-				"source":     strings.TrimSpace(string(active.Source)),
-				"items_from": strings.TrimSpace(spec.ItemsFrom),
-				"actual":     len(items),
-				"limit":      limit,
+				"source":          strings.TrimSpace(string(active.Source)),
+				"items_from":      effective.ItemsFrom,
+				"actual":          len(items),
+				"authored_limit":  effective.AuthoredMaxItems,
+				"effective_limit": limit,
+				"remediation":     "raise max_items or split the batch",
 			},
 			ErrFanOutBoundExceeded,
 		)
@@ -1807,7 +1807,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		frame.state.SetFanOut("item", item)
 		frame.state.SetFanOut("index", index)
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{ItemAlias: spec.As})
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{ItemAlias: effective.ItemAlias})
 		if err != nil {
 			return false, err
 		}

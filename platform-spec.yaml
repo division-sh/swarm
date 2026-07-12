@@ -503,11 +503,10 @@ contract_formats:
           or by receiver-side late binding when resolution yields exactly one
           recipient.
         - event.target_set: a concrete list of recipient route identities for
-          fan-out targeting. It is produced by lowered parent `connect`
-          fan-out/topology or by the exceptional
-          `target: { flow, match, allow_fanout: true }` escape hatch after
-          publish-time resolution. It is not a selector and it is not
-          broadcast.
+          fan-out targeting. Current runnable production writes come from
+          lowered parent `connect` fan-out/topology. It is not a selector,
+          cannot be materialized from producer flow/match permission, and is
+          not broadcast. Evidence-gated receiver instance fan-out remains #1934.
 
         Top-level event.entity_id and event.flow_instance are retired
         receiver-context projection shorthands and are unsupported on
@@ -2638,9 +2637,9 @@ handler_specification:
         fields: map of output_field_name → CEL expression evaluated against handler context. Optional. If omitted, the emitted
           payload contains no business fields. Runtime-owned envelope context is attached on the event carrier and is accessed
           through event.* rather than payload.*.
-        target: optional controlled dynamic-routing escape hatch. Valid forms are sender, {instance_id}, {flow, match},
-          and {flow, match, allow_fanout}. This field is not payload and is the only producer-authored path that may ask
-          the platform to populate event.target or event.target_set. It is not the common consumer-routing surface for
+        target: optional controlled dynamic-routing escape hatch. Valid forms are sender, {instance_id}, and {flow, match}.
+          This field is not payload and may ask the platform to populate singular event.target only. It cannot authorize
+          multi-recipient cardinality or populate event.target_set. It is not the common consumer-routing surface for
           parent-composed flow packages; common cross-flow delivery is owned by parent connect lowering. A loaded flow-scope
           producer target, or package-root producer target from a root output pin consumed by an explicit root connect endpoint,
           that selects a loaded package receiver input for the same pin-declared output or a receiver flow reached by the parent
@@ -2666,9 +2665,11 @@ handler_specification:
         sender: Copy inbound event.source into the new event.target. Sender is the immediate inbound sender, not a chain ancestor.
         instance_id: Resolve a target instance in the addressed child/template scope using the instance_id known to the producer.
         flow_match: Resolve exactly one target instance in target.flow whose declared entity fields match the target.match expressions.
-        flow_match_allow_fanout: Permit more than one match for the specified flow/match selector. Publish-time resolution
-          MUST materialize event.target_set as the complete concrete recipient route list, leave singular event.target absent
-          on the persisted event, and persist one delivery target per recipient route. It must not silently collapse to one target.
+        retired_allow_fanout: >
+          Any authored `emit.target.allow_fanout` key, including false, is a load-time teaching error. Authors use collection
+          `fan_out` over an owner-maintained child-key list, ordinary output pin/connect routing, and receiver
+          `resolution.mode: select`; see `examples/routing/notify-all-children`. True one-event multi-instance delivery is
+          evidence-gated in #1934.
       target_failures:
         target_required_missing: Pin-declared output has no lowered parent connect route, no explicit target escape hatch,
           no structural ParentRoute, no eligible static child delivery-entity route, and no broadcast:true.
@@ -2870,9 +2871,11 @@ handler_specification:
           terminal path is itself a collection.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
           `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
-        identity: string — required expression over the item alias that declares the stable per-item key. It is
-          verification metadata, not a second expression namespace. Bootverify must prove `fan_out.emit.fields`
-          carries this exact expression so downstream join/dedup contracts can bind to the emitted payload.
+        identity: optional expression over the item alias that declares the stable per-item key. For a statically
+          scalar list item, omission defaults identity to the `as` alias. Object, list, dynamic, or otherwise unresolved
+          item types require an explicit identity and fail closed on omission. It is verification metadata, not a
+          second expression namespace. Bootverify must prove `fan_out.emit.fields` carries the effective expression so
+          downstream join/dedup contracts can bind to the emitted payload.
         max_items: optional positive integer tightening the platform ceiling. An authored zero is invalid; only omission
           selects the platform ceiling. The platform ceiling is always enforced even when authors omit max_items.
         emit: string or object — per-item event to emit, optionally with local fields payload construction. During
@@ -2883,7 +2886,14 @@ handler_specification:
           Runtime evaluates items_from once per handler activation and checks the resulting count before any
           per-item emit. If the count exceeds the effective limit, the handler fails closed with non-retryable
           typed platform error `platform.fan_out_bound_exceeded`. The runtime must not silently truncate and
-          must not emit a partial prefix.
+          must not emit a partial prefix. The diagnostic names the actual count, authored limit when present,
+          effective limit, and tells the author to raise max_items or split the batch.
+      effective_semantics:
+        canonical_owner: contracts.WorkflowContractBundle.ResolveFanOutEffectiveSemantics
+        fields: [items_from, collection_type, item_type, as, identity, identity_derived, authored_max_items, effective_max_items]
+        consumers: [parser_lowering, bootverify, engine, authoring_view, describe_graph, policy_expression_validation, supported_proof_runners]
+        rule: Every consumer uses this typed effective row. Consumers must not independently re-derive item type,
+          omitted scalar identity, or effective bound from raw fan_out syntax.
       empty_collection: >
         An empty collection emits zero events and still completes the fan_out row. Handler `advances_to` runs once
         after fan_out completion, including the empty path, and `fan_out.count` is 0 for later data_accumulation.
@@ -3564,7 +3574,7 @@ engine:
       target_route: 'The resolved delivery route identity on the envelope: target.flow_instance plus target.entity_id.
         This is receiver context and publish-time narrowing identity.'
       target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
-        target_set[].entity_id. This is the concrete multi-recipient target representation for allow_fanout:true.'
+        target_set[].entity_id. This is a concrete topology/runtime route carrier, never an authored selector.'
     resolution_rules:
       contracts_always_local: 'Node subscribes_to, handler keys, agent subscriptions within a flow,
         and event definitions in events.yaml always use local names. No flow prefixes in contract
@@ -3713,13 +3723,6 @@ engine:
         producers whose output pin is consumed by explicit root connect authority, it is forbidden as package-internal composition
         routing when target.flow has a receiver input for the same pin-declared output event or is reached by the parent
         connect graph; parent connect owns that route.
-      flow_match_allow_fanout: |
-        `target: { flow, match, allow_fanout: true }` is the explicit dynamic fan-out escape hatch for flow/match targeting.
-        It permits more than one matched recipient. Parent-authored fan-out should use connect topology. Publish-time
-        resolution materializes event.target_set as the concrete ordered recipient route list, leaves singular event.target
-        absent on the persisted event, and persists one delivery target per recipient. It is not valid as a compatibility
-        surface for package-internal fan-out that parent connect/broadcast lowering can express. The authored flow/match
-        selector is not the persisted routing authority after resolution.
       broadcast: |
         `broadcast: true` is the producer-authored explicit opt-out escape hatch for pin-declared output routing. It leaves
         event.target absent and uses the ordinary no-target event-type delivery path. Parent-authored broadcast/fan-out should
@@ -3775,7 +3778,7 @@ engine:
       match_count_behavior:
         zero_target_set: Dead-letter target_unreachable_no_subscriber or target_not_subscribed depending on whether the target instance exists.
         one_target_set: Normal delivery.
-        many_target_set: Dead-letter target_ambiguous unless the emit used allow_fanout:true; with allow_fanout:true, persist event.target_set and per-recipient delivery targets.
+        many_target_set: Concrete topology-owned target_set routes persist one delivery target per recipient. A producer flow/match selector resolving more than one candidate always fails target_ambiguous and never reaches this branch.
         no_target: Existing no-target event-type fan-out semantics.
     target_resolution_failure_taxonomy:
       boot_verify:
@@ -3795,7 +3798,7 @@ engine:
         target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
         target_unreachable_terminated: Target or ParentRoute referred to an instance that no longer exists.
         parent_route_incomplete: Structural child-to-parent routing needs ParentRoute but instance metadata only has incomplete legacy parent data.
-        target_ambiguous: flow/match resolution finds more than one target without allow_fanout:true.
+        target_ambiguous: flow/match resolution finds more than one target.
         target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
         platform.reply_already_terminal: A distinct reply event attempted to consume a context already terminally claimed by
           another reply. Diagnostics name reply_context_id, request event, accepted reply event, and rejected reply event.
@@ -6103,7 +6106,7 @@ engine:
           retryable: false
           deterministic: true
           message_template: Fan-out bound was exceeded (%s).
-          remediation_template: Reduce the collection or raise the declared bound (%s).
+          remediation_template: Raise max_items or split the batch (%s).
         platform.chain_depth_exceeded:
           family: routing_control
           task_failure: true
@@ -9760,7 +9763,7 @@ flow_model:
           proof_obligations:
           - bootverify rejects loaded flow-scope target.flow/match and broadcast:true when used as package-internal composition routing
           - runtime pin-route resolution rejects the same stale producer route before it can populate event.target or event.target_set
-          - explicit sender, instance_id, genuine dynamic flow/match/allow_fanout, target_set, and external/no-receiver broadcast remain supported escape hatches
+          - explicit sender, instance_id, singular dynamic flow/match, topology-owned target_set, and external/no-receiver broadcast remain supported under their distinct owners
           - connected agent/node output pins continue through EventBus RoutePlan without relay nodes or producer target/broadcast
           does_not_close:
           - '#1466 composition-first parent closure'
@@ -15109,15 +15112,17 @@ static_analyzer:
         - sender
         - instance_id
         - flow_match
-        - flow_match_allow_fanout
         rule: Target form must be syntactically valid and reference loaded flow topology where statically known. flow_match
           target forms from loaded flow-scope producers, or package-root producers whose output pin is consumed by
           explicit root connect authority, are invalid when they select a loaded package receiver input for the same
           pin-declared output or a receiver flow reached by the parent connect graph instead of acting as a genuine
-          dynamic escape hatch.
-      fanout_representation:
-        rule: flow_match_allow_fanout resolves to event.target_set, not singular event.target. The runtime must persist concrete
-          target_set route identities and one delivery target per recipient; it must not persist only the authored selector.
+          dynamic escape hatch. A dynamic flow/match selector resolves exactly one recipient; zero is unreachable and
+          more than one is ambiguous.
+      retired_producer_fanout:
+        rule: Any authored `emit.target.allow_fanout` key is invalid, including false. Use collection fan_out over the
+          owner's child-key list, an ordinary output pin/connect, and receiver resolution.mode select; see
+          examples/routing/notify-all-children. True one-event multi-instance delivery remains evidence-gated at
+          https://github.com/division-sh/swarm/issues/1934.
       structural_parent_route:
         rule: Child-to-parent structural binding is valid only when no lowered parent connect route applies and only for
           child/template instances that will record full ParentRoute at create_flow_instance time.

@@ -1,0 +1,17 @@
+account-node:
+  id: account-node
+  execution_type: system_node
+  subscribes_to:
+    - account.registered
+    - account.notify.requested
+  event_handlers:
+    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+    account.notify.requested:
+      data_accumulation:
+        writes:
+          - source_field: command
+            target_field: last_command

@@ -1,0 +1,15 @@
+name: notify-all-children
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: portfolio
+    flow: portfolio
+    mode: singleton
+  - id: account
+    flow: account
+    mode: template
+connect:
+  - from: portfolio.account_registered
+    to: account.account_registered
+  - from: portfolio.account_notify_requested
+    to: account.account_notify_requested
