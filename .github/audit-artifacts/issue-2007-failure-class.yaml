@@ -64,10 +64,11 @@ standing_identity:
   forbidden_identity_inputs: [bundle_hash, bundle_source, source_path, boot_timestamp, lease_timestamp]
   generation_identity:
     run_id: uuid_v5(service_id, "run" + NUL + decimal_generation)
-    instance_id: uuid_v5(service_id, "instance" + NUL + decimal_generation)
+    instance_id: uuid_v5(service_id, "instance")
     entity_id: existing_canonical_flow_instance_entity_identity_owner
     ordinary_revision_change: preserve_generation_run_instance_entity
-    explicit_reset: retire_current_generation_and_increment
+    poison_repair: preserve_service_instance_entity_and_advance_run_generation
+    explicit_reset: preserve_service_instance_entity_clear_current_state_and_advance_run_generation
 
 persisted_model:
   standing_services:
@@ -76,6 +77,8 @@ persisted_model:
       service_id: uuid_not_null
       package_key: text_not_null
       flow_id: text_not_null
+      instance_id: text_unique_not_null
+      entity_id: uuid_unique_not_null
       declaration_present: boolean_not_null
       operator_override: enum_none_suspended_not_null
       effective_state: enum_active_suspended_orphaned_not_null
@@ -102,8 +105,6 @@ persisted_model:
       service_id: uuid_fk_standing_services
       generation: bigint_positive_not_null
       run_id: uuid_fk_runs_unique_not_null
-      instance_id: text_unique_not_null
-      entity_id: uuid_not_null
       created_bundle_hash: text_not_null
       created_bundle_source: text_not_null
       created_at: timestamp_not_null
@@ -113,7 +114,6 @@ persisted_model:
     unique_constraints:
       - one_unretired_generation_per_service
       - [run_id]
-      - [instance_id]
   standing_service_journal:
     primary_key: [service_id, sequence]
     columns:
@@ -145,16 +145,40 @@ state_machine:
     result: active_revised_same_generation
     source_rule: accept_and_journal
   any_plus_server_restart_abandon_poison:
-    result: repaired_same_generation
+    result: repaired_next_generation_terminal_predecessor_preserved
     preconditions:
       - current_generation_run_id_matches_service
       - run_control_reason_equals_server_restart_abandon
       - startup_ownership_is_exclusive
       - complete_child_quiescence_is_proven
+      - canonical_current_state_projection_is_coherent
     mutation: >-
-      Clear only the abandon-owned terminal/control evidence, preserve service
-      run/entity state, update current revision, journal repaired, and rehydrate
-      runtime side effects. Unknown or operator-owned terminality fails closed.
+      Never reopen or erase the cancelled run. Retire that generation, create
+      the deterministic next run generation, move only the canonical current
+      flow/entity projection to the new run while preserving stable
+      service/instance/entity identity, update current revision, journal the
+      repair and predecessor provenance, and rehydrate runtime side effects.
+      Unknown or operator-owned terminality, incoherent current state, or live
+      child work fails closed with the standing reset command.
+    carry_forward:
+      included:
+        - current_flow_instance_and_entity_state_projection
+        - typed_contained_state_and_current_stage
+        - declaration_owned_configuration_needed_to_rebuild_runtime_owners
+      retained_on_terminal_predecessor:
+        - events
+        - event_deliveries
+        - event_receipts
+        - sessions
+        - turns
+        - timers_and_schedule_claims
+        - outbox_and_operation_rows
+        - audit_and_mutation_history
+      rebuilt_for_new_generation:
+        - routes
+        - agents_and_runtime_handlers
+        - timers_and_schedules_derived_from_current_state_and_current_revision
+        - ingress_target_publication
   declaration_removed:
     result: orphaned_same_generation
     mutation: >-
@@ -180,9 +204,10 @@ state_machine:
     result: fresh_next_generation_preserve_service_history_and_override
     mutation: >-
       Destructively terminalize the old generation with standing_reset,
-      retire it, insert the deterministic next generation and canonical fresh
-      run/instance/entity state, and publish only when the durable transaction
-      commits. A suspended override remains suspended after reset.
+      retire it, insert the deterministic next run generation, clear and
+      rematerialize canonical state under the stable service/instance/entity
+      identity, and publish only when the durable transaction commits. A
+      suspended override remains suspended after reset.
   generic_run_stop_current_standing_generation:
     result: refuse_before_mutation
     remediation: standing_suspend_or_standing_reset
@@ -201,6 +226,7 @@ reconciliation_transaction:
     - apply_revision_override_orphan_reset_or_repair_state_machine
     - apply_complete_cancelled_or_failed_child_quiescence_when_required
     - mutate_run_instance_entity_route_agent_and_timer_persistence
+    - preserve_terminal_predecessor_evidence_and_move_only_whitelisted_current_state_projection_on_repair
     - append_exactly_one_journal_row_per_operation_id
     - set_publication_state_pending_and_increment_publication_sequence
     - commit_all_or_nothing
@@ -220,6 +246,35 @@ reconciliation_transaction:
       Treat publication as pending; replay is safe because every publication
       consumer is keyed by service_id, generation, and publication_sequence.
     no_database_transaction_across_runtime_publication: true
+
+terminal_immutability:
+  owner: internal/store/runlifecycle
+  rule: >-
+    completed, failed, cancelled, and forked run rows and their ended_at,
+    failure, run-control, and terminal event evidence are immutable. Standing
+    reconciliation never updates a terminal run back to running or clears its
+    terminal evidence.
+  backend_enforcement:
+    - postgres_run_status_failure_ended_at_constraints
+    - sqlite_run_status_failure_ended_at_triggers
+  run_control: >-
+    Terminal predecessor runs remain terminal and reject pause, continue,
+    stop, event publication, directive execution, replay, and recovery.
+  readback: >-
+    run.get and run.diagnose continue to report the predecessor as cancelled;
+    standing service readback reports the new current generation/run and links
+    the repaired predecessor through the standing journal.
+  terminal_event_identity: >-
+    Existing predecessor terminal/control events and receipts remain attached
+    to the predecessor. The repair transition is a new standing-service journal
+    fact and any new runtime event is emitted under the next run generation.
+  idempotency: >-
+    The locked service row plus unique service operation_id and deterministic
+    next run_id make commit retry and repeated boot converge on one generation.
+  late_writer_fence: >-
+    Old-generation writers remain rejected by immutable terminal run status;
+    new-generation publication is keyed by service_id, generation, and
+    publication_sequence.
 
 startup_order:
   - load_verify_and_plan_all_declarations_without_mutation
@@ -248,6 +303,13 @@ systematic_consumers:
     - destructive_reset_runtime_nuke
     - builder_and_store_failed_run_terminalization
     - delivery_receipt_session_timer_claim_late_writers
+  terminal_immutability_consumers:
+    - internal_store_runlifecycle_mark_terminal
+    - postgres_constraints_and_sqlite_triggers
+    - run_control_pause_continue_stop_admission
+    - run_get_run_diagnose_and_standing_readback
+    - event_publish_directive_replay_and_recovery_run_status_admission
+    - terminal_event_receipt_and_journal_identity
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
     - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
@@ -259,6 +321,7 @@ proof_manifestations:
   standing:
     - default_dev_recovery_false_cold_boot_and_restart_with_timer
     - exact_server_restart_abandon_poison_repaired
+    - repaired_predecessor_remains_cancelled_with_ended_at_and_one_next_generation
     - unknown_or_operator_terminality_refuses_with_reset_command
     - edited_source_restart_three_times_same_service_generation_and_journaled_revisions
     - declaration_removed_zero_active_schedules_claims_deliveries_sessions
@@ -274,6 +337,8 @@ proof_manifestations:
     - builder_failed_run_atomic_failure_envelope_and_quiescence
     - direct_store_failed_run_atomic_failure_envelope_and_quiescence
     - serve_abandon_run_stop_and_runtime_nuke_reason_preservation
+    - postgres_and_sqlite_terminal_constraints_remain_immutable_during_repair
+    - repeated_poison_repair_boot_is_idempotent_and_old_generation_late_writers_fail
   preserved_or_split:
     - normal_completion_regression_matrix
     - unavailable_bundle_cleanup_regression_matrix
