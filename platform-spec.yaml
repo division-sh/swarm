@@ -2899,6 +2899,10 @@ handler_specification:
       empty_collection: >
         An empty collection emits zero events and still completes the fan_out row. Handler `advances_to` runs once
         after fan_out completion, including the empty path, and `fan_out.count` is 0 for later data_accumulation.
+      collection_iteration: >
+        Runtime emits exactly one intent for each source-list entry in declared list order. Duplicate values remain
+        separate entries and produce separate intents; fan_out never sorts or deduplicates the source collection.
+        Persisted child events retain that order and multiplicity through their strictly increasing emitted_at values.
       transition_order: Handler `advances_to` fires once after per-item emission, not once per item.
       graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
       route_authority: >

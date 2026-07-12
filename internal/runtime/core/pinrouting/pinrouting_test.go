@@ -464,6 +464,9 @@ func TestResolveFlowMatchFailsClosedOnAmbiguousActiveDynamicInstances(t *testing
 	if got := result.Event.TargetRoute(); !got.Empty() {
 		t.Fatalf("Event target = %#v, want empty on ambiguous target", got)
 	}
+	if got := result.Event.TargetRoutes(); len(got) != 0 {
+		t.Fatalf("Event target_set = %#v, want empty on ambiguous target", got)
+	}
 }
 
 func TestResolveFlowMatchFailsClosedWhenDynamicInstanceDescriptorMissing(t *testing.T) {
