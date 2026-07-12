@@ -23,13 +23,14 @@ const (
 
 // Options produces verifier-only corruptions of the checked-in canonical example.
 type Options struct {
-	OmitOutputPin     bool
-	OmitConnect       bool
-	BadConnectMapping bool
-	MissingEmitCarry  bool
-	ProducerTarget    bool
-	ProducerBroadcast bool
-	ObjectMembership  bool
+	OmitOutputPin               bool
+	OmitConnect                 bool
+	BadConnectMapping           bool
+	MissingEmitCarry            bool
+	ProducerTarget              bool
+	ProducerBroadcast           bool
+	ObjectMembership            bool
+	UndeclaredPayloadMembership bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -116,6 +117,11 @@ func WriteVariant(t testing.TB, opts Options) string {
     account_id: text
 `)
 		replaceFile(t, ownerNodes, "            account_id: account_id\n", "            account_id: account_id.account_id\n")
+	}
+	if opts.UndeclaredPayloadMembership {
+		replaceFile(t, ownerNodes, "        items_from: entity.account_ids\n", `        items_from: payload.account_ids
+        identity: account_id
+`)
 	}
 	return root
 }

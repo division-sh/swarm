@@ -2793,7 +2793,7 @@ func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish
 }
 
 func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.WorkflowContractBundle {
-	return declarativeEmitContractTestBundleWithEntry(eventType, runtimecontracts.EventCatalogEntry{
+	bundle := declarativeEmitContractTestBundleWithEntry(eventType, runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"label": {Type: "string"},
@@ -2801,6 +2801,12 @@ func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.Workf
 		},
 		Required: []string{"label"},
 	})
+	bundle.Events["batch.submitted"] = runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+			"items": {Type: "[json]"},
+		}},
+	}
+	return bundle
 }
 
 func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle {

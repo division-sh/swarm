@@ -208,6 +208,8 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "canonical_code_owner"), "pinRoutingAgentEmitSites")
 
 	fanOut := mustYAMLPath(t, root, "handler_specification", "handler_fields", "fan_out")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "items_from"), "missing event catalog entry")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "items_from"), "hard load error")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "identity"), "statically scalar list item")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "identity"), "require an explicit identity")
 	assertScalarValue(t, mustYAMLPath(t, fanOut, "effective_semantics", "canonical_owner"), "contracts.WorkflowContractBundle.ResolveFanOutEffectiveSemantics")

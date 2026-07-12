@@ -727,7 +727,7 @@ timer-owner:
 				name: "dead-event-schema-fanout",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\nstart: {}\n",
+						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
 						nodes: `
 fanout-node:
   id: fanout-node
@@ -753,7 +753,7 @@ fanout-node:
 				name: "dead-event-schema-accumulate-on-complete-emit",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\nstart: {}\n",
+						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
 						nodes: `
 accumulate-node:
   id: accumulate-node
@@ -779,7 +779,7 @@ accumulate-node:
 				name: "dead-event-schema-accumulate-on-timeout-fanout",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\nstart: {}\n",
+						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
 						nodes: `
 accumulate-timeout-node:
   id: accumulate-timeout-node

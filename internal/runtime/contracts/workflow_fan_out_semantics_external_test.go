@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 )
 
@@ -41,5 +42,29 @@ func TestFanOutEffectiveSemantics_RequiresIdentityForObjectItems(t *testing.T) {
 	_, err := notifyallchildren.LoadBundleResult(t, notifyallchildren.Options{ObjectMembership: true})
 	if err == nil || !strings.Contains(err.Error(), "fan_out.identity is required") {
 		t.Fatalf("bundle load error = %v, want object identity requirement", err)
+	}
+}
+
+func TestFanOutEffectiveSemantics_RejectsUndeclaredPayloadSourceWithExplicitIdentity(t *testing.T) {
+	_, err := notifyallchildren.LoadBundleResult(t, notifyallchildren.Options{UndeclaredPayloadMembership: true})
+	if err == nil || !strings.Contains(err.Error(), "references undeclared payload field account_ids") {
+		t.Fatalf("bundle load error = %v, want undeclared payload collection rejection", err)
+	}
+}
+
+func TestFanOutEffectiveSemantics_RejectsMissingEventContractWithExplicitIdentity(t *testing.T) {
+	bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
+	handler, ok := bundle.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
+	if !ok || handler.FanOut == nil {
+		t.Fatal("canonical notify handler fan_out missing")
+	}
+	spec := *handler.FanOut
+	spec.ItemsFrom = "payload.account_ids"
+	spec.ItemsPath = runtimepaths.Parse(spec.ItemsFrom)
+	spec.Identity = "account_id"
+
+	_, err := bundle.ResolveFanOutEffectiveSemantics(notifyallchildren.OwnerFlowID, "portfolio.undeclared", spec)
+	if err == nil || !strings.Contains(err.Error(), "references undeclared payload field account_ids") || !strings.Contains(err.Error(), "portfolio.undeclared") {
+		t.Fatalf("ResolveFanOutEffectiveSemantics error = %v, want missing event-contract rejection", err)
 	}
 }
