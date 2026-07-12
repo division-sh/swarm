@@ -406,7 +406,7 @@ func TestBuildEmptyTopologyUsesStableEmptyCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal empty topology: %v", err)
 	}
-	for _, field := range []string{"producers", "consumers", "input_pins", "output_pins", "boundary_exposures", "edges", "legacy_qualified_subscriptions", "issues"} {
+	for _, field := range []string{"producers", "consumers", "input_pins", "output_pins", "root_input_sources", "boundary_exposures", "edges", "legacy_qualified_subscriptions", "issues"} {
 		if !strings.Contains(string(encoded), `"`+field+`":[]`) {
 			t.Fatalf("empty topology field %s is not a stable array: %s", field, encoded)
 		}

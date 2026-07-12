@@ -139,7 +139,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "chat-flow",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/@standing/a",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
 	}, nil)
@@ -150,7 +150,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 		t.Fatalf("persisted events = %d, want 1", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.RunID() != "41000000-0000-0000-0000-000000000001" || evt.FlowInstance() != "chat-flow/@standing/a" || evt.EntityID() != "41000000-0000-0000-0000-000000000002" {
+	if evt.RunID() != "41000000-0000-0000-0000-000000000001" || evt.FlowInstance() != "chat-flow/a" || evt.EntityID() != "41000000-0000-0000-0000-000000000002" {
 		t.Fatalf("event authority = run=%s flow_instance=%s entity=%s", evt.RunID(), evt.FlowInstance(), evt.EntityID())
 	}
 }

@@ -242,6 +242,11 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	return eb.routeTable
 }
 
+func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+	table := eb.RouteTable()
+	return table != nil && table.HasFlowInstanceRoute(identity)
+}
+
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	return eb.AddFlowInstanceRouteContext(context.Background(), req)
 }

@@ -1217,7 +1217,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 		return false
 	}
 	if target.FlowID != "" {
-		return target.FlowID == flowID && workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)
+		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)
 	}
 	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
 	if flowPath == "" {
@@ -1225,12 +1225,12 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	}
 	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return targetPath == flowPath || targetPath == flowID || runtimeflowidentity.StandingInstanceMatchesFlow(source, flowID, targetPath)
+		return targetPath == flowPath || targetPath == flowID || pc.hasMaterializedFlowInstanceRoute(source, flowID, targetPath)
 	}
 	return workflowNodeDeliveryTargetPathMatches(flowPath, targetPath)
 }
 
-func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, flowID, flowInstance string) bool {
+func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, flowID, flowInstance string) bool {
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if flowInstance == "" {
 		return true
@@ -1240,9 +1240,26 @@ func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, f
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || runtimeflowidentity.StandingInstanceMatchesFlow(source, flowID, flowInstance)
+		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || pc.hasMaterializedFlowInstanceRoute(source, flowID, flowInstance)
 	}
 	return true
+}
+
+type flowInstanceRouteOwner interface {
+	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
+}
+
+func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, flowID, instancePath string) bool {
+	owner, ok := pc.bus.(flowInstanceRouteOwner)
+	if !ok || owner == nil {
+		return false
+	}
+	identity := runtimeflowidentity.StoredRoute(
+		runtimeflowidentity.ScopeKey(source, flowID),
+		runtimeflowidentity.LogicalInstanceID(instancePath),
+		instancePath,
+	)
+	return identity.Valid() && owner.HasFlowInstanceRoute(identity)
 }
 
 func workflowNodeDeliveryTargetPathMatches(flowPath, targetPath string) bool {

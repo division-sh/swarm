@@ -62,6 +62,17 @@ func TestLookupKeys_UsesCanonicalEntityID(t *testing.T) {
 	}
 }
 
+func TestStanding_UsesCanonicalFlowInstanceRoute(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	instance := Standing(nil, "service", "bundle-v1:sha256:"+digest)
+	if instance.ScopeKey != "service" || instance.InstanceID != digest || instance.InstancePath != "service/"+digest {
+		t.Fatalf("standing identity = %#v, want canonical service route", instance)
+	}
+	if instance.EntityID != EntityID(instance.InstancePath) || !OwnedByFlow(nil, "service", instance.InstancePath) {
+		t.Fatalf("standing route ownership = entity:%q owned:%v", instance.EntityID, OwnedByFlow(nil, "service", instance.InstancePath))
+	}
+}
+
 func TestSemanticScope_DistinguishesStaticAndInstancedPaths(t *testing.T) {
 	cases := []struct {
 		path string

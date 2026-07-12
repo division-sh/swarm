@@ -373,6 +373,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
 			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-chat", "name: telegram-chat-v2", 1))
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "nodes.yaml"), strings.ReplaceAll(string(baseNodes), "telegram-chat.telegram_send_message", "telegram-chat-v2.telegram_send_message"))
 			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-chat", "telegram-chat-v2"))
 		}},
 	}
@@ -541,6 +542,26 @@ func standingSQLiteDiagnostics(path string) string {
 			}
 		}
 	}
+	deliveryRows, err := store.DB.Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
+	if err == nil {
+		defer deliveryRows.Close()
+		for deliveryRows.Next() {
+			var eventID, subscriber, status string
+			if deliveryRows.Scan(&eventID, &subscriber, &status) == nil {
+				parts = append(parts, fmt.Sprintf("delivery:%s:%s:%s", eventID, subscriber, status))
+			}
+		}
+	}
+	receiptRows, err := store.DB.Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
+	if err == nil {
+		defer receiptRows.Close()
+		for receiptRows.Next() {
+			var eventID, status, failure string
+			if receiptRows.Scan(&eventID, &status, &failure) == nil {
+				parts = append(parts, fmt.Sprintf("receipt:%s:%s:%s", eventID, status, failure))
+			}
+		}
+	}
 	return strings.Join(parts, ",")
 }
 
@@ -614,6 +635,15 @@ pins:
             cel: payload.payload.message.chat.id
           text:
             cel: payload.payload.message.text
+telegram-outcome-observer:
+  id: telegram-outcome-observer
+  execution_type: system_node
+  subscribes_to: [telegram-chat.telegram_send_message.succeeded, telegram-chat.telegram_send_message.failed]
+  event_handlers:
+    telegram-chat.telegram_send_message.succeeded:
+      advances_to: active
+    telegram-chat.telegram_send_message.failed:
+      advances_to: active
 `,
 		"flows/telegram-chat/tools.yaml": fmt.Sprintf(`telegram.send_message:
   description: send Telegram messages

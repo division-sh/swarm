@@ -185,18 +185,8 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 func Standing(source semanticview.Source, flowID, bundleHash string) Instance {
 	flowID = strings.TrimSpace(flowID)
 	bundleHash = strings.TrimSpace(bundleHash)
-	scopeKey := normalizeRef(ScopeKey(source, flowID))
 	identity := strings.TrimPrefix(bundleHash, "bundle-v1:sha256:")
-	instanceID := identity
-	instancePath := normalizeRef(path.Join(scopeKey, "@standing", identity))
-	return Instance{
-		TemplateID:    flowID,
-		ScopeKey:      scopeKey,
-		InstanceID:    instanceID,
-		InstancePath:  instancePath,
-		EntityID:      EntityID(instancePath),
-		HasStoredPath: instancePath != "",
-	}
+	return Derive(source, flowID, identity)
 }
 
 func StandingRunID(bundleHash, packageKey, flowID string) string {
@@ -206,17 +196,6 @@ func StandingRunID(bundleHash, packageKey, flowID string) string {
 		strings.TrimSpace(flowID),
 	}, "\x00")
 	return uuid.NewSHA1(standingRunNamespace, []byte(material)).String()
-}
-
-func StandingInstanceMatchesFlow(source semanticview.Source, flowID, instancePath string) bool {
-	scopeKey := normalizeRef(ScopeKey(source, flowID))
-	instancePath = normalizeRef(instancePath)
-	if scopeKey == "" || instancePath == "" {
-		return false
-	}
-	prefix := scopeKey + "/@standing/"
-	identity, ok := strings.CutPrefix(instancePath, prefix)
-	return ok && len(identity) == 64
 }
 
 func DeriveRoute(scopeKey, instanceID string) Route {

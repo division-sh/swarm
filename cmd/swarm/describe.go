@@ -133,7 +133,10 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 	if err := renderCLIOutput(out, errOut, opts.output, topology, func(w io.Writer) {
 		writeRoutingTopologyText(w, topology)
 	}, func() ([]string, error) {
-		values := make([]string, 0, len(topology.Edges)+len(topology.Issues))
+		values := make([]string, 0, len(topology.RootInputSources)+len(topology.Edges)+len(topology.Issues))
+		for _, source := range topology.RootInputSources {
+			values = append(values, source.ID)
+		}
 		for _, edge := range topology.Edges {
 			values = append(values, edge.ID)
 		}
@@ -403,6 +406,13 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 	}
 	fmt.Fprintf(out, "routing topology: %s\n", topology.SchemaVersion)
 	fmt.Fprintf(out, "  source authority: %s\n", topology.SourceAuthority)
+	if len(topology.RootInputSources) > 0 {
+		fmt.Fprintln(out, "  root input sources:")
+		for _, source := range topology.RootInputSources {
+			target := firstNonEmpty(source.Target.FlowPath, source.Target.FlowID)
+			fmt.Fprintf(out, "    - [%s] %s/%s -> flow %s (%s)\n", source.Kind, source.Alias, source.Provider, target, source.AuthoredLocation)
+		}
+	}
 	pubsub, inter := 0, 0
 	for _, edge := range topology.Edges {
 		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect {

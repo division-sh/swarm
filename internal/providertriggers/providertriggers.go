@@ -558,6 +558,26 @@ type EventNameManifest struct {
 	Template string `yaml:"template"`
 }
 
+func (m EventNameManifest) Accepts(eventName string) bool {
+	eventName = strings.TrimSpace(eventName)
+	if eventName == "" {
+		return false
+	}
+	if literal := strings.TrimSpace(m.Literal); literal != "" {
+		return eventName == literal
+	}
+	template := strings.TrimSpace(m.Template)
+	if strings.Count(template, "{event_type}") != 1 {
+		return false
+	}
+	prefix, suffix, _ := strings.Cut(template, "{event_type}")
+	if !strings.HasPrefix(eventName, prefix) || !strings.HasSuffix(eventName, suffix) {
+		return false
+	}
+	middle := strings.TrimSuffix(strings.TrimPrefix(eventName, prefix), suffix)
+	return strings.TrimSpace(middle) != ""
+}
+
 type AckManifest struct {
 	Mode string `yaml:"mode"`
 }

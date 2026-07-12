@@ -77,6 +77,43 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	if provider.Provider != "telegram" || provider.SigningSecret != "webhook_signing.telegram" {
 		t.Fatalf("standing describe provider = %#v", provider)
 	}
+	if len(view.RoutingTopology.RootInputSources) != 1 {
+		t.Fatalf("standing root input sources = %#v", view.RoutingTopology.RootInputSources)
+	}
+	source := view.RoutingTopology.RootInputSources[0]
+	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-chat" || source.Target.FlowPath != "telegram-chat" {
+		t.Fatalf("standing root input source = %#v", source)
+	}
+	for _, edge := range view.RoutingTopology.Edges {
+		if edge.Scope != routingtopology.DeliveryScopeTypedPubSub && edge.Scope != routingtopology.DeliveryScopeInterFlowConnect {
+			t.Fatalf("standing ingress created third delivery scope: %#v", edge)
+		}
+	}
+}
+
+func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T) {
+	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	var jsonOut, jsonErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes --json code=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
+		t.Fatalf("decode standing routes topology: %v\n%s", err, jsonOut.String())
+	}
+	if len(topology.RootInputSources) != 1 || topology.RootInputSources[0].ID == "" {
+		t.Fatalf("standing route root input sources = %#v", topology.RootInputSources)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
+	}
+	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-chat"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("standing routes human output missing %q:\n%s", want, humanOut.String())
+		}
+	}
 }
 
 func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T) {

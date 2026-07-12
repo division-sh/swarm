@@ -168,7 +168,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, providers *pr
 					}
 					literal := strings.TrimSpace(manifest.EventName.Literal)
 					template := strings.TrimSpace(manifest.EventName.Template)
-					if err := validateStandingIngressPins(source, flowID, provider, literal, template); err != nil {
+					if err := validateStandingIngressPins(source, flowID, provider, manifest.EventName); err != nil {
 						return nil, fmt.Errorf("%s: %w", location, err)
 					}
 					decl.Ingress = append(decl.Ingress, StandingIngressBinding{
@@ -202,51 +202,56 @@ func standingDeclarationLocation(pkg runtimecontracts.LoadedProjectPackage, flow
 	return fmt.Sprintf("%s flows[%s]", path, firstNonEmpty(flowID, "<missing>"))
 }
 
-func validateStandingIngressPins(source semanticview.Source, flowID, provider, literal, template string) error {
-	pins := source.FlowInputEventPins(flowID)
+func validateStandingIngressPins(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {
+	literal := strings.TrimSpace(eventNames.Literal)
+	template := strings.TrimSpace(eventNames.Template)
 	if literal != "" {
-		for _, pin := range pins {
-			if strings.TrimSpace(pin.Event) == literal && strings.TrimSpace(pin.Source) == "external" {
-				return nil
-			}
+		if _, err := resolveStandingInputEndpoint(source, flowID, literal); err == nil {
+			return nil
 		}
 		return fmt.Errorf("ingress provider %q emits %q; add an exact external input pin for %q to flow %s", provider, literal, literal, flowID)
 	}
 	if template == "" {
 		return fmt.Errorf("ingress provider %q has no canonical event-name policy", provider)
 	}
-	for _, pin := range pins {
-		if strings.TrimSpace(pin.Source) == "external" && standingEventTemplateMatches(template, strings.TrimSpace(pin.Event)) {
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	for _, endpoint := range census.InputPins() {
+		if strings.TrimSpace(endpoint.FlowID) != strings.TrimSpace(flowID) || !eventNames.Accepts(endpoint.Event.Authored) {
+			continue
+		}
+		if _, err := resolveStandingInputEndpointWithCensus(source, census, flowID, endpoint.Event.Authored); err == nil {
 			return nil
 		}
 	}
 	return fmt.Errorf("ingress provider %q emits template %q; add at least one exact external input pin matching that template to flow %s", provider, template, flowID)
 }
 
-func standingEventTemplateMatches(template, event string) bool {
-	template = strings.TrimSpace(template)
-	event = strings.TrimSpace(event)
-	if event == "" || strings.Count(template, "{event_type}") != 1 {
-		return false
-	}
-	prefix, suffix, _ := strings.Cut(template, "{event_type}")
-	if !strings.HasPrefix(event, prefix) || !strings.HasSuffix(event, suffix) {
-		return false
-	}
-	middle := strings.TrimSuffix(strings.TrimPrefix(event, prefix), suffix)
-	return strings.TrimSpace(middle) != ""
+func standingInputPinAdmitted(source semanticview.Source, flowID, eventName string) bool {
+	_, err := resolveStandingInputEndpoint(source, flowID, eventName)
+	return err == nil
 }
 
-func standingInputPinAdmitted(source semanticview.Source, flowID, eventName string) bool {
-	if source == nil || strings.TrimSpace(flowID) == "" || strings.TrimSpace(eventName) == "" {
-		return false
+func resolveStandingInputEndpoint(source semanticview.Source, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
+	return resolveStandingInputEndpointWithCensus(source, semanticview.BuildAuthoredEventEndpointCensus(source), flowID, eventName)
+}
+
+func resolveStandingInputEndpointWithCensus(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
+	flowID = strings.TrimSpace(flowID)
+	eventName = strings.TrimSpace(eventName)
+	if source == nil || flowID == "" || eventName == "" {
+		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("standing ingress requires semantic source, flow id, and event name")
 	}
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if strings.TrimSpace(pin.Event) == strings.TrimSpace(eventName) && strings.TrimSpace(pin.Source) == "external" {
-			return true
-		}
+	association := census.ResolveDeclaredInputEndpoint(flowID, eventName)
+	endpoint, ok := association.Endpoint()
+	if !ok {
+		return semanticview.AuthoredEventEndpoint{}, association.Err()
 	}
-	return false
+	producer := semanticview.ResolveFlowInputProducer(source, flowID, eventName)
+	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) &&
+		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
+		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not declared as external ingress", eventName, flowID)
+	}
+	return endpoint, nil
 }
 
 func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, error) {

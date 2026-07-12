@@ -219,5 +219,6 @@ func requiredPlatformEventFieldNames(fields map[string]EventFieldSpec) []string 
 
 func platformEventFieldAllowsOmission(field EventFieldSpec) bool {
 	lower := strings.ToLower(strings.TrimSpace(field.Type + " " + field.Description))
-	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until")
+	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until") ||
+		strings.Contains(lower, "(optional") || strings.HasPrefix(lower, "optional")
 }

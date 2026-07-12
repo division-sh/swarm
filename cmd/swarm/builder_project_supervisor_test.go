@@ -234,7 +234,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			BundleHash: hash, Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway},
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
-				RunID: runID, FlowInstance: "telegram-chat/@standing/" + strings.TrimPrefix(alias, "chat-"),
+				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
 				EntityID: entityID, SigningSecret: "webhook_signing.telegram",
 			}},
 		}, persistence, eventsStore
@@ -282,7 +282,7 @@ func TestRuntimeProjectSupervisorRejectsChangedStandingBundleWithoutMutation(t *
 	newHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
 	oldTarget := runtimepkg.StandingTarget{
 		BundleHash: oldHash, FlowID: "service", Alias: "chat", Provider: "telegram",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "service/@standing/a",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "service/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", SigningSecret: "webhook_signing.telegram",
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
