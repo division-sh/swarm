@@ -121,6 +121,64 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 	})
 }
 
+func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	configPath := writeDoctorClaudeHostConfig(t, "")
+	contractsPath := doctorAgentContractsPath
+
+	t.Run("serve", func(t *testing.T) {
+		var out lockedBuffer
+		code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+			ConfigPath:           configPath,
+			ContractsPath:        contractsPath,
+			DataSource:           t.TempDir(),
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			StoreMode:            storebackend.ActiveDefaultBackend().String(),
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			SelfCheck:            true,
+			RequireBundleMatch:   false,
+			NoRequireBundleMatch: true,
+			Output:               &out,
+		})
+		if code != cliExitRuntime {
+			t.Fatalf("serve code = %d, want %d\n%s", code, cliExitRuntime, out.String())
+		}
+		assertClaudeHostRefusal(t, out.String())
+	})
+
+	t.Run("verify", func(t *testing.T) {
+		opts := defaultVerifyCommandOptions()
+		opts.configPath = configPath
+		opts.contractsPath = contractsPath
+		var stdout, stderr bytes.Buffer
+		if code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr); code == 0 {
+			t.Fatalf("verify unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
+		}
+		assertClaudeHostRefusal(t, stderr.String())
+	})
+
+	t.Run("describe", func(t *testing.T) {
+		opts := defaultDescribeCommandOptions()
+		opts.configPath = configPath
+		opts.contractsPath = contractsPath
+		var stdout, stderr bytes.Buffer
+		if code := runDescribeCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr); code == 0 {
+			t.Fatalf("describe unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
+		}
+		assertClaudeHostRefusal(t, stderr.String())
+	})
+}
+
+func assertClaudeHostRefusal(t *testing.T, output string) {
+	t.Helper()
+	for _, want := range []string{"uses claude_cli backend", "Use Docker", "llm.backend: anthropic", "Docker-free local run"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("explicit-host refusal missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func assertBootFloorWorkspaceRequirementOutput(t *testing.T, output string) {
 	t.Helper()
 	for _, want := range []string{"workspace backend: docker", "agent native-bash-worker", "native_tools.bash"} {

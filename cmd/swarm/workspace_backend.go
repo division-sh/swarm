@@ -125,8 +125,8 @@ func resolveWorkspaceBackendDecision(flagBackend string, flagSet bool, cfg *conf
 	return decideWorkspaceBackend(preference, cfg, source)
 }
 
-func resolveWorkspaceBackendDiagnostic(repo string, source semanticview.Source) (workspaceBackendSelection, error) {
-	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
+func resolveWorkspaceBackendDiagnostic(repo, configPath string, source semanticview.Source) (workspaceBackendSelection, error) {
+	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return workspaceBackendSelection{}, err
 	}
@@ -281,7 +281,7 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 				reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonExecTool, AgentID: label, Tool: strings.TrimSpace(tool)})
 			}
 		}
-		if class != workspaceCapabilityExec && nativeToolEnabled(entry.NativeTools, "file_io") {
+		if nativeToolEnabled(entry.NativeTools, "file_io") {
 			reasons = append(reasons, workspaceCapabilityReason{Kind: workspaceReasonNativeFileIO, AgentID: label})
 		}
 	}

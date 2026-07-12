@@ -209,6 +209,52 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass(t *testing.T) {
+	tests := []struct {
+		name   string
+		agents map[string]runtimecontracts.AgentRegistryEntry
+	}{
+		{
+			name: "exec agent sorts first",
+			agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"a-exec":  {ID: "a-exec", NativeTools: map[string]any{"bash": true}},
+				"z-files": {ID: "z-files", NativeTools: map[string]any{"file_io": true}},
+			},
+		},
+		{
+			name: "file agent sorts first",
+			agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"a-files": {ID: "a-files", NativeTools: map[string]any{"file_io": true}},
+				"z-exec":  {ID: "z-exec", NativeTools: map[string]any{"bash": true}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision, err := decideWorkspaceBackend(workspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Agents: tt.agents}))
+			if err != nil {
+				t.Fatalf("decideWorkspaceBackend: %v", err)
+			}
+			if decision.CapabilityClass != workspaceCapabilityExec || decision.Backend != workspace.BackendDocker {
+				t.Fatalf("decision = %#v, want aggregate exec/Docker", decision)
+			}
+			var bashAgents, fileAgents []string
+			for _, reason := range decision.Reasons {
+				switch reason.Kind {
+				case workspaceReasonNativeBash:
+					bashAgents = append(bashAgents, reason.AgentID)
+				case workspaceReasonNativeFileIO:
+					fileAgents = append(fileAgents, reason.AgentID)
+				}
+			}
+			if len(bashAgents) != 1 || len(fileAgents) != 1 {
+				t.Fatalf("typed reasons = %#v, want one bash and one file_io fact independent of aggregate class", decision.Reasons)
+			}
+		})
+	}
+}
+
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
 	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, nil, "", semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{}, workspaceBackendSelection{Backend: workspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
 	if err != nil {
