@@ -2,7 +2,7 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
 audit_base: e0ab4dbbf358438b8ccb689642703ff6799178ee
-working_class: declaration_owned_standing_service_reconciliation_and_destructive_terminal_quiescence
+working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_and_terminal_event_admission
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
 binding_context:
@@ -22,7 +22,7 @@ terminal_status_invariants:
       The transition does not destroy work. It succeeds only when canonical
       entity/flow terminality, deliveries, pipeline receipts, active timers and
       claims, and session leases prove that no same-run execution remains.
-    issue_2007_action: preserve_and_regression_prove
+    issue_2007_action: preserve_completion_owner_and_absorb_terminal_event_admission
   cancelled:
     owner: canonical_run_destructive_terminalization_owner
     policy: destructive_complete_quiescence
@@ -276,6 +276,43 @@ terminal_immutability:
     new-generation publication is keyed by service_id, generation, and
     publication_sequence.
 
+terminal_event_admission:
+  canonical_owner: internal/store/runlifecycle plus selected-store event mutation boundary
+  current_invalid_interpreters:
+    - internal/store/runlifecycle.EnsureActive ReopenCompleted
+    - PostgreSQL appendEventSpec completed-to-running transition
+    - SQLite AppendEventTx terminal-row insert without lifecycle transition
+  rule: >-
+    A new event carrying an existing run_id may persist only when the locked run
+    is running or paused. Completed, cancelled, failed, and forked runs reject
+    the event before event, delivery, receipt, replay-scope, outbox, state, or
+    counter mutation. Event persistence never rewrites run lifecycle truth.
+  ordering:
+    - validate_event_shape_and_lineage
+    - check_existing_event_id_first
+    - exact_duplicate_returns_idempotent_success_without_run_transition_or_new_rows
+    - conflicting_duplicate_fails_closed_without_mutation
+    - lock_or_create_run_row
+    - require_existing_run_status_running_or_paused
+    - insert_event_and_atomic_delivery_manifest
+    - update_counts_without_changing_status_or_terminal_evidence
+  new_run_rule: >-
+    A missing run row may be created as running only through the canonical run
+    creation owner. An existing terminal row is never treated as missing and is
+    never reopened.
+  terminal_evidence_events: >-
+    There is no generic post-terminal event exception. Executable terminal
+    outcome events must persist before the terminal transition in the same
+    owner transaction. Non-executable diagnostics use runtime_logs, run
+    terminal fields, run_control_state, or the standing-service journal rather
+    than appending to events under a terminal run.
+  backend_atomicity:
+    postgres: lock run FOR UPDATE in the same transaction before event or delivery insert
+    sqlite: consume the serialized runtime mutation transaction and read status before insert
+  removed_behavior:
+    - ReopenCompleted option and completed-to-running event append
+    - SQLite terminal-run event insertion with unchanged terminal status
+
 startup_order:
   - load_verify_and_plan_all_declarations_without_mutation
   - acquire_startup_ownership
@@ -310,6 +347,18 @@ systematic_consumers:
     - run_get_run_diagnose_and_standing_readback
     - event_publish_directive_replay_and_recovery_run_status_admission
     - terminal_event_receipt_and_journal_identity
+  terminal_event_admission_consumers:
+    - postgres_AppendEvent_AppendEventTx_and_all_PersistEventWithDelivery_variants
+    - sqlite_AppendEvent_AppendEventTx_and_all_atomic_delivery_variants
+    - sqlEventMutation_AppendEvent
+    - EventBus_Publish_PublishAcknowledged_PublishInMutation_PublishDirect_and_deferred_publish
+    - EventBus_atomic_persistEventRecord_variants_and_outbox_flush
+    - public_event_publish_and_run_start
+    - inbound_webhook_root_publish
+    - event_replay_and_agent_replay
+    - agent_directive_operation_event_persistence
+    - workflow_system_node_agent_tool_activity_and_mailbox_event_producers
+    - recovery_and_sweeper_duplicate_replay_paths
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
     - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
@@ -339,6 +388,17 @@ proof_manifestations:
     - serve_abandon_run_stop_and_runtime_nuke_reason_preservation
     - postgres_and_sqlite_terminal_constraints_remain_immutable_during_repair
     - repeated_poison_repair_boot_is_idempotent_and_old_generation_late_writers_fail
+  terminal_event_admission:
+    - postgres_and_sqlite_new_event_rejected_for_completed_cancelled_failed_and_forked
+    - exact_duplicate_event_idempotent_for_each_terminal_status_without_reopen
+    - conflicting_duplicate_rejected_for_each_terminal_status
+    - direct_AppendEvent_and_AppendEventTx_zero_mutation_on_terminal_refusal
+    - every_atomic_event_delivery_persistence_variant_zero_mutation_on_terminal_refusal
+    - EventBus_Publish_PublishDirect_PublishInMutation_and_outbox_zero_mutation_on_terminal_refusal
+    - event_publish_run_start_inbound_replay_directive_and_internal_producers_consume_same_owner
+    - no_post_terminal_diagnostic_event_exception
+    - postgres_ReopenCompleted_behavior_and_regression_test_removed
+    - sqlite_terminal_append_divergence_removed
   preserved_or_split:
     - normal_completion_regression_matrix
     - unavailable_bundle_cleanup_regression_matrix
