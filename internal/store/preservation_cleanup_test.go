@@ -13,7 +13,7 @@ import (
 )
 
 func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansRunScopedState(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

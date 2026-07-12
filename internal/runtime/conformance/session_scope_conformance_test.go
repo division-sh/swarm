@@ -45,7 +45,7 @@ type sessionScopeConformanceCase struct {
 
 func TestSessionScopeConformance(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	cases := []sessionScopeConformanceCase{

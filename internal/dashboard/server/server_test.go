@@ -2354,7 +2354,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t
 }
 
 func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelector(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := store.NewPostgresStore(dsn)
@@ -2463,7 +2463,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 }
 
 func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := store.NewPostgresStore(dsn)
@@ -2543,7 +2543,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 }
 
 func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := store.NewPostgresStore(dsn)

@@ -134,7 +134,7 @@ func testOperationalRuntimeConfig() *config.Config {
 
 func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"regexp"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	activeEntity := uuid.NewString()
 	terminalEntity := uuid.NewString()

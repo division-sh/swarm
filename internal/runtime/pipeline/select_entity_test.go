@@ -20,7 +20,7 @@ import (
 )
 
 func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -67,7 +67,7 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 }
 
 func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -113,7 +113,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 }
 
 func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -192,7 +192,7 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -225,7 +225,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 }
 
 func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteLegacyFingerprint(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -307,7 +307,7 @@ func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteLegacyF
 }
 
 func TestRepairContractEntityTypesBlocksPersistedMissingBundleRow(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -357,7 +357,7 @@ func TestRepairContractEntityTypesBlocksPersistedMissingBundleRow(t *testing.T) 
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -385,7 +385,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -402,7 +402,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMat
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministicIDConflict(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -438,7 +438,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreatesOneEntity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -474,7 +474,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreate
 }
 
 func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptIdempotent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectOrCreateEntityTestCoordinator(t, db)
@@ -509,7 +509,7 @@ func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptId
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRepoCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
@@ -548,7 +548,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 }
 
 func TestBackgroundWorkflowNodeSelectEntityDuplicateSameEventIsReceiptIdempotent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -596,7 +596,7 @@ func TestBackgroundWorkflowNodeSelectEntityDuplicateSameEventIsReceiptIdempotent
 }
 
 func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatches(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -661,7 +661,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 }
 
 func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -677,7 +677,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T
 }
 
 func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnMissingPayloadRef(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
@@ -693,7 +693,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnMissingPayloadRef(t 
 }
 
 func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)

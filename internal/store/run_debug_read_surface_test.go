@@ -42,7 +42,7 @@ func assertRunTestQuiescence(t *testing.T, got RunTestQuiescence, want RunTestQu
 }
 
 func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -105,7 +105,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 }
 
 func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -143,7 +143,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 }
 
 func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMutations(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -296,7 +296,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 }
 
 func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -397,7 +397,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -500,7 +500,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWatermark(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -584,7 +584,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessionDoesNotExist(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 

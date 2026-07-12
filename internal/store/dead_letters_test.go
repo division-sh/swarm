@@ -16,7 +16,7 @@ import (
 )
 
 func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -71,7 +71,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 }
 
 func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -112,7 +112,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 }
 
 func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 

@@ -75,7 +75,7 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 }
 
 func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -153,7 +153,7 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRo
 }
 
 func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeliveries(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -238,7 +238,7 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 }
 
 func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -288,7 +288,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 }
 
 func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -341,7 +341,7 @@ func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t 
 }
 
 func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -400,7 +400,7 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 }
 
 func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -470,7 +470,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 }
 
 func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -536,7 +536,7 @@ func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T)
 }
 
 func TestPostgresStore_MarkRunTerminal_RejectsRunsWithoutCanonicalTerminalEvidenceColumns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -578,7 +578,7 @@ func TestPostgresStore_MarkRunTerminal_RejectsRunsWithoutCanonicalTerminalEviden
 }
 
 func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeDependentDDL(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -658,7 +658,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeD
 }
 
 func TestPostgresStore_EnsureSchemaTables_ReportsOutdatedSchemaForLegacyTimers(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -714,7 +714,7 @@ func TestPostgresStore_EnsureSchemaTables_ReportsOutdatedSchemaForLegacyTimers(t
 }
 
 func TestPostgresStore_EnsureSchemaTables_AllowsCurrentTimerSchema(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -724,7 +724,7 @@ func TestPostgresStore_EnsureSchemaTables_AllowsCurrentTimerSchema(t *testing.T)
 }
 
 func TestPostgresStore_EnsureSchemaTables_AddsMailboxDeferredUntilAndNormalizesLegacyDeferredRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -857,7 +857,7 @@ func legacyTimerDiagnosticPlan() SchemaTableDDL {
 }
 
 func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibilityBeforeDependentDDL(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -929,7 +929,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibil
 }
 
 func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendProfiles(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1014,7 +1014,7 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 }
 
 func TestPostgresStore_EnsureAgentModelAliasColumnMigratesLegacyModelTier(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1075,7 +1075,7 @@ func TestPostgresStore_EnsureAgentModelAliasColumnMigratesLegacyModelTier(t *tes
 }
 
 func TestPostgresStore_EnsureAgentModelAliasColumnRejectsUnmappableLegacyModelTier(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1106,7 +1106,7 @@ func TestPostgresStore_EnsureAgentModelAliasColumnRejectsUnmappableLegacyModelTi
 }
 
 func TestPostgresStore_EnsureSchemaTables_PhasesConversationAuditRunIDCompatibilityBeforeDependentDDL(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1183,7 +1183,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesConversationAuditRunIDCompatibil
 }
 
 func TestPostgresStore_EnsureSchemaTables_DropsDeprecatedEntitySubjectCompatibility(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1245,7 +1245,7 @@ func TestPostgresStore_EnsureSchemaTables_DropsDeprecatedEntitySubjectCompatibil
 }
 
 func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurnsSupportsResetAll(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1338,7 +1338,7 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurns
 }
 
 func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButRejectsSecondLiveOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -1377,7 +1377,7 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 }
 
 func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -1400,7 +1400,7 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 }
 
 func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -1447,7 +1447,7 @@ func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 }
 
 func TestPostgresStore_AgentSessionSuccessorInvariantsRejectCrossScopeAndLegacyWrites(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -1614,7 +1614,7 @@ func installFailAgentTurnInsertTrigger(t *testing.T, ctx context.Context, db *sq
 }
 
 func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1707,7 +1707,7 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 }
 
 func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1746,7 +1746,7 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 }
 
 func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
 		if strings.TrimSpace(eventType) != "task.completed" {
@@ -1787,7 +1787,7 @@ func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersisten
 }
 
 func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
 		if strings.TrimSpace(eventType) != "platform.inbound_recorded" {
@@ -1819,7 +1819,7 @@ func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePe
 }
 
 func TestPostgresStore_RecordInboundEvent_PlatformCatalogSchemaMatchesProducerPayload(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	pg.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	ctx := context.Background()
@@ -1875,7 +1875,7 @@ func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValid
 }
 
 func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminalDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1932,7 +1932,7 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 }
 
 func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -1993,7 +1993,7 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 }
 
 func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2098,7 +2098,7 @@ func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *test
 }
 
 func TestPostgresStore_EnsureSchemaTables_MigratesEventReceiptsTypedSubscriberIdentity(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
@@ -2187,7 +2187,7 @@ func TestPostgresStore_EnsureSchemaTables_MigratesEventReceiptsTypedSubscriberId
 }
 
 func TestPostgresStore_EnsureSchemaTables_FailsClosedOnNodePipelineMigrationConflict(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
@@ -2220,7 +2220,7 @@ func TestPostgresStore_EnsureSchemaTables_FailsClosedOnNodePipelineMigrationConf
 }
 
 func TestPostgresStore_EnsureSchemaTables_FailsClosedOnAmbiguousNodePipelineRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
@@ -2296,7 +2296,7 @@ func eventReceiptsTypedIdentityPlans(t *testing.T) []SchemaTableDDL {
 }
 
 func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2376,7 +2376,7 @@ func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) 
 }
 
 func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	pg.schemaCaps = StoreSchemaCapabilities{
 		Events: EventSchemaCapabilities{
@@ -2474,7 +2474,7 @@ func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 }
 
 func TestPostgresStore_ListPendingEventsForAgent_UsesTypedEnvelopeMetadata(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2525,7 +2525,7 @@ func TestPostgresStore_ListPendingEventsForAgent_UsesTypedEnvelopeMetadata(t *te
 }
 
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2583,7 +2583,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 }
 
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 
 	if _, err := db.ExecContext(ctx, `ALTER TABLE events DROP COLUMN run_id`); err != nil {
@@ -2623,7 +2623,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 }
 
 func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2662,7 +2662,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 }
 
 func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2705,7 +2705,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 }
 
 func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2721,7 +2721,7 @@ func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
 }
 
 func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2749,7 +2749,7 @@ func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
 }
 
 func TestPostgresStore_Inbound_RecordAndPurge(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2769,7 +2769,7 @@ func TestPostgresStore_Inbound_RecordAndPurge(t *testing.T) {
 }
 
 func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2944,7 +2944,7 @@ func TestNormalizeJSONPayload_RedactsSensitiveText(t *testing.T) {
 }
 
 func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -2999,7 +2999,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 }
 
 func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
@@ -3072,7 +3072,7 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 }
 
 func TestSchedules_ExactIdentityUsesFlowInstance(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
@@ -3166,7 +3166,7 @@ func TestSchedules_ExactIdentityUsesFlowInstance(t *testing.T) {
 }
 
 func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runA := uuid.NewString()
@@ -3252,7 +3252,7 @@ func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
 }
 
 func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
@@ -3284,7 +3284,7 @@ func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 }
 
 func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -3320,7 +3320,7 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 }
 
 func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
@@ -3356,7 +3356,7 @@ func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *t
 }
 
 func TestSchedules_MarkScheduleFiredExact_PreservesRecurringReplayAndFiresOnceSchedules(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
@@ -3444,7 +3444,7 @@ func TestSchedules_MarkScheduleFiredExact_PreservesRecurringReplayAndFiresOnceSc
 }
 
 func TestSchedules_ClaimSchedule_IsExclusiveAcrossStores(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pg1 := &PostgresStore{DB: db}
 	pg2 := &PostgresStore{DB: db}
@@ -3493,7 +3493,7 @@ func TestSchedules_ClaimSchedule_IsExclusiveAcrossStores(t *testing.T) {
 }
 
 func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pg1 := &PostgresStore{DB: db}
 	pg2 := &PostgresStore{DB: db}
@@ -3575,7 +3575,7 @@ func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
 }
 
 func TestSchedules_CancelExactTerminalAllowsSubsequentReclaim(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pgOwner := &PostgresStore{DB: db}
 	pgSuccessor := &PostgresStore{DB: db}
@@ -3626,7 +3626,7 @@ func TestSchedules_CancelExactTerminalAllowsSubsequentReclaim(t *testing.T) {
 }
 
 func TestSchedules_CompleteScheduleFireExactReleasesClaimForRecreatedOnceTimer(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	pgOwner := &PostgresStore{DB: db}
 	pgSuccessor := &PostgresStore{DB: db}
@@ -3677,7 +3677,7 @@ func TestSchedules_CompleteScheduleFireExactReleasesClaimForRecreatedOnceTimer(t
 }
 
 func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3733,7 +3733,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 }
 
 func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3788,7 +3788,7 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 }
 
 func TestPendingEventQueries_PreserveParentCorrelation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3844,7 +3844,7 @@ func TestPendingEventQueries_PreserveParentCorrelation(t *testing.T) {
 }
 
 func TestManagerStore_EventReceiptBranches(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3879,7 +3879,7 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 }
 
 func TestManagerStore_GetEventReceipt_FailsClosedOnMalformedSideEffects(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3910,7 +3910,7 @@ func TestManagerStore_GetEventReceipt_FailsClosedOnMalformedSideEffects(t *testi
 }
 
 func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -3923,7 +3923,7 @@ func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
 }
 
 func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
@@ -3972,7 +3972,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 }
 
 func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -4017,7 +4017,7 @@ func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testin
 }
 
 func TestManagerStore_EnsureEntitySchema(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
@@ -4030,7 +4030,7 @@ func TestManagerStore_EnsureEntitySchema(t *testing.T) {
 }
 
 func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
@@ -4073,7 +4073,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 }
 
 func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4142,7 +4142,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 }
 
 func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	baseCtx := context.Background()
 	resetAgentSessionsSpecTable(t, baseCtx, pg)
@@ -4191,7 +4191,7 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 }
 
 func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4246,7 +4246,7 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 }
 
 func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4279,7 +4279,7 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 }
 
 func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4378,7 +4378,7 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 }
 
 func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4401,7 +4401,7 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeStat
 }
 
 func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalWatchdogRuntimeState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4424,7 +4424,7 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalWatchdogRun
 }
 
 func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConversation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4466,7 +4466,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConve
 }
 
 func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4501,7 +4501,7 @@ func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.
 }
 
 func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4552,7 +4552,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *tes
 }
 
 func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -4631,7 +4631,7 @@ func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t
 }
 
 func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -4680,7 +4680,7 @@ func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *test
 }
 
 func TestManagerStore_AppendAgentTurn_CanonicalizesTurnBlocksThroughSingleStoreAdapter(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -4727,7 +4727,7 @@ func TestManagerStore_AppendAgentTurn_CanonicalizesTurnBlocksThroughSingleStoreA
 }
 
 func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwnershipAndPersistsTurnRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4785,7 +4785,7 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 }
 
 func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4833,7 +4833,7 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 }
 
 func TestManagerStore_AppendAgentTurn_RollsBackTaskAuditAndTurnRowWhenTurnInsertFails(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4871,7 +4871,7 @@ func TestManagerStore_AppendAgentTurn_RollsBackTaskAuditAndTurnRowWhenTurnInsert
 }
 
 func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4942,7 +4942,7 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 }
 
 func TestManagerStore_StatelessConversationFailsClosedWithoutAuditCapabilityAndDoesNotCreateTable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -4976,7 +4976,7 @@ func TestManagerStore_StatelessConversationFailsClosedWithoutAuditCapabilityAndD
 }
 
 func TestManagerStore_TaskAppendTurnFailsClosedWithoutAuditCapabilityAndDoesNotCreateTable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5009,7 +5009,7 @@ func TestManagerStore_TaskAppendTurnFailsClosedWithoutAuditCapabilityAndDoesNotC
 }
 
 func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5063,7 +5063,7 @@ func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 }
 
 func TestManagerStore_TaskConversationUpsertIsIdempotentBySessionID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5108,7 +5108,7 @@ func TestManagerStore_TaskConversationUpsertIsIdempotentBySessionID(t *testing.T
 }
 
 func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5184,7 +5184,7 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 }
 
 func TestManagerStore_AppendAgentTurn_TaskEntityScopeSurvivesConversationUpsert(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5269,7 +5269,7 @@ func TestManagerStore_AppendAgentTurn_TaskEntityScopeSurvivesConversationUpsert(
 }
 
 func TestManagerStore_AppendAgentTurn_TaskFlowScopeSurvivesConversationUpsert(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5354,7 +5354,7 @@ func TestManagerStore_AppendAgentTurn_TaskFlowScopeSurvivesConversationUpsert(t 
 }
 
 func TestManagerStore_AppendAgentTurn_TaskDoesNotAdoptLegacySessionRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5418,7 +5418,7 @@ func TestManagerStore_AppendAgentTurn_TaskDoesNotAdoptLegacySessionRow(t *testin
 }
 
 func TestPostgresStore_EnsureConversationAuditTable_DoesNotMigrateLegacyTaskSessionRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -5490,7 +5490,7 @@ func TestPostgresStore_EnsureConversationAuditTable_DoesNotMigrateLegacyTaskSess
 }
 
 func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBeforeLiveSessionAcquire(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -5647,7 +5647,7 @@ func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBefore
 }
 
 func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5687,7 +5687,7 @@ func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlo
 }
 
 func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlockField(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5727,7 +5727,7 @@ func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlo
 }
 
 func TestManagerStore_AppendAgentTurn_TaskReactivatesExistingInactiveAuditRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5791,7 +5791,7 @@ func TestManagerStore_AppendAgentTurn_TaskReactivatesExistingInactiveAuditRow(t 
 }
 
 func TestManagerStore_TaskConversationDoesNotPersistLiveSessionRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -5844,7 +5844,7 @@ func TestManagerStore_TaskConversationDoesNotPersistLiveSessionRow(t *testing.T)
 }
 
 func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -5887,7 +5887,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 }
 
 func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6004,7 +6004,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 }
 
 func TestManagerStore_UpsertAgent_PersistsPlatformInternalGlobalSessionAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6113,7 +6113,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 }
 
 func TestManagerStore_UpsertAgent_RejectsInvalidConversationModeAtAdmission(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6143,7 +6143,7 @@ func TestManagerStore_UpsertAgent_RejectsInvalidConversationModeAtAdmission(t *t
 }
 
 func TestManagerStore_UpsertAgent_FailsClosedWithoutHotPathSchemaRepair(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6203,7 +6203,7 @@ func TestManagerStore_UpsertAgent_FailsClosedWithoutHotPathSchemaRepair(t *testi
 }
 
 func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6231,7 +6231,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 }
 
 func TestPostgresStore_EnsureSchemaCompatibilityColumnsAddsMultiBundleRunColumnsAsLegacy(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -6293,7 +6293,7 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsAddsMultiBundleRunColumns
 }
 
 func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6321,7 +6321,7 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing
 }
 
 func TestManagerStore_LoadAgents_FailsClosedWithoutHotPathSchemaRepair(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6378,7 +6378,7 @@ func TestManagerStore_LoadAgents_FailsClosedWithoutHotPathSchemaRepair(t *testin
 }
 
 func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 	resetAgentSessionsSpecTable(t, ctx, pg)
@@ -6567,7 +6567,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 }
 
 func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6620,7 +6620,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 }
 
 func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColumnUpgrade(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -6713,7 +6713,7 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColum
 }
 
 func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)

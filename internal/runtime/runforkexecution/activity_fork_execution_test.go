@@ -28,7 +28,7 @@ import (
 )
 
 func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 

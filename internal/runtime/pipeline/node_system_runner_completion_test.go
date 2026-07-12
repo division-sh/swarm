@@ -31,7 +31,7 @@ func (b *systemNodeCompletionBus) ConvergeNormalRunCompletionForEvent(_ context.
 }
 
 func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCompletion(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -121,7 +121,7 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 }
 
 func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -183,7 +183,7 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 }
 
 func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -234,7 +234,7 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 }
 
 func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -279,7 +279,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 }
 
 func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -346,7 +346,7 @@ func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.
 }
 
 func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -446,7 +446,7 @@ func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 }
 
 func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -518,7 +518,7 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 }
 
 func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -577,7 +577,7 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 }
 
 func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -640,7 +640,7 @@ func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing
 }
 
 func TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -690,7 +690,7 @@ func TestSystemNodeProcessedSettlementFailsWithTerminalNodeDeliveryAuthority(t *
 		{name: "retry_exhausted_failed", status: "failed", retryCount: DefaultSystemNodeRetryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			ctx := context.Background()
 			runID := uuid.NewString()
 			eventID := uuid.NewString()

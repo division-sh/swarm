@@ -3,6 +3,7 @@ package cataloge2e
 import (
 	"context"
 	"database/sql"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -77,7 +78,7 @@ func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 			}
 
 			_, startRuntime := tier11StartedRuntimeFixtures[fixtureName]
-			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
+			h := newRuntimeHarness(t, fixtureRoot, startRuntime, testutil.PostgresRowState())
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, catalogRuntimePublishTimeout)
@@ -128,7 +129,7 @@ func TestTier11DynamicFlowInstanceFlowMatchTarget_RealRuntime(t *testing.T) {
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-	h := newRuntimeHarness(t, fixtureRoot, true)
+	h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
 	h.seedEntityFields(expected)
 	for _, step := range expected.triggerSequence() {
 		h.publishAndWait(step, catalogRuntimePublishTimeout)

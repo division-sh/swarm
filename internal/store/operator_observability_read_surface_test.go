@@ -14,7 +14,7 @@ import (
 
 func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -135,7 +135,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 
 func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -203,7 +203,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 
 func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -336,7 +336,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -478,7 +478,7 @@ func assertRuntimeLogIDsAndSources(t *testing.T, logs []OperatorRuntimeLogEntry,
 
 func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -533,7 +533,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 
 func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -614,7 +614,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 
 func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -697,7 +697,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 
 func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()
@@ -734,7 +734,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 
 func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runID := uuid.NewString()

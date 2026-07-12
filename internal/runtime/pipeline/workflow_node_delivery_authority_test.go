@@ -15,7 +15,7 @@ import (
 )
 
 func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
@@ -43,7 +43,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 }
 
 func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLog(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
@@ -76,7 +76,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 }
 
 func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
@@ -115,7 +115,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 		{name: "retry_exhausted_failed", status: "failed", retryCount: DefaultSystemNodeRetryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			ctx := context.Background()
 			pc, bus := newDeliveryAuthorityCoordinator(t, db)
 			runCtx := testPipelineCoordinatorRunContext(t, pc)
@@ -146,7 +146,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 }
 
 func TestPipelineCoordinatorInterceptSkipsWhenCanonicalDeliveryAuthorityUnavailable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pc, bus := newDeliveryAuthorityCoordinatorWithReceipts(t, db, false)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
@@ -170,7 +170,7 @@ func TestPipelineCoordinatorInterceptSkipsWhenCanonicalDeliveryAuthorityUnavaila
 }
 
 func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pc, _ := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)

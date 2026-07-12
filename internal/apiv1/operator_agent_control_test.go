@@ -20,7 +20,7 @@ import (
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	db := sqliteStore.DB
 	controller := &fakeAgentControlController{
 		directiveResponse: "accepted",
@@ -109,7 +109,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 }
 
 func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -156,7 +156,7 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 }
 
 func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
 	operation := runtimeagentcontrol.DirectiveOperation{
 		OperationID:      "00000000-0000-0000-0000-000000000801",
@@ -209,7 +209,7 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 }
 
 func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	db := sqliteStore.DB
 	missingRunID := "00000000-0000-0000-0000-000000000404"
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
@@ -267,7 +267,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 }
 
 func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBus(pg)
@@ -317,7 +317,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 }
 
 func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingOwnerLands(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bootFingerprint := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
@@ -368,7 +368,7 @@ func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingO
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{

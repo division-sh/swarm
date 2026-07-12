@@ -340,7 +340,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		"search_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresRowState())
 
 	defs := exec.ToolDefinitionsForActor(actor)
 	names := roleScopedToolDefinitionMap(defs)
@@ -490,7 +490,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresRowState())
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
 	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
@@ -559,7 +559,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
 		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresFreshPhysical())
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
 	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
@@ -606,7 +606,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
-	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresRowState())
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	for _, name := range []string{"get_entity", "query_entities"} {
@@ -627,7 +627,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresRowState())
 	currentID := uuid.NewString()
 	siblingID := uuid.NewString()
 	foreignID := uuid.NewString()
@@ -703,7 +703,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
@@ -1290,7 +1290,7 @@ types: {}
 accounts:
   status: text
 `)
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1387,7 +1387,7 @@ types: {}
 accounts:
   status: text
 `)
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2224,7 +2224,7 @@ foreign:
 		Role:  "analyzer",
 		Tools: []string{"save_entity_field", "get_entity"},
 	}
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ensureEntityToolTestRun(t, db)
 	bus := &entityToolRuntimeLogBus{}
 	pg := &store.PostgresStore{DB: db}
@@ -2739,12 +2739,12 @@ accounts:
 
 func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
-	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true)
+	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true, testutil.PostgresRowState())
 }
 
-func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, requirement)
 	ensureEntityToolTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)

@@ -21,7 +21,7 @@ const bundleDeleteTestHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const bundleDeleteOtherHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 }
 
 func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRuns(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 }
 
 func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsDeleted(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 }
 
 func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -256,7 +256,7 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 }
 
 func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceRunCreation(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

@@ -2,6 +2,7 @@ package cataloge2e
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-tools", "test-flow-data-access")
 
-	h := newRuntimeHarness(t, fixtureRoot, true)
+	h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
 	cfg, ok := h.rt.Manager.GetAgentConfig("reference-agent")
 	if !ok {
 		t.Fatal("reference-agent config was not registered")

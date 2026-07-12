@@ -19,7 +19,7 @@ import (
 func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	path := filepath.Join(t.TempDir(), "dev.db")
-	first, err := NewSQLiteRuntimeStore(path)
+	first, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 func TestSQLiteSchemaBootstrapRejectsUnstampedWithoutWALMutation(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	store, err := NewSQLiteRuntimeStore(path)
+	store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestSQLiteSchemaBootstrapConcurrentCreatorsConverge(t *testing.T) {
 	stores := make([]*SQLiteRuntimeStore, 2)
 	for i := range stores {
 		var err error
-		stores[i], err = NewSQLiteRuntimeStore(path)
+		stores[i], err = NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), path))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,7 +117,7 @@ func TestSQLiteSchemaBootstrapConcurrentCreatorsConverge(t *testing.T) {
 
 func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	if err := store.BootstrapSchema(context.Background(), request); err != nil {
@@ -138,7 +138,7 @@ func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 	const createUnexpectedIndex = `CREATE UNIQUE INDEX drift_probe_idx ON timers(status) WHERE status = 'pending'`
 
 	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "unexpected-index.db"))
+		store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "unexpected-index.db")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 	})
 
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 		t.Cleanup(cleanup)
 		store := &PostgresStore{DB: db}
 		if _, err := db.Exec(createUnexpectedIndex); err != nil {
@@ -177,7 +177,7 @@ func assertUnexpectedIndexRejected(t *testing.T, err error) {
 func TestSQLiteSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	path := filepath.Join(t.TempDir(), "malformed-origin.db")
-	store, err := NewSQLiteRuntimeStore(path)
+	store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestSQLiteSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 
 func TestPostgresSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	var target string
@@ -260,7 +260,7 @@ func assertMalformedStoredOrigins(
 
 func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
-	dsn, db, cleanup := testutil.StartEmptyPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresEmptyPhysical())
 	t.Cleanup(cleanup)
 	second, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -291,7 +291,7 @@ func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 
 func TestPostgresSchemaBootstrapRejectsBeforeExtensionOrSchemaMutation(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
-	_, db, cleanup := testutil.StartEmptyPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresEmptyPhysical())
 	t.Cleanup(cleanup)
 	if _, err := db.Exec(`CREATE TABLE legacy_state (id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
@@ -330,7 +330,7 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 				break
 			}
 			if backend == "sqlite" {
-				store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "rollback.db"))
+				store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "rollback.db")))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -344,7 +344,7 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 				}
 				return
 			}
-			_, db, cleanup := testutil.StartEmptyPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresEmptyPhysical())
 			t.Cleanup(cleanup)
 			store := &PostgresStore{DB: db}
 			if err := store.BootstrapSchema(context.Background(), request); err == nil {
@@ -361,7 +361,7 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	request.StatePlans = generatedProbeStatePlans()
-	store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "state.db"))
+	store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "state.db")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	request.StatePlans = generatedProbeStatePlans()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	var target string

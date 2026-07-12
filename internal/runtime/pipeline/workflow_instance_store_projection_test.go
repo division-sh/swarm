@@ -14,7 +14,7 @@ import (
 )
 
 func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -154,7 +154,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 }
 
 func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	workflowStore := NewWorkflowInstanceStore(db)
@@ -226,7 +226,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 }
 
 func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -325,7 +325,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 }
 
 func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPathOnRoundTrip(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -425,7 +425,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 
 			store := NewWorkflowInstanceStore(db)

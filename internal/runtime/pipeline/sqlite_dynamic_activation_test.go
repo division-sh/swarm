@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"github.com/division-sh/swarm/internal/testutil"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)

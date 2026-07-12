@@ -23,7 +23,7 @@ import (
 const retryPolicyEntityStateRunID = "22222222-2222-2222-2222-222222222222"
 
 func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -61,7 +61,7 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 }
 
 func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -128,7 +128,7 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 }
 
 func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
@@ -151,7 +151,7 @@ func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *test
 }
 
 func TestUpsertEventReceipt_DirectDeadLetterIsNotRetryExhaustion_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
@@ -174,7 +174,7 @@ func TestUpsertEventReceipt_DirectDeadLetterIsNotRetryExhaustion_V2(t *testing.T
 }
 
 func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -245,7 +245,7 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 }
 
 func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -294,7 +294,7 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 }
 
 func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -369,7 +369,7 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 }
 
 func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeRun_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresFreshPhysical())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -483,7 +483,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 }
 
 func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresFreshPhysical())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -566,7 +566,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 }
 
 func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -621,7 +621,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 }
 
 func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -677,7 +677,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pg, cleanup := newTestPostgresStore(t)
+			pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 			defer cleanup()
 
 			ctx := context.Background()
@@ -720,7 +720,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 }
 
 func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -753,7 +753,7 @@ func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *
 }
 
 func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -804,7 +804,7 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 }
 
 func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -925,7 +925,7 @@ func assertPendingDeliveryDetail(t *testing.T, got store.PendingAgentDeliveryDet
 }
 
 func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -964,7 +964,7 @@ func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
 }
 
 func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -987,7 +987,7 @@ func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *te
 }
 
 func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1020,7 +1020,7 @@ func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *te
 }
 
 func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1116,9 +1116,9 @@ func rewindCanonicalDeliveryAttempt(t *testing.T, ctx context.Context, pg *store
 	}
 }
 
-func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
+func newTestPostgresStore(t *testing.T, requirement testutil.DatabaseRequirement) (*store.PostgresStore, func()) {
 	t.Helper()
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, requirement)
 	appDSN := dsn
 	pg, err := store.NewPostgresStore(appDSN)
 	if err != nil {

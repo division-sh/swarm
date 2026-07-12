@@ -3553,7 +3553,7 @@ func TestRunServeRuntimeJoinsEarlyStartupAndStoreCleanupFailure(t *testing.T) {
 }
 
 func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -3601,7 +3601,7 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 }
 
 func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -3638,7 +3638,7 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 }
 
 func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMode(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	pinnedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -3687,7 +3687,7 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 }
 
 func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
@@ -10136,7 +10136,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
+	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:         writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
@@ -10162,7 +10162,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 			t.Fatalf("concise abandon output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
 		}
 	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), sqlitePath))
 	if err != nil {
 		t.Fatalf("reopen sqlite store: %v", err)
 	}
@@ -10615,10 +10615,10 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	t.Helper()
 	return installServeRuntimePostgresTestStoresForDatabase(t, func(workspaceMountSources) serveWorkspaceLifecycle {
 		return workspaceFactory()
-	}, false)
+	}, false, testutil.PostgresFreshPhysical())
 }
 
-func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string, string) {
+func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, requirement testutil.DatabaseRequirement) (string, string) {
 	t.Helper()
 	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRoot(), defaultPlatformSpecPath))
 	if err != nil {
@@ -10628,7 +10628,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, requirement, sqlitePath))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}
@@ -10684,10 +10684,10 @@ func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 
 func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
-	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true)
+	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true, testutil.PostgresRowState())
 }
 
-func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle, useTemplate bool) (string, *sql.DB, *store.PostgresStore) {
+func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle, useTemplate bool, requirement testutil.DatabaseRequirement) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
@@ -10695,9 +10695,9 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 	var db *sql.DB
 	var cleanup func()
 	if useTemplate {
-		dsn, db, cleanup = testutil.StartPostgres(t)
+		dsn, db, cleanup = testutil.AcquirePostgres(t, requirement)
 	} else {
-		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
+		dsn, db, cleanup = testutil.AcquirePostgres(t, requirement)
 	}
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
@@ -10866,7 +10866,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 }
 
 func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
@@ -10892,7 +10892,7 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 }
 
 func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
@@ -11190,7 +11190,7 @@ func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveries
 }
 
 func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -11246,7 +11246,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 }
 
 func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -11299,7 +11299,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 }
 
 func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmissionJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -11483,7 +11483,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateWithContractsReachesSelectedActivati
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsBorrowedRequireExplicitData(t *testing.T) {
-	dsn, _, _ := testutil.StartPostgres(t)
+	dsn, _, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRoot()
 	borrowedRoot := t.TempDir()
@@ -11513,7 +11513,7 @@ flows: []
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal(t *testing.T) {
-	dsn, _, _ := testutil.StartPostgres(t)
+	dsn, _, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	configPath := os.Getenv("SWARM_CONFIG")
 	rawConfig, err := os.ReadFile(configPath)
@@ -11536,7 +11536,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRoot()
 	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
@@ -11628,7 +11628,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRoot()
 	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
@@ -11679,7 +11679,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 }
 
 func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -11785,7 +11785,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 }
 
 func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
@@ -11835,7 +11835,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 }
 
 func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	setPostgresEnvFromDSN(t, dsn)
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
@@ -11872,7 +11872,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBin
 }
 
 func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -11933,7 +11933,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 }
 
 func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipientPlan(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -12581,7 +12581,7 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 }
 
 func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
@@ -12617,7 +12617,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 }
 
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
@@ -12730,7 +12730,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 }
 
 func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
@@ -14683,7 +14683,7 @@ func TestInitializeStateStoresDoesNotPlanGeneratedEntityTables(t *testing.T) {
 func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testing.T) {
 	ctx := context.Background()
 	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
-	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "dev.db")))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}
@@ -14707,7 +14707,7 @@ func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testin
 func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *testing.T) {
 	ctx := context.Background()
 	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
-	dsn, db, cleanup := testutil.StartEmptyPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresEmptyPhysical())
 	t.Cleanup(cleanup)
 	pg, err := store.NewPostgresStore(dsn)
 	if err != nil {
@@ -15418,7 +15418,7 @@ func TestValidateServeGatewayURLEnvForNonDevRejectsAnyRetiredURLEnv(t *testing.T
 func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *testing.T) {
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {

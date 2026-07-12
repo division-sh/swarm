@@ -17,7 +17,7 @@ import (
 )
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
-	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
+	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond, testutil.SQLiteFreshFile())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -92,7 +92,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 }
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *testing.T) {
-	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
+	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond, testutil.SQLiteFreshFile())
 	baseCtx := context.Background()
 
 	lockTx, err := lockStore.DB.BeginTx(baseCtx, nil)
@@ -127,7 +127,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 }
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeout(t *testing.T) {
-	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
+	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond, testutil.SQLiteFreshFile())
 	baseCtx := context.Background()
 
 	lockTx, err := lockStore.DB.BeginTx(baseCtx, nil)
@@ -162,7 +162,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 }
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 	tx, err := store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction(t *t
 }
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutation(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -238,7 +238,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 }
 
 func TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -280,11 +280,11 @@ func TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks(t *testing.T
 	}
 }
 
-func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration) (*SQLiteRuntimeStore, *SQLiteRuntimeStore) {
+func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration, requirement testutil.DatabaseRequirement) (*SQLiteRuntimeStore, *SQLiteRuntimeStore) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runtime.db")
-	store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	lockStore := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	store := newBootstrappedSQLiteRuntimeStoreForPath(t, path, requirement)
+	lockStore := newBootstrappedSQLiteRuntimeStoreForPath(t, path, requirement)
 	for _, db := range []*sql.DB{store.DB, lockStore.DB} {
 		if _, err := db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA busy_timeout = %d", int(busyTimeout/time.Millisecond))); err != nil {
 			t.Fatalf("set sqlite busy_timeout: %v", err)

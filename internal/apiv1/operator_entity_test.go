@@ -123,7 +123,7 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 
 func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg := &store.PostgresStore{DB: db}
@@ -199,7 +199,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 
 func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	runID := "11111111-1111-1111-1111-111111111111"
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"

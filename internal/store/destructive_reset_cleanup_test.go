@@ -17,7 +17,7 @@ import (
 )
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPreservesBoundaries(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAuthority(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 		runtimeagentcontrol.DirectiveOperationFailed,
 	} {
 		t.Run(string(terminalState), func(t *testing.T) {
-			dsn, _, cleanup := testutil.StartPostgres(t)
+			dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			pg, err := NewPostgresStore(dsn)
 			if err != nil {
@@ -257,7 +257,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleCatalog(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -299,7 +299,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleC
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundleCatalog(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -341,7 +341,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundl
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWithoutMutation(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -377,7 +377,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWi
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPlanPersistedRun(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPl
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfterPlan(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -478,7 +478,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 }
 
 func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanup(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -530,7 +530,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesIntoCleanupSet(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -731,7 +731,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLinkedEventsAndDeliveries(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -858,7 +858,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKeyReference(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -908,7 +908,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -932,7 +932,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelope(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -970,7 +970,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelo
 }
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

@@ -45,7 +45,7 @@ func (a *destructiveResetBlockingDirectiveAgent) BoardStep(context.Context, runt
 }
 
 func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	pg := &store.PostgresStore{DB: db}

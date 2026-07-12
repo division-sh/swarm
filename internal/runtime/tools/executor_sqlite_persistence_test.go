@@ -68,7 +68,7 @@ accounts:
   score: numeric
   priority: integer
 `)
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := newSQLiteRuntimeToolStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
@@ -139,7 +139,7 @@ accounts:
 }
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := newSQLiteRuntimeToolStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
@@ -181,7 +181,7 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := newSQLiteRuntimeToolStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
@@ -243,8 +243,8 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 		name  string
 		store humanTaskToolStore
 	}{
-		{name: "postgres", store: newPostgresHumanTaskToolStoreForTest(t)},
-		{name: "sqlite", store: newSQLiteRuntimeToolStoreForTest(t)},
+		{name: "postgres", store: newPostgresHumanTaskToolStoreForTest(t, testutil.PostgresRowState())},
+		{name: "sqlite", store: newSQLiteRuntimeToolStoreForTest(t, testutil.SQLiteDefaultTemp())},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.Config{Extensions: map[string]any{
@@ -478,14 +478,14 @@ func createHumanTaskWithExecutor(t *testing.T, exec *runtimetools.Executor, acto
 	return taskID
 }
 
-func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {
+func newPostgresHumanTaskToolStoreForTest(t *testing.T, requirement testutil.DatabaseRequirement) *store.PostgresStore {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	return &store.PostgresStore{DB: db}
 }
 
-func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
+func newSQLiteRuntimeToolStoreForTest(t *testing.T, requirement testutil.DatabaseRequirement) *store.SQLiteRuntimeStore {
 	t.Helper()
 	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
@@ -499,7 +499,7 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, requirement, filepath.Join(t.TempDir(), "dev.db")))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}

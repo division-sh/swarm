@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"github.com/division-sh/swarm/internal/testutil"
 	"path/filepath"
 	"testing"
 )
@@ -36,7 +37,7 @@ func runCatalogRequiredSmokeFixture(t *testing.T, fixtureRoot string, startRunti
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-	h := newRuntimeHarness(t, fixtureRoot, startRuntime)
+	h := newRuntimeHarness(t, fixtureRoot, startRuntime, testutil.PostgresRowState())
 	h.seedEntityFields(expected)
 	for _, step := range expected.triggerSequence() {
 		h.publishAndWait(step, catalogRuntimePublishTimeout)

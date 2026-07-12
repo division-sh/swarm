@@ -19,7 +19,7 @@ import (
 func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *testing.T) {
 	bundle := templateflowpilot.LoadBundle(t, templateflowpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, workflowStore := newTemplateFlowPilotPipelineCoordinator(t, db, bundle, source)
 	ctx := testPipelineCoordinatorRunContext(t, pc)

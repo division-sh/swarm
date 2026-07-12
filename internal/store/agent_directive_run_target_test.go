@@ -10,7 +10,7 @@ import (
 )
 
 func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}

@@ -14,7 +14,7 @@ import (
 
 func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	runA := uuid.NewString()
@@ -165,7 +165,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 
 func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	db := sqliteStore.DB
 
 	runA := uuid.NewString()

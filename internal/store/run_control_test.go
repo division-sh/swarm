@@ -12,7 +12,7 @@ import (
 )
 
 func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -112,7 +112,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 }
 
 func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()

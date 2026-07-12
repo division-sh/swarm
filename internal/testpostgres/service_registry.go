@@ -238,6 +238,10 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 		_ = db.Close()
 		return nil, fmt.Errorf("wait for runner-owned Postgres: %w", err)
 	}
+	if err := hardenOwnedPostgres(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := verifyOwnedPostgresSettings(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -251,6 +255,15 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (*Se
 	service.Connection = connection
 	cleanupOnError = false
 	return service, nil
+}
+
+func hardenOwnedPostgres(ctx context.Context, db *sql.DB) error {
+	for _, name := range []string{"postgres", "template1"} {
+		if _, err := db.ExecContext(ctx, `REVOKE CONNECT, TEMPORARY ON DATABASE `+quoteIdent(name)+` FROM PUBLIC`); err != nil {
+			return fmt.Errorf("harden runner-owned Postgres database %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) MarkChildRunning() error {

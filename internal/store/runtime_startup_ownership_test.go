@@ -9,7 +9,7 @@ import (
 )
 
 func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 
 	lease1, err := pg.AcquireRuntimeStartupOwnership(context.Background(), "runtime-1")
@@ -28,7 +28,7 @@ func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *te
 }
 
 func TestPostgresStore_AcquireRuntimeStartupOwnership_ReleaseAllowsSuccessor(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 
 	lease1, err := pg.AcquireRuntimeStartupOwnership(context.Background(), "runtime-1")

@@ -14,7 +14,7 @@ import (
 )
 
 func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDeliveries(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 }
 
 func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableWork(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -278,7 +278,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 }
 
 func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableWork(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
 	runID := uuid.NewString()
@@ -383,7 +383,7 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 }
 
 func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

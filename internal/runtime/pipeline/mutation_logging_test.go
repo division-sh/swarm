@@ -15,7 +15,7 @@ import (
 )
 
 func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 
 	entityID := uuid.NewString()
 	pc := &PipelineCoordinator{
@@ -82,7 +82,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 }
 
 func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLog(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
 
@@ -148,7 +148,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 }
 
 func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
 
@@ -219,7 +219,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 }
 
 func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
@@ -238,7 +238,7 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 }
 
 func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
@@ -257,7 +257,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 }
 
 func TestMutationLogTrackedStateFailsOnMalformedCanonicalMutationField(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
@@ -284,7 +284,7 @@ func TestMutationLogTrackedStateFailsOnMalformedCanonicalMutationField(t *testin
 
 func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *testing.T) {
 	t.Run("state transition", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 		entityID := uuid.NewString()
 		pc := testMutationLoggingCoordinator(db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
@@ -298,7 +298,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	})
 
 	t.Run("gate mutation", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 		entityID := uuid.NewString()
 		pc := testMutationLoggingCoordinator(db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
@@ -312,7 +312,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	})
 
 	t.Run("evidence write", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 		entityID := uuid.NewString()
 		pc := testMutationLoggingCoordinator(db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)

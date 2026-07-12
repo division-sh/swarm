@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,7 +107,7 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 
 func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	owners := newRecordingRuntimeNukeOwners()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -133,7 +134,7 @@ func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *te
 func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntimeContextsAndReplay(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	idempotency := newRecordingAPIIdempotencyStore()
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	owners := newRecordingRuntimeNukeOwners()
 	owners.containerFailure = "docker stop denied"
 	handler := testHandler(t, Options{
@@ -165,7 +166,7 @@ func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntime
 	}
 	assertRuntimeContextsUnloaded(t, fixture.manager)
 
-	replayFixture := newOperatorRuntimeContextFixture(t)
+	replayFixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	replayOwners := newRecordingRuntimeNukeOwners()
 	replayHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -203,7 +204,7 @@ func assertRuntimeContextsUnloaded(t *testing.T, manager *swruntime.RuntimeConte
 
 func TestOperatorRuntimeNukeExcludeBundlesLeavesRuntimeContextsLoaded(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	owners := newRecordingRuntimeNukeOwners()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},

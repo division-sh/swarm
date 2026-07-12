@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pg, cleanup := newTestPostgresStore(t)
+			pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 			defer cleanup()
 
 			ctx := context.Background()
@@ -97,7 +98,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 }
 
 func TestCanonicalDeliveryOwnerInvariant_ReceiptRowsRemainOutcomeOnly_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
+	pg, cleanup := newTestPostgresStore(t, testutil.PostgresRowState())
 	defer cleanup()
 
 	ctx := context.Background()

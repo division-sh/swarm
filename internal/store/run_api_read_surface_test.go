@@ -12,7 +12,7 @@ import (
 )
 
 func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -130,7 +130,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 }
 
 func TestRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	_, err := pg.LoadRunHeader(context.Background(), uuid.NewString())
 	if !errors.Is(err, ErrRunNotFound) {

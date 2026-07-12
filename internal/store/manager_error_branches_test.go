@@ -15,7 +15,7 @@ import (
 )
 
 func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	const runID = "44444444-4444-4444-4444-444444444444"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)

@@ -288,7 +288,7 @@ func TestWorkflowTimerFireAtSupportsPolicyRenderedDayDelay(t *testing.T) {
 
 func TestHandleWorkflowStageTimerFireMarksFiredAndAdvancesWithSQLiteStore(t *testing.T) {
 	runID := uuid.NewString()
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestHandleWorkflowStageTimerFireMarksFiredAndAdvancesWithSQLiteStore(t *tes
 
 func TestHandleWorkflowStageTimerFireDeactivatesTerminalTemplateFlow(t *testing.T) {
 	runID := uuid.NewString()
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
 	var deactivated FlowInstanceDeactivationRequest
@@ -474,7 +474,7 @@ func TestHandleWorkflowStageTimerFireDeactivatesTerminalTemplateFlow(t *testing.
 
 func TestPipelineEngineStateRepoSaveStateArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	runID := uuid.NewString()
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	schedules := &recordingSchedulePersistence{}
 	source := semanticview.Wrap(stageTimerLifecycleBundle())
@@ -534,7 +534,7 @@ func TestLoopConnectedRecurringTimerFailsClosedAtRuntimeOnBothStores(t *testing.
 			StartOn: "state:review", Delay: "1h", Recurring: true,
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -580,7 +580,7 @@ func TestLoopTimerCannotBypassCloseAtRuntimeOnBothStores(t *testing.T) {
 			StartOn: "state:review", Delay: "1h", AdvancesTo: "expired",
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -609,7 +609,7 @@ func TestLoopTimerGenerationRejectsPriorAttemptAndAdvancesCurrentAttemptOnBothSt
 			StartOn: "state:review", Delay: "1h", AdvancesTo: "drafting",
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			prior, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -691,7 +691,7 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -764,7 +764,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -823,18 +823,18 @@ func TestRegisterWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t
 	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) error {
 		pc.registerWorkflowTimerSchedule(ctx, sc)
 		return nil
-	})
+	}, testutil.PostgresRowState())
 }
 
 func TestPersistWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t *testing.T) {
 	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) error {
 		return pc.persistWorkflowTimerSchedule(ctx, sc)
-	})
+	}, testutil.PostgresRowState())
 }
 
-func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testing.T, schedule func(*PipelineCoordinator, context.Context, Schedule) error) {
+func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testing.T, schedule func(*PipelineCoordinator, context.Context, Schedule) error, requirement testutil.DatabaseRequirement) {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	store := &recordingSchedulePersistence{}
 	scheduler := NewScheduler()
@@ -1006,7 +1006,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
@@ -1082,7 +1082,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -1167,7 +1167,7 @@ func TestReconcileAccumulationTimeoutScheduleUsesMatchedHandlerEventKey(t *testi
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -1238,7 +1238,7 @@ func TestReconcileAccumulationTimeoutScheduleUsesFanInPinDerivedWindow(t *testin
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -1336,7 +1336,7 @@ func TestReconcileAccumulationTimeoutScheduleRejectsAmbiguousFanInInput(t *testi
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -1387,7 +1387,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := &recordingSchedulePersistence{}
@@ -1478,7 +1478,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
@@ -1583,7 +1583,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
@@ -1642,7 +1642,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
@@ -1734,7 +1734,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
@@ -1828,7 +1828,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}

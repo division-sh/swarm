@@ -52,7 +52,7 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
@@ -107,7 +107,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
@@ -169,7 +169,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJSONB(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
@@ -227,7 +227,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBundleHashJSONB(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
@@ -294,7 +294,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()

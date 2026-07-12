@@ -19,7 +19,7 @@ import (
 func TestFinalFlowInstanceAuthoringFixturePipelineDispatchPersistsSingletonContainedStateReadback(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, workflowStore := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
 	ctx := testPipelineCoordinatorRunContext(t, pc)
@@ -106,7 +106,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchPersistsSingletonConta
 func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInputConnectEvent(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, workflowStore := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
 	ctx := testPipelineCoordinatorRunContext(t, pc)
@@ -175,7 +175,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 func TestFinalFlowInstanceAuthoringFixturePipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, _ := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
 

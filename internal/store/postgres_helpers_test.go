@@ -73,7 +73,7 @@ func TestDSNFromConfigPinsDefaultNonSecretKeywordsAgainstPGEnv(t *testing.T) {
 }
 
 func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	connection, err := testpostgres.ParseConnection(dsn)
 	if err != nil {

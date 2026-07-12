@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewSource_RequiresTerminalStates(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	_, err := NewSource(db, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
@@ -23,7 +23,7 @@ func TestNewSource_RequiresTerminalStates(t *testing.T) {
 }
 
 func TestNewSourceUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	source, err := NewSource(db, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -53,7 +53,7 @@ func TestNewSourceUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
 }
 
 func TestSource_FiltersTerminalStatesFromDigestReads(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	source, err := NewSource(db, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{

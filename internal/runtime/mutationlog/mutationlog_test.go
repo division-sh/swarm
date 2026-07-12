@@ -86,7 +86,7 @@ func TestReconstructEntityStateProjection_AppliesNestedFieldMutationsOverTopLeve
 }
 
 func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	runID := uuid.NewString()
 	sourceFact := runtimecorrelation.BundleSourceFact{
 		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -122,7 +122,7 @@ func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
 }
 
 func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	runID := uuid.NewString()
 	sourceFact := runtimecorrelation.BundleSourceFact{
 		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",

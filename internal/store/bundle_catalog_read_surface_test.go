@@ -11,7 +11,7 @@ import (
 )
 
 func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -122,7 +122,7 @@ agents:
 }
 
 func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -151,7 +151,7 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 }
 
 func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	bundleHash := "bundle-v1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
@@ -197,7 +197,7 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 }
 
 func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeletedRuns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 

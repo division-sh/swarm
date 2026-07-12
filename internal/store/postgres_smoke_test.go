@@ -17,7 +17,7 @@ import (
 )
 
 func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &PostgresStore{DB: db}
 	const runID = "66666666-6666-6666-6666-666666666666"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)

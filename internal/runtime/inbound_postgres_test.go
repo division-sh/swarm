@@ -30,7 +30,7 @@ import (
 )
 
 func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	const (
@@ -133,7 +133,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 }
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	const (
@@ -236,7 +236,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 }
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	const (
@@ -353,7 +353,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 		providerEventName = "inbound.stripe"
 	)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)
@@ -401,7 +401,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 }
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	const (
@@ -480,7 +480,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		providerEventName = "inbound.twilio"
 	)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)
@@ -532,7 +532,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 }
 
 func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	const (
@@ -607,7 +607,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 		providerEventName = "inbound.shopify"
 	)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)
@@ -655,7 +655,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 }
 
 func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	const (
@@ -731,7 +731,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		providerEventName = "inbound.telegram"
 	)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)
@@ -824,7 +824,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 
 			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
@@ -920,7 +920,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
-			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 			seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
 			bus, err := runtimebus.NewEventBus(sqliteStore)

@@ -28,7 +28,7 @@ func TestAgentLifecycleBlockingLayerCoversEveryCurrentProducerState(t *testing.T
 }
 
 func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLayerPair(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := NewPostgresStore(dsn)
@@ -97,7 +97,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 }
 
 func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycle(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := NewPostgresStore(dsn)
@@ -150,7 +150,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 }
 
 func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLifecycleWhenNoLiveWorkRemains(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg, err := NewPostgresStore(dsn)

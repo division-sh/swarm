@@ -592,7 +592,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 		{
 			name: "postgres",
 			open: func(t *testing.T) storeBundle {
-				dsn, _, cleanup := testutil.StartPostgres(t)
+				dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				store, err := store.NewPostgresStore(dsn)
 				if err != nil {
@@ -798,7 +798,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			return stores
 		}},
 		{name: "postgres", open: func(t *testing.T) storeBundle {
-			dsn, _, cleanup := testutil.StartPostgres(t)
+			dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 			pg, err := store.NewPostgresStore(dsn)
 			if err != nil {

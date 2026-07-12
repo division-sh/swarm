@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,7 +37,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-	h := newRuntimeHarness(t, fixtureRoot, true)
+	h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	h.rt.Bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "test-agent"})
 	_ = h.rt.Bus.Subscribe("test-agent", events.EventType("task.ready"))
@@ -395,7 +396,7 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	t.Helper()
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
-	h := newRuntimeHarness(t, fixtureRoot, true)
+	h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)
 	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)

@@ -29,7 +29,7 @@ const runtimeContextTestBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbb
 const runtimeContextTestBundleHashC = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
 func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	handler := fixture.handler(t)
 	chPrimary := fixture.busA.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
 	defer fixture.busA.Unsubscribe("scan-orchestrator")
@@ -65,7 +65,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 }
 
 func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	handler := fixture.handler(t)
 	chSelected := fixture.busB.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
 	defer fixture.busB.Unsubscribe("scan-orchestrator")
@@ -149,7 +149,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := newOperatorRuntimeContextFixture(t)
+			fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 			if tt.seedBundleRow {
 				seedOperatorBundleDeleteBundle(t, context.Background(), fixture.db, tt.bundleHash)
 			}
@@ -202,7 +202,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 	}
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
-			fixture := newOperatorRuntimeContextFixture(t)
+			fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 			handler := fixture.handler(t)
 			runID := uuid.NewString()
 			seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
@@ -217,7 +217,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 }
 
 func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	handler := fixture.handler(t)
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, fixture.pg, "agent-a")
@@ -241,7 +241,7 @@ func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *te
 }
 
 func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	baseStore := &recordingRuntimeContextRunControlStore{}
 	selectedStore := &recordingRuntimeContextRunControlStore{}
 	baseControl := runtimeruncontrol.NewController(baseStore, nil, runtimeruncontrol.Options{})
@@ -278,7 +278,7 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 }
 
 func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	baseAgent := &directiveIntegrationAgent{id: "agent-1"}
 	selectedAgent := &directiveIntegrationAgent{id: "agent-1"}
 	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, baseAgent)
@@ -313,7 +313,7 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 }
 
 func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	handler := fixture.handler(t)
 	resp := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashC, "triage.requested", `{"topic":"missing"}`, "", "idem-unloaded-context"))
 	if resp.Error == nil {
@@ -358,7 +358,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 }
 
 func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	result := fixture.manager.DeactivateBundleHash(runtimeContextTestBundleHashB, swruntime.RuntimeContextCauseUnloaded)
 	if !result.Found || !result.Changed {
 		t.Fatalf("DeactivateBundleHash result = %#v, want changed", result)
@@ -456,7 +456,7 @@ func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *test
 }
 
 func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t *testing.T) {
-	fixture := newOperatorRuntimeContextFixture(t)
+	fixture := newOperatorRuntimeContextFixture(t, testutil.PostgresRowState())
 	ingress := &recordingRuntimeIngress{}
 	runtimeHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -570,9 +570,9 @@ type operatorRuntimeContextFixture struct {
 	manager *swruntime.RuntimeContextManager
 }
 
-func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixture {
+func newOperatorRuntimeContextFixture(t *testing.T, requirement testutil.DatabaseRequirement) operatorRuntimeContextFixture {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, requirement)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)

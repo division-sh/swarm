@@ -25,7 +25,7 @@ import (
 )
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
@@ -397,7 +397,7 @@ func TestOperatorMailboxGetDegradesEntityContextReadFailure(t *testing.T) {
 }
 
 func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
@@ -478,7 +478,7 @@ func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack
 }
 
 func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	sourceEventID := uuid.NewString()
@@ -603,7 +603,7 @@ func TestOperatorMailboxRejectAndDeferPublishFailureLeavesItemRetryable(t *testi
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			pg := &store.PostgresStore{DB: db}
 			ctx := context.Background()
 			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
@@ -672,7 +672,7 @@ func TestOperatorMailboxRejectAndDeferPublishFailureLeavesItemRetryable(t *testi
 }
 
 func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
@@ -820,7 +820,7 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 }
 
 func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 

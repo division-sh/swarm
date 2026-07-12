@@ -81,7 +81,7 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -157,7 +157,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 
 func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -227,7 +227,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 
 func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -382,7 +382,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -521,7 +521,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -573,7 +573,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 
 func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -662,7 +662,7 @@ func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *test
 
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -745,7 +745,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 }
 
 func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
@@ -1157,7 +1157,7 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 
 func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1243,7 +1243,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 
 func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -1327,7 +1327,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 
 func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -1482,7 +1482,7 @@ func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediag
 
 func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -1605,7 +1605,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 
 func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -1738,7 +1738,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &store.PostgresStore{DB: db}
 
@@ -1876,7 +1876,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -1954,7 +1954,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	if _, err := db.ExecContext(ctx, `
@@ -2012,7 +2012,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, db, runID := newEntityToolConformanceHarness(t)
+	ctx, exec, db, runID := newEntityToolConformanceHarness(t, testutil.PostgresRowState())
 
 	requireMutationSurface(t, db)
 
@@ -2048,7 +2048,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 }
 
 func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
@@ -2310,9 +2310,9 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB, string) {
+func newEntityToolConformanceHarness(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB, string) {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, requirement)
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO runs (run_id, status)

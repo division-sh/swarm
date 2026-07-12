@@ -20,7 +20,7 @@ import (
 
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -82,7 +82,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 
 func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if _, err := store.DB.ExecContext(ctx, `
@@ -127,7 +127,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 
 func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &PostgresStore{DB: db}
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
@@ -198,7 +198,7 @@ func computeModuleReplayEvidenceTestEnvelope() computemodule.ReplayEnvelope {
 
 func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
@@ -302,7 +302,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 
 func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &PostgresStore{DB: db}
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {

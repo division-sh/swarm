@@ -43,7 +43,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 			}))
 			defer server.Close()
 
-			fixture = newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true)
+			fixture = newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true, testutil.PostgresFreshPhysical())
 			seedActivityBoringSourceFlow(t, fixture, tc.kind, sourceEvent)
 			fixture.pc.SetTestWorkflowNodeHandlerStartHook(func(ctx context.Context, nodeID string, evt events.Event) error {
 				if nodeID != "scanner" || evt.ID() != sourceEvent.ID() {
@@ -115,7 +115,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	}))
 	defer server.Close()
 
-	fixture := newActivityBoringFullFlowFixture(t, activityBoringStorePostgres, server.URL, false)
+	fixture := newActivityBoringFullFlowFixture(t, activityBoringStorePostgres, server.URL, false, testutil.PostgresFreshPhysical())
 	seedActivityBoringSourceFlow(t, fixture, activityBoringStorePostgres, sourceEvent)
 	ctx := runtimecorrelation.WithRunID(context.Background(), sourceEvent.RunID())
 	handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
@@ -169,7 +169,7 @@ func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdenti
 			}))
 			defer server.Close()
 
-			fixture := newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true)
+			fixture := newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true, testutil.PostgresFreshPhysical())
 			sourceEvent := newActivityBoringSourceEvent(entityID, uuid.NewString(), "https://example.com/source")
 			forkEvent := newActivityBoringSourceEvent(entityID, uuid.NewString(), "https://example.com/source")
 			sourceExpected := activityBoringExpectedIntentForSourceEvent(sourceEvent, "https://example.com/source")
@@ -209,7 +209,7 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 			}))
 			defer server.Close()
 
-			fixture := newActivityBoringFixture(t, tc.kind, server.URL)
+			fixture := newActivityBoringFixture(t, tc.kind, server.URL, testutil.PostgresFreshPhysical())
 			intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
 			ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
 			request, err := activityRequestEmitIntent(intent)
@@ -252,7 +252,7 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 	}))
 	defer server.Close()
 
-	fixture := newActivityBoringFixture(t, activityBoringStorePostgres, server.URL)
+	fixture := newActivityBoringFixture(t, activityBoringStorePostgres, server.URL, testutil.PostgresFreshPhysical())
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
 	ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
 	writer := pipelineActivityIntentWriter{coordinator: fixture.pc}
@@ -305,7 +305,7 @@ func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t 
 			}))
 			defer server.Close()
 
-			fixture := newActivityBoringFixture(t, tc.kind, server.URL)
+			fixture := newActivityBoringFixture(t, tc.kind, server.URL, testutil.PostgresFreshPhysical())
 			sourceRunID := uuid.NewString()
 			forkRunID := uuid.NewString()
 			sourceIntent := newActivityBoringIntent("https://example.com/source", sourceRunID)
@@ -354,7 +354,7 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 			}))
 			defer server.Close()
 
-			fixture := newActivityBoringFixture(t, tc.kind, server.URL)
+			fixture := newActivityBoringFixture(t, tc.kind, server.URL, testutil.PostgresFreshPhysical())
 			intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
 			intent.RetryMaxAttempts = 3
 			intent.RetryBackoff = "none"
@@ -437,11 +437,11 @@ type activityBoringFixture struct {
 	pc  *PipelineCoordinator
 }
 
-func newActivityBoringFixture(t *testing.T, kind activityBoringStoreKind, serverURL string) activityBoringFixture {
+func newActivityBoringFixture(t *testing.T, kind activityBoringStoreKind, serverURL string, requirement testutil.DatabaseRequirement) activityBoringFixture {
 	t.Helper()
 	switch kind {
 	case activityBoringStoreSQLite:
-		db := newSQLiteWorkflowInstanceStoreTestDB(t)
+		db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 		bus := &persistingActivityBoringBus{appendEvent: func(ctx context.Context, evt events.Event) error {
 			return appendActivityBoringEvent(ctx, db, kind, evt)
 		}}
@@ -451,7 +451,7 @@ func newActivityBoringFixture(t *testing.T, kind activityBoringStoreKind, server
 		})
 		return activityBoringFixture{db: db, bus: bus, pc: pc}
 	case activityBoringStorePostgres:
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 		t.Cleanup(cleanup)
 		return newActivityBoringCoordinator(t, db, kind, serverURL)
 	default:
@@ -476,14 +476,14 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
 }
 
-func newActivityBoringFullFlowFixture(t *testing.T, kind activityBoringStoreKind, serverURL string, handleActivityRequests bool) activityBoringFixture {
+func newActivityBoringFullFlowFixture(t *testing.T, kind activityBoringStoreKind, serverURL string, handleActivityRequests bool, requirement testutil.DatabaseRequirement) activityBoringFixture {
 	t.Helper()
 	switch kind {
 	case activityBoringStoreSQLite:
-		db := newSQLiteWorkflowInstanceStoreTestDB(t)
+		db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 		return newActivityBoringFullFlowCoordinator(t, db, kind, serverURL, handleActivityRequests)
 	case activityBoringStorePostgres:
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 		t.Cleanup(cleanup)
 		return newActivityBoringFullFlowCoordinator(t, db, kind, serverURL, handleActivityRequests)
 	default:

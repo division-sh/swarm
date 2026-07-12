@@ -42,7 +42,7 @@ func runStartTestEventBusOptions(source semanticview.Source) runtimebus.EventBus
 }
 
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -112,7 +112,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 }
 
 func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -134,7 +134,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 }
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
@@ -161,7 +161,7 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 }
 
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -179,7 +179,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 }
 
 func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -206,7 +206,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -227,7 +227,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("existing run bundle mismatch", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -259,7 +259,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -280,7 +280,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -301,7 +301,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -322,7 +322,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("undeclared event", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -354,7 +354,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("declared but unroutable root input", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
@@ -393,7 +393,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("payload validation", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
@@ -423,7 +423,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("invalid caller run id", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -454,7 +454,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
@@ -491,7 +491,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("publish failure", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}, source)
@@ -513,7 +513,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}, source)
@@ -574,7 +574,7 @@ func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.
 }
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))

@@ -136,6 +136,20 @@ func (d Connection) WithDatabase(database string) (Connection, error) {
 	return newConnection(cfg)
 }
 
+func (d Connection) WithIdentity(database, user, password string) (Connection, error) {
+	if strings.TrimSpace(database) == "" {
+		return Connection{}, fmt.Errorf("postgres test database name is required")
+	}
+	if strings.TrimSpace(user) == "" || password == "" {
+		return Connection{}, fmt.Errorf("postgres test lease user and password are required")
+	}
+	cfg := d.config.Clone()
+	cfg.Database = database
+	cfg.User = user
+	cfg.Password = password
+	return newConnection(cfg)
+}
+
 func (d Connection) Open() (*sql.DB, error) {
 	connector, err := pq.NewConnectorConfig(d.config.Clone())
 	if err != nil {

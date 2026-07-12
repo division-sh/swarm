@@ -8,7 +8,7 @@ import (
 )
 
 func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

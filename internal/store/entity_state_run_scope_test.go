@@ -9,7 +9,7 @@ import (
 )
 
 func TestEntityStateSchema_AllowsSameEntityIDInDifferentRuns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	runA := uuid.NewString()
 	runB := uuid.NewString()

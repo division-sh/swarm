@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func assertSQLiteRunCompletionStatus(t *testing.T, db *sql.DB, runID, want strin
 
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRuntimeLogs(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
@@ -115,7 +116,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 
 func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
@@ -142,7 +143,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 
 func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventEntityA := uuid.NewString()
@@ -190,7 +191,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (

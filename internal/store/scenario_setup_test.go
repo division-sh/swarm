@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 
 func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	req := ScenarioSetupRequest{

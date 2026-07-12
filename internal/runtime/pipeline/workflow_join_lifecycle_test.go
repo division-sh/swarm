@@ -35,7 +35,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 		{name: "zero members complete immediately", members: []any{}, wantStatus: joinruntime.StatusClosed, wantReason: joinruntime.CloseReasonComplete, wantEvent: joinCompleteEvent, wantKind: timeridentity.TimerHandleJoinComplete},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 			schedules := &recordingSchedulePersistence{}
 			bundle := workflowJoinLifecycleBundle()
@@ -99,7 +99,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 		{name: "expected zero", members: []any{}, wantStatus: joinruntime.StatusClosed, wantEvent: joinCompleteEvent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -137,7 +137,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 }
 
 func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
@@ -189,7 +189,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 }
 
 func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	bundle := workflowJoinLifecycleBundle()
 	node := bundle.Nodes["join-node"]
@@ -227,7 +227,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 }
 
 func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
@@ -299,14 +299,14 @@ type workflowJoinStoreCase struct {
 	open func(*testing.T) (*WorkflowInstanceStore, context.Context)
 }
 
-func workflowJoinStoreCases() []workflowJoinStoreCase {
+func workflowJoinStoreCases(requirement testutil.DatabaseRequirement) []workflowJoinStoreCase {
 	return []workflowJoinStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -323,11 +323,11 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -421,11 +421,11 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -505,11 +505,11 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -596,11 +596,11 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -684,11 +684,11 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -759,7 +759,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 }
 
 func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	bundle := workflowJoinLifecycleBundle()

@@ -119,7 +119,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 }
 
 func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	source := loadWorkflowTempSource(t, map[string]string{
@@ -354,7 +354,7 @@ func mutationParentRoutePinOutputSource() semanticview.Source {
 }
 
 func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -400,7 +400,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 }
 
 func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeactivation(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -559,7 +559,7 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 }
 
 func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 }
 
 func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 	entityID := "11111111-1111-1111-1111-111111111111"
 	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
@@ -647,7 +647,7 @@ review_entity:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	repo := pipelineEngineStateRepo{
 		coordinator: &PipelineCoordinator{
@@ -666,7 +666,7 @@ review_entity:
 }
 
 func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -715,7 +715,7 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 }
 
 func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	t.Run("state_buckets", func(t *testing.T) {
@@ -741,7 +741,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 }
 
 func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -756,7 +756,7 @@ func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) 
 }
 
 func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -810,7 +810,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 }
 
 func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTargetForConcreteEvents(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -1153,7 +1153,7 @@ func (m *recordingMailboxWriteMaterializer) rows() []MailboxWriteMaterialization
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	artifactRoot := t.TempDir()
@@ -1419,7 +1419,7 @@ func TestSourceUsesArtifactRepoCommitDetectsSupportedActionSurfaces(t *testing.T
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifactRoot(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -1491,7 +1491,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			defer cleanup()
 			store := NewWorkflowInstanceStore(db)
 			bus := &recordingPipelineBus{}
@@ -1534,7 +1534,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -1635,7 +1635,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 }
 
 func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughOutbox(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	workflowStore := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -1712,7 +1712,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 }
 
 func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughOutbox(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	workflowStore := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -1793,7 +1793,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 }
 
 func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureRollsBackState(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	workflowStore := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{outboxErr: errors.New("outbox unavailable")}
@@ -1864,7 +1864,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEventCollector(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{publishErr: errors.New("direct publish must not be used")}
@@ -1922,7 +1922,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEv
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSuccessResultEvent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -1977,7 +1977,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAllowlist(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -2039,7 +2039,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMismatch(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -2079,7 +2079,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentConflict(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
@@ -2126,7 +2126,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistory(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
@@ -2200,7 +2200,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHistory(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
@@ -2255,7 +2255,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
 	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}

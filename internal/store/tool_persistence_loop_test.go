@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func TestToolEntityReadbackProjectsLoopsWithoutReservedState(t *testing.T) {
-	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteDefaultTemp(), "file:"+t.Name()+"?mode=memory&cache=shared"))
 	if err != nil {
 		t.Fatal(err)
 	}

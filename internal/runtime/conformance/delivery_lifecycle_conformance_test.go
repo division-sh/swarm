@@ -162,7 +162,7 @@ func TestDeliveryLifecycleConformance(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			fx := newDeliveryLifecycleFixture(t, ctx)
+			fx := newDeliveryLifecycleFixture(t, ctx, testutil.PostgresRowState())
 			eventID := tc.seed(t, ctx, fx)
 			got := fx.snapshot(t, ctx, eventID)
 			assertDeliveryLifecycleExpectation(t, got, tc.expect, eventID)
@@ -198,9 +198,9 @@ type deliveryLifecycleFixture struct {
 	subscription events.EventType
 }
 
-func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLifecycleFixture {
+func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) *deliveryLifecycleFixture {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 
 	pg := &store.PostgresStore{DB: db}

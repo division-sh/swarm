@@ -122,7 +122,7 @@ func (s claudeAttemptProofProviderHeadFaultStore) SettleExternalAttemptAndPromot
 func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
-			backend := newClaudeAttemptProofBackend(t, backendName)
+			backend := newClaudeAttemptProofBackend(t, backendName, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "proof-oauth-token")
 			t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
 			captureDir := t.TempDir()
@@ -192,7 +192,7 @@ func makeClaudeAttemptProofDeliveryRetryEligible(t *testing.T, backend claudeAtt
 func TestClaudePostlaunchFailureTerminalizesAndRestartSkips(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
-			backend := newClaudeAttemptProofBackend(t, backendName)
+			backend := newClaudeAttemptProofBackend(t, backendName, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "proof-oauth-token")
 			t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
 			captureDir := t.TempDir()
@@ -243,7 +243,7 @@ func TestClaudePostlaunchFailureTerminalizesAndRestartSkips(t *testing.T) {
 func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
-			backend := newClaudeAttemptProofBackend(t, backendName)
+			backend := newClaudeAttemptProofBackend(t, backendName, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 			baseStore := backend.store
 			backend.store = claudeAttemptProofProviderHeadFaultStore{
 				claudeAttemptProofStore: baseStore,
@@ -315,7 +315,7 @@ func TestClaudeAttemptIdentitySelectedStoreModeAndProcessParity(t *testing.T) {
 			}
 			for _, backendName := range []string{"sqlite", "postgres"} {
 				t.Run(surface.name+"/"+backendName, func(t *testing.T) {
-					backend := newClaudeAttemptProofBackend(t, backendName)
+					backend := newClaudeAttemptProofBackend(t, backendName, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 					t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
 					captureDir := t.TempDir()
 					t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_CAPTURE", captureDir)
@@ -370,7 +370,7 @@ func (claudeAttemptProofChainDepthAgent) OnEvent(context.Context, events.Event) 
 func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
-			backend := newClaudeAttemptProofBackend(t, backendName)
+			backend := newClaudeAttemptProofBackend(t, backendName, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 			eventBus, err := runtimebus.NewEventBus(backend.store)
 			if err != nil {
 				t.Fatalf("new chain-depth proof event bus: %v", err)
@@ -394,7 +394,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 	}
 }
 
-func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofBackend {
+func newClaudeAttemptProofBackend(t *testing.T, name string, requirement testutil.DatabaseRequirement, sqliteRequirement testutil.DatabaseRequirement) claudeAttemptProofBackend {
 	t.Helper()
 	switch name {
 	case "sqlite":
@@ -406,7 +406,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		if err != nil {
 			t.Fatalf("generate SQLite schema: %v", err)
 		}
-		sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.db"))
+		sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, sqliteRequirement, filepath.Join(t.TempDir(), "runtime.db")))
 		if err != nil {
 			t.Fatalf("new SQLite runtime store: %v", err)
 		}
@@ -414,7 +414,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
 		return claudeAttemptProofBackend{name: name, store: sqliteStore, db: sqliteStore.DB, sessions: sqliteStore}
 	case "postgres":
-		_, db, _ := testutil.StartPostgres(t)
+		_, db, _ := testutil.AcquirePostgres(t, requirement)
 		pg := &store.PostgresStore{DB: db}
 		return claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: runtimesessions.NewPostgresRegistry(db, time.Minute)}
 	default:

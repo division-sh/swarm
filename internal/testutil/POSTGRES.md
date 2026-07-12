@@ -5,9 +5,10 @@ preferred local setup is a host Postgres instance selected explicitly with
 `SWARM_TEST_POSTGRES_DSN`; this avoids the Docker or Colima memory cost during
 normal test iteration.
 
-The test role must use password authentication and have `CREATEDB`. The harness
-creates isolated databases, initializes one canonical schema template, clones
-that template for each test, and removes the databases during cleanup. Custom
+The test role must use password authentication and have `CREATEDB` plus
+`CREATEROLE`. The harness creates fresh physical databases only for schema and
+database-level proofs; row-state proofs reuse fenced databases through a random,
+single-lease login role. Custom
 `pqgo-*` TLS registrations, GSS authentication, passfiles, service files, and
 empty passwords are intentionally unsupported because cleanup runs in a separate
 process and must receive a self-contained connection value.
@@ -21,19 +22,24 @@ intent are left untouched and block reconciliation.
 
 ## Existing Host Postgres
 
-For a local PostgreSQL 16 server whose current administrator can create roles:
+Only a dedicated PostgreSQL 16 test cluster is supported. The harness rejects a
+shared cluster where a newly created role inherits `CONNECT` to any database.
+As a cluster administrator:
 
 ```bash
 psql postgres <<'SQL'
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'swarm_test') THEN
-    CREATE ROLE swarm_test LOGIN CREATEDB PASSWORD 'swarm-test';
+    CREATE ROLE swarm_test LOGIN CREATEDB CREATEROLE PASSWORD 'swarm-test';
   ELSE
-    ALTER ROLE swarm_test LOGIN CREATEDB PASSWORD 'swarm-test';
+    ALTER ROLE swarm_test LOGIN CREATEDB CREATEROLE PASSWORD 'swarm-test';
   END IF;
 END
 $$;
+REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+REVOKE CONNECT, TEMPORARY ON DATABASE template1 FROM PUBLIC;
+GRANT CONNECT ON DATABASE postgres TO swarm_test;
 SQL
 ```
 
@@ -56,7 +62,7 @@ URL DSNs are equally supported:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='postgres://swarm_test:swarm-test@127.0.0.1:5432/postgres?sslmode=disable' \
-  go test ./internal/testutil -run '^TestStartPostgres' -count=1
+  go test ./internal/testutil -run '^TestAcquirePostgres' -count=1
 ```
 
 A set but invalid DSN fails closed and never falls through to Docker.

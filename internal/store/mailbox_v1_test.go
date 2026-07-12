@@ -46,7 +46,7 @@ func TestMailboxDecisionCarriesLoopRevisionWithoutExposingInternalGeneration(t *
 }
 
 func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
@@ -311,7 +311,7 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 }
 
 func TestPostgresStore_APIIdempotencyReplaysAndConflicts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)

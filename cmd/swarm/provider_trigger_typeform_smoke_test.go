@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"io"
 	"net"
 	"net/http"
@@ -43,7 +44,7 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 	timeout := typeformLiveSmokeTimeout(t)
 
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedProviderTriggerSmokeRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)

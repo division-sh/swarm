@@ -79,7 +79,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 
 func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	runID := uuid.NewString()
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	schedules := &recordingSchedulePersistence{}
 	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
@@ -714,7 +714,7 @@ opco.ceo_ready:
 		t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
 	}
 
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:                     bus,
@@ -797,7 +797,7 @@ states: [initializing, ready]
 		t.Fatalf("resolved evidence target = %q, want build_evidence", got)
 	}
 
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	workflowStore := NewWorkflowInstanceStore(db)
 	pc := &PipelineCoordinator{

@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,7 +33,7 @@ func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-			h := newRuntimeHarness(t, fixtureRoot, false)
+			h := newRuntimeHarness(t, fixtureRoot, false, testutil.PostgresRowState())
 			h.seedEntityFields(expected)
 			if len(expected.Trigger.Concurrent) > 0 {
 				h.publishConcurrentAndWait(expected.Trigger.Concurrent, catalogRuntimePublishTimeout)

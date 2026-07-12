@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-2")
 
@@ -71,7 +72,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 
 func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx, testutil.SQLiteDefaultTemp())
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 
 	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
@@ -125,9 +126,9 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	}
 }
 
-func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
+func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
-	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, requirement)
 }
 
 func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, agentID string) {

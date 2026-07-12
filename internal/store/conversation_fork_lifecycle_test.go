@@ -14,7 +14,7 @@ import (
 )
 
 func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := activeConversationForkTestClock()
@@ -140,7 +140,7 @@ func activeConversationForkTestClock() time.Time {
 }
 
 func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := activeConversationForkTestClock()
@@ -185,7 +185,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 }
 
 func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := activeConversationForkTestClock()
@@ -407,7 +407,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 }
 
 func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 	now := activeConversationForkTestClock()

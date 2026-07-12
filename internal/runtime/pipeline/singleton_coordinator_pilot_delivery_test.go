@@ -19,7 +19,7 @@ import (
 func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback(t *testing.T) {
 	bundle := singletoncoordinatorpilot.LoadBundle(t, singletoncoordinatorpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, workflowStore := newSingletonCoordinatorPilotPipelineCoordinator(t, db, bundle, source)
 	ctx := testPipelineCoordinatorRunContext(t, pc)
@@ -106,7 +106,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
 	bundle := singletoncoordinatorpilot.LoadBundle(t, singletoncoordinatorpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pc, _ := newSingletonCoordinatorPilotPipelineCoordinator(t, db, bundle, source)
 

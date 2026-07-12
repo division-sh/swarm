@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/division-sh/swarm/internal/testutil"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRows(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
@@ -50,7 +51,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 }
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	storageRef := "review/inst-1"
@@ -98,7 +99,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 }
 
 func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	storageRef := "root/terminated"
@@ -132,7 +133,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 }
 
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := NewSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	called := false
@@ -150,7 +151,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationR
 }
 
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
@@ -184,7 +185,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 }
 
 func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
@@ -209,7 +210,7 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 }
 
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := NewSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	tx, err := db.BeginTx(ctx, nil)
@@ -240,7 +241,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 }
 
 func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	store := NewWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
@@ -296,10 +297,10 @@ func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *WorkflowIn
 	return NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
 }
 
-func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
+func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T, requirement testutil.DatabaseRequirement) *sql.DB {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, requirement, "file:"+name+"?mode=memory&cache=shared"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

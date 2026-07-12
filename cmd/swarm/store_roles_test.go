@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"github.com/division-sh/swarm/internal/testutil"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -70,7 +71,7 @@ func TestValidateSelectedStoreBundleRolesAcceptsSQLiteBuildStores(t *testing.T) 
 }
 
 func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteDefaultTemp(), ":memory:"))
 	if err != nil {
 		t.Fatalf("open inert sql handle for selected postgres role projection: %v", err)
 	}

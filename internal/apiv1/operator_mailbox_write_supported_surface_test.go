@@ -37,7 +37,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			name: "sqlite_default_no_selector",
 			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
-				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 				probe := runtimelifecycleprobe.New()
 				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore, probe)
 				return handler, sqliteStore.DB, bus, probe
@@ -47,7 +47,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			name: "postgres_explicit_opt_in",
 			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
 				probe := runtimelifecycleprobe.New()
@@ -110,7 +110,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			name: "sqlite_default_no_selector",
 			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
-				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 				probe := runtimelifecycleprobe.New()
 				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore, probe)
 				return handler, sqliteStore.DB, bus, probe
@@ -120,7 +120,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			name: "postgres_explicit_opt_in",
 			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
 				probe := runtimelifecycleprobe.New()
@@ -165,7 +165,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	bundle := mailboxWriteSupportedSurfaceBundle(t)
 	source := semanticview.Wrap(bundle)
 	fact := bundleSourceFactForTestBundle(t, bundle)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	probe := runtimelifecycleprobe.New()
 	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil, probe)
 

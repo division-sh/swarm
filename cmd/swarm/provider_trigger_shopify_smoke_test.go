@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil"
 	"io"
 	"net/http"
 	"os"
@@ -57,7 +58,7 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 		providerEventName = "inbound.shopify"
 	)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	seedProviderTriggerSmokeRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, clientSecret, agentID)
 
 	bus, err := runtimebus.NewEventBus(sqliteStore)

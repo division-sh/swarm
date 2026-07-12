@@ -17,10 +17,10 @@ func TestValidatePersistedStandingOwnershipIsPredecessorOwnedAcrossBackends(t *t
 			var db *sql.DB
 			var store *WorkflowInstanceStore
 			if backend == "sqlite" {
-				db = newSQLiteWorkflowInstanceStoreTestDB(t)
+				db = newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 				store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
+				_, db, _ = testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				store = NewWorkflowInstanceStore(db)
 			}
 			existing := runtimecorrelation.BundleSourceFact{

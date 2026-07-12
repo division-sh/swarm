@@ -31,7 +31,7 @@ import (
 func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runInboundAdmissionSupportedSurfacePolicyMatrix(t, backend)
+			runInboundAdmissionSupportedSurfacePolicyMatrix(t, backend, testutil.PostgresRowState(), testutil.SQLiteFreshFile())
 		})
 	}
 }
@@ -226,7 +226,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			var postgresStore *store.PostgresStore
 			var postgresDSN string
 			if backend == "postgres" {
-				dsn, _, cleanup := testutil.StartPostgres(t)
+				dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				postgresDSN = dsn
 				t.Cleanup(cleanup)
 				oldBuildStores := buildStoresForServe
@@ -314,7 +314,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 	}
 }
 
-func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend string) {
+func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend string, requirement testutil.DatabaseRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
@@ -343,7 +343,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		sqlitePath := filepath.Join(dataRoot, "admission.sqlite")
 		configPath = writeInboundAdmissionRuntimeConfig(t, backend, sqlitePath, platformDirs, externalDirs)
 	} else {
-		dsn, _, cleanup := testutil.StartPostgres(t)
+		dsn, _, cleanup := testutil.AcquirePostgres(t, requirement)
 		postgresDSN = dsn
 		t.Cleanup(cleanup)
 		postgresStore, err = store.NewPostgresStore(dsn)
@@ -446,7 +446,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 
 	if backend == "sqlite" {
 		sqlitePath := inboundAdmissionSQLitePathFromConfig(t, configPath)
-		sqliteStore, err = store.NewSQLiteRuntimeStore(sqlitePath)
+		sqliteStore, err = store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, sqliteRequirement, sqlitePath))
 		if err != nil {
 			t.Fatal(err)
 		}

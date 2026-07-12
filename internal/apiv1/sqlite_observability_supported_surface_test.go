@@ -21,13 +21,13 @@ import (
 
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	ctx := context.Background()
-	fixture := newSQLiteObservabilitySurfaceFixture(t, ctx)
+	fixture := newSQLiteObservabilitySurfaceFixture(t, ctx, testutil.SQLiteDefaultTemp())
 	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
 }
 
 func TestPostgresObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	ctx := context.Background()
-	fixture := newPostgresObservabilitySurfaceFixture(t, ctx)
+	fixture := newPostgresObservabilitySurfaceFixture(t, ctx, testutil.PostgresRowState())
 	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
 }
 
@@ -161,7 +161,7 @@ func traceRowsContainEvent(t *testing.T, rows []any, eventName string) bool {
 
 func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 	base := time.Unix(1700003100, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000001429"
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
@@ -255,15 +255,15 @@ type observabilitySurfaceFixture struct {
 	now          time.Time
 }
 
-func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
+func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) observabilitySurfaceFixture {
 	t.Helper()
-	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, requirement)
 	return newObservabilitySurfaceFixture(t, ctx, sqliteStore)
 }
 
-func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
+func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) observabilitySurfaceFixture {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	pg := &storepkg.PostgresStore{DB: db}
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {

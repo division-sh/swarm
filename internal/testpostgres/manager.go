@@ -27,6 +27,9 @@ const (
 	controlNamePrefix      = "mas_control_v1_"
 	templateNamePrefix     = "mas_template_v1_"
 	sandboxNamePrefix      = "mas_test_v1_"
+	poolNamePrefix         = "mas_pool_v1_"
+	leaseRolePrefix        = "mas_lease_v1_"
+	dmlRolePrefix          = "mas_dml_v1_"
 	intentTableName        = "swarm_test_resource_intents_v1"
 )
 
@@ -40,8 +43,11 @@ type Manager struct {
 	templateName string
 	spec         runtimecontracts.PlatformSpecDocument
 	ddlPlans     []platformschema.TableDDL
+	dmlRole      string
+	rowPool      rowStatePool
 
 	afterCandidateSnapshot func()
+	beforeLeaseRoleCommit  func(role string) error
 }
 
 type Sandbox struct {
@@ -62,6 +68,8 @@ type resourceMetadata struct {
 	Identity string `json:"identity"`
 	LeaseKey int64  `json:"lease_key,omitempty"`
 	Template string `json:"template,omitempty"`
+	Role     string `json:"role,omitempty"`
+	Lease    string `json:"lease,omitempty"`
 }
 
 type resourceIntent struct {
@@ -112,7 +120,14 @@ func NewManager(ctx context.Context, admin Connection) (*Manager, error) {
 		admin: admin, role: role, ownershipKey: keyDigest[:], templateID: digest,
 		spec: spec, ddlPlans: plans,
 	}
-	controlID := hex.EncodeToString(keyDigest[:])[:24]
+	m.dmlRole = m.signedResourceName(dmlRolePrefix, "dml-role", controlIDForKey(keyDigest[:]))
+	if err := m.preflightCapabilities(ctx, db); err != nil {
+		return nil, err
+	}
+	if err := m.ensureDMLRole(ctx, db); err != nil {
+		return nil, err
+	}
+	controlID := controlIDForKey(keyDigest[:])
 	m.controlName = m.signedResourceName(controlNamePrefix, "control", controlID)
 	m.control, err = admin.WithDatabase(m.controlName)
 	if err != nil {
@@ -183,11 +198,17 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 
 	if withTemplate {
 		err = m.withDDLAdmission(ctx, adminDB, "clone sandbox "+name, func(conn *sql.Conn) error {
-			return createDatabaseFromTemplate(ctx, conn, name, m.templateName)
+			if err := createDatabaseFromTemplate(ctx, conn, name, m.templateName); err != nil {
+				return err
+			}
+			return hardenManagedDatabase(ctx, conn, name)
 		})
 	} else {
 		err = m.withDDLAdmission(ctx, adminDB, "create empty sandbox "+name, func(conn *sql.Conn) error {
-			return createDatabase(ctx, conn, name)
+			if err := createDatabase(ctx, conn, name); err != nil {
+				return err
+			}
+			return hardenManagedDatabase(ctx, conn, name)
 		})
 	}
 	if err != nil {
@@ -265,11 +286,17 @@ func (m *Manager) ensureControlDatabase(ctx context.Context, adminDB *sql.DB) er
 			if err != nil || exists {
 				return err
 			}
-			return createDatabase(ctx, conn, m.controlName)
+			if err := createDatabase(ctx, conn, m.controlName); err != nil {
+				return err
+			}
+			return hardenManagedDatabase(ctx, conn, m.controlName)
 		})
 	}
 	if err != nil {
 		return fmt.Errorf("initialize postgres test control database: %w", err)
+	}
+	if err := hardenManagedDatabase(ctx, adminDB, m.controlName); err != nil {
+		return err
 	}
 	controlDB, err := m.control.Open()
 	if err != nil {
@@ -430,6 +457,9 @@ func (m *Manager) intentMatchesName(intent resourceIntent) bool {
 	case "template":
 		identity, ok := m.verifyResourceName(intent.Name, templateNamePrefix, "template")
 		return ok && identity == intent.Identity && intent.LeaseKey == 0 && intent.Template == ""
+	case "pool":
+		identity, ok := m.verifyResourceName(intent.Name, poolNamePrefix, "pool")
+		return ok && identity == intent.Identity && intent.LeaseKey == advisoryKey("pool:"+identity) && intent.Template == m.templateName
 	default:
 		return false
 	}
@@ -444,7 +474,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	rows, err := db.QueryContext(ctx, `
 		SELECT d.datname, COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
-		WHERE d.datname LIKE 'mas_test_v1_%' OR d.datname LIKE 'mas_template_v1_%'
+		WHERE d.datname LIKE 'mas_test_v1_%' OR d.datname LIKE 'mas_template_v1_%' OR d.datname LIKE 'mas_pool_v1_%'
 		ORDER BY d.datname`)
 	if err != nil {
 		return fmt.Errorf("list postgres test resources: %w", err)
@@ -506,13 +536,15 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return m.reconcileLeaseRoles(ctx, db)
 }
 
 func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, candidate databaseCandidate) error {
 	kind, prefix := "sandbox", sandboxNamePrefix
 	if strings.HasPrefix(candidate.name, templateNamePrefix) {
 		kind, prefix = "template", templateNamePrefix
+	} else if strings.HasPrefix(candidate.name, poolNamePrefix) {
+		kind, prefix = "pool", poolNamePrefix
 	}
 	identity, signed := m.verifyResourceName(candidate.name, prefix, kind)
 	if !signed {
@@ -521,6 +553,8 @@ func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, ca
 	lockKey := advisoryKey("template:" + candidate.name)
 	if kind == "sandbox" {
 		lockKey = advisoryKey("sandbox:" + identity)
+	} else if kind == "pool" {
+		lockKey = advisoryKey("pool:" + identity)
 	}
 	lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
 	if err != nil || !acquired {
@@ -557,6 +591,8 @@ func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.
 	kind, prefix := "sandbox", sandboxNamePrefix
 	if strings.HasPrefix(candidate.name, templateNamePrefix) {
 		kind, prefix = "template", templateNamePrefix
+	} else if strings.HasPrefix(candidate.name, poolNamePrefix) {
+		kind, prefix = "pool", poolNamePrefix
 	}
 	identity, signed := m.verifyResourceName(candidate.name, prefix, kind)
 	if !signed {
@@ -589,6 +625,11 @@ func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.
 			return nil
 		}
 	}
+	if metadataErr == nil && metadata.Role != "" {
+		if err := m.retireLeaseRole(ctx, db, candidate.name, metadata.Role, metadata.Lease, metadata.LeaseKey); err != nil {
+			return fmt.Errorf("reconcile stale postgres lease role %q: %w", metadata.Role, err)
+		}
+	}
 	if err := m.dropSandbox(ctx, db, candidate.name); err != nil {
 		return fmt.Errorf("reconcile stale postgres test %s %q: %w", kind, candidate.name, err)
 	}
@@ -608,6 +649,15 @@ func (m *Manager) validResourceMetadata(metadata resourceMetadata) bool {
 		return ok
 	case "template":
 		return metadata.LeaseKey == 0 && metadata.Template == ""
+	case "pool":
+		if metadata.LeaseKey != advisoryKey("pool:"+metadata.Identity) || metadata.Template != m.templateName {
+			return false
+		}
+		if (metadata.Role == "") != (metadata.Lease == "") {
+			return false
+		}
+		_, ok := m.verifyResourceName(m.signedResourceName(poolNamePrefix, "pool", metadata.Identity), poolNamePrefix, "pool")
+		return ok
 	default:
 		return false
 	}
@@ -665,7 +715,10 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		return err
 	}
 	if err := m.withExclusiveDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
-		return createDatabase(ctx, conn, m.templateName)
+		if err := createDatabase(ctx, conn, m.templateName); err != nil {
+			return err
+		}
+		return hardenManagedDatabase(ctx, conn, m.templateName)
 	}); err != nil {
 		cleanupErr := m.retireIntentIfDatabaseAbsent(context.Background(), adminDB, m.templateName)
 		return errors.Join(fmt.Errorf("create postgres template %q: %w", m.templateName, err), cleanupErr)
@@ -680,7 +733,7 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
 		return err
 	}
-	if err := initializeDatabase(ctx, templateDB, m.role, m.spec, m.ddlPlans); err != nil {
+	if err := initializeDatabase(ctx, templateDB, m.role, m.dmlRole, m.spec, m.ddlPlans); err != nil {
 		_ = templateDB.Close()
 		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
 		return err
@@ -697,7 +750,7 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 	return m.deleteIntent(ctx, m.templateName)
 }
 
-func initializeDatabase(ctx context.Context, db *sql.DB, role string, spec runtimecontracts.PlatformSpecDocument, plans []platformschema.TableDDL) error {
+func initializeDatabase(ctx context.Context, db *sql.DB, role, dmlRole string, spec runtimecontracts.PlatformSpecDocument, plans []platformschema.TableDDL) error {
 	for _, stmt := range []string{
 		`CREATE SCHEMA IF NOT EXISTS public`,
 		`GRANT ALL ON SCHEMA public TO ` + quoteIdent(role),
@@ -718,7 +771,21 @@ func initializeDatabase(ctx context.Context, db *sql.DB, role string, spec runti
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit platform bootstrap: %w", err)
 	}
+	for _, stmt := range []string{
+		`REVOKE CREATE ON SCHEMA public FROM PUBLIC`,
+		`GRANT USAGE ON SCHEMA public TO ` + quoteIdent(dmlRole),
+		`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ` + quoteIdent(dmlRole),
+		`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ` + quoteIdent(dmlRole),
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("initialize postgres template lease privilege %q: %w", stmt, err)
+		}
+	}
 	return nil
+}
+
+func controlIDForKey(key []byte) string {
+	return hex.EncodeToString(key)[:24]
 }
 
 func inspectSession(ctx context.Context, db *sql.DB) (string, string, error) {
@@ -901,6 +968,14 @@ func createDatabaseFromTemplate(ctx context.Context, db databaseExecer, name, te
 	return err
 }
 
+func hardenManagedDatabase(ctx context.Context, db databaseExecer, name string) error {
+	_, err := db.ExecContext(ctx, `REVOKE CONNECT, TEMPORARY ON DATABASE `+quoteIdent(name)+` FROM PUBLIC`)
+	if err != nil {
+		return fmt.Errorf("revoke public authority on managed postgres database %q: %w", name, err)
+	}
+	return nil
+}
+
 func dropDatabase(ctx context.Context, db databaseExecer, name string) error {
 	if _, err := db.ExecContext(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1 AND pid<>pg_backend_pid()`, name); err != nil {
 		return err
@@ -972,7 +1047,7 @@ func templateDigest(plans []platformschema.TableDDL, platformVersion, role, serv
 	}
 	hash := sha256.New()
 	for _, value := range [][]byte{
-		[]byte(resourceMetadataPrefix), canonical, []byte(platformVersion),
+		[]byte(resourceMetadataPrefix), []byte("lease-dml-v1"), canonical, []byte(platformVersion),
 		[]byte(role), []byte(serverID), []byte(serverVersion),
 	} {
 		_, _ = hash.Write(value)

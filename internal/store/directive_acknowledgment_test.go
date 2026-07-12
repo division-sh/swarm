@@ -180,14 +180,14 @@ type directiveAmbiguityBackend struct {
 	db    *sql.DB
 }
 
-func forEachDirectiveAmbiguityBackend(t *testing.T, run func(*testing.T, directiveAmbiguityBackend)) {
+func forEachDirectiveAmbiguityBackend(t *testing.T, run func(*testing.T, directiveAmbiguityBackend), requirement testutil.DatabaseRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
-		store := newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), "directive-ambiguity.db"))
+		store := newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), "directive-ambiguity.db"), sqliteRequirement)
 		run(t, directiveAmbiguityBackend{name: "sqlite", store: store, db: store.DB})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 		t.Cleanup(cleanup)
 		store := &PostgresStore{DB: db}
 		run(t, directiveAmbiguityBackend{name: "postgres", store: store, db: db})
@@ -236,7 +236,7 @@ func TestDirectiveFailureFinalizationAcknowledgmentMatrix(t *testing.T) {
 				}
 			})
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
@@ -287,7 +287,7 @@ func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
 				})
 			}
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveSuccessFinalizationAcknowledgmentMatrix(t *testing.T) {
@@ -328,7 +328,7 @@ func TestDirectiveSuccessFinalizationAcknowledgmentMatrix(t *testing.T) {
 				})
 			}
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveReconciliationAcknowledgmentMatrix(t *testing.T) {
@@ -373,7 +373,7 @@ func TestDirectiveReconciliationAcknowledgmentMatrix(t *testing.T) {
 				})
 			}
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveFailureFinalizationRollsBackReceiptAndOperationTogether(t *testing.T) {
@@ -400,7 +400,7 @@ func TestDirectiveFailureFinalizationRollsBackReceiptAndOperationTogether(t *tes
 		if got := h.agent.calls.Load(); got != 1 {
 			t.Fatalf("BoardStep calls after convergence = %d, want 1", got)
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t *testing.T) {
@@ -419,7 +419,7 @@ func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t
 		if got := h.agent.calls.Load(); got != 1 {
 			t.Fatalf("BoardStep calls = %d, want 1", got)
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T) {
@@ -466,7 +466,7 @@ func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T
 				assertDirectiveOperationEvidence(t, persisted, runtimeagentcontrol.DirectiveOperationPrepared, false, false)
 			})
 		}
-	})
+	}, testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile())
 }
 
 type directiveAmbiguityHarness struct {

@@ -363,7 +363,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 		{name: "force", deleteParams: `"bundle_hash":"` + runStartTestBundleHash + `","force":true,"idempotency_key":"force-delete-current-runtime"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 			pg := &store.PostgresStore{DB: db}
 			ctx := context.Background()

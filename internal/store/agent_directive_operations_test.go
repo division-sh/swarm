@@ -17,7 +17,7 @@ import (
 
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001001", "00000000-0000-0000-0000-000000001002", "idem-1", "hash-1", now)
 
@@ -87,7 +87,7 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 
 func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC)
 
 	executingReq := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001101", "00000000-0000-0000-0000-000000001102", "idem-recovery", "hash-recovery", now)
@@ -147,8 +147,8 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "directive.db")
-	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	second, err := NewSQLiteRuntimeStore(path)
+	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path, testutil.SQLiteSharedFile())
+	second, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), path))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore second handle: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 			now := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedDirectiveForTest(t, ctx, store, now)
 			if _, err := store.DB.Exec(tc.triggerSQL); err != nil {
@@ -248,7 +248,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 
 func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Date(2026, 7, 10, 14, 45, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001251", "00000000-0000-0000-0000-000000001252", "result-failure", "result-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -285,7 +285,7 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 
 func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Date(2026, 7, 10, 14, 50, 0, 0, time.UTC)
 	if _, err := store.DB.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
 		t.Fatalf("create event trigger: %v", err)
@@ -310,7 +310,7 @@ func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing
 }
 
 func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
@@ -345,7 +345,7 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 }
 
 func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmission(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	stores := []*PostgresStore{{DB: db}, {DB: db}}
@@ -399,7 +399,7 @@ func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmissio
 }
 
 func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
@@ -458,7 +458,7 @@ func TestPostgresDirectiveOperationFinalizationFailuresRollbackToExecuted(t *tes
 		{name: "api projection failure", triggerName: "fail_pg_directive_projection", table: "api_idempotency"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			t.Cleanup(cleanup)
 			ctx := context.Background()
 			store := &PostgresStore{DB: db}
@@ -492,7 +492,7 @@ func TestPostgresDirectiveOperationFinalizationFailuresRollbackToExecuted(t *tes
 }
 
 func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
@@ -523,7 +523,7 @@ func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(
 }
 
 func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ import (
 
 func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
@@ -245,7 +246,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 
 func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	agentDeliveryID := uuid.NewString()
@@ -359,7 +360,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 
 func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 
 	tx, err := store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -412,7 +413,7 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 
 func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -451,7 +452,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -681,7 +682,7 @@ func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivatio
 
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	bus, err := runtimebus.NewEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -754,7 +755,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 
 func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	store.SetEventPayloadValidator(func(eventType string, _ []byte) error {
 		if eventType == "item.failed" {
 			return errors.New("schema violation")
@@ -807,8 +808,8 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
-	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath, testutil.SQLiteSharedFile())
+	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath, testutil.SQLiteSharedFile())
 	req := APIIdempotencyRequest{
 		Method:         "event.publish",
 		ActorTokenID:   "token-1",
@@ -892,7 +893,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 
 func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	tx, err := store.BeginEventTx(ctx)
 	if err != nil {
 		t.Fatalf("BeginEventTx: %v", err)
@@ -931,7 +932,7 @@ func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
 
 func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
@@ -987,7 +988,7 @@ func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query str
 
 func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
@@ -1040,7 +1041,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 
 func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
@@ -1104,7 +1105,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 
 func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
@@ -1160,7 +1161,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.
 
 func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
@@ -1211,7 +1212,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			eventID := uuid.NewString()
@@ -1266,7 +1267,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 
 func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	now := time.Now().UTC()
@@ -1395,7 +1396,7 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 
 func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	now := time.Now().UTC()
@@ -1430,7 +1431,7 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 
 func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
@@ -1454,7 +1455,7 @@ func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 
 func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Now().UTC()
 	store.SetNowFnForTest(func() time.Time { return now })
 
@@ -1595,7 +1596,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 
 func TestSQLiteRuntimeStore_TaskAuditAppendThenUpsertUsesGlobalScope(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 
@@ -1668,7 +1669,7 @@ func TestSQLiteRuntimeStore_TaskAuditAppendThenUpsertUsesGlobalScope(t *testing.
 
 func TestSQLiteRuntimeStore_TaskAuditEntityScopeSurvivesConversationUpsert(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1739,7 +1740,7 @@ func TestSQLiteRuntimeStore_TaskAuditEntityScopeSurvivesConversationUpsert(t *te
 
 func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
@@ -1810,7 +1811,7 @@ func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *test
 
 func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
 
@@ -1929,7 +1930,7 @@ func operatorDeliveriesContain(deliveries []OperatorEventDelivery, subscriberTyp
 
 func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
@@ -2138,7 +2139,7 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	seedSQLiteScheduleRun(t, store, ctx, runID)
@@ -2188,7 +2189,7 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	seedSQLiteScheduleRun(t, store, ctx, runID)
@@ -2245,7 +2246,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 }
 
 func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	seedSQLiteScheduleRun(t, store, ctx, runID)
@@ -2328,19 +2329,19 @@ func assertSQLiteActiveScheduleCount(t *testing.T, store *SQLiteRuntimeStore, ct
 	}
 }
 
-func newBootstrappedSQLiteRuntimeStoreForTest(t *testing.T) *SQLiteRuntimeStore {
+func newBootstrappedSQLiteRuntimeStoreForTest(t *testing.T, requirement testutil.DatabaseRequirement) *SQLiteRuntimeStore {
 	t.Helper()
-	return newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), ".swarm", "dev.db"))
+	return newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), ".swarm", "dev.db"), requirement)
 }
 
-func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLiteRuntimeStore {
+func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string, requirement testutil.DatabaseRequirement) *SQLiteRuntimeStore {
 	t.Helper()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	store, err := NewSQLiteRuntimeStore(dbPath)
+	store, err := NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, requirement, dbPath))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}

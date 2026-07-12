@@ -551,7 +551,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -684,7 +684,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -786,7 +786,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 
 func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-2", "active")
 
@@ -833,7 +833,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 
 func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-empty", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-ephemeral", "ephemeral")
@@ -858,7 +858,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 
 func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO spend_ledger (
@@ -894,7 +894,7 @@ func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLit
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConversationOwners(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -945,7 +945,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {
@@ -1145,7 +1145,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 }
 
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1393,7 +1393,7 @@ func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryL
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
 	if err != nil {

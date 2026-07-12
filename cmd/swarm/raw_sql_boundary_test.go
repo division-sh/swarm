@@ -126,6 +126,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "digest source is an explicit SQL read-model exception pending selected read-owner migration",
 		},
+		"internal/testpostgres/row_pool.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          2015,
+			Reason:         "typed test database owner uses raw PostgreSQL catalog and reset operations to fence lease authority and validate reusable row-state slots",
+		},
 		"internal/runtime/bus/eventbus.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"sort"
 	"sync"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	ctx := context.Background()
-	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	s := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	now := activeConversationForkTestClock()
 	source := seedSQLiteConversationForkSource(t, s, now)
 

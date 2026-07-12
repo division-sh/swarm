@@ -152,7 +152,7 @@ type agentFixtureEmit struct {
 	Payload map[string]any `yaml:"payload"`
 }
 
-func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHarness {
+func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool, requirement testutil.DatabaseRequirement) *runtimeHarness {
 	t.Helper()
 	runtimeCatalogHarnessStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -165,7 +165,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		t.Fatalf("newFixtureWorkflowModule: %v", err)
 	}
 
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	waitForCatalogHarnessDB(t, db)
 

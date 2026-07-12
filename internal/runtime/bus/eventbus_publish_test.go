@@ -460,7 +460,7 @@ func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB
 }
 
 func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
@@ -525,7 +525,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 }
 
 func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
@@ -1270,7 +1270,7 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 }
 
 func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
 	pg := &store.PostgresStore{DB: db}
@@ -1394,7 +1394,7 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 }
 
 func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
 	pg := &store.PostgresStore{DB: db}
@@ -1439,7 +1439,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 }
 
 func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
 	pg := &store.PostgresStore{DB: db}
@@ -1487,7 +1487,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 }
 
 func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
 	pg := &store.PostgresStore{DB: db}
@@ -1542,7 +1542,7 @@ func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing
 }
 
 func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{})
 	if err != nil {
@@ -1587,7 +1587,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 }
 
 func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	eb, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1675,7 +1675,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 }
 
 func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
 	fingerprint := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
@@ -1705,7 +1705,7 @@ func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *te
 }
 
 func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
 	sourceFact := runtimecorrelation.BundleSourceFact{
@@ -1747,7 +1747,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 }
 
 func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	eventID := "22222222-2222-2222-2222-222222222222"
 	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
@@ -1999,7 +1999,7 @@ func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
@@ -2065,7 +2065,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
@@ -2155,7 +2155,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 }
 
 func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
@@ -2404,7 +2404,7 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg := &store.PostgresStore{DB: db}
@@ -2549,7 +2549,7 @@ func contains(items []string, want string) bool {
 }
 
 func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
 	pg := &store.PostgresStore{DB: db}
@@ -2816,7 +2816,7 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg := &store.PostgresStore{DB: db}
@@ -2949,7 +2949,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	pg := &store.PostgresStore{DB: db}

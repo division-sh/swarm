@@ -1325,7 +1325,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 }
 
 func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
@@ -1417,7 +1417,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 }
 
 func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)

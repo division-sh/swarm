@@ -15,7 +15,7 @@ import (
 )
 
 func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID := uuid.NewString(), uuid.NewString()
@@ -132,7 +132,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 }
 
 func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -209,7 +209,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 }
 
 func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()

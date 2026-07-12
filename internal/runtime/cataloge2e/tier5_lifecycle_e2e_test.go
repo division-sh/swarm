@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,7 +45,7 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 				fixtureName == "test-create-flow-instance-duplicate" ||
 				fixtureName == "test-timer-fire" ||
 				fixtureName == "test-timer-recurring"
-			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
+			h := newRuntimeHarness(t, fixtureRoot, startRuntime, testutil.PostgresRowState())
 			h.seedEntityFields(expected)
 			if expected.Trigger.Boot || strings.TrimSpace(expected.Expected.BootResult) != "" {
 				assertCatalogRuntimeOutcome(t, h, expected)

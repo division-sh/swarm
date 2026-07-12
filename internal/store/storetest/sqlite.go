@@ -3,24 +3,24 @@ package storetest
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 // StartSQLiteRuntimeStore creates a file-backed SQLite runtime store with the
 // canonical platform schema for backend-neutral tests.
-func StartSQLiteRuntimeStore(t testing.TB) *store.SQLiteRuntimeStore {
+func StartSQLiteRuntimeStore(t testing.TB, requirement testutil.DatabaseRequirement) *store.SQLiteRuntimeStore {
 	t.Helper()
-	return StartSQLiteRuntimeStoreWithContext(t, context.Background())
+	return StartSQLiteRuntimeStoreWithContext(t, context.Background(), requirement)
 }
 
-func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *store.SQLiteRuntimeStore {
+func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context, requirement testutil.DatabaseRequirement) *store.SQLiteRuntimeStore {
 	t.Helper()
 
 	var platformSpec runtimecontracts.PlatformSpecDocument
@@ -35,7 +35,7 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	dbPath := testutil.SQLitePath(t, requirement)
 	sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)

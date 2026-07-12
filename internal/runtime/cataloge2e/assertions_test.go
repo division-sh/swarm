@@ -16,7 +16,7 @@ import (
 )
 
 func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	rootID := "11111111-1111-1111-1111-111111111111"
 	childID := "22222222-2222-2222-2222-222222222222"
 	grandchildID := "33333333-3333-3333-3333-333333333333"
@@ -167,7 +167,7 @@ func TestCatalogRecognizesHandlerOutcome_RejectsTyposAndUnsupportedValues(t *tes
 }
 
 func TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
+	h := newCatalogAssertionHarness(t, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 
@@ -185,7 +185,7 @@ func TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof(t *te
 }
 
 func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
+	h := newCatalogAssertionHarness(t, testutil.PostgresRowState())
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 
@@ -207,7 +207,7 @@ func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *test
 }
 
 func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
+	h := newCatalogAssertionHarness(t, testutil.PostgresRowState())
 	entityID := "11111111-1111-1111-1111-111111111111"
 	bundle := loadFixtureBundle(t, filepath.Join(repoRootFromCatalogE2E(t), "tests", "tier11-flow-composition", "test-subject-id-cross-flow-inherit"))
 	h.bundle = bundle
@@ -231,9 +231,9 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
 
-func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
+func newCatalogAssertionHarness(t *testing.T, requirement testutil.DatabaseRequirement) *runtimeHarness {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	ctx := catalogRuntimeContext()
 	if _, err := db.ExecContext(ctx, `

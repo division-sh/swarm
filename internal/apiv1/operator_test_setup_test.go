@@ -18,7 +18,7 @@ import (
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(testSetupValidationBundle(t))
 	handler := testSetupHandler(t, pg, source)
@@ -177,7 +177,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			pg := &store.PostgresStore{DB: db}
 			handler := testSetupHandler(t, pg, semanticview.Wrap(testSetupValidationBundle(t)))
 			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)

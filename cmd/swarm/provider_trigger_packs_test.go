@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/division-sh/swarm/internal/testutil"
 	"io/fs"
 	"net"
 	"net/http"
@@ -44,7 +45,7 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 		t.Fatalf("mkdir release data: %v", err)
 	}
 	sqlitePath := filepath.Join(releaseRoot, "runtime.db")
-	seedReleaseProviderTriggerStore(t, platformSpecBody, sqlitePath)
+	seedReleaseProviderTriggerStore(t, platformSpecBody, sqlitePath, testutil.SQLiteDefaultTemp())
 	configPath := filepath.Join(releaseRoot, "platform-config.yaml")
 	writeReleaseProviderTriggerConfig(t, configPath, sqlitePath)
 
@@ -294,7 +295,7 @@ func writeReleaseProviderTriggerConfig(t *testing.T, path, sqlitePath string) {
 	writeRuntimeConfigText(t, path, strings.Join(lines, "\n")+"\n")
 }
 
-func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqlitePath string) {
+func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqlitePath string, requirement testutil.DatabaseRequirement) {
 	t.Helper()
 	var platformSpec runtimecontracts.PlatformSpecDocument
 	decodeAuthoritativeYAMLBytesForTest(t, platformSpecBody, &platformSpec)
@@ -302,7 +303,7 @@ func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqli
 	if err != nil {
 		t.Fatalf("generate release platform tables: %v", err)
 	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, requirement, sqlitePath))
 	if err != nil {
 		t.Fatalf("create release SQLite store: %v", err)
 	}

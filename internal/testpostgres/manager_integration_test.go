@@ -3,10 +3,12 @@ package testpostgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -354,6 +356,9 @@ func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dropDatabase(context.Background(), db, name)
+	if err := hardenManagedDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
 	if err := setDatabaseMetadata(ctx, db, name, resourceMetadata{Version: 1, Kind: "template", Identity: identity}); err != nil {
 		t.Fatal(err)
 	}
@@ -669,6 +674,331 @@ func integrationManager(t *testing.T) *Manager {
 		t.Fatal(err)
 	}
 	return manager
+}
+
+func TestRowStateLeaseProcessDeathReconciliationFencesRoleAndRetiresSlot(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	lease, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, role, connection := lease.Name, lease.role, lease.Connection
+	_ = lease.DB.Close()
+	releaseAdvisoryLock(lease.slot.leaseConn, lease.slot.leaseKey)
+	lease.slot.leaseConn = nil
+
+	if _, err := NewManager(ctx, manager.admin); err != nil {
+		t.Fatalf("startup reconciliation: %v", err)
+	}
+	assertDatabaseAbsent(t, manager.admin, name)
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)`, role).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatalf("stale lease role %q survived startup reconciliation", role)
+	}
+	stale, err := connection.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stale.Close()
+	if err := stale.PingContext(ctx); err == nil {
+		t.Fatal("stale process-death lease credential remained usable")
+	}
+}
+
+func TestRowStateLeaseOrphanRoleReconciliationWithoutSlot(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	lease, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := lease.role
+	_ = lease.DB.Close()
+	releaseAdvisoryLock(lease.slot.leaseConn, lease.slot.leaseKey)
+	lease.slot.leaseConn = nil
+	adminDB, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dropDatabase(ctx, adminDB, lease.Name); err != nil {
+		_ = adminDB.Close()
+		t.Fatal(err)
+	}
+	_ = adminDB.Close()
+	if _, err := NewManager(ctx, manager.admin); err != nil {
+		t.Fatalf("orphan-role reconciliation: %v", err)
+	}
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)`, role).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatalf("orphan lease role %q survived reconciliation", role)
+	}
+}
+
+func TestRowStateLeaseSchemaContaminationRetiresSlot(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	lease, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminConnection, err := manager.admin.WithDatabase(lease.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminDB, err := adminConnection.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminDB.ExecContext(ctx, `CREATE TABLE contamination_probe (id bigint)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = adminDB.Close()
+	if err := lease.Release(ctx); err == nil || !strings.Contains(err.Error(), "shape changed") {
+		t.Fatalf("contaminated lease release error=%v, want shape retirement", err)
+	}
+	assertDatabaseAbsent(t, manager.admin, lease.Name)
+}
+
+func TestRowStateLeaseConnectAndPrivilegeBoundary(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	leaseA, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer leaseA.Release(context.Background())
+	leaseB, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer leaseB.Release(context.Background())
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sandbox.Release(context.Background())
+	if err := leaseA.DB.PingContext(ctx); err != nil {
+		t.Fatalf("assigned slot connection: %v", err)
+	}
+	for _, database := range []string{leaseB.Name, manager.controlName, manager.templateName, sandbox.Name, "postgres"} {
+		projected, err := leaseA.Connection.WithDatabase(database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := projected.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = db.PingContext(ctx)
+		_ = db.Close()
+		if err == nil {
+			t.Fatalf("lease role connected outside assigned slot to %q", database)
+		}
+	}
+	if _, err := leaseA.DB.ExecContext(ctx, `UPDATE runtime_store_metadata SET swarm_version='lease-dml' WHERE id=1`); err != nil {
+		t.Fatalf("required DML failed: %v", err)
+	}
+	if _, err := leaseA.DB.ExecContext(ctx, `SET ROLE `+quoteIdent(manager.role)); err == nil {
+		t.Fatal("lease role escalated to manager role")
+	}
+	if _, err := leaseA.DB.ExecContext(ctx, `CREATE TABLE forbidden_boundary_probe (id bigint)`); err == nil {
+		t.Fatal("lease role acquired schema creation authority")
+	}
+}
+
+func TestRowStateLeaseRoleTransactionRollbackLeavesNoRole(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var attemptedRole string
+	manager.beforeLeaseRoleCommit = func(role string) error {
+		attemptedRole = role
+		return errors.New("injected pre-commit failure")
+	}
+	if _, err := manager.AcquireRowState(ctx); err == nil || !strings.Contains(err.Error(), "injected pre-commit failure") {
+		t.Fatalf("AcquireRowState error=%v, want injected rollback", err)
+	}
+	if attemptedRole == "" {
+		t.Fatal("lease role commit hook did not observe the attempted role")
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)`, attemptedRole).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatalf("lease role %q survived transaction rollback", attemptedRole)
+	}
+}
+
+func TestManagerSupportsNonSuperuserCreatedbCreaterole(t *testing.T) {
+	if os.Getenv("SWARM_TEST_MINIMAL_MANAGER_CHILD") != "1" {
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, thisFile, _, _ := runtime.Caller(0)
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+		cmd := exec.Command("go", "run", "./cmd/swarm-test-postgres", "--", executable, "-test.run=^TestManagerSupportsNonSuperuserCreatedbCreaterole$", "-test.v")
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "SWARM_TEST_MINIMAL_MANAGER_CHILD=1")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("isolated minimally privileged manager proof: %v\n%s", err, output)
+		}
+		return
+	}
+	adminConnection, err := ConnectionFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	adminDB, err := adminConnection.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminDB.Close()
+	var superuser bool
+	if err := adminDB.QueryRowContext(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname=current_user`).Scan(&superuser); err != nil {
+		t.Fatal(err)
+	}
+	if !superuser {
+		t.Skip("minimal manager bootstrap requires the runner-owned superuser")
+	}
+	identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+	missingRole := "mas_manager_missing_" + identity
+	if _, err := adminDB.ExecContext(ctx, `CREATE ROLE `+quoteIdent(missingRole)+` LOGIN CREATEDB PASSWORD `+quoteLiteral("missing-"+identity)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminDB.ExecContext(ctx, `GRANT CONNECT ON DATABASE postgres TO `+quoteIdent(missingRole)); err != nil {
+		t.Fatal(err)
+	}
+	missingConnection, err := adminConnection.WithIdentity("postgres", missingRole, "missing-"+identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewManager(ctx, missingConnection); err == nil || !strings.Contains(err.Error(), "CREATEDB + CREATEROLE") {
+		t.Fatalf("missing CREATEROLE preflight error=%v", err)
+	}
+	cleanupMinimalManagerProbe(t, adminConnection, missingRole, "")
+
+	role, password := "mas_manager_probe_"+identity, "probe-"+identity
+	if _, err := adminDB.ExecContext(ctx, `CREATE ROLE `+quoteIdent(role)+` LOGIN CREATEDB CREATEROLE PASSWORD `+quoteLiteral(password)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminDB.ExecContext(ctx, `GRANT CONNECT ON DATABASE postgres TO `+quoteIdent(role)); err != nil {
+		t.Fatal(err)
+	}
+	dmlRole := ""
+	defer func() { cleanupMinimalManagerProbe(t, adminConnection, role, dmlRole) }()
+	connection, err := adminConnection.WithIdentity("postgres", role, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(ctx, connection)
+	if err != nil {
+		t.Fatalf("initialize minimally privileged manager: %v", err)
+	}
+	dmlRole = manager.dmlRole
+	lease, err := manager.AcquireRowState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.DB.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var nativeManagerAuthority bool
+	if err := adminDB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_auth_members membership
+			JOIN pg_roles granted_role ON granted_role.oid=membership.roleid
+			JOIN pg_roles member_role ON member_role.oid=membership.member
+			WHERE granted_role.rolname=$1
+			  AND member_role.rolname=$2
+			  AND membership.admin_option
+		)`, lease.role, role).Scan(&nativeManagerAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if !nativeManagerAuthority {
+		t.Fatal("PostgreSQL did not retain native ADMIN authority for the manager over the lease role")
+	}
+	if err := lease.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	manager.rowPool.mu.Lock()
+	slots := append([]*rowStateSlot(nil), manager.rowPool.available...)
+	manager.rowPool.available = nil
+	manager.rowPool.mu.Unlock()
+	for _, slot := range slots {
+		manager.retireRowStateSlot(ctx, slot)
+	}
+}
+
+func cleanupMinimalManagerProbe(t *testing.T, admin Connection, role, dmlRole string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := admin.Open()
+	if err != nil {
+		t.Errorf("open cleanup admin: %v", err)
+		return
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT d.datname FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE r.rolname=$1 ORDER BY d.datname`, role)
+	if err != nil {
+		t.Errorf("list probe databases: %v", err)
+		return
+	}
+	var databases []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Errorf("scan probe database: %v", err)
+		}
+		databases = append(databases, name)
+	}
+	_ = rows.Close()
+	for _, name := range databases {
+		if err := dropDatabase(ctx, db, name); err != nil {
+			t.Errorf("drop probe database %s: %v", name, err)
+		}
+	}
+	if dmlRole != "" {
+		if _, err := db.ExecContext(ctx, `DROP ROLE IF EXISTS `+quoteIdent(dmlRole)); err != nil {
+			t.Errorf("drop probe DML role: %v", err)
+		}
+	}
+	_, _ = db.ExecContext(ctx, `REVOKE CONNECT ON DATABASE postgres FROM `+quoteIdent(role))
+	if _, err := db.ExecContext(ctx, `DROP ROLE IF EXISTS `+quoteIdent(role)); err != nil {
+		t.Errorf("drop probe manager role: %v", err)
+	}
 }
 
 func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {

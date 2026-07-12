@@ -12,7 +12,7 @@ import (
 )
 
 func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 
 	err := store.Upsert(context.Background(), WorkflowInstance{
@@ -28,7 +28,7 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 }
 
 func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 	runA := uuid.NewString()
 	runB := uuid.NewString()
@@ -71,7 +71,7 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 }
 
 func TestWorkflowInstanceStore_RunScopedTimerRowsDoNotBleed(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	store := NewWorkflowInstanceStore(db)
 	runA := uuid.NewString()
 	runB := uuid.NewString()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -103,7 +104,7 @@ func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
 func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	ctx := context.Background()
 	setCLIAPITestToken(t, "test-token")
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 	runID := "11111111-1111-1111-1111-111111111111"
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"

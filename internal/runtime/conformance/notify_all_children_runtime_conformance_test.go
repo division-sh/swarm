@@ -46,7 +46,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 		{
 			name: "postgres",
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				return &store.PostgresStore{DB: db}, db
 			},
@@ -54,7 +54,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				backend := storetest.StartSQLiteRuntimeStore(t)
+				backend := storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 				return backend, backend.DB
 			},
 		},

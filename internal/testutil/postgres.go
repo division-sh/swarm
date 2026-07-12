@@ -20,21 +20,18 @@ var postgresManagers = struct {
 	bySource map[string]*testpostgres.Manager
 }{bySource: make(map[string]*testpostgres.Manager)}
 
-// StartPostgres returns a database-per-test sandbox cloned from the canonical
-// content-addressed platform template.
-func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
+func AcquirePostgres(t *testing.T, requirement DatabaseRequirement) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
-	return startPostgresDatabase(t, true)
+	if err := requirement.validate(); err != nil {
+		t.Fatal(err)
+	}
+	if requirement.backend != DatabaseBackendPostgreSQL {
+		t.Fatalf("PostgreSQL acquisition requires PostgreSQL backend, got %d", requirement.backend)
+	}
+	return acquirePostgresDatabase(t, requirement)
 }
 
-// StartEmptyPostgres returns a database-per-test sandbox without platform
-// schema bootstrap.
-func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
-	t.Helper()
-	return startPostgresDatabase(t, false)
-}
-
-func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
+func acquirePostgresDatabase(t *testing.T, requirement DatabaseRequirement) (string, *sql.DB, func()) {
 	t.Helper()
 	connection, err := testpostgres.ConnectionFromEnvironment()
 	if err != nil {
@@ -60,6 +57,32 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 	postgresManagers.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	if requirement.isolation == databaseIsolationPostgresRowState {
+		lease, err := manager.AcquireRowState(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("acquire reusable Postgres row-state lease: %v", err)
+		}
+		dsn, err := lease.Connection.String()
+		if err != nil {
+			_ = lease.Release(context.Background())
+			t.Fatalf("serialize Postgres row-state lease: %v", err)
+		}
+		release := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := lease.Release(ctx); err != nil {
+				t.Errorf("release Postgres row-state lease %q: %v", lease.Name, err)
+			}
+		}
+		t.Cleanup(release)
+		return dsn, lease.DB, release
+	}
+	useTemplate := requirement.isolation == databaseIsolationPostgresFreshPhysical
+	if !useTemplate && requirement.isolation != databaseIsolationPostgresEmptyPhysical {
+		cancel()
+		t.Fatalf("unsupported PostgreSQL isolation %d", requirement.isolation)
+	}
 	sandbox, err := manager.Acquire(ctx, useTemplate)
 	cancel()
 	if err != nil {

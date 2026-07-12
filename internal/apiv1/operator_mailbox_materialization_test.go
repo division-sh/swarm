@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteMailboxMaterializationAPIStore(t, ctx)
+	sqliteStore := newSQLiteMailboxMaterializationAPIStore(t, ctx, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -82,7 +83,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	}
 }
 
-func newSQLiteMailboxMaterializationAPIStore(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
+func newSQLiteMailboxMaterializationAPIStore(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
-	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, requirement)
 }

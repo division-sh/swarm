@@ -36,8 +36,12 @@ func TestReplyContinuationRows_BackendParityMailboxAndHumanTaskRestoreContext(t 
 		name  string
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
-		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
+		{name: "postgres", setup: func(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+			return setupPostgresReplyContextStoreTest(t, testutil.PostgresRowState())
+		}},
+		{name: "sqlite", setup: func(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+			return setupSQLiteReplyContextStoreTest(t, testutil.SQLiteDefaultTemp())
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base, seed := tc.setup(t)
@@ -243,8 +247,12 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 		name  string
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
-		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
+		{name: "postgres", setup: func(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+			return setupPostgresReplyContextStoreTest(t, testutil.PostgresRowState())
+		}},
+		{name: "sqlite", setup: func(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+			return setupSQLiteReplyContextStoreTest(t, testutil.SQLiteDefaultTemp())
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
@@ -351,9 +359,9 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 	}
 }
 
-func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+func setupPostgresReplyContextStoreTest(t *testing.T, requirement testutil.DatabaseRequirement) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
@@ -376,9 +384,9 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	}
 }
 
-func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+func setupSQLiteReplyContextStoreTest(t *testing.T, requirement testutil.DatabaseRequirement) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
 	t.Helper()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, requirement)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
 		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
 			return err

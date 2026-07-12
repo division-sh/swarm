@@ -23,7 +23,7 @@ const (
 )
 
 func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsServeAdmissionFingerprint(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithBundleFingerprint(context.Background(), testBootBundleFingerprint)
 	runID := uuid.NewString()
@@ -47,7 +47,7 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsSe
 }
 
 func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(context.Background(), `
@@ -87,7 +87,7 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 }
 
 func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	runID := uuid.NewString()
 
@@ -101,7 +101,7 @@ func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 }
 
 func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleHashOnReopen(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -133,7 +133,7 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleH
 }
 
 func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -156,7 +156,7 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 }
 
 func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	err := storerunlifecycle.EnsureActive(context.Background(), db, uuid.NewString(), "", "", storerunlifecycle.EnsureActiveOptions{
 		HasBundleHashCol:   true,
 		HasBundleSourceCol: true,
@@ -168,7 +168,7 @@ func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) 
 }
 
 func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := uuid.NewString()
 
@@ -185,7 +185,7 @@ func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 }
 
 func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	legacyRunID := uuid.NewString()

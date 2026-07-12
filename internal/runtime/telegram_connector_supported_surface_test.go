@@ -34,7 +34,7 @@ import (
 // The process-served standing-ingress tests own the supported E2E claim.
 func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		t.Cleanup(cleanup)
 
 		const (
@@ -69,7 +69,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			flowInstance = "telegram-connector-supported-surface-sqlite"
 		)
 		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)

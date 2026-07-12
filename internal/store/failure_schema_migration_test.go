@@ -16,7 +16,7 @@ import (
 )
 
 func TestPostgresCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	createPostgresLegacyFailureTables(t, ctx, db)
 	ids := seedPostgresLegacyFailures(t, ctx, db)
@@ -43,7 +43,7 @@ func TestPostgresCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testi
 }
 
 func TestPostgresCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	createPostgresLegacyFailureTables(t, ctx, db)
 	if _, err := db.ExecContext(ctx, `
@@ -63,7 +63,7 @@ func TestPostgresCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testin
 }
 
 func TestSQLiteCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "failure-migration.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "failure-migration.db")))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestSQLiteCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testing
 }
 
 func TestSQLiteCanonicalFailureMigrationPreservesReplyContextAddedByNewerMaster(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "failure-migration-reply-context.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "failure-migration-reply-context.db")))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestSQLiteCanonicalFailureMigrationPreservesReplyContextAddedByNewerMaster(
 }
 
 func TestSQLiteCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "failure-migration-unknown.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "failure-migration-unknown.db")))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSQLiteCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.
 }
 
 func TestPostgresRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `
 		DROP TABLE IF EXISTS run_control_state CASCADE;
@@ -182,7 +182,7 @@ func TestPostgresRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason
 }
 
 func TestPostgresRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS runs CASCADE; CREATE TABLE runs (run_id UUID PRIMARY KEY, status TEXT NOT NULL, error_summary TEXT, ended_at TIMESTAMPTZ)`)
 	runID := uuid.NewString()
@@ -197,7 +197,7 @@ func TestPostgresRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomical
 }
 
 func TestSQLiteRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "run-terminal-migration.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "run-terminal-migration.db")))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestSQLiteRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason(t
 }
 
 func TestSQLiteRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "run-terminal-migration-reject.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "run-terminal-migration-reject.db")))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestSQLiteRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically
 }
 
 func TestPostgresCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS agent_turns CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`)
@@ -269,7 +269,7 @@ func TestPostgresCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing
 }
 
 func TestPostgresCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS agent_turns CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`)
@@ -285,7 +285,7 @@ func TestPostgresCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomical
 }
 
 func TestSQLiteCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T) {
-	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-empty.db")
+	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-empty.db", testutil.SQLiteFreshFile())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT);
@@ -302,7 +302,7 @@ func TestSQLiteCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T
 }
 
 func TestSQLiteCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically(t *testing.T) {
-	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-ambiguous.db")
+	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-ambiguous.db", testutil.SQLiteFreshFile())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT);
@@ -320,7 +320,7 @@ func TestSQLiteCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically
 }
 
 func TestPostgresCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS events CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id UUID PRIMARY KEY, event_name TEXT NOT NULL, payload JSONB NOT NULL)`)
@@ -335,7 +335,7 @@ func TestPostgresCanonicalFailureMigrationNormalizesFailureBearingEvents(t *test
 }
 
 func TestSQLiteCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testing.T) {
-	db := openSQLiteFailureMigrationTestDB(t, "failure-events.db")
+	db := openSQLiteFailureMigrationTestDB(t, "failure-events.db", testutil.SQLiteFreshFile())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, payload TEXT NOT NULL)`)
 	fixtures := seedSQLiteLegacyFailureEvents(t, ctx, db)
@@ -349,7 +349,7 @@ func TestSQLiteCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testin
 }
 
 func TestPostgresCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS events CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id UUID PRIMARY KEY, event_name TEXT NOT NULL, payload JSONB NOT NULL)`)
@@ -367,7 +367,7 @@ func TestPostgresCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t
 }
 
 func TestSQLiteCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t *testing.T) {
-	db := openSQLiteFailureMigrationTestDB(t, "failure-events-unknown.db")
+	db := openSQLiteFailureMigrationTestDB(t, "failure-events-unknown.db", testutil.SQLiteFreshFile())
 	ctx := context.Background()
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, payload TEXT NOT NULL)`)
 	id := uuid.NewString()
@@ -471,9 +471,9 @@ func assertMigratedFailureEvents(t testing.TB, fixtures []legacyFailureEventFixt
 	}
 }
 
-func openSQLiteFailureMigrationTestDB(t testing.TB, name string) *sql.DB {
+func openSQLiteFailureMigrationTestDB(t testing.TB, name string, requirement testutil.DatabaseRequirement) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), name))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, requirement, filepath.Join(t.TempDir(), name)))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -605,7 +605,7 @@ func seedSQLiteLegacyFailures(t testing.TB, ctx context.Context, db *sql.DB) leg
 }
 
 func TestPostgresDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	createPostgresLegacyDirectiveOperationTable(t, ctx, db)
 	leaseID, notAdmittedID := uuid.NewString(), uuid.NewString()
@@ -630,7 +630,7 @@ func TestPostgresDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t
 }
 
 func TestSQLiteDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "directive-failure-migration.db"))
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "directive-failure-migration.db")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ func TestPostgresDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomicall
 	tests := directiveOperationBlockedMigrationRows()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 			ctx := context.Background()
 			createPostgresLegacyDirectiveOperationTable(t, ctx, db)
 			id := uuid.NewString()
@@ -682,7 +682,7 @@ func TestPostgresDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomicall
 func TestSQLiteDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomically(t *testing.T) {
 	for _, test := range directiveOperationBlockedMigrationRows() {
 		t.Run(test.name, func(t *testing.T) {
-			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "directive-failure-blocked.db"))
+			db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, testutil.SQLiteFreshFile(), filepath.Join(t.TempDir(), "directive-failure-blocked.db")))
 			if err != nil {
 				t.Fatal(err)
 			}

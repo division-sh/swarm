@@ -12,7 +12,7 @@ import (
 )
 
 func TestWorkflowInstanceStoreMutateE_RollsBackCallbackFailure(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
@@ -35,7 +35,7 @@ func TestWorkflowInstanceStoreMutateE_RollsBackCallbackFailure(t *testing.T) {
 }
 
 func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -101,7 +101,7 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 }
 
 func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -160,7 +160,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 }
 
 func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)
@@ -196,7 +196,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 }
 
 func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 
 	store := NewWorkflowInstanceStore(db)

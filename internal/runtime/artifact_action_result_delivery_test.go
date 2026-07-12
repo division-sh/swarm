@@ -49,7 +49,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			resultEventType := "repo-scaffold/inst-1/" + tc.resultEventName
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := &store.PostgresStore{DB: db}
@@ -208,7 +208,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			resultEventType := "repo-scaffold/" + tc.resultEventName
 			bundle := loadRuntimeTempBundle(t, artifactActionResultStaticDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			_, db, cleanup := testutil.StartPostgres(t)
+			_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := &store.PostgresStore{DB: db}

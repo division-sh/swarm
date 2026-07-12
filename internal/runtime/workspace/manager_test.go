@@ -315,7 +315,7 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 }
 
 func TestRuntimeWorkspaceContainersWithoutRunContextReturnsStaticContainers(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	manager := NewDockerManager(db)
 	containers, err := manager.RuntimeWorkspaceContainers(context.Background())
 	if err != nil {

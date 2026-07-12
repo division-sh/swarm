@@ -3,13 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 )
 
 func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	fixture := seedSQLiteRunTraceParityRows(t, ctx, sqliteStore)
 	mainFilter := RunDebugTraceFilter{
 		EventNames: []string{"trace.event_only", "trace.late_delivered", "trace.failed", "trace.second_delivered"},
@@ -91,7 +92,7 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 
 func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	fixture := seedSQLiteRunTraceParityRows(t, ctx, sqliteStore)
 
 	var got []string
@@ -130,7 +131,7 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 
 func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 
 	runID := "00000000-0000-0000-0000-000000001816"
 	businessEvent := "00000000-0000-0000-0000-000000001817"
@@ -166,7 +167,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 
 func TestSQLiteRunDebugTracePageIncludesTaskAuditSessionsInWatermark(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	base := time.Unix(1700003200, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000001430"
 	eventID := "00000000-0000-0000-0000-000000001431"

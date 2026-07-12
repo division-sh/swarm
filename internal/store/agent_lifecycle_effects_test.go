@@ -22,22 +22,22 @@ type lifecycleEffectStore interface {
 }
 
 func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	proveLifecycleAndExternalEffectAuthority(t, store, store.DB, true)
 }
 
 func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	proveLifecycleAndExternalEffectAuthority(t, &PostgresStore{DB: db}, db, false)
 }
 
 func TestProviderHeadSettlementFencesLifecycleAndLeaseSQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	proveProviderHeadSettlementFencesLifecycleAndLease(t, store, store.DB, true)
 }
 
 func TestProviderHeadSettlementFencesLifecycleAndLeasePostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	proveProviderHeadSettlementFencesLifecycleAndLease(t, &PostgresStore{DB: db}, db, false)
 }
 

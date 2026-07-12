@@ -17,7 +17,7 @@ import (
 )
 
 func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -43,7 +43,7 @@ func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 }
 
 func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -85,7 +85,7 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 }
 
 func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 
 	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutLineage(
@@ -110,7 +110,7 @@ func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 }
 
 func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 
 	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
@@ -151,7 +151,7 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 }
 
 func TestPostgresDiagnosticDirectWritersUseAdmissionFactsAndRemainNonRouted(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
@@ -208,7 +208,7 @@ func TestPostgresDiagnosticDirectWritersUseAdmissionFactsAndRemainNonRouted(t *t
 }
 
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 
 	logger := runtimepkg.NewRuntimeLogger(sqliteStore)

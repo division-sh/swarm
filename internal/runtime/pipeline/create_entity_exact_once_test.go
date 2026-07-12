@@ -24,7 +24,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
-				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 				ctx := sqliteExactOnceRunContext(t, db)
 				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx, nil, nil, nil
 			},
@@ -32,7 +32,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 		{
 			name: "postgres",
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				t.Cleanup(cleanup)
 				pc := newExactOnceCoordinator(t, db, NewWorkflowInstanceStore(db))
 				return pc, testPipelineCoordinatorRunContext(t, pc), nil, nil, nil
@@ -120,7 +120,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 				pc := newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db))
 				return pc, sqliteExactOnceRunContext(t, db)
 			},
@@ -128,7 +128,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 		{
 			name: "postgres",
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				t.Cleanup(cleanup)
 				pc := newExactOnceCoordinator(t, db, NewWorkflowInstanceStore(db))
 				return pc, testPipelineCoordinatorRunContext(t, pc)

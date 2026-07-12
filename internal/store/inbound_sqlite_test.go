@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestSQLiteRuntimeStore_RecordInboundEvent_DedupesWithCanonicalMarker(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t, testutil.SQLiteDefaultTemp())
 	ctx := context.Background()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()

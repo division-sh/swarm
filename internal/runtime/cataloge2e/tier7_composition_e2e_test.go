@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -43,7 +44,7 @@ func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
 			_, startRuntime := tier7StartedRuntimeFixtures[fixtureName]
-			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
+			h := newRuntimeHarness(t, fixtureRoot, startRuntime, testutil.PostgresRowState())
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, catalogRuntimePublishTimeout)

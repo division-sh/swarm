@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +30,7 @@ import (
 
 func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnStoredDivergence(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newComputeModuleReplaySQLiteStore(t)
+	sqliteStore := newComputeModuleReplaySQLiteStore(t, testutil.SQLiteDefaultTemp())
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -98,7 +99,7 @@ func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Co
 	}
 }
 
-func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
+func newComputeModuleReplaySQLiteStore(t *testing.T, requirement testutil.DatabaseRequirement) *store.SQLiteRuntimeStore {
 	t.Helper()
 	var spec runtimecontracts.PlatformSpecDocument
 	source, err := yamlsource.Load(platform.PlatformSpecYAML())
@@ -113,7 +114,7 @@ func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, requirement, dbPath))
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}

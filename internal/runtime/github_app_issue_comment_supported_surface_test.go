@@ -38,7 +38,7 @@ import (
 
 func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
+		_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 		t.Cleanup(cleanup)
 
 		const (
@@ -73,7 +73,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			flowInstance = "github-app-issue-comment-sqlite"
 		)
 		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx, testutil.SQLiteDefaultTemp())
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)

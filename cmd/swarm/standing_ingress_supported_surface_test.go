@@ -166,7 +166,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, nil)
 
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(testutil.SQLiteDeclaredPath(t, testutil.SQLiteFreshFile(), sqlitePath))
 	if err != nil {
 		t.Fatalf("open SQLite runtime store: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) 
 
 func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	dsn, _, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
@@ -533,7 +533,7 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sql
 			if strings.HasPrefix(sqlitePath, "postgres:") {
 				diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(sqlitePath, "postgres:"))
 			} else if strings.TrimSpace(sqlitePath) != "" {
-				diagnostics = standingSQLiteDiagnostics(sqlitePath)
+				diagnostics = standingSQLiteDiagnostics(sqlitePath, testutil.SQLiteDefaultTemp())
 			}
 			t.Fatalf("timed out waiting for Telegram reply %d/%d; diagnostics: %s", i+1, len(chatIDs), diagnostics)
 		}
@@ -592,8 +592,12 @@ func standingPostgresDiagnostics(dsn string) string {
 	return strings.Join(parts, ",")
 }
 
-func standingSQLiteDiagnostics(path string) string {
-	store, err := store.NewSQLiteRuntimeStore(path)
+func standingSQLiteDiagnostics(path string, requirement testutil.DatabaseRequirement) string {
+	declaredPath, err := testutil.DeclareSQLitePath(requirement, path)
+	if err != nil {
+		return err.Error()
+	}
+	store, err := store.NewSQLiteRuntimeStore(declaredPath)
 	if err != nil {
 		return err.Error()
 	}

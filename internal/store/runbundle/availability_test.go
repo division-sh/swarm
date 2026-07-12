@@ -15,7 +15,7 @@ const (
 )
 
 func TestLoadAvailabilityClassifiesBundleSourceStates(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 
 	persistedPresent := seedRunBundleAvailability(t, db, "running", testBundleHash, storerunlifecycle.BundleSourcePersisted, "")
@@ -67,7 +67,7 @@ func TestLoadAvailabilityClassifiesBundleSourceStates(t *testing.T) {
 }
 
 func TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	runID := seedRunBundleAvailability(t, db, "running", "", storerunlifecycle.BundleSourcePersisted, "")
 
@@ -81,7 +81,7 @@ func TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity(t *testin
 }
 
 func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 	ctx := context.Background()
 	runID := seedRunBundleAvailability(t, db, "running", "", storerunlifecycle.BundleSourceLegacy, testBundleHash)
 	if _, err := db.ExecContext(ctx, `DROP TABLE bundles`); err != nil {
@@ -98,7 +98,7 @@ func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
 }
 
 func TestListActiveConflictsUsesAvailabilityOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	persistedPresent := seedRunBundleAvailability(t, db, "running", testBundleHash, storerunlifecycle.BundleSourcePersisted, "")
 	legacy := seedRunBundleAvailability(t, db, "paused", "", storerunlifecycle.BundleSourceLegacy, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")

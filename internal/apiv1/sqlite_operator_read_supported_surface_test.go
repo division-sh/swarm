@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx, testutil.SQLiteDefaultTemp())
 	agentID := "agent-operator-read"
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
@@ -91,7 +92,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 
 func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx, testutil.SQLiteFreshFile())
 	if _, err := sqliteStore.DB.ExecContext(ctx, `ALTER TABLE agent_turns DROP COLUMN turn_blocks`); err != nil {
 		t.Fatalf("drop optional turn_blocks column: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T
 
 func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx, testutil.SQLiteDefaultTemp())
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)

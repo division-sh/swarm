@@ -72,7 +72,7 @@ func (s *typedSystemNodeReceiptStore) MarkSystemNodeProcessedAndSettleDelivery(c
 }
 
 func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := testPipelineRunContext(t, db)
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "test_connector_failure", "pipeline-test", "handle", nil)
@@ -141,7 +141,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 }
 
 func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
@@ -211,7 +211,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 }
 
 func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := testPipelineRunContext(t, db)
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -299,7 +299,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 }
 
 func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
@@ -342,7 +342,7 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 }
 
 func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
@@ -392,7 +392,7 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 }
 
 func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	ctx := context.Background()
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
@@ -468,7 +468,7 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 }
 
 func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{

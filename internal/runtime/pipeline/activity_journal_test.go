@@ -23,14 +23,14 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 		{
 			name: "sqlite",
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				db, journal := newSQLiteActivityJournalStore(t, ctx)
+				db, journal := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 				return db, journal, true
 			},
 		},
 		{
 			name: "postgres",
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				t.Cleanup(cleanup)
 				return db, NewWorkflowInstanceStore(db), false
 			},
@@ -96,14 +96,14 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 		{
 			name: "sqlite",
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				db, journal := newSQLiteActivityJournalStore(t, ctx)
+				db, journal := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 				return db, journal, true
 			},
 		},
 		{
 			name: "postgres",
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				t.Cleanup(cleanup)
 				return db, NewWorkflowInstanceStore(db), false
 			},
@@ -136,7 +136,7 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 }
 
 func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 

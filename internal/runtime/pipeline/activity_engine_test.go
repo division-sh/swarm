@@ -485,7 +485,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -589,7 +589,7 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
@@ -632,14 +632,14 @@ func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery
 		{
 			name: "sqlite",
 			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				db, store := newSQLiteActivityJournalStore(t, ctx)
+				db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 				return db, store, true
 			},
 		},
 		{
 			name: "postgres",
 			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
-				_, db, _ := testutil.StartPostgres(t)
+				_, db, _ := testutil.AcquirePostgres(t, testutil.PostgresFreshPhysical())
 				return db, NewWorkflowInstanceStore(db), false
 			},
 		},
@@ -792,7 +792,7 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -839,7 +839,7 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -911,7 +911,7 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -948,7 +948,7 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatal(err)
 	}
@@ -1054,7 +1054,7 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -1136,7 +1136,7 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	emptyCredentials := testActivityCredentialStore(t, "", "")
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
@@ -1187,7 +1187,7 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 		},
 	})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+	db, store := newSQLiteActivityJournalStore(t, ctx, testutil.SQLiteFreshFile())
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: source},
@@ -1407,10 +1407,10 @@ func (f activityRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, err
 	return f(req)
 }
 
-func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore) {
+func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context, requirement testutil.DatabaseRequirement) (*sql.DB, *WorkflowInstanceStore) {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", testutil.SQLiteDeclaredDSN(t, requirement, "file:"+name+"?mode=memory&cache=shared"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

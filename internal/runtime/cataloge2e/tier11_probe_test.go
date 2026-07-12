@@ -2,6 +2,7 @@ package cataloge2e
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,7 @@ func TestTier11Probe(t *testing.T) {
 				t.Logf("boot errors=%#v", report.Errors())
 				return
 			}
-			h := newRuntimeHarness(t, fixtureRoot, true)
+			h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, catalogRuntimePublishTimeout)

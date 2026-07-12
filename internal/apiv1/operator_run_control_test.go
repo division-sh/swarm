@@ -15,7 +15,7 @@ import (
 )
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBus(pg)
@@ -108,7 +108,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 }
 
 func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bus, err := runtimebus.NewEventBus(pg)

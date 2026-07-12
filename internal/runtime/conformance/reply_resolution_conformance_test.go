@@ -257,7 +257,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				return &store.PostgresStore{DB: db}
 			},
@@ -265,7 +265,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				return storetest.StartSQLiteRuntimeStore(t)
+				return storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 			},
 		},
 	} {
@@ -360,7 +360,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				return &store.PostgresStore{DB: db}
 			},
@@ -368,7 +368,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				return storetest.StartSQLiteRuntimeStore(t)
+				return storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 			},
 		},
 	} {
@@ -454,7 +454,7 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
+				_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 				t.Cleanup(cleanup)
 				return &store.PostgresStore{DB: db}
 			},
@@ -462,7 +462,7 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 		{
 			name: "sqlite",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				return storetest.StartSQLiteRuntimeStore(t)
+				return storetest.StartSQLiteRuntimeStore(t, testutil.SQLiteDefaultTemp())
 			},
 		},
 	} {
