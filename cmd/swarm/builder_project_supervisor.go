@@ -129,7 +129,7 @@ func newRuntimeProjectSupervisor(
 			return err
 		},
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
-			return initializeStateStores(ctx, stores, bundle, false)
+			return initializeStateStores(ctx, stores, bundle)
 		},
 		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
 			decision, err := decideWorkspaceBackend(workspaceBackend, cfg, source)

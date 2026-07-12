@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1099,11 +1098,29 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
 		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)
 	}
-	if !captured.Verbose {
-		t.Fatal("serve verbose = false, want dev composition")
+	if captured.Verbose {
+		t.Fatal("serve verbose = true, want dev and presentation verbosity to remain independent")
 	}
 	if captured.ShutdownGrace != wantGrace {
 		t.Fatalf("serve shutdown grace = %s, want explicit %s", captured.ShutdownGrace, wantGrace)
+	}
+}
+
+func TestCLI_ServeDevAndExplicitVerboseComposeIndependently(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--verbose"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !captured.Dev || !captured.Verbose {
+		t.Fatalf("serve dev/verbose = %t/%t, want both explicit modes", captured.Dev, captured.Verbose)
 	}
 }
 
@@ -1151,8 +1168,8 @@ func TestCLI_ServeDevAcceptsExplicitRequireBundleMatchFalse(t *testing.T) {
 
 func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	spec := loadServeDevModeSpec(t)
-	if strings.TrimSpace(spec.ImplementedBy) != "#830" {
-		t.Fatalf("dev mode implemented_by = %q, want #830", spec.ImplementedBy)
+	if !strings.Contains(spec.ImplementedBy, "#830") || !strings.Contains(spec.ImplementedBy, "#2010") {
+		t.Fatalf("dev mode implemented_by = %q, want #830/#2010 migration", spec.ImplementedBy)
 	}
 	if strings.TrimSpace(spec.Flag) != "--dev" {
 		t.Fatalf("dev mode flag = %q, want --dev", spec.Flag)
@@ -1160,7 +1177,7 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	for _, want := range []string{
 		"`--abandon-active-runs`",
 		"`--no-require-bundle-match`",
-		"`--verbose`",
+		"without setting `--verbose`",
 		"dev entity-container cleanup",
 	} {
 		if !stringSliceContains(spec.Composition, want) {
@@ -1178,6 +1195,11 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"--dev --require-bundle-match=false", "redundant but valid"} {
+		if !stringSliceContains(spec.ConflictRules, want) {
+			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
+		}
+	}
+	for _, want := range []string{"--dev --verbose", "not redundant"} {
 		if !stringSliceContains(spec.ConflictRules, want) {
 			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
 		}
@@ -3362,15 +3384,16 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	}
 }
 
-func TestServeBootReporterEmitsNumberedProgressOnlyWhenVerbose(t *testing.T) {
+func TestServeLifecyclePresenterProjectsBootFactsByMode(t *testing.T) {
 	var quiet bytes.Buffer
-	newServeBootReporter(false, &quiet).emit(1, "process_start", "ok", "")
+	concise := newServeLifecyclePresenter(serveOptions{Output: &quiet})
+	concise.boot(1, "process_start", "ok", "")
 	if quiet.Len() != 0 {
-		t.Fatalf("quiet reporter output = %q, want empty", quiet.String())
+		t.Fatalf("concise presenter emitted before readiness = %q", quiet.String())
 	}
 
 	var verbose bytes.Buffer
-	newServeBootReporter(true, &verbose).emit(1, "process_start", "ok", "contracts=contracts")
+	newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &verbose}).boot(1, "process_start", "ok", "contracts=contracts")
 	out := verbose.String()
 	for _, want := range []string{"[1/22]", "process_start", "ok", "contracts=contracts"} {
 		if !strings.Contains(out, want) {
@@ -14389,116 +14412,76 @@ func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
 	}
 }
 
-func TestSummarizeServeSchemaPlansDefaultOmitsTableBreakdown(t *testing.T) {
+func TestSummarizeServeSchemaPlansOmitsTableBreakdown(t *testing.T) {
 	plans := []store.SchemaTableDDL{
 		{TableName: "events", ColumnCount: 17},
 		{TableName: "runs", ColumnCount: 14},
 	}
 
-	summary, logOutput := captureServeSchemaPlanSummary(t, plans, false)
+	summary := summarizeServeSchemaPlans(plans)
 
 	if summary != "verified 2 generated tables" {
 		t.Fatalf("summary = %q, want concise generated-table count", summary)
 	}
 	for _, forbidden := range []string{"events(17)", "runs(14)", "detail="} {
-		if strings.Contains(summary, forbidden) || strings.Contains(logOutput, forbidden) {
-			t.Fatalf("default schema summary leaked %q\nsummary=%s\nlog=%s", forbidden, summary, logOutput)
-		}
-	}
-	for _, want := range []string{"swarm boot state stores", "tables=2", "columns=31"} {
-		if !strings.Contains(logOutput, want) {
-			t.Fatalf("default schema log missing %q:\n%s", want, logOutput)
+		if strings.Contains(summary, forbidden) {
+			t.Fatalf("serve schema summary leaked %q: %s", forbidden, summary)
 		}
 	}
 }
 
-func TestSummarizeServeSchemaPlansVerboseRetainsTableBreakdown(t *testing.T) {
+func TestDoctorSchemaInventoryRetainsTypedSortedTableBreakdown(t *testing.T) {
 	plans := []store.SchemaTableDDL{
 		{TableName: "runs", ColumnCount: 14},
 		{TableName: "events", ColumnCount: 17},
 	}
 
-	summary, logOutput := captureServeSchemaPlanSummary(t, plans, true)
-
-	if summary != "verified 2 generated tables (events(17), runs(14))" {
-		t.Fatalf("summary = %q, want sorted verbose table breakdown", summary)
+	summary := newServeSchemaPlanSummary(plans)
+	if summary.tableCount != 2 || summary.columnCount != 31 {
+		t.Fatalf("summary counts = %d/%d, want 2/31", summary.tableCount, summary.columnCount)
 	}
-	for _, forbidden := range []string{"events(17)", "runs(14)", "detail="} {
-		if strings.Contains(logOutput, forbidden) {
-			t.Fatalf("process log leaked verbose schema detail %q:\n%s", forbidden, logOutput)
-		}
+	if len(summary.tables) != 2 || summary.tables[0].Name != "events" || summary.tables[0].ColumnCount != 17 || summary.tables[1].Name != "runs" || summary.tables[1].ColumnCount != 14 {
+		t.Fatalf("typed inventory = %#v, want sorted events/runs rows", summary.tables)
 	}
 }
 
 func TestSummarizeServeSchemaPlansZeroPlans(t *testing.T) {
-	summary, logOutput := captureServeSchemaPlanSummary(t, nil, true)
+	summary := summarizeServeSchemaPlans(nil)
 
 	if summary != "verified 0 generated tables" {
 		t.Fatalf("summary = %q, want zero generated-table summary", summary)
 	}
-	for _, want := range []string{"tables=0", "columns=0"} {
-		if !strings.Contains(logOutput, want) {
-			t.Fatalf("zero-plan schema log missing %q:\n%s", want, logOutput)
-		}
-	}
-	if strings.Contains(logOutput, "detail=") {
-		t.Fatalf("zero-plan schema log emitted empty detail:\n%s", logOutput)
-	}
 }
 
-func TestInitializeServeSchemaStateStoresConsumeVerboseOwner(t *testing.T) {
+func TestInitializeServeSchemaStateStoresNeverExposeTableInventory(t *testing.T) {
 	ctx := context.Background()
 	bundle := loadStoreBackendSelectionWorkflowBundle(t)
 	stores := storeBundle{SchemaBootstrapper: recordingSchemaBootstrapper{}}
 
-	defaultSummary, err := initializeStateStores(ctx, stores, bundle, false)
+	defaultSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
-		t.Fatalf("initializeStateStores(default): %v", err)
+		t.Fatalf("initializeStateStores: %v", err)
 	}
 	if strings.Contains(defaultSummary, "(") {
-		t.Fatalf("default loaded-bundle state store summary leaked table detail:\n%s", defaultSummary)
+		t.Fatalf("loaded-bundle state store summary leaked table detail:\n%s", defaultSummary)
 	}
 
-	verboseSummary, err := initializeStateStores(ctx, stores, bundle, true)
+	loadedDefaultSummaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, []serveRuntimeBundle{{bundle: bundle}, {bundle: bundle}})
 	if err != nil {
-		t.Fatalf("initializeStateStores(verbose): %v", err)
-	}
-	if !strings.Contains(verboseSummary, "(") || !strings.Contains(verboseSummary, ")") {
-		t.Fatalf("verbose loaded-bundle state store summary missing table detail:\n%s", verboseSummary)
-	}
-
-	loadedDefaultSummaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, []serveRuntimeBundle{{bundle: bundle}, {bundle: bundle}}, false)
-	if err != nil {
-		t.Fatalf("initializeLoadedServeRuntimeStateStores(default): %v", err)
+		t.Fatalf("initializeLoadedServeRuntimeStateStores: %v", err)
 	}
 	for _, summary := range loadedDefaultSummaries {
 		if strings.Contains(summary, "(") {
-			t.Fatalf("default loaded runtime state store summary leaked table detail:\n%v", loadedDefaultSummaries)
+			t.Fatalf("loaded runtime state store summary leaked table detail:\n%v", loadedDefaultSummaries)
 		}
 	}
 
-	loadedVerboseSummaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, []serveRuntimeBundle{{bundle: bundle}}, true)
+	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(repoRoot(), defaultPlatformSpecPath))
 	if err != nil {
-		t.Fatalf("initializeLoadedServeRuntimeStateStores(verbose): %v", err)
-	}
-	if len(loadedVerboseSummaries) != 1 || !strings.Contains(loadedVerboseSummaries[0], "(") || !strings.Contains(loadedVerboseSummaries[0], ")") {
-		t.Fatalf("verbose loaded runtime state store summary missing table detail:\n%v", loadedVerboseSummaries)
-	}
-
-	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(repoRoot(), defaultPlatformSpecPath), false)
-	if err != nil {
-		t.Fatalf("initializeServePlatformStateStores(default): %v", err)
+		t.Fatalf("initializeServePlatformStateStores: %v", err)
 	}
 	if strings.Contains(defaultPlatformSummary, "(") {
-		t.Fatalf("default pre-catalog platform state store summary leaked table detail:\n%s", defaultPlatformSummary)
-	}
-
-	verbosePlatformSummary, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(repoRoot(), defaultPlatformSpecPath), true)
-	if err != nil {
-		t.Fatalf("initializeServePlatformStateStores(verbose): %v", err)
-	}
-	if !strings.Contains(verbosePlatformSummary, "(") || !strings.Contains(verbosePlatformSummary, ")") {
-		t.Fatalf("verbose pre-catalog platform state store summary missing table detail:\n%s", verbosePlatformSummary)
+		t.Fatalf("pre-catalog platform state store summary leaked table detail:\n%s", defaultPlatformSummary)
 	}
 }
 
@@ -14507,7 +14490,7 @@ func TestInitializeStateStoresDoesNotPlanGeneratedEntityTables(t *testing.T) {
 	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
 	recorder := &capturingSchemaBootstrapper{}
 
-	summary, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: recorder}, bundle, true)
+	summary, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: recorder}, bundle)
 	if err != nil {
 		t.Fatalf("initializeStateStores: %v", err)
 	}
@@ -14532,7 +14515,7 @@ func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testin
 		}
 	})
 
-	if _, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: sqliteStore}, bundle, false); err != nil {
+	if _, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: sqliteStore}, bundle); err != nil {
 		t.Fatalf("initializeStateStores(sqlite): %v", err)
 	}
 	if !sqliteMainTestTableExists(t, sqliteStore.DB, "entity_state") {
@@ -14558,7 +14541,7 @@ func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *test
 		}
 	})
 
-	if _, err := initializeStateStores(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, false); err != nil {
+	if _, err := initializeStateStores(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle); err != nil {
 		t.Fatalf("initializeStateStores(postgres): %v", err)
 	}
 	if !postgresMainTestTableExists(t, db, "entity_state") {
@@ -14573,27 +14556,12 @@ func TestServeRuntimeStateStoreSummaryDedupesSchemaSummaries(t *testing.T) {
 	got := serveRuntimeStateStoreSummary([]serveRuntimeBundleContext{
 		{stateStoreSummary: "verified 2 generated tables"},
 		{stateStoreSummary: "verified 2 generated tables"},
-		{stateStoreSummary: "verified 2 generated tables (events(17), runs(14))"},
 		{stateStoreSummary: " "},
 	})
 
-	if strings.Count(got, "verified 2 generated tables") != 2 {
-		t.Fatalf("summary = %q, want one concise and one verbose summary after de-dupe", got)
+	if strings.Count(got, "verified 2 generated tables") != 1 {
+		t.Fatalf("summary = %q, want one concise summary after de-dupe", got)
 	}
-	if strings.Count(got, "events(17)") != 1 {
-		t.Fatalf("summary = %q, want one verbose table detail after de-dupe", got)
-	}
-}
-
-func captureServeSchemaPlanSummary(t *testing.T, plans []store.SchemaTableDDL, verbose bool) (string, string) {
-	t.Helper()
-	var logOutput bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() {
-		slog.SetDefault(previous)
-	})
-	return summarizeServeSchemaPlans(plans, verbose), logOutput.String()
 }
 
 type recordingSchemaBootstrapper struct{}
@@ -14699,33 +14667,12 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 		t.Fatalf("serve boot progress spec step count = %d, want %d", got, want)
 	}
 
-	oldBuildStores := buildStoresForServe
-	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	dsn, _, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	runtimePG, err := store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
-			return storeBundle{}, err
-		}
-		return selectedPostgresStoreBundle(runtimePG, cfg), nil
-	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
-		return serveRuntimeWorkspaceStub{}, nil
-	}
-	t.Cleanup(func() {
-		buildStoresForServe = oldBuildStores
-		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
-	})
-
+	sqlitePath := filepath.Join(t.TempDir(), "verbose-sequence.sqlite")
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
+		StoreMode:          "sqlite",
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
@@ -14772,27 +14719,6 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 			t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
-			oldBuildStores := buildStoresForServe
-			oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-			dsn, _, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			runtimePG, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				t.Fatalf("NewPostgresStore: %v", err)
-			}
-			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-				if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
-					return storeBundle{}, err
-				}
-				return selectedPostgresStoreBundle(runtimePG, cfg), nil
-			}
-			configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
-				return serveRuntimeWorkspaceStub{}, nil
-			}
-			t.Cleanup(func() {
-				buildStoresForServe = oldBuildStores
-				configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
-			})
 
 			occupied, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
@@ -14806,27 +14732,32 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 			} else {
 				mcpAddr = occupied.Addr().String()
 			}
+			verbose := !tt.occupyAPI
 
 			var out lockedBuffer
 			code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-				ConfigPath:         writeServeRuntimeTestConfig(t),
+				ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
 				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 				PlatformSpecPath:   defaultPlatformSpecPath,
-				StoreMode:          "postgres",
+				StoreMode:          "sqlite",
 				APIListenAddr:      apiAddr,
 				MCPListenAddr:      mcpAddr,
 				SelfCheck:          true,
 				RequireBundleMatch: true,
-				Verbose:            true,
+				Verbose:            verbose,
 				Output:             &out,
 			})
 			if code != 3 {
 				t.Fatalf("runServeRuntime code = %d, want 3\noutput:\n%s", code, out.String())
 			}
-			if !strings.Contains(out.String(), "http_listener_bind") || !strings.Contains(out.String(), "FAILED") {
-				t.Fatalf("serve output missing bind failure proof:\n%s", out.String())
+			if verbose {
+				if !strings.Contains(out.String(), "http_listener_bind") || !strings.Contains(out.String(), "FAILED") {
+					t.Fatalf("verbose serve output missing bind failure proof:\n%s", out.String())
+				}
+			} else if !strings.Contains(out.String(), "serve failed · http listener bind") {
+				t.Fatalf("concise serve output missing bind failure proof:\n%s", out.String())
 			}
-			if strings.Contains(out.String(), "ready                      ok") {
+			if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "\n  ready in ") {
 				t.Fatalf("serve reported readiness after listener bind failure:\n%s", out.String())
 			}
 		})
@@ -15737,7 +15668,7 @@ func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
 		case <-ticker.C:
-			if strings.Contains(out.String(), "[22/22]") {
+			if serveOutputIsReady(out.String()) {
 				return
 			}
 		}
@@ -15800,7 +15731,7 @@ func (p *serveRuntimeTestProcess) waitForReadyLine() {
 			}
 			p.t.Fatalf("timed out waiting for serve ready line and stopping runServeRuntime\noutput:\n%s", p.outputString())
 		case <-ticker.C:
-			if strings.Contains(p.outputString(), "[22/22]") {
+			if serveOutputIsReady(p.outputString()) {
 				return
 			}
 		}
@@ -15861,15 +15792,23 @@ func (p *serveRuntimeTestProcess) recordStopped(code int) {
 func serveRuntimeAPIListenerFromOutput(t *testing.T, output string) string {
 	t.Helper()
 	for _, line := range strings.Split(output, "\n") {
-		for _, field := range strings.Fields(line) {
+		fields := strings.Fields(line)
+		for i, field := range fields {
 			field = strings.Trim(field, "(),")
 			if addr, ok := strings.CutPrefix(field, "api_listener="); ok && strings.TrimSpace(addr) != "" {
 				return addr
+			}
+			if strings.TrimSpace(line) != "" && fields[0] == "listeners" && field == "api" && i+1 < len(fields) {
+				return strings.Trim(fields[i+1], "(),")
 			}
 		}
 	}
 	t.Fatalf("serve output missing api_listener:\n%s", output)
 	return ""
+}
+
+func serveOutputIsReady(output string) bool {
+	return strings.Contains(output, "[22/22]") || strings.Contains(output, "\n  ready in ")
 }
 
 type serveBootProgressRow struct {
