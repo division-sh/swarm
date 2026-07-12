@@ -118,9 +118,9 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 			name: "required path must match the audited pattern",
 			mutate: func(inventory *routeAuthorityDriftInventory) {
 				dim := routeAuthorityDriftSearchDimensionByID(t, inventory, "event_deliveries")
-				dim.RequiredPaths = []string{"go.mod"}
+				dim.RequiredPaths = []string{"README.md"}
 			},
-			want: "event_deliveries required_path go.mod does not match pattern",
+			want: "event_deliveries required_path README.md does not match pattern",
 		},
 		{
 			name: "no implemented guardrail is not enough",
