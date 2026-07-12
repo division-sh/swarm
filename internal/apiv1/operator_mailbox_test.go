@@ -101,6 +101,16 @@ func TestMailboxListTaggedCursorAdvancesOwnersIndependently(t *testing.T) {
 	}
 }
 
+func TestMailboxListOptionsAcceptsSupersededDecisionCardStatus(t *testing.T) {
+	opts, err := mailboxListOptionsFromParams(map[string]any{"status": "SuPeRsEdEd"})
+	if err != nil {
+		t.Fatalf("mailboxListOptionsFromParams: %v", err)
+	}
+	if opts.Status != decisioncard.StatusSuperseded {
+		t.Fatalf("status = %q, want %q", opts.Status, decisioncard.StatusSuperseded)
+	}
+}
+
 func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 	t.Helper()
 	var count int
