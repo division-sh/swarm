@@ -1425,6 +1425,17 @@ func TestNormalizeEventTokenNormalizesProviderTopicSeparators(t *testing.T) {
 	}
 }
 
+func TestEventNameManifestAcceptsLiteralAndTemplateNames(t *testing.T) {
+	literal := EventNameManifest{Literal: "inbound.telegram"}
+	if !literal.Accepts("inbound.telegram") || literal.Accepts("inbound.telegram.message") {
+		t.Fatalf("literal event-name acceptance is not exact")
+	}
+	template := EventNameManifest{Template: "inbound.github.{event_type}"}
+	if !template.Accepts("inbound.github.issue_comment") || template.Accepts("inbound.github.") || template.Accepts("inbound.gitlab.issue_comment") {
+		t.Fatalf("template event-name acceptance did not preserve the declared prefix/suffix boundary")
+	}
+}
+
 func telegramRequest(secret string, body []byte, payload any) Request {
 	req := Request{
 		Provider: "telegram",

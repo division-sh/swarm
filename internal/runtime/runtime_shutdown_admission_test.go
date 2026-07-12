@@ -287,7 +287,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		rec := httptest.NewRecorder()
 		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 			BundleHash: hash, FlowID: "chat", RunID: "41000000-0000-0000-0000-000000000001",
-			FlowInstance: "chat/@standing/a", EntityID: "41000000-0000-0000-0000-000000000002",
+			FlowInstance: "chat/a", EntityID: "41000000-0000-0000-0000-000000000002",
 			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 		}, nil)
 		response <- rec

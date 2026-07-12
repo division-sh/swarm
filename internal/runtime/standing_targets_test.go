@@ -35,6 +35,41 @@ func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T)
 	}
 }
 
+func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runtimecontracts.WorkflowContractBundle)
+	}{
+		{
+			name: "non_external",
+			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
+				pins := bundle.Semantics.FlowInputEventPins["coordinator"]
+				pins[0].Source = "internal"
+				bundle.Semantics.FlowInputEventPins["coordinator"] = pins
+			},
+		},
+		{
+			name: "ambiguous",
+			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
+				pins := bundle.Semantics.FlowInputEventPins["coordinator"]
+				duplicate := pins[0]
+				duplicate.Name = "telegram_update_duplicate"
+				bundle.Semantics.FlowInputEventPins["coordinator"] = append(pins, duplicate)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
+			bundle, _ := semanticview.Bundle(source)
+			tc.mutate(bundle)
+			_, err := ResolveStandingTargetDeclarations(source, registry)
+			if err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
+				t.Fatalf("canonical input-association error = %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveStandingTargetDeclarationsRejectsImplicitActivation(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
@@ -67,7 +102,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		Runtime:    &Runtime{Bus: bus},
 		StandingTargets: []StandingTarget{{
 			BundleHash: hash, FlowID: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", FlowInstance: "coordinator/@standing/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
+			RunID: "run", FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
 		}},
 	})
 	if err != nil {
@@ -95,7 +130,7 @@ func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "coordinator",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/@standing/a",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
 	}, source)
@@ -127,7 +162,7 @@ func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), FlowID: "coordinator",
-		RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/@standing/b",
+		RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b",
 		EntityID: "42000000-0000-0000-0000-000000000002", Alias: "issues", Provider: "github",
 		SigningSecret: "github-secret",
 	}, source)

@@ -8546,6 +8546,7 @@ flow_model:
         lifecycle: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
         ingress_dispatch: internal/runtime.InboundGateway.HandleResolvedWebhook
+        routing_projection: internal/runtime/routingtopology.Build root_input_sources
       authoring_shape:
         example:
           flows:
@@ -8572,7 +8573,10 @@ flow_model:
         one singleton flow instance, and that instance's primary entity. First activation consumes the full canonical
         ActivateFlowInstance path, including routes, agents, initial timers, schedules, and creation effects. Same-source
         restart rehydrates the persisted instance and runtime side effects without replaying creation effects. The canonical
-        bundle_hash, package flow identity, run_id, flow_instance, and entity_id form the standing semantic authority.
+        bundle_hash, package flow identity, run_id, flow_instance, and entity_id form the standing semantic authority. The
+        standing instance uses the ordinary canonical flow-instance identity owner: its bundle digest is the logical
+        instance_id and its instance_path is derived from the declared flow scope plus that instance_id. A special standing
+        path segment or alternate route matcher is forbidden.
         Admission discovers every active persisted standing owner independently of candidate declarations, then requires each
         predecessor bundle hash/source pair to be in the complete candidate bundle set. Removing or renaming the declaration,
         renaming package or flow identity, or changing standing to non-standing MUST NOT hide persisted predecessor authority.
@@ -8624,12 +8628,15 @@ flow_model:
       readback: >
         Basic describe projects activation, alias, providers, and signing-secret references from package declarations. Serve
         readiness projects the exact POST URL and BOUND/UNBOUND state from the loaded RuntimeContextManager plus deployment
-        credential store. Neither surface exposes secret values or creates a second target model.
+        credential store. `routing-topology/v1.root_input_sources` projects each alias/provider binding and its target flow as
+        admission provenance; it is not a producer, edge, or third delivery scope. Neither surface exposes secret values or
+        creates a second target model.
       legacy_paths_removed:
       - scanning entity_state by route alias as ingress target authority
       - reading webhook signing values from flow-instance config
       - discarding a resolved run_id and publishing empty-run root ingress
       - treating seeded entities or request-context run injection as supported served-path proof
+      - encoding standing ownership in a special flow-instance path namespace
     escape_hatches:
       static_multi_entity_flows:
         status: retired_unsupported
@@ -8755,6 +8762,12 @@ flow_model:
           delivery_scopes:
           - typed_pubsub delivery between authored producers and consumers, with match exact|pattern and boundary same_flow|import_boundary proof
           - inter_flow_connect delivery between authored producers and consumers, lowered from declared output pin through parent connect to declared input pin
+          root_input_source_rule: >
+            `root_input_sources` is the deterministic admission-provenance projection for declared standing ingress. Each
+            entry names the authored alias, provider, package/flow target, and authored package location. It does not create a
+            producer endpoint or route edge, does not participate in delivery-scope counts, and does not authorize delivery.
+            After admission, the canonical declared-input association and typed pub/sub relation owners govern the event's
+            ordinary delivery. Flow-entry ingress declarations remain the semantic source; the projection is read-only.
           typed_pubsub_rule: >
             One semanticview relation resolver evaluates each producer-or-input/consumer pair exactly once. Same canonical
             flow identity may return exact or pattern with boundary same_flow. Different canonical flow identity may return

@@ -54,10 +54,10 @@ func seedPersistedStandingOwner(t *testing.T, db *sql.DB, sqlite bool, fact runt
 		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`, runID, fact.BundleHash, fact.BundleSource); err != nil {
 			t.Fatalf("seed standing run: %v", err)
 		}
-		if _, err := db.Exec(`INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ('service/@standing/a', 'telegram-chat', 'static', '{}', 'active')`); err != nil {
+		if _, err := db.Exec(`INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ('service/a', 'telegram-chat', 'static', '{}', 'active')`); err != nil {
 			t.Fatalf("seed standing instance: %v", err)
 		}
-		if _, err := db.Exec(`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, fields) VALUES (?, ?, 'service/@standing/a', 'active', '{"activation":"standing","package_key":"."}')`, runID, entityID); err != nil {
+		if _, err := db.Exec(`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, fields) VALUES (?, ?, 'service/a', 'active', '{"activation":"standing","package_key":"."}')`, runID, entityID); err != nil {
 			t.Fatalf("seed standing entity: %v", err)
 		}
 		return
@@ -65,10 +65,10 @@ func seedPersistedStandingOwner(t *testing.T, db *sql.DB, sqlite bool, fact runt
 	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`, runID, fact.BundleHash, fact.BundleSource); err != nil {
 		t.Fatalf("seed standing run: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ('service/@standing/a', 'telegram-chat', 'static', '{}'::jsonb, 'active')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ('service/a', 'telegram-chat', 'static', '{}'::jsonb, 'active')`); err != nil {
 		t.Fatalf("seed standing instance: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, fields) VALUES ($1::uuid, $2::uuid, 'service/@standing/a', 'active', '{"activation":"standing","package_key":"."}'::jsonb)`, runID, entityID); err != nil {
+	if _, err := db.Exec(`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, fields) VALUES ($1::uuid, $2::uuid, 'service/a', 'active', '{"activation":"standing","package_key":"."}'::jsonb)`, runID, entityID); err != nil {
 		t.Fatalf("seed standing entity: %v", err)
 	}
 }

@@ -110,6 +110,7 @@ func TestPlatformEventCatalogImplicitRequiredSkipsNullableFields(t *testing.T) {
 payload:
   required_value: string
   optional_value: string (nullable)
+  explicitly_optional_value: string (optional; producer may omit it)
 `), &node); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -136,6 +137,22 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 				"provider":          "github",
 				"provider_event_id": "provider-evt-1",
 				"entity_id":         "00000000-0000-0000-0000-000000000127",
+			},
+		},
+		{
+			eventType: "platform.activity_requested",
+			payload: map[string]any{
+				"activity_id": "telegram_send_message", "tool": "telegram.send_message",
+				"input":        map[string]any{"chat_id": float64(42), "text": "hello"},
+				"effect_class": "non_idempotent_write", "success_event": "telegram-chat.telegram_send_message.succeeded",
+				"failure_event": "telegram-chat.telegram_send_message.failed", "retry_max_attempts": 1,
+				"retry_backoff": "none", "fork_policy": "reuse_recorded_result",
+				"entity_id": "00000000-0000-0000-0000-000000000127", "node_id": "telegram-responder",
+				"flow_id": "telegram-chat", "handler_event_key": "inbound.telegram",
+				"source_event_id": "00000000-0000-0000-0000-000000000128",
+				"source_run_id":   "00000000-0000-0000-0000-000000000129", "source_task_id": "",
+				"parent_event_id": "00000000-0000-0000-0000-000000000128", "chain_depth": 1,
+				"attempt": 1, "loop_generation": map[string]any{},
 			},
 		},
 		{

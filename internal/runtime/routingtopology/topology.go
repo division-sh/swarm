@@ -20,8 +20,9 @@ const (
 type DeliveryScope string
 
 const (
-	DeliveryScopeTypedPubSub      DeliveryScope = "typed_pubsub"
-	DeliveryScopeInterFlowConnect DeliveryScope = "inter_flow_connect"
+	DeliveryScopeTypedPubSub       DeliveryScope = "typed_pubsub"
+	DeliveryScopeInterFlowConnect  DeliveryScope = "inter_flow_connect"
+	RootInputSourceStandingIngress               = "standing_ingress"
 )
 
 type EventIdentity struct {
@@ -73,6 +74,21 @@ type BoundaryExposure struct {
 	Event    EventIdentity `json:"event"`
 	Producer Endpoint      `json:"producer"`
 	Output   Endpoint      `json:"output"`
+}
+
+type RootInputSource struct {
+	ID               string          `json:"id"`
+	Kind             string          `json:"kind"`
+	Alias            string          `json:"alias"`
+	Provider         string          `json:"provider"`
+	Target           RootInputTarget `json:"target"`
+	AuthoredLocation string          `json:"authored_location,omitempty"`
+}
+
+type RootInputTarget struct {
+	PackageKey string `json:"package_key,omitempty"`
+	FlowID     string `json:"flow_id"`
+	FlowPath   string `json:"flow_path,omitempty"`
 }
 
 type Edge struct {
@@ -195,6 +211,7 @@ type Topology struct {
 	Consumers                    []Endpoint                    `json:"consumers"`
 	InputPins                    []Endpoint                    `json:"input_pins"`
 	OutputPins                   []Endpoint                    `json:"output_pins"`
+	RootInputSources             []RootInputSource             `json:"root_input_sources"`
 	BoundaryExposures            []BoundaryExposure            `json:"boundary_exposures"`
 	Edges                        []Edge                        `json:"edges"`
 	LegacyQualifiedSubscriptions []LegacyQualifiedSubscription `json:"legacy_qualified_subscriptions"`
@@ -221,11 +238,58 @@ func Build(source semanticview.Source) Topology {
 		Consumers:                    endpointViews(census.Consumers()),
 		InputPins:                    endpointViews(census.InputPins()),
 		OutputPins:                   endpointViews(census.OutputPins()),
+		RootInputSources:             rootInputSourceViews(source),
 		BoundaryExposures:            builder.sortedExposures(),
 		Edges:                        builder.sortedEdges(),
 		LegacyQualifiedSubscriptions: legacyQualifiedSubscriptionViews(census.LegacyQualifiedSubscriptions()),
 		Issues:                       issueViews(planIssues, builder.relationIssues),
 	}
+}
+
+func rootInputSourceViews(source semanticview.Source) []RootInputSource {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return []RootInputSource{}
+	}
+	out := make([]RootInputSource, 0)
+	for _, pkg := range bundle.PackageTree {
+		for flowIndex, ref := range pkg.Manifest.Flows {
+			if ref.Ingress == nil {
+				continue
+			}
+			flowID := strings.TrimSpace(ref.ID)
+			alias := strings.TrimSpace(ref.Ingress.Alias)
+			if alias == "" {
+				alias = flowID
+			}
+			target := RootInputTarget{
+				PackageKey: strings.TrimSpace(pkg.Key),
+				FlowID:     flowID,
+				FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+			}
+			sourceFile := strings.TrimSpace(pkg.Paths.PackageFile)
+			if sourceFile == "" {
+				sourceFile = "package.yaml"
+			}
+			for providerIndex, binding := range ref.Ingress.Providers {
+				item := RootInputSource{
+					Kind:             RootInputSourceStandingIngress,
+					Alias:            alias,
+					Provider:         strings.TrimSpace(binding.Provider),
+					Target:           target,
+					AuthoredLocation: sourceFile + ":flows[" + strconv.Itoa(flowIndex) + "].ingress.providers[" + strconv.Itoa(providerIndex) + "]",
+				}
+				item.ID = rootInputSourceID(item)
+				out = append(out, item)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left := strings.Join([]string{out[i].Alias, out[i].Provider, out[i].Target.PackageKey, out[i].Target.FlowID, out[i].AuthoredLocation, out[i].ID}, "\x00")
+		right := strings.Join([]string{out[j].Alias, out[j].Provider, out[j].Target.PackageKey, out[j].Target.FlowID, out[j].AuthoredLocation, out[j].ID}, "\x00")
+		return left < right
+	})
+	return out
 }
 
 type topologyBuilder struct {
@@ -664,6 +728,20 @@ func edgeID(edge Edge) string {
 	}
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 	return "route-" + hex.EncodeToString(digest[:8])
+}
+
+func rootInputSourceID(source RootInputSource) string {
+	parts := []string{
+		strings.TrimSpace(source.Kind),
+		strings.TrimSpace(source.Alias),
+		strings.TrimSpace(source.Provider),
+		strings.TrimSpace(source.Target.PackageKey),
+		strings.TrimSpace(source.Target.FlowID),
+		strings.TrimSpace(source.Target.FlowPath),
+		strings.TrimSpace(source.AuthoredLocation),
+	}
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+	return "root-input-" + hex.EncodeToString(digest[:8])
 }
 
 func normalizedStrings(values []string) []string {
