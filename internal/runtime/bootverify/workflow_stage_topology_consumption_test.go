@@ -101,6 +101,55 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 	}
 }
 
+func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
+	stages := []string{"waiting", "exact-target", "pattern-target"}
+	handlers := map[string]runtimecontracts.SystemNodeContract{
+		"exact-node": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"work.requested": {AdvancesTo: "exact-target"},
+			},
+		},
+		"pattern-node": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"*.requested": {AdvancesTo: "pattern-target"},
+			},
+		},
+	}
+	topology := runtimecontracts.BuildWorkflowStageTopology(
+		"", "waiting", stages, []string{"exact-target", "pattern-target"},
+		[]runtimecontracts.HandlerTransitionSemantic{
+			{NodeID: "exact-node", EventType: "work.requested", AdvancesTo: "exact-target"},
+			{NodeID: "pattern-node", EventType: "*.requested", AdvancesTo: "pattern-target"},
+		},
+		nil,
+		nil,
+	)
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
+		Nodes:  handlers,
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"exact-node":   handlers["exact-node"].EventHandlers,
+				"pattern-node": handlers["pattern-node"].EventHandlers,
+			},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+		},
+	}
+	trigger, err := timeridentity.ParseStartTrigger("event:work.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := timerActivationStates(semanticview.Wrap(bundle), runtimecontracts.WorkflowTimerContract{}, trigger, stringSet(stages))
+	for _, target := range []string{"exact-target", "pattern-target"} {
+		if _, ok := got[target]; !ok {
+			t.Fatalf("activation states = %#v, missing %s from matching handler union", got, target)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("activation states = %#v, want exact union of two handler topologies", got)
+	}
+}
+
 func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 	accumulate := &runtimecontracts.AccumulateSpec{
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "accumulated"}},
@@ -173,30 +222,61 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 	}
 }
 
-func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesNonHandlerEdges(t *testing.T) {
-	topology := runtimecontracts.WorkflowStageTopology{
-		FlowID: "", InitialStage: "waiting", Stages: []string{"waiting", "review", "done"}, TerminalStages: []string{"done"},
-		Edges: []runtimecontracts.WorkflowStageTopologyEdge{
-			{From: "waiting", To: "review", Source: "handler.advances_to", NodeID: "node", HandlerEvent: "work.started", EventType: "work.started"},
-			{From: "review", To: "done", Source: "loop.escape", NodeID: "node", HandlerEvent: "review.revision_requested", EventType: "review.revision_requested"},
+func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOtherCarrier(t *testing.T) {
+	join := &runtimecontracts.JoinSpec{
+		ID: "approval", Stage: "joining",
+		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "joined"},
+		Timeout: runtimecontracts.JoinTimeoutSpec{
+			After:   "1h",
+			Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "join-timed-out"},
 		},
 	}
+	stages := []string{"waiting", "review", "joining", "joined", "join-timed-out", "expired", "escaped"}
+	topology := runtimecontracts.BuildWorkflowStageTopology(
+		"", "waiting", stages, []string{"joined", "join-timed-out", "expired", "escaped"},
+		[]runtimecontracts.HandlerTransitionSemantic{
+			{NodeID: "work-node", EventType: "work.started", AdvancesTo: "review"},
+			{NodeID: "join-node", EventType: "approval.requested", AdvancesTo: "joining", Join: join},
+		},
+		[]runtimecontracts.WorkflowTimerContract{{ID: "review.expire", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent, AdvancesTo: "expired"}},
+		[]runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
+			Operations: []runtimecontracts.WorkflowLoopOperationPlan{{NodeID: "review-node", HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review"}},
+		}},
+	)
+	handlers := map[string]runtimecontracts.SystemNodeContract{
+		"work-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.started": {AdvancesTo: "review"}}},
+		"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"approval.requested": {AdvancesTo: "joining", Join: join}}},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events:    map[string]runtimecontracts.EventCatalogEntry{"work.started": {}},
-		Nodes:     map[string]runtimecontracts.SystemNodeContract{"node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.started": {AdvancesTo: "review"}}}},
-		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.started": {}, "approval.requested": {}},
+		Nodes:  handlers,
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"work-node": handlers["work-node"].EventHandlers,
+				"join-node": handlers["join-node"].EventHandlers,
+			},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+		},
 	}
 	source := semanticview.Wrap(bundle)
 	reachable := authoredReachableStates(source, "", "waiting")
-	if _, ok := reachable["done"]; !ok {
+	if _, ok := reachable["escaped"]; !ok {
 		t.Fatalf("reachable = %#v, want loop escape target", reachable)
 	}
 	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{Event: "work.started"})
 	if _, ok := edges["waiting"]["review"]; ok {
 		t.Fatalf("cancel graph retained firing handler edge: %#v", edges)
 	}
-	if _, ok := edges["review"]["done"]; !ok {
-		t.Fatalf("cancel graph dropped loop escape edge: %#v", edges)
+	for _, edge := range [][2]string{
+		{"review", "escaped"},
+		{"review", "expired"},
+		{"joining", "joined"},
+		{"joining", "join-timed-out"},
+	} {
+		if _, ok := edges[edge[0]][edge[1]]; !ok {
+			t.Fatalf("cancel graph dropped %s -> %s carrier: %#v", edge[0], edge[1], edges)
+		}
 	}
 }
 
