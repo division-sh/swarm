@@ -388,6 +388,34 @@ func TestManagerDDLAdmissionSharesSandboxWorkAndFencesTemplateMutation(t *testin
 	}
 }
 
+func TestManagerIntentAuthorityInitializationUsesExclusiveDDLAdmission(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	controlDB, err := manager.control.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controlDB.Close()
+	holder, err := controlDB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	key := advisoryKey("global-ddl-admission")
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_lock_shared($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.ExecContext(context.Background(), `SELECT pg_advisory_unlock_shared($1)`, key)
+
+	blockedCtx, blockedCancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer blockedCancel()
+	err = manager.ensureIntentAuthority(blockedCtx, controlDB)
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("intent authority initialization error = %v, want exclusive DDL fence", err)
+	}
+}
+
 func TestManagerDDLAdmissionGivesQueuedExclusiveWriterPriority(t *testing.T) {
 	manager := integrationManager(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

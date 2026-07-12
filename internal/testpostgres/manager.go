@@ -280,18 +280,24 @@ func (m *Manager) ensureControlDatabase(ctx context.Context, adminDB *sql.DB) er
 	if err := waitForDatabase(ctx, controlDB, 30*time.Second); err != nil {
 		return fmt.Errorf("wait for postgres test control database: %w", err)
 	}
-	_, err = controlDB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+quoteIdent(intentTableName)+` (
-		resource_name text PRIMARY KEY,
-		kind text NOT NULL,
-		identity text NOT NULL,
-		lease_key bigint NOT NULL DEFAULT 0,
-		template_name text NOT NULL DEFAULT '',
-		created_at timestamptz NOT NULL DEFAULT now()
-	)`)
-	if err != nil {
+	if err := m.ensureIntentAuthority(ctx, controlDB); err != nil {
 		return fmt.Errorf("create postgres test resource-intent authority: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) ensureIntentAuthority(ctx context.Context, controlDB *sql.DB) error {
+	return m.withExclusiveDDLAdmission(ctx, controlDB, "initialize resource-intent authority", func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+quoteIdent(intentTableName)+` (
+			resource_name text PRIMARY KEY,
+			kind text NOT NULL,
+			identity text NOT NULL,
+			lease_key bigint NOT NULL DEFAULT 0,
+			template_name text NOT NULL DEFAULT '',
+			created_at timestamptz NOT NULL DEFAULT now()
+		)`)
+		return err
+	})
 }
 
 type databaseRowQueryer interface {
