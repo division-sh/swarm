@@ -65,6 +65,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 	t.Run("verify text", func(t *testing.T) {
 		opts := defaultVerifyCommandOptions()
 		opts.contractsPath = contractsRoot
+		opts.configPath = writeTestVerifyRuntimeConfig(t)
 
 		var stdout, stderr bytes.Buffer
 		code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
@@ -77,6 +78,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 	t.Run("verify json", func(t *testing.T) {
 		opts := defaultVerifyCommandOptions()
 		opts.contractsPath = contractsRoot
+		opts.configPath = writeTestVerifyRuntimeConfig(t)
 		opts.output.asJSON = true
 
 		var stdout, stderr bytes.Buffer

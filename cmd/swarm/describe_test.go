@@ -523,6 +523,7 @@ func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
 		"verify",
 		"--contracts", contractsRoot,
+		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -559,6 +560,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
 		"verify",
 		"--contracts", contractsRoot,
+		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
@@ -609,7 +611,7 @@ types:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
-		"verify", "--contracts", contractsRoot, "--json",
+		"verify", "--contracts", contractsRoot, "--config", writeTestVerifyRuntimeConfig(t), "--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("verify --json code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())

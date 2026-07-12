@@ -1605,11 +1605,12 @@ func TestVerifyCommandIgnoresRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
 	contractsRoot := writeEnvAuthorityContractsFixture(t, "dot-env-contracts")
+	configPath := writeTestVerifyRuntimeConfig(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\nBROKEN\n")
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), "", []string{"verify"}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), "", []string{"verify", "--config", configPath}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -1619,7 +1620,7 @@ func TestVerifyCommandIgnoresRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), "", []string{"verify", "--contracts", contractsRoot}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), "", []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -1680,7 +1681,7 @@ platform_version: ">=0.7.0 <0.8.0"
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -1706,7 +1707,7 @@ platform_version: ">=0.8.0"
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
 	}
@@ -1743,7 +1744,7 @@ extra:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -1770,7 +1771,7 @@ homepage: https://division.sh
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
 	}
@@ -12623,13 +12624,16 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	}
 }
 
-func runVerifyCommandWithContractsForTest(ctx context.Context, repo, contractsPath string, out *bytes.Buffer) int {
-	return runVerifyCommandWithContractsOutputForTest(ctx, repo, contractsPath, out, out)
+func runVerifyCommandWithContractsForTest(t *testing.T, ctx context.Context, repo, contractsPath string, out *bytes.Buffer) int {
+	t.Helper()
+	return runVerifyCommandWithContractsOutputForTest(t, ctx, repo, contractsPath, out, out)
 }
 
-func runVerifyCommandWithContractsOutputForTest(ctx context.Context, repo, contractsPath string, out, errOut *bytes.Buffer) int {
+func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Context, repo, contractsPath string, out, errOut *bytes.Buffer) int {
+	t.Helper()
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = contractsPath
+	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
 }
 
@@ -12644,7 +12648,7 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), tc.path, &buf)
+			code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), tc.path, &buf)
 			if code == 0 {
 				t.Fatal("expected non-zero exit code")
 			}
@@ -13021,7 +13025,7 @@ pins:
 			root := t.TempDir()
 			tt.write(t, root)
 			var buf bytes.Buffer
-			code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+			code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 			if code != cliExitValidation {
 				t.Fatalf("code = %d, want %d output=%s", code, cliExitValidation, buf.String())
 			}
@@ -13072,7 +13076,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	root := writeVerifyLintEvidenceFixture(t)
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
@@ -13091,6 +13095,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
+	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
 	stderr.Reset()
@@ -13114,6 +13119,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
+	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 
 	var stdout, stderr bytes.Buffer
@@ -13219,7 +13225,7 @@ func TestRunVerifyCommand_AllowsBootTimerWithoutCancelOn(t *testing.T) {
 	root := writeVerifyBootTimerCommandFixture(t, "")
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
@@ -13232,7 +13238,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	root := writeVerifyBootTimerCommandFixture(t, "state:done")
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
@@ -13253,6 +13259,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
+	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
 	stderr.Reset()
@@ -13289,7 +13296,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 
 	root := filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-state-machine-unreachable")
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(
+	code := runVerifyCommandWithContractsOutputForTest(t,
 		context.Background(),
 		repoRoot(),
 		root,
@@ -13318,6 +13325,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
+	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
 	stderr.Reset()
@@ -13478,7 +13486,7 @@ assignee:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -13499,7 +13507,7 @@ func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.
 	writeVerifyModelAliasFixture(t, root, "not_configured")
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
@@ -13516,7 +13524,7 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	writeVerifyModelAliasFixture(t, root, "audit.custom")
 
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, strings.Join([]string{
 		"llm:",
 		"  backend: anthropic",
 		"  models:",
@@ -13526,11 +13534,13 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
-	}, "\n")+"\n")
+	}, "\n")+"\n"))
 	t.Setenv("SWARM_CONFIG", configPath)
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &buf, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -13600,7 +13610,7 @@ Use save_entity_field for `+"`business_brief`"+`.
 `)
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
@@ -13641,7 +13651,7 @@ accumulator:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
@@ -13696,7 +13706,7 @@ accumulator:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -13781,7 +13791,7 @@ scorer:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -13799,7 +13809,7 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
@@ -13823,7 +13833,7 @@ func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
@@ -13853,7 +13863,7 @@ func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}

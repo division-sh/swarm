@@ -75,10 +75,11 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	}
 
 	verifyFixture := outputModeVerifyFixture(t)
+	verifyConfig := writeTestVerifyRuntimeConfig(t)
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), repoRoot(), []string{"verify", "--contracts", verifyFixture, "--json"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), repoRoot(), []string{"verify", "--contracts", verifyFixture, "--config", verifyConfig, "--json"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -92,7 +93,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), repoRoot(), []string{"verify", "--contracts", verifyFixture, "--quiet"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), repoRoot(), []string{"verify", "--contracts", verifyFixture, "--config", verifyConfig, "--quiet"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --quiet code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -438,7 +439,7 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", "--contracts", outputModeVerifyFixture(t)}
+				return []string{"verify", "--contracts", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return repoRoot() },
 		},

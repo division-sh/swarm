@@ -57,7 +57,7 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", "--contracts", outputModeVerifyFixture(t)}
+				return []string{"verify", "--contracts", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return repoRoot() },
 		},

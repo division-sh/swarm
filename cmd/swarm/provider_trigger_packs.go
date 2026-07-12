@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -54,49 +53,6 @@ func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoad
 		ExternalDirs: externalDirs,
 	}, nil
 }
-
-// loadVerifyProviderTriggerPacks keeps offline verification self-contained by
-// using the fixed release inventory when no elevated platform override exists.
-// Both sources pass through the identical required-inventory verifier.
-func loadVerifyProviderTriggerPacks(repo string, cfgResult runtimeConfigLoadResult, requireCatalog bool) (providerTriggerPackLoad, error) {
-	if cfgResult.Config == nil {
-		return providerTriggerPackLoad{}, fmt.Errorf("runtime config is required")
-	}
-	if len(cfgResult.Config.ProviderTriggers.Packs.PlatformDirs) > 0 {
-		return loadConfiguredProviderTriggerPacks(repo, cfgResult)
-	}
-	runningVersion, err := platform.PlatformVersion()
-	if err != nil {
-		return providerTriggerPackLoad{}, err
-	}
-	platformDirs := make([]string, 0, len(providertriggers.RequiredPlatformPackIdentities()))
-	present := 0
-	for _, identity := range providertriggers.RequiredPlatformPackIdentities() {
-		dir := filepath.Join(repo, "packs", "provider-triggers", identity.Provider)
-		platformDirs = append(platformDirs, dir)
-		if _, err := os.Stat(filepath.Join(dir, packs.EnvelopeFileName)); err == nil {
-			present++
-		} else if !os.IsNotExist(err) {
-			return providerTriggerPackLoad{}, fmt.Errorf("inspect default provider trigger pack %q: %w", dir, err)
-		}
-	}
-	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	if present == 0 && len(externalDirs) == 0 && !requireCatalog {
-		catalog, err := providertriggers.NewCatalogSnapshot()
-		if err != nil {
-			return providerTriggerPackLoad{}, err
-		}
-		return providerTriggerPackLoad{Catalog: catalog}, nil
-	}
-	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs(runningVersion, platformDirs, externalDirs)
-	if err != nil {
-		return providerTriggerPackLoad{}, err
-	}
-	return providerTriggerPackLoad{
-		Catalog: catalog, Loaded: loaded, PlatformDirs: platformDirs, ExternalDirs: externalDirs,
-	}, nil
-}
-
 func requiredProviderTriggerPlatformPackIDs() string {
 	identities := providertriggers.RequiredPlatformPackIdentities()
 	ids := make([]string, 0, len(identities))
