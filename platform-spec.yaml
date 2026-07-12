@@ -8656,7 +8656,11 @@ flow_model:
             materializes an exact `{instance_path}/{local_event}` route only from lifecycle proof that the instance belongs to
             that same source template; it removes the exact route with the source or consumer instance lifecycle. Concrete path
             shape or presence in the global authored event-path inventory is not instance-ownership proof. An authored static
-            descendant remains unauthorized even when its path has the same segment shape as a template instance. The static
+            descendant remains unauthorized even when its path has the same segment shape as a template instance. Before any
+            route-state mutation, flow-instance materialization MUST reject an instance path that aliases or would capture an
+            authored static scope, or overlaps a non-instance event identity; canonical namespace collision is a hard invalidity
+            and MUST leave existing event paths, observers, and sibling instance routes unchanged. A declared nested template
+            scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof. The static
             witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
             event or static flow.
             That paired witness drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
