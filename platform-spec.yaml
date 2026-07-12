@@ -4925,7 +4925,11 @@ engine:
       postgres_owner: internal/store.PostgresStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
       scope: >
         SQLite supports local-dev delivery, receipt settlement, pending/backlog replay, and process-local replay claims over
-        persisted rows. Postgres remains the production owner for cross-runtime claims and transaction/fencing semantics.
+        persisted rows. A live EventBus publication owns a process-local, reference-counted claim for its event identity
+        from canonical admission through pipeline-receipt settlement; generic and dedicated recovery sweepers must skip
+        that identity rather than execute a persisted-but-unsettled foreground event concurrently. The claim is released
+        after synchronous or acknowledged post-commit dispatch completes, so unrelated recovery work remains eligible.
+        Postgres remains the production owner for cross-runtime claims and transaction/fencing semantics.
     - name: llm_conversation_and_turn_rows
       owner: internal/runtime/llm TurnPersistence and ConversationPersistence
       sqlite_owner: internal/store.SQLiteRuntimeStore conversation and agent turn methods

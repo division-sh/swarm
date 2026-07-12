@@ -171,8 +171,6 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		return err
 	}
 	ctx = eb.withBundleFingerprint(ctx)
-	eb.inFlightPublishes.Add(1)
-	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
 	if evt.Type() == "" {
 		return errors.New("event type is required")
@@ -189,6 +187,8 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err != nil {
 		return err
 	}
+	eb.beginEventPublish(evt.ID())
+	defer eb.endEventPublish(evt.ID())
 	if replayed, err := eb.publishCommittedReplayIfPresent(ictx, evt); replayed || err != nil {
 		return err
 	}
@@ -302,8 +302,6 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 		return err
 	}
 	ctx = eb.withBundleFingerprint(ctx)
-	eb.inFlightPublishes.Add(1)
-	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
 	if evt.Type() == "" {
 		return errors.New("event type is required")
@@ -320,6 +318,8 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err != nil {
 		return err
 	}
+	eb.beginEventPublish(evt.ID())
+	defer eb.endEventPublish(evt.ID())
 
 	if mutationRunner, ok := eb.store.(EventMutationRunner); ok && mutationRunner != nil {
 		return eb.publishAcknowledgedTransactional(ictx, evt, start, mutationRunner)
@@ -442,9 +442,9 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 		ctx = context.Background()
 	}
 	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
-	eb.inFlightPublishes.Add(1)
+	eb.beginEventPublish(evt.ID())
 	go func() {
-		defer eb.inFlightPublishes.Add(-1)
+		defer eb.endEventPublish(evt.ID())
 		eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
 	}()
 }

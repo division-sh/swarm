@@ -143,6 +143,9 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	redelivered := lifecycleEvents + decisionRoutes
 	for _, record := range events {
 		evt := record.Event
+		if eb.eventPublishInFlight(evt.ID()) {
+			continue
+		}
 		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return redelivered, err
@@ -236,6 +239,9 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, replaySto
 	recovered := 0
 	for _, record := range records {
 		evt := record.Event
+		if eb.eventPublishInFlight(evt.ID()) {
+			continue
+		}
 		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return recovered, err
