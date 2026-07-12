@@ -1305,6 +1305,9 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 		nil, nil, nil, "", nil, nil, nil,
 	)
 	supervisor.dev = true
+	catalog := emptyProviderTriggerCatalog(t)
+	supervisor.providerTriggers = catalog
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if strings.TrimSpace(contractsRoot) != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
