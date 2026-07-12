@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type pipelinePublicationClaim struct {
-	bus     *EventBus
-	eventID string
-	lease   runtimeownership.Lease
-	once    sync.Once
+	bus      *EventBus
+	eventID  string
+	lease    runtimeownership.Lease
+	released atomic.Bool
 }
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
@@ -43,12 +43,13 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) {
 	if c == nil || c.lease == nil {
 		return
 	}
-	c.once.Do(func() {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		if err := c.lease.Release(context.WithoutCancel(ctx)); err != nil && c.bus != nil {
-			c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
-		}
-	})
+	if !c.released.CompareAndSwap(false, true) {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := c.lease.Release(context.WithoutCancel(ctx)); err != nil && c.bus != nil {
+		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
+	}
 }
