@@ -33,6 +33,7 @@ type Store struct {
 	lru         *list.List
 	sourceBytes int64
 	parseCount  uint64
+	hits        uint64
 	coalesced   uint64
 	parse       func([]byte) (yaml.Node, error)
 }
@@ -70,6 +71,7 @@ type Stats struct {
 	Inflight    int
 	SourceBytes int64
 	ParseCount  uint64
+	Hits        uint64
 	Coalesced   uint64
 }
 
@@ -120,6 +122,7 @@ func (s *Store) Load(raw []byte) (Snapshot, error) {
 
 	s.mu.Lock()
 	if cached := s.entries[digest]; cached != nil {
+		s.hits++
 		s.lru.MoveToFront(cached.lru)
 		s.mu.Unlock()
 		return snapshotResult(cached)
@@ -164,6 +167,7 @@ func (s *Store) Stats() Stats {
 		Inflight:    len(s.inflight),
 		SourceBytes: s.sourceBytes,
 		ParseCount:  s.parseCount,
+		Hits:        s.hits,
 		Coalesced:   s.coalesced,
 	}
 }
@@ -232,7 +236,8 @@ func (s Snapshot) Decode(target any) error {
 	if s.entry == nil {
 		return fmt.Errorf("empty YAML snapshot")
 	}
-	return s.entry.root.Decode(target)
+	root := cloneNode(&s.entry.root, make(map[*yaml.Node]*yaml.Node))
+	return root.Decode(target)
 }
 
 func (s Snapshot) Root() Node {

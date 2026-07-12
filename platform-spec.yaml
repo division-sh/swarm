@@ -156,6 +156,39 @@ vocabulary:
     - description
 contract_formats:
   description: Canonical format for all flow contract files.
+  authoritative_yaml_source:
+    canonical_owner: platform-spec.yaml#contract_formats.authoritative_yaml_source
+    implementation_owner: internal/yamlsource
+    scope:
+    - platform-spec.yaml
+    - package.yaml
+    - schema.yaml
+    - nodes.yaml
+    - events.yaml
+    - entities.yaml
+    - types.yaml
+    - agents.yaml
+    - tools.yaml
+    - policy.yaml
+    document_grammar: |
+      Every present authoritative YAML source MUST contain exactly one YAML
+      document. Empty and comment-only files contain no document and fail
+      closed. Multi-document streams fail closed. An authored empty mapping is
+      written explicitly as {}. File omission remains governed by
+      contract_formats.minimum_flow_package and is not equivalent to a present
+      empty document.
+    lexical_ownership: |
+      The process acquires authoritative YAML lexical state through one
+      content-addressed immutable owner keyed by SHA-256 of copied source bytes,
+      never by path or mtime. The owner retains parsed success or failure under
+      bounded process-local LRU limits, coalesces concurrent acquisition, keeps
+      retained yaml.Node pointers private, and exposes only read-only traversal,
+      caller-owned node copies, copied bytes, or fresh caller-owned decoded
+      values. Domain projections such as workflow bundles, API specifications,
+      bundle hashes, bundle identities, prompt variables, and source-line views
+      remain in their existing semantic owners and MUST NOT become shared
+      mutable cache values.
+    diagnostics: Read failures and parse/decode failures preserve the current source path and fail closed.
   loader_defaults:
     description: Fields and identifiers that the loader derives from context. Entries marked non-authorable are not accepted
       as public YAML fields.
