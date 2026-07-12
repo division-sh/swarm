@@ -8660,7 +8660,13 @@ flow_model:
             route-state mutation, flow-instance materialization MUST reject an instance path that aliases or would capture an
             authored static scope, or overlaps a non-instance event identity; canonical namespace collision is a hard invalidity
             and MUST leave existing event paths, observers, and sibling instance routes unchanged. A declared nested template
-            scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof. The static
+            scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof.
+            RouteTable is the canonical lifecycle identity owner and stores one complete normalized `(scope_key, instance_id,
+            instance_path)` route per instance path. Normal template creation, recovery, and ad hoc fallback use the same
+            admission function. Exact replay of the complete identity is idempotent. A different identity at an owned path is a
+            hard conflict; presence requires the complete identity; removal must match the complete stored owner before either
+            persisted or in-memory authority is changed. All identity and authored-namespace collisions are validated before
+            event paths, observers, or routes mutate. The static
             witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
             event or static flow.
             That paired witness drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;

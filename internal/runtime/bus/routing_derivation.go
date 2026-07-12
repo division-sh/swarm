@@ -31,8 +31,7 @@ type RouteTable struct {
 	authoredEventPath map[string]struct{}
 	authoredScopes    map[string]struct{}
 	templates         map[string]routeFlowTemplate
-	instances         map[string]struct{}
-	instanceScope     map[string]string
+	instanceOwners    map[string]runtimeflowidentity.Route
 	instanceEventPath map[string][]string
 	templateObservers map[string][]routeTemplateSourceObserver
 }
@@ -229,26 +228,23 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	}
 
 	req = req.Normalized()
-	identity := req.Identity
-	if !identity.Valid() {
-		return fmt.Errorf("flow-instance route identity is required")
-	}
-	instancePath := identity.InstancePath
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
-	if _, exists := rt.instances[instancePath]; exists {
+	identity, replay, err := rt.admitFlowInstanceRouteIdentityLocked(req.Identity)
+	if err != nil {
+		return err
+	}
+	if replay {
 		return nil
 	}
-	templateScope := eventidentity.Normalize(identity.ScopeKey)
-	if collision := rt.flowInstanceRouteCollisionLocked(templateScope, instancePath); collision != "" {
-		return fmt.Errorf("flow-instance route %q collides with authored canonical identity %q", instancePath, collision)
-	}
+	req.Identity = identity
+	instancePath := identity.InstancePath
+	templateScope := identity.ScopeKey
 
 	if templateDef, ok := rt.templates[templateScope]; ok {
-		rt.instances[instancePath] = struct{}{}
-		rt.instanceScope[instancePath] = templateScope
+		rt.instanceOwners[instancePath] = identity
 		rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
 		rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 		vars := flowInstanceRouteMaterializationVars(req, templateDef.FlowID)
@@ -288,8 +284,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 		return fmt.Errorf("route template %q not found", templateID)
 	}
 	localEvents := routeNodeLocalEventSet(req.Template)
-	rt.instances[instancePath] = struct{}{}
-	rt.instanceScope[instancePath] = templateScope
+	rt.instanceOwners[instancePath] = identity
 	rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, localEvents)
 	rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 	vars := flowInstanceRouteMaterializationVars(req, templateID)
@@ -314,32 +309,48 @@ func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.Route) b
 	if rt == nil {
 		return false
 	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
+	identity, err := normalizeFlowInstanceRouteIdentity(identity)
+	if err != nil {
 		return false
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	_, exists := rt.instances[identity.InstancePath]
-	return exists
+	owner, exists := rt.instanceOwners[identity.InstancePath]
+	return exists && flowInstanceRouteIdentityEqual(owner, identity)
 }
 
-func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) {
+func (rt *RouteTable) flowInstanceRouteRemovalOwner(identity runtimeflowidentity.Route) (runtimeflowidentity.Route, bool, error) {
 	if rt == nil {
-		return
+		return runtimeflowidentity.Route{}, false, fmt.Errorf("route table is required")
 	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
-		return
+	identity, err := normalizeFlowInstanceRouteIdentity(identity)
+	if err != nil {
+		return runtimeflowidentity.Route{}, false, err
 	}
-	instancePath := identity.InstancePath
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.matchFlowInstanceRouteOwnerLocked(identity)
+}
+
+func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	if rt == nil {
+		return fmt.Errorf("route table is required")
+	}
+	identity, err := normalizeFlowInstanceRouteIdentity(identity)
+	if err != nil {
+		return err
+	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	if _, exists := rt.instances[instancePath]; !exists {
-		return
+	owner, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
+	if err != nil {
+		return err
 	}
-	delete(rt.instances, instancePath)
-	delete(rt.instanceScope, instancePath)
+	if !exists {
+		return nil
+	}
+	instancePath := owner.InstancePath
+	delete(rt.instanceOwners, instancePath)
 	for _, eventType := range rt.instanceEventPath[instancePath] {
 		delete(rt.eventPath, eventType)
 	}
@@ -367,19 +378,24 @@ func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route
 		rt.templateObservers[sourceTemplatePath] = filteredObservers
 	}
 	rt.rebuildLocked()
+	return nil
 }
 
 func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.Route) []FlowInstanceRouteRecord {
 	if rt == nil {
 		return nil
 	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
+	identity, err := normalizeFlowInstanceRouteIdentity(identity)
+	if err != nil {
 		return nil
 	}
 	instancePath := identity.InstancePath
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
+	owner, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
+	if err != nil || !exists || !flowInstanceRouteIdentityEqual(owner, identity) {
+		return nil
+	}
 
 	seen := make(map[string]struct{})
 	out := make([]FlowInstanceRouteRecord, 0, 8)
@@ -427,8 +443,7 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		authoredEventPath: make(map[string]struct{}),
 		authoredScopes:    make(map[string]struct{}),
 		templates:         make(map[string]routeFlowTemplate),
-		instances:         make(map[string]struct{}),
-		instanceScope:     make(map[string]string),
+		instanceOwners:    make(map[string]runtimeflowidentity.Route),
 		instanceEventPath: make(map[string][]string),
 		templateObservers: make(map[string][]routeTemplateSourceObserver),
 	}
@@ -560,6 +575,64 @@ func (rt *RouteTable) addAuthoredEventPathsLocked(basePath string, localEvents m
 		rt.authoredEventPath[eventType] = struct{}{}
 	}
 	return added
+}
+
+func (rt *RouteTable) admitFlowInstanceRouteIdentityLocked(raw runtimeflowidentity.Route) (runtimeflowidentity.Route, bool, error) {
+	identity, err := normalizeFlowInstanceRouteIdentity(raw)
+	if err != nil {
+		return runtimeflowidentity.Route{}, false, err
+	}
+	_, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
+	if err != nil {
+		return runtimeflowidentity.Route{}, false, err
+	}
+	if exists {
+		return identity, true, nil
+	}
+	if collision := rt.flowInstanceRouteCollisionLocked(identity.ScopeKey, identity.InstancePath); collision != "" {
+		return runtimeflowidentity.Route{}, false, fmt.Errorf("flow-instance route %q collides with authored canonical identity %q", identity.InstancePath, collision)
+	}
+	return identity, false, nil
+}
+
+func normalizeFlowInstanceRouteIdentity(raw runtimeflowidentity.Route) (runtimeflowidentity.Route, error) {
+	identity := runtimeflowidentity.StoredRoute(raw.ScopeKey, raw.InstanceID, raw.InstancePath)
+	if !identity.Valid() {
+		return runtimeflowidentity.Route{}, fmt.Errorf("flow-instance route identity requires scope_key, instance_id, and instance_path")
+	}
+	return identity, nil
+}
+
+func (rt *RouteTable) matchFlowInstanceRouteOwnerLocked(identity runtimeflowidentity.Route) (runtimeflowidentity.Route, bool, error) {
+	owner, exists := rt.instanceOwners[identity.InstancePath]
+	if exists {
+		if !flowInstanceRouteIdentityEqual(owner, identity) {
+			return runtimeflowidentity.Route{}, false, fmt.Errorf(
+				"flow-instance path %q is owned by scope %q instance %q, not scope %q instance %q",
+				identity.InstancePath,
+				owner.ScopeKey,
+				owner.InstanceID,
+				identity.ScopeKey,
+				identity.InstanceID,
+			)
+		}
+		return owner, true, nil
+	}
+	expected := runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, "")
+	if expected.InstancePath != identity.InstancePath {
+		return runtimeflowidentity.Route{}, false, fmt.Errorf(
+			"flow-instance route identity is inconsistent: scope %q and instance %q derive path %q, not %q",
+			identity.ScopeKey,
+			identity.InstanceID,
+			expected.InstancePath,
+			identity.InstancePath,
+		)
+	}
+	return runtimeflowidentity.Route{}, false, nil
+}
+
+func flowInstanceRouteIdentityEqual(left, right runtimeflowidentity.Route) bool {
+	return left.ScopeKey == right.ScopeKey && left.InstanceID == right.InstanceID && left.InstancePath == right.InstancePath
 }
 
 func (rt *RouteTable) flowInstanceRouteCollisionLocked(templateScope, instancePath string) string {
@@ -698,8 +771,8 @@ func (rt *RouteTable) addTemplateSourceObserverLocked(observer routeTemplateSour
 		}
 	}
 	rt.templateObservers[observer.SourceTemplatePath] = append(rt.templateObservers[observer.SourceTemplatePath], observer)
-	for _, instancePath := range sortedStringKeys(rt.instanceScope) {
-		if eventidentity.Normalize(rt.instanceScope[instancePath]) == observer.SourceTemplatePath {
+	for _, instancePath := range sortedStringKeys(rt.instanceOwners) {
+		if rt.instanceOwners[instancePath].ScopeKey == observer.SourceTemplatePath {
 			rt.materializeTemplateSourceObserverLocked(observer, instancePath)
 		}
 	}
