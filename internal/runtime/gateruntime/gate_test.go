@@ -22,11 +22,11 @@ func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 	if err := loaded.CommitDecision("event-1", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Supersede("stage_exited", now.Add(2*time.Minute)) != true || loaded.Status != StatusSuperseded {
-		t.Fatalf("committed activation supersession = %#v, want terminal fence", loaded)
+	if loaded.Supersede("stage_exited", now.Add(2*time.Minute)) || loaded.Status != StatusDecisionCommitted {
+		t.Fatalf("committed activation supersession = %#v, want committed decision preserved", loaded)
 	}
-	if err := loaded.Route("event-1", now.Add(3*time.Minute)); err == nil {
-		t.Fatal("superseded activation routed")
+	if err := loaded.Route("event-1", now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("committed activation route: %v", err)
 	}
 }
 

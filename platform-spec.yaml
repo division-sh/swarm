@@ -336,7 +336,10 @@ contract_formats:
           produces open -> decision_committed -> routed; a competing exit
           produces open -> superseded. A flow may never expose a waiting gated
           stage without a card, complete naturally with an open or committed
-          gate, or route from a current contract instead of the frozen card.
+          gate, or route from a current contract instead of the frozen card. Once
+          a verdict is decision_committed it fences ordinary, timer, terminal,
+          and quiescence exits until that frozen route succeeds; only an open
+          activation may be superseded.
         snapshot: >
           Card creation evaluates context once and freezes the structured
           snapshot, authored outcome/input schema, effective cadence,
@@ -344,7 +347,10 @@ contract_formats:
           decision_schema_hash. mailbox.get returns this snapshot; live entity
           context is supplementary and never reconstructs what was shown.
         cadence: >
-          Default cadence is stamped at card creation. Reminder urgency never
+          The effective first reminder (default 4h), urgency deadline (default
+          24h), later reminder interval (default 24h), and input-draft TTL
+          (default 15m) are operator-configurable and stamped at card creation.
+          Reminder urgency never
           decides or supersedes; authored stage timers remain the only
           timeout-routing owner. Active actor input drafts pause reminders only
           for that actor, and draft TTL must not exceed the reminder interval.
@@ -352,6 +358,8 @@ contract_formats:
           Generic mailbox payloads, node-level gate declarations, fixed public
           approve/reject operations, decorative authority fields, live-context
           reconstruction, and dual card/mailbox writable state are invalid.
+          Generic mailbox producers reject item_type decision_card and every
+          reserved decision-card payload field.
     bounded_loops:
       status: merge_bearing
       implementation_tracker: '#1849'
@@ -11062,7 +11070,8 @@ platform_tables:
     decision_card_input_drafts:
       description: 'Durable actor/card/verdict-scoped half-input owner. An active draft is not a verdict. It is cancellable,
         TTL-expiring, and consumed only by a complete mailbox.decide in the same card mutation. Replaced, expired, foreign,
-        or already-consumed drafts fail closed.'
+        or already-consumed drafts fail closed. Replacement, cancellation, consumption, expiry, stage supersession, and run
+        supersession close every affected active draft and append an exact decision_card_changes cursor row in the same mutation.'
       ddl: |
         CREATE TABLE decision_card_input_drafts (
             input_draft_id UUID PRIMARY KEY,
@@ -11086,7 +11095,7 @@ platform_tables:
             change_id  BIGSERIAL PRIMARY KEY,
             run_id     UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             card_id    UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired')),
+            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
             payload    JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             INDEX idx_decision_card_changes_card (card_id, change_id),
@@ -14582,6 +14591,10 @@ configuration_source_authority:
             max_concurrent_agents: split_unsupported
             event_poll_interval: split_unsupported
             recovery_on_startup: project_safe
+            decision_card_first_reminder: project_safe_duration_default_4h
+            decision_card_urgency: project_safe_duration_default_24h
+            decision_card_reminder_interval: project_safe_duration_default_24h
+            decision_card_input_draft_ttl: project_safe_duration_default_15m
           owner: runtime_storage.runtime_store_backend_selection
         store:
           trust: elevated
@@ -21955,10 +21968,14 @@ api_specification:
         `mailbox.decide` acquires the workflow activation fence before the card,
         then commits activation decision_committed, typed verdict, change cursor,
         canonical event, delivery evidence, and API idempotency together. The
-        post-commit runtime routes only the frozen outcome plan and advances the
-        activation to routed. A competing stage exit supersedes the card instead;
-        exactly one CAS outcome wins. Paused dispatch preserves decision_committed
-        and continuation resumes routing after continue.
+        post-commit runtime routes only under the card's recorded bundle pin.
+        The routed activation, stage/timer/join/gate mutations, deterministic
+        authored outcome event, and its delivery manifest commit in one mutation;
+        acknowledgment-loss retries converge on the same event identity. An
+        unavailable pin leaves decision_committed for later recovery. A competing
+        stage exit may supersede only an open card; exactly one CAS outcome wins.
+        Paused dispatch preserves decision_committed and continuation resumes
+        routing after continue.
     scopes:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, decide:<resource>, acknowledge:<resource>,
         verify:<resource>)
@@ -23374,7 +23391,7 @@ api_specification:
           sequence: {type: integer, minimum: 1}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
-          change_type: {type: string, enum: [created, decided, deferred, superseded, input_draft_started, input_draft_cancelled, input_draft_expired]}
+          change_type: {type: string, enum: [created, decided, deferred, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
           payload: {type: object, additionalProperties: true}
           created_at: {$ref: '#/components/schemas/Timestamp'}
       MailboxPriority:

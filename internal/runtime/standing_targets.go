@@ -410,8 +410,8 @@ func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget,
 			}
 			created = wasCreated
 			if created {
-				if err := rt.Pipeline.ArmFlowInstanceInitialStageTimers(txctx, instance.EntityID); err != nil {
-					return fmt.Errorf("arm initial timers: %w", err)
+				if err := rt.Pipeline.ArmFlowInstanceInitialStageLifecycle(txctx, instance.EntityID); err != nil {
+					return fmt.Errorf("arm initial stage lifecycle: %w", err)
 				}
 			}
 			return nil

@@ -485,6 +485,9 @@ func decodeExpressionValueMapNode(node *yaml.Node, label string) (map[string]Exp
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("INVALID-EMIT: %s must be a mapping", label)
 	}
+	if err := validateUniqueNormalizedMappingKeys(node, label); err != nil {
+		return nil, fmt.Errorf("INVALID-EMIT: %w", err)
+	}
 	fields := make(map[string]ExpressionValue, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		target := strings.TrimSpace(node.Content[i].Value)

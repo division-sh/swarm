@@ -3,6 +3,8 @@ package tools
 import (
 	"fmt"
 	"strings"
+
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
 
 func NormalizeMailboxType(raw string) (string, error) {
@@ -11,6 +13,9 @@ func NormalizeMailboxType(raw string) (string, error) {
 	t = strings.ReplaceAll(t, ".", "_")
 	if t == "" {
 		return "", fmt.Errorf("invalid mailbox type %q", raw)
+	}
+	if err := decisioncard.ValidateNoticeShape(t, nil); err != nil {
+		return "", err
 	}
 	return t, nil
 }

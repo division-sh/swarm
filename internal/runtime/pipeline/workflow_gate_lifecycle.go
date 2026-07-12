@@ -59,6 +59,9 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 			if activation.Stage != currentStage || activation.Stage == nextStage {
 				continue
 			}
+			if activation.Status == gateruntime.StatusDecisionCommitted {
+				return fmt.Errorf("stage %s cannot exit while decision card %s has a committed verdict awaiting its frozen route", currentStage, activation.CardID)
+			}
 			if activation.Supersede(firstNonEmptyString(sourceEvent, "stage_exited"), now) {
 				if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 					return err
@@ -201,13 +204,20 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	if runID == "" {
 		runID = asString(instance.Metadata["run_id"])
 	}
+	frozenOutcomes := make(map[string]runtimecontracts.WorkflowGateOutcomePlan, len(plan.Outcomes))
+	for verdict, outcome := range plan.Outcomes {
+		if eventName := strings.TrimSpace(outcome.Emit.Event); eventName != "" && pc.SemanticSource() != nil {
+			outcome.Emit.Event = pc.SemanticSource().ResolveFlowEventReference(plan.FlowID, eventName)
+		}
+		frozenOutcomes[verdict] = outcome
+	}
 	card := decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"), FlowID: plan.FlowID,
 		EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
 		StageActivationID: activation.ActivationID, DecisionID: plan.Decision,
-		Snapshot:   decisioncard.Snapshot{Decision: plan.Decision, Title: plan.Title, Context: contextSnapshot, Outcomes: plan.Outcomes},
+		Snapshot:   decisioncard.Snapshot{Decision: plan.Decision, Title: plan.Title, Context: contextSnapshot, Outcomes: frozenOutcomes},
 		BundleHash: activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+		EffectiveCadence: pc.decisionCardCadence.Stamp(activation.OpenedAt),
 		Provenance:       map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage},
 		CreatedAt:        activation.OpenedAt,
 	}

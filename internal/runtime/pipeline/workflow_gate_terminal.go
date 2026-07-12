@@ -33,8 +33,11 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 	if runID == "" {
 		runID = strings.TrimSpace(asString(instance.Metadata["run_id"]))
 	}
-	entityID := strings.TrimSpace(instance.InstanceID)
+	entityID := strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["entity_id"]), instance.InstanceID))
 	for _, activation := range activations {
+		if activation.Status == gateruntime.StatusDecisionCommitted {
+			return fmt.Errorf("flow cannot terminate while decision card %s has a committed verdict awaiting its frozen route", activation.CardID)
+		}
 		if !activation.Supersede(reason, now) {
 			continue
 		}

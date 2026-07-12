@@ -135,6 +135,28 @@ func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageTimers(ctx context.Con
 	return pc.armWorkflowCurrentStageTimers(ctx, strings.TrimSpace(entityID), "")
 }
 
+// ArmFlowInstanceInitialStageLifecycle materializes every stage-owned durable
+// intent for a newly created flow instance inside the caller's mutation.
+func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageLifecycle(ctx context.Context, entityID string) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	if err != nil || !ok {
+		return err
+	}
+	stage := strings.TrimSpace(instance.CurrentState)
+	if stage == "" {
+		return nil
+	}
+	sourceEvent := "state:" + stage
+	if err := pc.applyWorkflowTimerIntents(ctx, entityID, "", stage, sourceEvent); err != nil {
+		return err
+	}
+	return pc.applyWorkflowGateIntents(ctx, entityID, "", stage, sourceEvent)
+}
+
 func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{

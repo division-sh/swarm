@@ -272,6 +272,37 @@ stages:
 	}
 }
 
+func TestFlowSchemaDocumentRejectsNormalizedGateKeyCollisions(t *testing.T) {
+	tests := []struct {
+		name string
+		gate string
+	}{
+		{name: "gate field", gate: `decision: launch_review
+" decision ": other
+outcomes: {approve: {advances_to: operating}}`},
+		{name: "verdict", gate: `decision: launch_review
+outcomes:
+  approve: {advances_to: operating}
+  " approve ": {advances_to: operating}`},
+		{name: "input", gate: `decision: launch_review
+outcomes:
+  reject:
+    advances_to: operating
+    input:
+      feedback: {type: text}
+      " feedback ": {type: text}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gate FlowStageGateDeclaration
+			err := yaml.Unmarshal([]byte(tc.gate), &gate)
+			if err == nil || !strings.Contains(err.Error(), "duplicate normalized key") {
+				t.Fatalf("decode error = %v, want normalized collision", err)
+			}
+		})
+	}
+}
+
 func TestFlowSchemaDocumentRejectsGateOutcomeWithoutAdvance(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`

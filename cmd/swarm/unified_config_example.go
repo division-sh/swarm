@@ -39,6 +39,10 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 	}
 	return []unifiedConfigExampleEntry{
 		e("runtime.recovery_on_startup", "false", "Recover persisted runtime state on startup.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.decision_card_first_reminder", "4h", "Delay before the first pending decision-card reminder.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.decision_card_urgency", "24h", "Delay before a pending decision card becomes urgent.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.decision_card_reminder_interval", "24h", "Cadence for later pending decision-card reminders.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.decision_card_input_draft_ttl", "15m", "Lifetime of an incomplete actor-scoped decision input draft.", unifiedConfigExampleTierProjectSafe),
 		e("serve.api_listen_addr", `"127.0.0.1:8081"`, "Loopback API listener. Public or wildcard binds require local/operator config or a flag.", unifiedConfigExampleTierProjectSafe),
 		e("serve.mcp_listen_addr", `"127.0.0.1:8082"`, "Loopback MCP listener. Public or wildcard binds require local/operator config or a flag.", unifiedConfigExampleTierProjectSafe),
 		e("workspace.backend", "docker", "Workspace backend preference; actual isolation still follows capability policy.", unifiedConfigExampleTierProjectSafe),

@@ -123,7 +123,7 @@ func (a *Activation) Route(eventID string, now time.Time) error {
 }
 
 func (a *Activation) Supersede(reason string, now time.Time) bool {
-	if a == nil || (a.Status != StatusOpen && a.Status != StatusDecisionCommitted) {
+	if a == nil || a.Status != StatusOpen {
 		return false
 	}
 	a.Status = StatusSuperseded

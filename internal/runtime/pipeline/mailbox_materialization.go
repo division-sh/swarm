@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
@@ -93,6 +94,9 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	}
 	payload, err := mailboxWritePayload(execCtx.Base, spec.Payload)
 	if err != nil {
+		return err
+	}
+	if err := decisioncard.ValidateNoticeShape(normalizedType, payload); err != nil {
 		return err
 	}
 	if generation, ok := attemptgeneration.FromLoopContext(execCtx.Base.Loop.Raw()); ok {

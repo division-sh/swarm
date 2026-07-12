@@ -33,8 +33,11 @@ const (
 	ChangeDraftStarted   = "input_draft_started"
 	ChangeDraftCancelled = "input_draft_cancelled"
 	ChangeDraftExpired   = "input_draft_expired"
+	ChangeDraftConsumed  = "input_draft_consumed"
 
 	DefaultInputDraftTTL    = 15 * time.Minute
+	DefaultFirstReminder    = 4 * time.Hour
+	DefaultUrgency          = 24 * time.Hour
 	DefaultReminderInterval = 24 * time.Hour
 )
 
@@ -49,6 +52,43 @@ var (
 	ErrDraftNotFound     = errors.New("decision card input draft not found")
 	ErrDraftNotAuthority = errors.New("decision card input draft is not authoritative")
 )
+
+var reservedNoticeFields = map[string]struct{}{
+	"card_id": {}, "decision_id": {}, "stage_activation_id": {}, "card_content_hash": {},
+	"decision_schema_hash": {}, "decision_event_id": {}, "verdict": {}, "outcomes": {},
+}
+
+func ValidateNoticeShape(itemType string, payload map[string]any) error {
+	itemType = strings.ToLower(strings.TrimSpace(itemType))
+	itemType = strings.NewReplacer("-", "_", ".", "_").Replace(itemType)
+	if itemType == KindDecisionCard {
+		return fmt.Errorf("mailbox item_type %s is reserved for the typed decision-card owner", KindDecisionCard)
+	}
+	return validateNoticePayloadFields(payload, "")
+}
+
+func validateNoticePayloadFields(payload map[string]any, prefix string) error {
+	for field, value := range payload {
+		field = strings.TrimSpace(field)
+		path := field
+		if prefix != "" {
+			path = prefix + "." + field
+		}
+		leaf := field
+		if index := strings.LastIndex(leaf, "."); index >= 0 {
+			leaf = leaf[index+1:]
+		}
+		if _, reserved := reservedNoticeFields[strings.ToLower(strings.TrimSpace(leaf))]; reserved {
+			return fmt.Errorf("mailbox notice payload field %s is reserved for the typed decision-card owner", path)
+		}
+		if nested, ok := value.(map[string]any); ok {
+			if err := validateNoticePayloadFields(nested, path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 type Store interface {
 	CreateDecisionCard(context.Context, Card) error
@@ -68,6 +108,38 @@ type Cadence struct {
 	UrgencyAt        time.Time `json:"urgency_at"`
 	InputDraftTTL    string    `json:"input_draft_ttl"`
 	ReminderInterval string    `json:"reminder_interval"`
+}
+
+type CadencePolicy struct {
+	FirstReminderDelay time.Duration
+	UrgencyDelay       time.Duration
+	InputDraftTTL      time.Duration
+	ReminderInterval   time.Duration
+}
+
+func (p CadencePolicy) Normalize() CadencePolicy {
+	if p.FirstReminderDelay <= 0 {
+		p.FirstReminderDelay = DefaultFirstReminder
+	}
+	if p.UrgencyDelay <= 0 {
+		p.UrgencyDelay = DefaultUrgency
+	}
+	if p.InputDraftTTL <= 0 {
+		p.InputDraftTTL = DefaultInputDraftTTL
+	}
+	if p.ReminderInterval <= 0 {
+		p.ReminderInterval = DefaultReminderInterval
+	}
+	return p
+}
+
+func (p CadencePolicy) Stamp(createdAt time.Time) Cadence {
+	p = p.Normalize()
+	createdAt = createdAt.UTC()
+	return Cadence{
+		FirstReminderAt: createdAt.Add(p.FirstReminderDelay), UrgencyAt: createdAt.Add(p.UrgencyDelay),
+		InputDraftTTL: p.InputDraftTTL.String(), ReminderInterval: p.ReminderInterval.String(),
+	}
 }
 
 type Snapshot struct {
@@ -245,6 +317,12 @@ func (c Card) Validate() error {
 	if draftTTL > reminderInterval {
 		return fmt.Errorf("decision card input draft TTL exceeds reminder interval")
 	}
+	if c.EffectiveCadence.FirstReminderAt.IsZero() || c.EffectiveCadence.UrgencyAt.IsZero() {
+		return fmt.Errorf("decision card reminder and urgency deadlines are required")
+	}
+	if c.EffectiveCadence.FirstReminderAt.Before(c.CreatedAt) || c.EffectiveCadence.UrgencyAt.Before(c.EffectiveCadence.FirstReminderAt) {
+		return fmt.Errorf("decision card cadence deadlines are invalid")
+	}
 	return nil
 }
 
@@ -271,6 +349,12 @@ func New(card Card) (Card, error) {
 	}
 	if strings.TrimSpace(card.EffectiveCadence.ReminderInterval) == "" {
 		card.EffectiveCadence.ReminderInterval = DefaultReminderInterval.String()
+	}
+	if card.EffectiveCadence.FirstReminderAt.IsZero() {
+		card.EffectiveCadence.FirstReminderAt = now.Add(DefaultFirstReminder)
+	}
+	if card.EffectiveCadence.UrgencyAt.IsZero() {
+		card.EffectiveCadence.UrgencyAt = now.Add(DefaultUrgency)
 	}
 	schema := map[string]any{}
 	for verdict, outcome := range card.Snapshot.Outcomes {

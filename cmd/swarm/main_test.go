@@ -5791,7 +5791,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	var cards decisioncard.Store
 	var workflow *runtimepipeline.WorkflowInstanceStore
-	var appendEvent func(context.Context, events.Event) error
+	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
 	case "postgres":
@@ -5799,7 +5799,18 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			t.Fatalf("seed postgres decision-card run: %v", err)
 		}
 		pg := &store.PostgresStore{DB: rt.DB}
-		cards, workflow, appendEvent, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.AppendEvent, pg.InsertMailboxItem
+		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
+		seedEvent = func(ctx context.Context, evt events.Event) error {
+			return pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				if err := mutation.AppendEvent(mutation.Context(), evt); err != nil {
+					return err
+				}
+				if err := mutation.UpsertCommittedReplayScope(mutation.Context(), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+					return err
+				}
+				return mutation.UpsertPipelineReceipt(mutation.Context(), evt.ID(), "success", nil)
+			})
+		}
 	case "sqlite":
 		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
 			t.Fatalf("seed sqlite decision-card run: %v", err)
@@ -5807,23 +5818,25 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
 		cards = sqlite
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
-		appendEvent, insertNotice = sqlite.AppendEvent, sqlite.InsertMailboxItem
+		insertNotice = sqlite.InsertMailboxItem
+		seedEvent = func(ctx context.Context, evt events.Event) error {
+			return sqlite.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				if err := mutation.AppendEvent(mutation.Context(), evt); err != nil {
+					return err
+				}
+				if err := mutation.UpsertCommittedReplayScope(mutation.Context(), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+					return err
+				}
+				return mutation.UpsertPipelineReceipt(mutation.Context(), evt.ID(), "success", nil)
+			})
+		}
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
 	evt := eventtest.RootIngress(sourceEventID, "review.requested", "", "", json.RawMessage(`{"review":true}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
-	if err := appendEvent(ctx, evt); err != nil {
+	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
-	}
-	receiptQuery := `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at)
-		VALUES (?, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}', ?)`
-	if rt.Backend == "postgres" {
-		receiptQuery = `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at)
-			VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}'::jsonb, $2)`
-	}
-	if _, err := rt.DB.ExecContext(ctx, receiptQuery, sourceEventID, now); err != nil {
-		t.Fatalf("seed decision-card source receipt: %v", err)
 	}
 	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{
 		EventID: sourceEventID, EntityID: entityID, FlowInstance: "root", FromAgent: "review-agent",
