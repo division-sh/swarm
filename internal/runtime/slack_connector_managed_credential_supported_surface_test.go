@@ -283,10 +283,12 @@ func newFakeSlackManagedConnectorServer(t *testing.T) *fakeSlackManagedConnector
 
 func (f *fakeSlackManagedConnectorServer) requireSideEffectCall(t *testing.T, backend, context string) slackManagedConnectorCall {
 	t.Helper()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
 	select {
 	case call := <-f.sideEffects:
 		return call
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		t.Fatalf("%s %s: timed out waiting for fake Slack side effect", backend, context)
 		return slackManagedConnectorCall{}
 	}

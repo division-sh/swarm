@@ -187,7 +187,6 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			originalA := items["acct-a"]
 			deleteNotifyAllChildrenReceipts(t, ctx, backend, db, originalA)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
-			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
 			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, fixedEngineNow.Add(-24*time.Hour), 20)
 			if err != nil {
 				t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
@@ -202,6 +201,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			if replay.ID() == "" {
 				t.Fatalf("original A item %s missing from persisted replay rows %#v", originalA, missing)
 			}
+			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
 			if err := restarted.bus.ReleasePendingPersistedDeliveriesForEvent(ctx, replay); err != nil {
 				t.Fatalf("ReleasePendingPersistedDeliveriesForEvent: %v", err)
 			}

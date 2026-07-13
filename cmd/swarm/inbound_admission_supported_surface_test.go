@@ -376,6 +376,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
+	waitForInboundAdmissionServeOutput(t, process, "[WARN] inbound_unsigned_webhook")
 	serveOutput := process.outputString()
 	var unsignedWarningLine string
 	for _, line := range strings.Split(serveOutput, "\n") {
@@ -466,6 +467,24 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		}
 		if err != nil || count != 1 {
 			t.Fatalf("%s persisted count=%d err=%v, want 1", test.event, count, err)
+		}
+	}
+}
+
+func waitForInboundAdmissionServeOutput(t *testing.T, process *serveRuntimeTestProcess, evidence string) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for serve output %q:\n%s", evidence, process.outputString())
+		case <-ticker.C:
+			if strings.Contains(process.outputString(), evidence) {
+				return
+			}
 		}
 	}
 }
