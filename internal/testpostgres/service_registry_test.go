@@ -508,6 +508,24 @@ func TestServiceRegistryReportsDockerEnumerationFailure(t *testing.T) {
 	}
 }
 
+func TestManagedContainersIgnoresContainerRemovedAfterEnumeration(t *testing.T) {
+	registry := NewServiceRegistry(t.TempDir(), "docker-unused")
+	fake := &fakeDocker{outputs: map[string][]byte{
+		canonicalPSCommand():  []byte("container-1 swarm-test-postgres-v1-runner-1\n"),
+		managedPSCommand():    []byte("container-1\n"),
+		"inspect container-1": []byte("Error: No such object: container-1"),
+	}, errors: map[string]error{"inspect container-1": errors.New("exit status 1")}}
+	registry.docker = fake
+
+	candidates, err := registry.managedContainers(context.Background())
+	if err != nil {
+		t.Fatalf("managedContainers: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("managed containers after concurrent removal = %#v, want none", candidates)
+	}
+}
+
 func TestServiceRegistryRejectsUnsafeStateRootBeforeDocker(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Chmod(root, 0o777); err != nil {

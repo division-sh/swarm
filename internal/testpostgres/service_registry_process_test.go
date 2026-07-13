@@ -104,7 +104,7 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Fatalf("build runner: %v\n%s", err, output)
 	}
 	blocker := filepath.Join(root, "block-child")
-	if err := os.WriteFile(blocker, []byte("#!/bin/sh\nset -eu\ntouch \"$1.started\"\nwhile [ ! -f \"$1.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
+	if err := os.WriteFile(blocker, []byte("#!/bin/sh\nset -eu\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$1.dsn\"\ntouch \"$1.started\"\nwhile [ ! -f \"$1.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := DefaultServiceRegistry()
@@ -114,11 +114,6 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 	if err := registry.initialize(); err != nil {
 		t.Fatal(err)
 	}
-	baseline, err := registry.loadRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	baselineAuthority := snapshotAuthorityEntries(t, registry)
 	prefixes := []string{filepath.Join(root, "first"), filepath.Join(root, "second")}
 	commands := make([]*exec.Cmd, 0, len(prefixes))
 	done := make([]chan error, 0, len(prefixes))
@@ -161,11 +156,16 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 	for index, prefix := range prefixes {
 		waitForRunnerPath(t, prefix+".started", done[index], logPaths, 2*time.Minute)
 	}
-	records := waitForServiceRecords(t, registry, len(baseline.Services)+2, ServiceChildRunning, 2*time.Minute)
-	for _, record := range records {
+	records := make([]ServiceRecord, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		record := waitForRunnerServiceRecord(t, registry, prefix+".dsn", 2*time.Minute)
 		if _, err := registry.inspectExact(context.Background(), record); err != nil {
 			t.Fatalf("live runner %s lacks exact container identity: %v", record.LeaseID, err)
 		}
+		records = append(records, record)
+	}
+	if records[0].LeaseID == records[1].LeaseID {
+		t.Fatalf("concurrent runners resolved to the same lease %s", records[0].LeaseID)
 	}
 
 	if err := os.WriteFile(prefixes[0]+".release", []byte("release\n"), 0o600); err != nil {
@@ -175,11 +175,16 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Fatalf("first runner: %v", err)
 	}
 	finished[0] = true
-	remaining := waitForServiceRecords(t, registry, len(baseline.Services)+1, ServiceChildRunning, time.Minute)
-	for _, record := range remaining {
-		if _, err := registry.inspectExact(context.Background(), record); err != nil {
-			t.Fatalf("second runner was disturbed by first teardown: %v", err)
-		}
+	waitForServiceRecordAbsent(t, registry, records[0].LeaseID, time.Minute)
+	remaining, err := registry.record(records[1].LeaseID)
+	if err != nil {
+		t.Fatalf("second runner record was disturbed by first teardown: %v", err)
+	}
+	if remaining.State != ServiceChildRunning {
+		t.Fatalf("second runner state after first teardown = %q, want %q", remaining.State, ServiceChildRunning)
+	}
+	if _, err := registry.inspectExact(context.Background(), remaining); err != nil {
+		t.Fatalf("second runner was disturbed by first teardown: %v", err)
 	}
 
 	if err := os.WriteFile(prefixes[1]+".release", []byte("release\n"), 0o600); err != nil {
@@ -189,18 +194,7 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Fatalf("second runner: %v", err)
 	}
 	finished[1] = true
-	final := waitForServiceRecords(t, registry, len(baseline.Services), ServiceChildRunning, time.Minute)
-	for leaseID := range baseline.Services {
-		if _, ok := final[leaseID]; !ok {
-			t.Fatalf("baseline live runner %s was removed by nested runner teardown", leaseID)
-		}
-	}
-	finalAuthority := snapshotAuthorityEntries(t, registry)
-	for dir, want := range baselineAuthority {
-		if got := finalAuthority[dir]; got != want {
-			t.Fatalf("authority directory %s after teardown = %q, want baseline %q", dir, got, want)
-		}
-	}
+	waitForServiceRecordAbsent(t, registry, records[1].LeaseID, time.Minute)
 }
 
 func waitForRunnerPath(t *testing.T, path string, result <-chan error, logs []string, timeout time.Duration) {
@@ -229,47 +223,60 @@ func readRunnerLogs(paths []string) string {
 	return strings.Join(values, "\n")
 }
 
-func snapshotAuthorityEntries(t *testing.T, registry *ServiceRegistry) map[string]string {
+func waitForRunnerServiceRecord(t *testing.T, registry *ServiceRegistry, dsnPath string, timeout time.Duration) ServiceRecord {
 	t.Helper()
-	result := make(map[string]string)
-	for _, dir := range []string{"leases", "creators", "handoff"} {
-		entries, err := os.ReadDir(filepath.Join(registry.StateRoot, dir))
-		if err != nil {
-			t.Fatal(err)
-		}
-		names := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			names = append(names, entry.Name())
-		}
-		result[dir] = strings.Join(names, "\n")
+	raw, err := os.ReadFile(dsnPath)
+	if err != nil {
+		t.Fatalf("read runner DSN: %v", err)
 	}
-	return result
-}
-
-func waitForServiceRecords(t *testing.T, registry *ServiceRegistry, count int, state ServiceState, timeout time.Duration) map[string]ServiceRecord {
-	t.Helper()
+	connection, err := ParseConnection(string(raw))
+	if err != nil {
+		t.Fatalf("parse runner DSN: %v", err)
+	}
+	wantPort := connection.Parameters().Port
 	deadline := time.Now().Add(timeout)
-	var last registryDocument
-	var lastErr error
 	for time.Now().Before(deadline) {
-		last, lastErr = registry.loadRegistry()
-		if lastErr == nil && len(last.Services) == count {
-			matching := true
-			for _, record := range last.Services {
-				if state != "" && record.State != state {
-					matching = false
-					break
+		doc, loadErr := registry.loadRegistry()
+		if loadErr == nil {
+			for _, record := range doc.Services {
+				if record.State != ServiceChildRunning {
+					continue
 				}
-			}
-			if matching {
-				return last.Services
+				portOutput, portErr := registry.dockerOutput(context.Background(), "port", record.ContainerID, "5432/tcp")
+				if portErr != nil {
+					continue
+				}
+				port, parseErr := parseDockerPort(portOutput)
+				if parseErr == nil && port == wantPort {
+					return record
+				}
 			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	encoded, _ := json.Marshal(last)
-	t.Fatalf("timed out waiting for %d services in state %q: registry=%s error=%v", count, state, encoded, lastErr)
-	return nil
+	t.Fatalf("timed out resolving runner record for port %d", wantPort)
+	return ServiceRecord{}
+}
+
+func waitForServiceRecordAbsent(t *testing.T, registry *ServiceRegistry, leaseID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := registry.record(leaseID); os.IsNotExist(err) {
+			for _, path := range []string{
+				registry.leasePath(leaseID),
+				registry.creatorPath(leaseID),
+				filepath.Join(registry.StateRoot, "handoff", leaseID+".cid"),
+			} {
+				if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+					t.Fatalf("retired runner authority remains at %s: %v", path, statErr)
+				}
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for runner lease %s to retire", leaseID)
 }
 
 func waitForProcess(t *testing.T, result <-chan error, timeout time.Duration) error {

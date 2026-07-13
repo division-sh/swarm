@@ -950,7 +950,10 @@ func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]d
 	for id := range ids {
 		inspectOut, err := r.runDocker(ctx, "inspect", id)
 		if err != nil {
-			return nil, fmt.Errorf("inspect managed Postgres service %s: %w", id, err)
+			if dockerObjectAbsent(inspectOut) {
+				continue
+			}
+			return nil, fmt.Errorf("inspect managed Postgres service %s: %w output=%s", id, err, strings.TrimSpace(string(inspectOut)))
 		}
 		var values []dockerInspect
 		if err := json.Unmarshal(inspectOut, &values); err != nil || len(values) != 1 {
