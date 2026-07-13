@@ -916,13 +916,15 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 		{name: "immediately before commit", mutation: providerRollbackBeforeCommit, retry: true},
 	}
 	backends := []struct {
-		name  string
-		setup func(*testing.T, providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore)
+		name        string
+		requirement testutil.DatabaseRequirement
+		setup       func(*testing.T, testutil.DatabaseRequirement, providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore)
 	}{
 		{
-			name: "postgres",
-			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
+			name:        "postgres",
+			requirement: testutil.PostgresRowState(),
+			setup: func(t *testing.T, requirement testutil.DatabaseRequirement, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
+				_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 				t.Cleanup(cleanup)
 				ctx := seedRuntimeTestRun(t, db)
 				return ctx, db, &providerRollbackPostgresStore{
@@ -932,9 +934,10 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 			},
 		},
 		{
-			name: "sqlite",
-			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
-				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+			name:        "sqlite",
+			requirement: testutil.SQLiteDefaultTemp(),
+			setup: func(t *testing.T, requirement testutil.DatabaseRequirement, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
+				sqliteStore := storetest.StartSQLiteRuntimeStore(t, requirement)
 				ctx := runtimecorrelation.WithRunID(context.Background(), templateInstanceDeliveryRunID)
 				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite rollback run: %v", err)
@@ -950,7 +953,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 	for _, backend := range backends {
 		for _, checkpoint := range checkpoints {
 			t.Run(backend.name+"/"+checkpoint.name, func(t *testing.T) {
-				ctx, db, eventStore := backend.setup(t, checkpoint.mutation)
+				ctx, db, eventStore := backend.setup(t, backend.requirement, checkpoint.mutation)
 				source := providerRollbackSemanticSource(t, !checkpoint.withoutCarrier)
 				plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{providerRollbackAuthorization()})
 				if len(issues) != 0 || len(plans) != 1 {

@@ -1825,14 +1825,16 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 
 func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) {
 	testCases := []struct {
-		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner)
-		count func(*testing.T, context.Context, *sql.DB, string, string) (int, int)
+		name        string
+		requirement testutil.DatabaseRequirement
+		setup       func(*testing.T, testutil.DatabaseRequirement) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner)
+		count       func(*testing.T, context.Context, *sql.DB, string, string) (int, int)
 	}{
 		{
-			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
-				_, db, cleanup := testutil.StartPostgres(t)
+			name:        "postgres",
+			requirement: testutil.PostgresRowState(),
+			setup: func(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
+				_, db, cleanup := testutil.AcquirePostgres(t, requirement)
 				t.Cleanup(cleanup)
 				ctx := eventBusTestRunContext(t, db)
 				pg := &store.PostgresStore{DB: db}
@@ -1841,9 +1843,10 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 			count: countPostgresInboundBatchRows,
 		},
 		{
-			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
-				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+			name:        "sqlite",
+			requirement: testutil.SQLiteDefaultTemp(),
+			setup: func(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
+				sqliteStore := storetest.StartSQLiteRuntimeStore(t, requirement)
 				ctx := runtimecorrelation.WithRunID(context.Background(), eventBusTestRunID)
 				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, eventBusTestRunID); err != nil {
 					t.Fatalf("seed SQLite event bus test run: %v", err)
@@ -1856,7 +1859,7 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, db, eventStore, runner := tc.setup(t)
+			ctx, db, eventStore, runner := tc.setup(t, tc.requirement)
 			proofStore := &failingInboundBatchStore{EventStore: eventStore, runner: runner, failAppend: 2}
 			rawID := uuid.NewString()
 			normalizedID := uuid.NewString()

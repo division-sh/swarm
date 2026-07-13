@@ -370,7 +370,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 
 func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.AcquirePostgres(t, testutil.PostgresRowState())
 	defer cleanup()
 	pg := &PostgresStore{DB: db}
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
