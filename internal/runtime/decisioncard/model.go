@@ -669,7 +669,7 @@ func SnapshotJSON(card Card) ([]byte, error) {
 
 func DecodeSnapshot(raw []byte) (Snapshot, error) {
 	var snapshot Snapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	if err := canonicaljson.Decode(raw, &snapshot); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshot, nil

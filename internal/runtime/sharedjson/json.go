@@ -3,6 +3,7 @@ package sharedjson
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 )
 
@@ -32,6 +33,9 @@ func AsFloat64(v any) (float64, bool) {
 		return float64(n), true
 	case float64:
 		return n, true
+	case json.Number:
+		value, err := n.Float64()
+		return value, err == nil
 	default:
 		return 0, false
 	}
@@ -48,9 +52,12 @@ func SchemaAdditionalProps(raw any) bool {
 }
 
 func IsNumeric(v any) bool {
-	switch v.(type) {
+	switch n := v.(type) {
 	case float64, float32, int, int64, int32, uint, uint64, uint32:
 		return true
+	case json.Number:
+		_, ok := new(big.Rat).SetString(n.String())
+		return ok
 	default:
 		return false
 	}
@@ -64,6 +71,9 @@ func IsInteger(v any) bool {
 		return t == float64(int64(t))
 	case float32:
 		return t == float32(int64(t))
+	case json.Number:
+		value, ok := new(big.Rat).SetString(t.String())
+		return ok && value.IsInt()
 	default:
 		return false
 	}

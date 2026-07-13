@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -161,7 +162,7 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	if err != nil {
 		return decisioncard.Card{}, err
 	}
-	if err := json.Unmarshal(snapshot, &card.Snapshot); err != nil {
+	if err := canonicaljson.Decode(snapshot, &card.Snapshot); err != nil {
 		return decisioncard.Card{}, fmt.Errorf("decode decision card snapshot: %w", err)
 	}
 	if err := json.Unmarshal(cadence, &card.EffectiveCadence); err != nil {
@@ -171,7 +172,7 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 		return decisioncard.Card{}, fmt.Errorf("decode decision card provenance: %w", err)
 	}
 	if len(fields) > 0 {
-		if err := json.Unmarshal(fields, &card.Fields); err != nil {
+		if err := canonicaljson.Decode(fields, &card.Fields); err != nil {
 			return decisioncard.Card{}, fmt.Errorf("decode decision card fields: %w", err)
 		}
 	}

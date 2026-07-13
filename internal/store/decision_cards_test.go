@@ -177,6 +177,75 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	}
 }
 
+func TestDecisionCardStorePreservesNumericSnapshotCarriersOnBothStores(t *testing.T) {
+	const preciseInteger = int64(9007199254740993)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			card, err := decisioncard.New(decisioncard.Card{
+				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
+				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				Snapshot: decisioncard.Snapshot{
+					Decision: "launch_review", Context: map[string]any{"large_integer": preciseInteger},
+					Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+						"approve": {
+							Verdict: "approve", AdvancesTo: "operating",
+							Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+								"large_integer": runtimecontracts.LiteralExpression(preciseInteger),
+							}},
+							EmitSchema: map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"large_integer": map[string]any{"type": "integer", "minimum": preciseInteger},
+								},
+								"required": []string{"large_integer"}, "additionalProperties": false,
+							},
+						},
+					},
+				},
+				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+				CreatedAt:        time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatalf("New decision card: %v", err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatalf("CreateDecisionCard: %v", err)
+			}
+			loaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("GetDecisionCard: %v", err)
+			}
+			if loaded.CardContentHash != card.CardContentHash || loaded.DecisionSchemaHash != card.DecisionSchemaHash {
+				t.Fatalf("round-trip hashes = %q/%q, want %q/%q", loaded.CardContentHash, loaded.DecisionSchemaHash, card.CardContentHash, card.DecisionSchemaHash)
+			}
+			assertStoreSnapshotNumber(t, "context.large_integer", loaded.Snapshot.Context["large_integer"])
+			outcome := loaded.Snapshot.Outcomes["approve"]
+			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal)
+			properties, ok := outcome.EmitSchema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("emit schema properties = %#v", outcome.EmitSchema["properties"])
+			}
+			property, ok := properties["large_integer"].(map[string]any)
+			if !ok {
+				t.Fatalf("large_integer schema = %#v", properties["large_integer"])
+			}
+			assertStoreSnapshotNumber(t, "schema minimum", property["minimum"])
+		})
+	}
+}
+
+func assertStoreSnapshotNumber(t *testing.T, name string, value any) {
+	t.Helper()
+	number, ok := value.(json.Number)
+	if !ok || number.String() != "9007199254740993" {
+		t.Fatalf("%s = %#v, want exact json.Number", name, value)
+	}
+}
+
 func setDecisionCardFeedbackRequired(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, required bool) {
 	outcome := outcomes["revise"]
 	outcome.Input["feedback"] = runtimecontracts.WorkflowGateInputField{Type: "text", Required: required}
