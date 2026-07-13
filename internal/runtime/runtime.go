@@ -621,7 +621,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return fmt.Errorf("flow instance activator is required")
 		}
 		return managerRef.ActivateFlowInstance(ctx, req)
-	}, opts.TestLifecycleProbe)
+	}, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}

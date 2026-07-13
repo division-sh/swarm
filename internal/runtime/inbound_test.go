@@ -112,6 +112,9 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
+	if bus != nil {
+		bus.SetProviderOutputAuthorizationVerifier(registry)
+	}
 	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	var resolver testInboundTargetResolver

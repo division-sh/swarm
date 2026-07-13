@@ -132,7 +132,7 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
 		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
-			return errors.New("flow instance already exists")
+			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "connect-route-plan-test", "activate", map[string]any{"flow_instance": req.Instance.InstancePath})
 		}
 	}
 	s.activations = append(s.activations, req)
@@ -168,7 +168,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
 		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
-			return errors.New("flow instance already exists")
+			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "connect-route-plan-test", "activate", map[string]any{"flow_instance": req.Instance.InstancePath})
 		}
 	}
 	s.activations = append(s.activations, req)

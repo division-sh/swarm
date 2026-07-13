@@ -1858,14 +1858,23 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, db, eventStore, runner := tc.setup(t)
 			proofStore := &failingInboundBatchStore{EventStore: eventStore, runner: runner, failAppend: 2}
-			eb, err := runtimebus.NewEventBus(proofStore)
-			if err != nil {
-				t.Fatalf("NewEventBus: %v", err)
-			}
 			rawID := uuid.NewString()
 			normalizedID := uuid.NewString()
 			entityID := uuid.NewString()
 			providerEventID := "provider-delivery-rollback"
+			authorization := runtimeprovideroutput.Authorization{
+				Provider: "proof-provider", Event: "inbound.proof.normalized", PackID: "provider.proof",
+				PackVersion: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
+			}
+			source := inboundBatchAuthorizedSource{
+				Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), authorizations: []runtimeprovideroutput.Authorization{authorization},
+			}
+			eb, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{
+				ContractBundle: source, ProviderOutputVerifier: source,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
 			batch := runtimebus.InboundDeliveryBatch{
 				Claim: runtimebus.InboundDeliveryClaim{
 					ProviderEventID: providerEventID,
@@ -1875,12 +1884,9 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 				Events: []runtimebus.InboundDeliveryEvent{
 					{Event: eventtest.RootIngress(rawID, events.EventType("inbound.proof"), "inbound-gateway", "", []byte(`{"raw":true}`), 0, eventBusTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()), Kind: runtimeprovideroutput.KindRaw},
 					{
-						Event: eventtest.RootIngress(normalizedID, events.EventType("inbound.proof.normalized"), "inbound-gateway", "", []byte(`{"normalized":true}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-						Kind:  runtimeprovideroutput.KindNormalized,
-						Authorization: runtimeprovideroutput.Authorization{
-							Provider: "proof-provider", Event: "inbound.proof.normalized", PackID: "provider.proof",
-							PackVersion: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
-						},
+						Event:         eventtest.RootIngress(normalizedID, events.EventType("inbound.proof.normalized"), "inbound-gateway", "", []byte(`{"normalized":true}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
+						Kind:          runtimeprovideroutput.KindNormalized,
+						Authorization: authorization,
 					},
 				},
 			}
@@ -1894,6 +1900,24 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 			}
 		})
 	}
+}
+
+type inboundBatchAuthorizedSource struct {
+	semanticview.Source
+	authorizations []runtimeprovideroutput.Authorization
+}
+
+func (s inboundBatchAuthorizedSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
+	return append([]runtimeprovideroutput.Authorization(nil), s.authorizations...)
+}
+
+func (s inboundBatchAuthorizedSource) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
+	for _, expected := range s.authorizations {
+		if expected.Matches(actual) {
+			return nil
+		}
+	}
+	return errors.New("authorization does not match test catalog owner")
 }
 
 type failingInboundBatchStore struct {

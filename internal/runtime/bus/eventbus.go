@@ -61,6 +61,7 @@ type EventBus struct {
 	bundleFingerprint           string
 	bundleSourceFact            runtimecorrelation.BundleSourceFact
 	testLifecycleProbe          runtimelifecycleprobe.Observer
+	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 }
@@ -110,6 +111,7 @@ type EventBusOptions struct {
 	BundleFingerprint           string
 	BundleSourceFact            runtimecorrelation.BundleSourceFact
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
+	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -174,9 +176,28 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		bundleFingerprint:           strings.TrimSpace(opts.BundleFingerprint),
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
+		providerOutputVerifier:      opts.ProviderOutputVerifier,
 	}
 	eb.rebuildRoutePlanners()
 	return eb, nil
+}
+
+func (eb *EventBus) SetProviderOutputAuthorizationVerifier(verifier ProviderOutputAuthorizationVerifier) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.providerOutputVerifier = verifier
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) providerOutputAuthorizationVerifier() ProviderOutputAuthorizationVerifier {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.providerOutputVerifier
 }
 
 func (eb *EventBus) rebuildRoutePlanners() {

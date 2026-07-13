@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
 func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
@@ -87,6 +88,28 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 		got.PackID != identity.ID || got.PackVersion != identity.Version ||
 		got.ManifestHash != identity.ManifestHash || got.GenerationID != catalog.GenerationID() {
 		t.Fatalf("normalized output authorization = %#v, want compiled pack identity/generation", got)
+	}
+	if err := catalog.VerifyProviderOutputAuthorization(got); err != nil {
+		t.Fatalf("VerifyProviderOutputAuthorization: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runtimeprovideroutput.Authorization)
+	}{
+		{name: "provider", mutate: func(a *runtimeprovideroutput.Authorization) { a.Provider = "telegram-stale" }},
+		{name: "event", mutate: func(a *runtimeprovideroutput.Authorization) { a.Event = "inbound.telegram.edited_message" }},
+		{name: "pack id", mutate: func(a *runtimeprovideroutput.Authorization) { a.PackID = "provider.telegram.stale" }},
+		{name: "pack version", mutate: func(a *runtimeprovideroutput.Authorization) { a.PackVersion = "0.9.0" }},
+		{name: "manifest hash", mutate: func(a *runtimeprovideroutput.Authorization) { a.ManifestHash = "sha256:" + strings.Repeat("d", 64) }},
+		{name: "catalog generation", mutate: func(a *runtimeprovideroutput.Authorization) { a.GenerationID = "generation-stale" }},
+	} {
+		t.Run("rejects "+tc.name+" mismatch", func(t *testing.T) {
+			stale := got
+			tc.mutate(&stale)
+			if err := catalog.VerifyProviderOutputAuthorization(stale); err == nil {
+				t.Fatalf("VerifyProviderOutputAuthorization(%s mismatch) error = nil", tc.name)
+			}
+		})
 	}
 }
 

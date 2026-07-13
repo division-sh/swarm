@@ -376,13 +376,6 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
-	readbackDeadline := time.Now().Add(2 * time.Second)
-	for !strings.Contains(process.outputString(), ":matrix:telegram AVAILABLE") {
-		if time.Now().After(readbackDeadline) {
-			t.Fatalf("timed out waiting for complete standing ingress readback:\n%s", process.outputString())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 	serveOutput := process.outputString()
 	var unsignedWarningLine string
 	for _, line := range strings.Split(serveOutput, "\n") {

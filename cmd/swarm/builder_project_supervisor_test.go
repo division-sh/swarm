@@ -233,9 +233,9 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	catalog := testProviderTriggerCatalog(t)
 	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressEventStore) {
 		eventsStore := &processIngressEventStore{}
-		bus, err := runtimebus.NewEventBus(eventsStore)
+		bus, err := runtimebus.NewEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{ProviderOutputVerifier: catalog})
 		if err != nil {
-			t.Fatalf("NewEventBus(%s): %v", alias, err)
+			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
 		}
 		gateway := runtimepkg.NewInboundGateway(bus, nil, nil)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})

@@ -130,7 +130,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	for _, want := range []string{
 		"swarm serve --dev · ",
 		"store                      sqlite · " + sqlitePath,
-		"workspace                  not required",
+		"workspace                  host · agent work runs on this machine",
 		"listeners                  api 127.0.0.1:",
 		"ready in ",
 		"telegram webhook",
@@ -144,7 +144,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if strings.Contains(firstOutput, "[1/22]") || strings.Contains(firstOutput, "telegram-secret") || strings.Contains(firstOutput, "\x1b[") {
 		t.Fatalf("concise supported serve output leaked verbose, secret, or terminal decoration:\n%s", firstOutput)
 	}
-	if strings.Count(firstOutput, "workspace                  not required") != 1 || strings.Count(firstOutput, "ready in ") != 1 {
+	if strings.Count(firstOutput, "workspace                  host · agent work runs on this machine") != 1 || strings.Count(firstOutput, "ready in ") != 1 {
 		t.Fatalf("concise supported serve output retained parallel lifecycle writers:\n%s", firstOutput)
 	}
 	for _, forbidden := range []string{"request_authentication=", "catalog_generation=", "manifest_hash=", "policy_source=", "provenance=", "source_path=", "standing ingress admitted:"} {
