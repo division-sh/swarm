@@ -459,6 +459,27 @@ var bundleFiles = map[string]string{
 func build() { saveArtifacts(bundleFiles) }
 `,
 		},
+		"split-helper-returns": {"fixture_test.go": `package fixture
+func packageFiles() map[string]string {
+  return map[string]string{"package.yaml": "name: fixture"}
+}
+func routingFiles() map[string]string {
+  return map[string]string{"schema.yaml": "pins: {inputs: {events: [{source: external}]}}"}
+}
+func build() { saveArtifacts(mergeFiles(packageFiles(), routingFiles())) }
+`},
+		"external-webhook": {"fixture_test.go": `package fixture
+var files = map[string]string{
+  "package.yaml": "name: fixture",
+  "schema.yaml": "pins: {inputs: {events: [{source: external webhook}]}}",
+}
+`},
+		"external-webhook-case-whitespace": {"fixture_test.go": `package fixture
+var files = map[string]string{
+  "package.yaml": "name: fixture",
+  "schema.yaml": "pins: {inputs: {events: [{source: '  ExTeRnAl webhook  '}]}}",
+}
+`},
 	}
 	for name, files := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -477,6 +498,22 @@ func parse(t T) {
 			t.Fatal("non-materializing parser snippet was classified as a complete bundle")
 		}
 	})
+}
+
+func TestCanonicalRoutingExternalSourceMatchesRuntimeSemantics(t *testing.T) {
+	tests := map[string]bool{
+		"external":             true,
+		"external webhook":     true,
+		"  ExTeRnAl webhook  ": true,
+		"internal":             false,
+		"webhook external":     false,
+		"":                     false,
+	}
+	for source, want := range tests {
+		if got := canonicalRoutingExternalSource(source); got != want {
+			t.Errorf("canonicalRoutingExternalSource(%q) = %t, want runtime parity %t", source, got, want)
+		}
+	}
 }
 
 func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
@@ -974,7 +1011,6 @@ func goPackageContainsCompleteRoutingBundle(files map[string]string) bool {
 func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageBundleSource {
 	fset := token.NewFileSet()
 	parsedFiles := make([]*ast.File, 0, len(files))
-	fileNames := map[*ast.File]string{}
 	paths := make([]string, 0, len(files))
 	for path := range files {
 		paths = append(paths, path)
@@ -986,7 +1022,6 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 			return []goPackageBundleSource{{File: path, Function: "<unparseable>"}}
 		}
 		parsedFiles = append(parsedFiles, parsed)
-		fileNames[parsed] = filepath.ToSlash(path)
 	}
 	if len(parsedFiles) == 0 {
 		return nil
@@ -994,94 +1029,42 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 
 	info := &types.Info{
 		Types: map[ast.Expr]types.TypeAndValue{},
-		Defs:  map[*ast.Ident]types.Object{},
-		Uses:  map[*ast.Ident]types.Object{},
 	}
 	config := types.Config{Importer: importer.Default(), Error: func(error) {}}
 	_, _ = config.Check("canonicalrouting/sourcecensus", fset, parsedFiles, info)
 
-	initializers := map[types.Object][]ast.Expr{}
-	for _, file := range parsedFiles {
-		for _, declaration := range file.Decls {
-			general, ok := declaration.(*ast.GenDecl)
-			if !ok || general.Tok != token.CONST && general.Tok != token.VAR {
-				continue
-			}
-			for _, specification := range general.Specs {
-				value, ok := specification.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for index, name := range value.Names {
-					object := info.Defs[name]
-					if object == nil || len(value.Values) == 0 {
-						continue
-					}
-					valueIndex := index
-					if valueIndex >= len(value.Values) {
-						valueIndex = len(value.Values) - 1
-					}
-					initializers[object] = append(initializers[object], value.Values[valueIndex])
-				}
-			}
-		}
-	}
-
-	var result []goPackageBundleSource
-	for _, file := range parsedFiles {
-		for _, declaration := range file.Decls {
-			switch value := declaration.(type) {
-			case *ast.FuncDecl:
-				if value.Body != nil && sourceNodeContainsCompleteBundle(value.Body, info, initializers) {
-					result = append(result, goPackageBundleSource{File: fileNames[file], Function: value.Name.Name})
-				}
-			case *ast.GenDecl:
-				if (value.Tok == token.CONST || value.Tok == token.VAR) && sourceNodeContainsCompleteBundle(value, info, initializers) {
-					result = append(result, goPackageBundleSource{File: fileNames[file], Function: "package-scope"})
-				}
-			}
-		}
-	}
-	return result
-}
-
-func sourceNodeContainsCompleteBundle(
-	node ast.Node,
-	info *types.Info,
-	initializers map[types.Object][]ast.Expr,
-) bool {
+	// Aggregate evidence from structural bundle capabilities across the whole
+	// package. Parser-only strings and ordinary production text are not bundle
+	// capabilities and therefore cannot combine into a false positive.
 	values := map[string]struct{}{}
-	visitedObjects := map[types.Object]struct{}{}
-	var collect func(ast.Node)
-	collect = func(current ast.Node) {
-		ast.Inspect(current, func(candidate ast.Node) bool {
-			if candidate == nil {
-				return false
-			}
-			if expression, ok := candidate.(ast.Expr); ok {
-				if typed, exists := info.Types[expression]; exists && typed.Value != nil && typed.Value.Kind() == constant.String {
-					values[constant.StringVal(typed.Value)] = struct{}{}
+	routingEvidenceFiles := map[string]struct{}{}
+	for _, file := range parsedFiles {
+		ast.Inspect(file, func(candidate ast.Node) bool {
+			var evidence map[string]struct{}
+			switch expression := candidate.(type) {
+			case *ast.FuncDecl:
+				if compilerResolvedFunctionReturnsStringMap(expression, info) {
+					evidence = compilerResolvedStrings(expression.Body, info)
+				}
+			case *ast.CompositeLit:
+				if compilerResolvedStringMap(info.Types[expression].Type) {
+					evidence = compilerResolvedStrings(expression, info)
+				}
+			case *ast.CallExpr:
+				candidateValues := compilerResolvedStrings(expression, info)
+				if stringEvidenceNamesBundleFile(candidateValues) {
+					evidence = candidateValues
 				}
 			}
-			identifier, ok := candidate.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			object := info.Uses[identifier]
-			if object == nil {
-				return true
-			}
-			if _, visited := visitedObjects[object]; visited {
-				return true
-			}
-			visitedObjects[object] = struct{}{}
-			for _, initializer := range initializers[object] {
-				collect(initializer)
+			for value := range evidence {
+				values[value] = struct{}{}
+				if yamlTextContainsCanonicalRoutingAuthority(value) {
+					routingEvidenceFiles[filepath.ToSlash(fset.Position(candidate.Pos()).Filename)] = struct{}{}
+				}
 			}
 			return true
 		})
 	}
-	collect(node)
 
 	hasPackageFile := false
 	hasSchemaFile := false
@@ -1091,7 +1074,69 @@ func sourceNodeContainsCompleteBundle(
 		hasSchemaFile = hasSchemaFile || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml")
 		hasRoutingAuthority = hasRoutingAuthority || yamlTextContainsCanonicalRoutingAuthority(value)
 	}
-	return hasPackageFile && hasSchemaFile && hasRoutingAuthority
+	if !hasPackageFile || !hasSchemaFile || !hasRoutingAuthority {
+		return nil
+	}
+	evidenceFiles := make([]string, 0, len(routingEvidenceFiles))
+	for path := range routingEvidenceFiles {
+		evidenceFiles = append(evidenceFiles, path)
+	}
+	sort.Strings(evidenceFiles)
+	result := make([]goPackageBundleSource, 0, len(evidenceFiles))
+	for _, path := range evidenceFiles {
+		result = append(result, goPackageBundleSource{File: path, Function: "package-scope"})
+	}
+	return result
+}
+
+func compilerResolvedFunctionReturnsStringMap(function *ast.FuncDecl, info *types.Info) bool {
+	if function.Type.Results == nil {
+		return false
+	}
+	for _, result := range function.Type.Results.List {
+		if compilerResolvedStringMap(info.Types[result.Type].Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func compilerResolvedStringMap(value types.Type) bool {
+	if value == nil {
+		return false
+	}
+	mapping, ok := value.Underlying().(*types.Map)
+	return ok && compilerResolvedStringType(mapping.Key()) && compilerResolvedStringType(mapping.Elem())
+}
+
+func compilerResolvedStringType(value types.Type) bool {
+	basic, ok := value.Underlying().(*types.Basic)
+	return ok && basic.Kind() == types.String
+}
+
+func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{} {
+	values := map[string]struct{}{}
+	ast.Inspect(node, func(candidate ast.Node) bool {
+		expression, ok := candidate.(ast.Expr)
+		if !ok {
+			return true
+		}
+		typed, exists := info.Types[expression]
+		if exists && typed.Value != nil && typed.Value.Kind() == constant.String {
+			values[constant.StringVal(typed.Value)] = struct{}{}
+		}
+		return true
+	})
+	return values
+}
+
+func stringEvidenceNamesBundleFile(values map[string]struct{}) bool {
+	for value := range values {
+		if strings.Contains(value, "package.yaml") || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml") {
+			return true
+		}
+	}
+	return false
 }
 
 func yamlTextContainsCanonicalRoutingAuthority(text string) bool {
@@ -1121,7 +1166,7 @@ func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
 			case "connect", "resolution", "replies_to":
 				return true
 			case "source":
-				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
+				if value.Kind == yaml.ScalarNode && canonicalRoutingExternalSource(value.Value) {
 					return true
 				}
 			}
@@ -1137,6 +1182,11 @@ func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
 		}
 	}
 	return false
+}
+
+func canonicalRoutingExternalSource(source string) bool {
+	// Keep this mirror exact with semanticview.eventMetadataExternalSource.
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "external")
 }
 
 func walkRepositoryGoFiles(repo string, visit func(path string, raw []byte) error) error {

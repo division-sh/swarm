@@ -12,7 +12,6 @@ type TemplateReplyVariant uint8
 
 const (
 	TemplateReplyExplicitCorrelation TemplateReplyVariant = iota + 1
-	TemplateReplyMailboxContinuation
 	TemplateReplyHumanContinuation
 )
 
@@ -32,8 +31,6 @@ func CopyTemplateReplyVariant(t testing.TB, opts TemplateReplyVariantOptions) st
 	applyTemplateReplyExplicitCorrelation(t, root)
 	switch opts.Variant {
 	case TemplateReplyExplicitCorrelation:
-	case TemplateReplyMailboxContinuation:
-		applyTemplateReplyMailboxContinuation(t, root)
 	case TemplateReplyHumanContinuation:
 		applyTemplateReplyHumanContinuation(t, root, opts.RequestKey, opts.AccountID)
 	default:
@@ -83,41 +80,6 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	applyClosedReplacement(t, providerNodes,
 		"        fields:\n          account_id: payload.account_id\n",
 		"        fields:\n          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
-}
-
-func applyTemplateReplyMailboxContinuation(t testing.TB, root string) {
-	t.Helper()
-	providerSchema := filepath.Join(root, "flows", "provider", "schema.yaml")
-	applyClosedReplacement(t, providerSchema, "  outputs:\n", `      - name: mailbox_deferred
-        event: mailbox.item_deferred
-      - name: mailbox_decided
-        event: mailbox.item_decided
-  outputs:
-`)
-	writeClosedVariantFile(t, root, "flows/provider/nodes.yaml", `provider-node:
-  id: provider-node
-  execution_type: system_node
-  subscribes_to: [provider.requested, mailbox.item_deferred, mailbox.item_decided]
-  produces: [provider.replied]
-  event_handlers:
-    provider.requested:
-      action:
-        id: mailbox_write
-        mailbox:
-          item_type: {literal: approval}
-          summary: {literal: Review provider response}
-          payload:
-            provider_request_id: {ref: payload.provider_request_id}
-            account_id: {ref: payload.account_id}
-    mailbox.item_deferred: {}
-    mailbox.item_decided:
-      emit:
-        event: provider.replied
-        fields:
-          provider_request_id: payload.mailbox_payload.provider_request_id
-          account_id: payload.mailbox_payload.account_id
-          result: {literal: approved}
-`)
 }
 
 func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, accountID string) {

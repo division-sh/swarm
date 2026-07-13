@@ -19,7 +19,7 @@ func TestHumanTaskInterpreterRemainsFrozenToIssue1995ClosedSet(t *testing.T) {
 		"internal/runtime/authority/source_provider.go",
 		"internal/runtime/runforkexecution/agent_runtime_materialization.go",
 		"internal/runtime/runtime.go",
-		"internal/runtime/testfixtures/templatereply/fixture.go",
+		"internal/runtime/testfixtures/canonicalrouting/template_reply.go",
 		"internal/runtime/tools/contracts.go",
 		"internal/runtime/tools/deps.go",
 		"internal/runtime/tools/executor.go",

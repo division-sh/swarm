@@ -1251,8 +1251,8 @@ func TestSwarmTestMailboxDecideFindsExactlyOneThenMutates(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox.yaml"), `
 name: mailbox scenario
 steps:
-  - publish: thing.created
-    payload: {amount: 7, who: operator}
+  - publish: item.received
+    payload: {item_id: review}
   - mailbox.decide:
       match:
         decision: launch_review
@@ -1325,8 +1325,8 @@ func TestSwarmTestMailboxDecideMissingVerdictFailsBeforeMailboxLookup(t *testing
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"), `
 name: mailbox decide missing verdict
 steps:
-  - publish: thing.created
-    payload: {amount: 7, who: operator}
+  - publish: item.received
+    payload: {item_id: review}
   - mailbox.decide:
       match:
         decision: launch_review
