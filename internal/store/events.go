@@ -345,6 +345,35 @@ func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, stat
 	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
+func (s *PostgresStore) HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false, nil
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, err
+	}
+	if caps.Events.Receipts != SchemaFlavorCanonical {
+		return false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+	}
+	var processed bool
+	err = eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM event_receipts
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'platform'
+			  AND subscriber_id = 'pipeline'
+			  AND outcome = 'success'
+			  AND reason_code = 'pipeline_persisted'
+		)
+	`, eventID).Scan(&processed)
+	if err != nil {
+		return false, fmt.Errorf("load processed pipeline receipt: %w", err)
+	}
+	return processed, nil
+}
+
 func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -488,6 +517,14 @@ func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string)
 }
 
 func (s *PostgresStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, false, fmt.Errorf("event_id is required")
+	}
+	return acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+}
+
+func (s *PostgresStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")

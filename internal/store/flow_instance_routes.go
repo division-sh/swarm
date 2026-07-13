@@ -28,6 +28,9 @@ func flowInstanceRouteExecutorFromContext(ctx context.Context, db *sql.DB) flowI
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return tx
 	}
+	if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		return conn
+	}
 	return db
 }
 
@@ -168,6 +171,8 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 	q := flowInstanceDescriptorQueryer(s.DB)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		q = conn
 	}
 	rows, err := q.QueryContext(ctx, `
 			SELECT
@@ -399,6 +404,8 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	q := flowInstanceDescriptorQueryer(s.DB)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		q = conn
 	}
 	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
 	if err != nil {

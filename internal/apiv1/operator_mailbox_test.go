@@ -24,6 +24,16 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("mailbox.list items = %#v, want one notice and one decision card", items)
 	}
+	for _, item := range items {
+		entry := asMap(t, item)
+		if entry["kind"] != decisioncard.KindDecisionCard {
+			continue
+		}
+		card := asMap(t, entry["decision_card"])
+		if _, ok := card["deferred_until"]; ok {
+			t.Fatalf("pending mailbox.list card exposes unset deferred_until: %#v", card)
+		}
+	}
 
 	got := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"mailbox.get","params":{"mailbox_id":"card-1"}}`)
 	if got.Error != nil {
@@ -31,6 +41,13 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	}
 	if result := asMap(t, got.Result); result["kind"] != "decision_card" {
 		t.Fatalf("mailbox.get result = %#v, want decision_card", result)
+	} else {
+		card := asMap(t, result["decision_card"])
+		for _, field := range []string{"decided_at", "deferred_until"} {
+			if _, ok := card[field]; ok {
+				t.Fatalf("pending mailbox.get card exposes unset %s: %#v", field, card)
+			}
+		}
 	}
 
 	beginBody := `{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":"card-1","verdict":"reject","observed_content_hash":"content-1","idempotency_key":"idem-begin"}}`
@@ -52,11 +69,36 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if deferred.Error != nil || asMap(t, deferred.Result)["status"] != "pending" {
 		t.Fatalf("mailbox.defer = result %#v error %#v", deferred.Result, deferred.Error)
 	}
+	deferredList := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"deferred-list","method":"mailbox.list","params":{}}`)
+	if deferredList.Error != nil {
+		t.Fatalf("mailbox.list after defer error = %#v", deferredList.Error)
+	}
+	var listedDeferred bool
+	for _, item := range asSlice(t, asMap(t, deferredList.Result)["items"]) {
+		entry := asMap(t, item)
+		if entry["kind"] == decisioncard.KindDecisionCard {
+			_, listedDeferred = asMap(t, entry["decision_card"])["deferred_until"]
+		}
+	}
+	if !listedDeferred {
+		t.Fatal("mailbox.list omitted deferred_until after defer")
+	}
 
 	decideBody := `{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":"card-1","verdict":"approve","fields":{},"observed_content_hash":"content-1","idempotency_key":"idem-decide"}}`
 	decided := rpcCall(t, handler, decideBody)
 	if decided.Error != nil || asMap(t, decided.Result)["status"] != "decided" {
 		t.Fatalf("mailbox.decide = result %#v error %#v", decided.Result, decided.Error)
+	}
+	decidedDetail := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"decided-get","method":"mailbox.get","params":{"mailbox_id":"card-1"}}`)
+	if decidedDetail.Error != nil {
+		t.Fatalf("mailbox.get after decide error = %#v", decidedDetail.Error)
+	}
+	cardAfterDecide := asMap(t, asMap(t, decidedDetail.Result)["decision_card"])
+	if _, ok := cardAfterDecide["decided_at"]; !ok {
+		t.Fatalf("mailbox.get omitted decided_at after decide: %#v", cardAfterDecide)
+	}
+	if _, ok := cardAfterDecide["deferred_until"]; ok {
+		t.Fatalf("mailbox.get retained deferred_until after decide: %#v", cardAfterDecide)
 	}
 	decideReplay := rpcCall(t, handler, decideBody)
 	if decideReplay.Error != nil || asMap(t, decideReplay.Result)["idempotency_replayed"] != true {

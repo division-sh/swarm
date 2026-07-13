@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -14,6 +15,10 @@ import (
 
 type pipelineReceiptRecorder interface {
 	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
+}
+
+type processedPipelineReceiptReader interface {
+	HasProcessedPipelineReceipt(context.Context, string) (bool, error)
 }
 
 type EventStore interface {
@@ -191,12 +196,14 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	}
 	eventsToReplay = append(eventsToReplay, generic...)
 	recorder, _ := r.store.(pipelineReceiptRecorder)
+	receiptReader, _ := r.store.(processedPipelineReceiptReader)
 	settler, _ := r.bus.(persistedPipelineRecoverySettler)
 	quarantiner, _ := r.bus.(persistedPipelineRecoveryQuarantiner)
 	_, requiresCanonicalSettlement := r.store.(DecisionRouteObligationStore)
-	settleProcessed := func(evt events.Event) error {
+	settlementOwner, _ := r.store.(runtimereplayclaim.SettlementOwner)
+	settleProcessed := func(settleCtx context.Context, evt events.Event) error {
 		if settler != nil {
-			return settler.SettleRecoveredPipelineEvent(ctx, evt)
+			return settler.SettleRecoveredPipelineEvent(settleCtx, evt)
 		}
 		if recorder == nil {
 			if !requiresCanonicalSettlement {
@@ -204,20 +211,20 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			}
 			return fmt.Errorf("missing pipeline recovery settlement owner")
 		}
-		return recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil)
+		return recorder.UpsertPipelineReceipt(settleCtx, evt.ID(), "processed", nil)
 	}
-	quarantineRoute := func(evt events.Event, cause error) (bool, error) {
+	quarantineRoute := func(routeCtx context.Context, evt events.Event, cause error) (bool, error) {
 		if _, ok := decisionRouteIDs[strings.TrimSpace(evt.ID())]; !ok {
 			return false, nil
 		}
 		if quarantiner == nil {
 			return true, fmt.Errorf("missing decision route quarantine owner")
 		}
-		if err := quarantiner.QuarantineRecoveredPipelineEvent(ctx, evt, cause); err != nil {
+		if err := quarantiner.QuarantineRecoveredPipelineEvent(routeCtx, evt, cause); err != nil {
 			return true, err
 		}
 		failure := runtimefailures.Normalize(cause, "pipeline-recovery", "quarantine_decision_route")
-		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
+		logStartupRecoveryPipelineReplayAftermath(routeCtx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
 		return true, nil
 	}
 	var firstErr error
@@ -229,7 +236,21 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		if strings.TrimSpace(evt.ID()) == "" {
 			continue
 		}
-		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
+		_, decisionRoute := decisionRouteIDs[strings.TrimSpace(evt.ID())]
+		var lease runtimeownership.Lease
+		var claimed bool
+		var err error
+		if decisionRoute {
+			if settlementOwner == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("claim decision route settlement %s: missing settlement owner", evt.ID())
+				}
+				continue
+			}
+			lease, claimed, err = settlementOwner.ClaimPipelineSettlement(ctx, evt.ID())
+		} else {
+			lease, claimed, err = replayStore.ClaimPipelineReplay(ctx, evt.ID())
+		}
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("claim replay event %s: %w", evt.ID(), err)
@@ -240,110 +261,135 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonClaimNotAcquired, nil, nil)
 			continue
 		}
+		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
+		if decisionRoute {
+			if receiptReader == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("settle decision route %s: missing processed receipt reader", evt.ID())
+				}
+				_ = lease.Release(workCtx)
+				continue
+			}
+			processed, receiptErr := receiptReader.HasProcessedPipelineReceipt(workCtx, evt.ID())
+			if receiptErr != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("load decision route %s settlement receipt: %w", evt.ID(), receiptErr)
+				}
+				_ = lease.Release(workCtx)
+				continue
+			}
+			if processed {
+				if err := settleProcessed(workCtx, evt); err != nil && firstErr == nil {
+					firstErr = fmt.Errorf("settle processed decision route %s: %w", evt.ID(), err)
+				}
+				_ = lease.Release(workCtx)
+				continue
+			}
+		}
 		if record.ReplayFailure != nil {
 			failure := *runtimefailures.CloneEnvelope(record.ReplayFailure)
-			if owned, err := quarantineRoute(evt, runtimefailures.FromEnvelope(failure)); owned {
+			if owned, err := quarantineRoute(workCtx, evt, runtimefailures.FromEnvelope(failure)); owned {
 				if err != nil && firstErr == nil {
 					firstErr = err
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
 			if recorder == nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: missing pipeline receipt recorder", evt.ID())
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "error", &failure); err != nil {
+			if err := recorder.UpsertPipelineReceipt(workCtx, evt.ID(), "error", &failure); err != nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: %w", evt.ID(), err)
 				}
 			}
-			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
-			_ = lease.Release(ctx)
+			logStartupRecoveryPipelineReplayAftermath(workCtx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
+			_ = lease.Release(workCtx)
 			continue
 		}
-		persistedRecipients, err := r.store.ListEventDeliveryRecipients(ctx, evt.ID())
+		persistedRecipients, err := r.store.ListEventDeliveryRecipients(workCtx, evt.ID())
 		if err != nil {
-			if owned, quarantineErr := quarantineRoute(evt, err); owned {
+			if owned, quarantineErr := quarantineRoute(workCtx, evt, err); owned {
 				if quarantineErr != nil && firstErr == nil {
 					firstErr = quarantineErr
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
 			if firstErr == nil {
 				firstErr = fmt.Errorf("load persisted recipients for replay event %s: %w", evt.ID(), err)
 			}
-			_ = lease.Release(ctx)
+			_ = lease.Release(workCtx)
 			continue
 		}
 		if len(persistedRecipients) == 0 {
 			if scopeReader, ok := r.store.(runtimereplayclaim.ScopeReader); ok && scopeReader != nil {
-				scope, err := scopeReader.LoadCommittedReplayScope(ctx, evt.ID())
+				scope, err := scopeReader.LoadCommittedReplayScope(workCtx, evt.ID())
 				if err != nil {
-					if owned, quarantineErr := quarantineRoute(evt, err); owned {
+					if owned, quarantineErr := quarantineRoute(workCtx, evt, err); owned {
 						if quarantineErr != nil && firstErr == nil {
 							firstErr = quarantineErr
 						}
-						_ = lease.Release(ctx)
+						_ = lease.Release(workCtx)
 						continue
 					}
 					if firstErr == nil {
 						firstErr = fmt.Errorf("load committed replay scope for replay event %s: %w", evt.ID(), err)
 					}
-					_ = lease.Release(ctx)
+					_ = lease.Release(workCtx)
 					continue
 				}
 				if scope == runtimereplayclaim.CommittedReplayScopeDirect {
-					if err := settleProcessed(evt); err != nil {
+					if err := settleProcessed(workCtx, evt); err != nil {
 						if firstErr == nil {
 							firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 						}
 					}
-					logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, nil, nil)
-					_ = lease.Release(ctx)
+					logStartupRecoveryPipelineReplayAftermath(workCtx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, nil, nil)
+					_ = lease.Release(workCtx)
 					continue
 				}
 			}
 		}
 		var replayErr error
 		if recoveryBus, ok := r.bus.(persistedPipelineRecoveryPublisher); ok && recoveryBus != nil {
-			replayErr = recoveryBus.RecoverPersistedPipeline(ctx, evt, persistedRecipients)
+			replayErr = recoveryBus.RecoverPersistedPipeline(workCtx, evt, persistedRecipients)
 		} else {
-			replayErr = r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients)
+			replayErr = r.bus.PublishPersistedRecipients(workCtx, evt, persistedRecipients)
 		}
 		if replayErr != nil {
 			if IsPipelineReceiptDeferred(replayErr) {
 				if obligations, ok := r.store.(DecisionRouteObligationStore); ok && obligations != nil {
 					failure := runtimefailures.Normalize(replayErr, "pipeline-recovery", "defer_decision_route")
-					if err := obligations.DeferDecisionRouteObligation(ctx, evt.ID(), time.Now().UTC().Add(DecisionRouteRetryDelay), &failure); err != nil && firstErr == nil {
+					if err := obligations.DeferDecisionRouteObligation(workCtx, evt.ID(), time.Now().UTC().Add(DecisionRouteRetryDelay), &failure); err != nil && firstErr == nil {
 						firstErr = err
 					}
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
-			if owned, quarantineErr := quarantineRoute(evt, replayErr); owned {
+			if owned, quarantineErr := quarantineRoute(workCtx, evt, replayErr); owned {
 				if quarantineErr != nil && firstErr == nil {
 					firstErr = quarantineErr
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
 			if firstErr == nil {
 				firstErr = fmt.Errorf("replay event %s: %w", evt.ID(), replayErr)
 			}
-			_ = lease.Release(ctx)
+			_ = lease.Release(workCtx)
 			continue
 		}
-		if err := settleProcessed(evt); err != nil && firstErr == nil {
+		if err := settleProcessed(workCtx, evt); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 		}
-		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, persistedRecipients)
-		_ = lease.Release(ctx)
+		logStartupRecoveryPipelineReplayAftermath(workCtx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, persistedRecipients)
+		_ = lease.Release(workCtx)
 	}
 	return firstErr
 }

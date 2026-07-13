@@ -132,7 +132,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if lookback <= 0 {
 		lookback = DefaultOutboxSweeperConfig().Lookback
 	}
-	decisionRoutes, err := eb.sweepDecisionRouteObligations(ctx, replayStore, limit)
+	decisionRoutes, err := eb.sweepDecisionRouteObligations(ctx, limit)
 	if err != nil {
 		return lifecycleEvents + decisionRoutes, err
 	}
@@ -153,49 +153,50 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		if !claimed {
 			continue
 		}
+		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
 		if record.ReplayFailure != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
-			_ = lease.Release(ctx)
+			eb.markPipelineReceipt(workCtx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
+			_ = lease.Release(workCtx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
+		recipients, err := eb.authoritativeRecipientsForEvent(workCtx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
-			_ = lease.Release(ctx)
+			eb.markPipelineReceipt(workCtx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
+			_ = lease.Release(workCtx)
 			return redelivered, err
 		}
-		if err := eb.RecoverPersistedPipeline(ctx, evt, recipients); err != nil {
+		if err := eb.RecoverPersistedPipeline(workCtx, evt, recipients); err != nil {
 			if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) {
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				if errors.Is(err, ErrRuntimeIngressPaused) {
 					return redelivered, nil
 				}
 				continue
 			}
 			if runtimepipeline.IsPipelineReceiptDeferred(err) {
-				_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), err)
-				_ = lease.Release(ctx)
+				_ = eb.deferDecisionRouteObligation(workCtx, evt.ID(), err)
+				_ = lease.Release(workCtx)
 				continue
 			}
 			if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
-				if recordErr := eb.markCommittedReplayScopeUnavailable(ctx, evt, err); recordErr != nil {
-					_ = lease.Release(ctx)
+				if recordErr := eb.markCommittedReplayScopeUnavailable(workCtx, evt, err); recordErr != nil {
+					_ = lease.Release(workCtx)
 					return redelivered, recordErr
 				}
-				_ = lease.Release(ctx)
+				_ = lease.Release(workCtx)
 				continue
 			}
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				if recordErr := eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "publish_replay")); recordErr != nil {
-					_ = lease.Release(ctx)
+				if recordErr := eb.markPipelineReceipt(workCtx, evt.ID(), "error", eventBusFailure(err, "publish_replay")); recordErr != nil {
+					_ = lease.Release(workCtx)
 					return redelivered, recordErr
 				}
 			}
-			_ = lease.Release(ctx)
+			_ = lease.Release(workCtx)
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID(), "processed", nil)
-		_ = lease.Release(ctx)
+		eb.markPipelineReceipt(workCtx, evt.ID(), "processed", nil)
+		_ = lease.Release(workCtx)
 		redelivered++
 	}
 	return redelivered, nil
@@ -227,7 +228,7 @@ func (eb *EventBus) ReleaseDecisionCardLifecycleEvents(ctx context.Context, limi
 	return released, nil
 }
 
-func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, replayStore runtimereplayclaim.Store, limit int) (int, error) {
+func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, limit int) (int, error) {
 	obligations, ok := eb.store.(runtimepipeline.DecisionRouteObligationStore)
 	if !ok || obligations == nil {
 		return 0, nil
@@ -237,40 +238,53 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, replaySto
 		return 0, err
 	}
 	recovered := 0
+	settlementOwner, ok := eb.store.(runtimereplayclaim.SettlementOwner)
+	if !ok || settlementOwner == nil {
+		return 0, errors.New("decision route settlement claim owner is required")
+	}
 	for _, record := range records {
 		evt := record.Event
 		if eb.eventPublishInFlight(evt.ID()) {
 			continue
 		}
-		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
+		lease, claimed, err := settlementOwner.ClaimPipelineSettlement(ctx, evt.ID())
 		if err != nil {
 			return recovered, err
 		}
 		if !claimed {
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
+		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
+		if settled, err := eb.settleProcessedDecisionRouteIfPresent(workCtx, evt); settled || err != nil {
+			_ = lease.Release(workCtx)
+			if err != nil {
+				return recovered, err
+			}
+			recovered++
+			continue
+		}
+		recipients, err := eb.authoritativeRecipientsForEvent(workCtx, evt.ID())
 		if err == nil {
-			err = eb.RecoverPersistedPipeline(ctx, evt, recipients)
+			err = eb.RecoverPersistedPipeline(workCtx, evt, recipients)
 		}
 		if runtimepipeline.IsPipelineReceiptDeferred(err) {
-			_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), err)
-			_ = lease.Release(ctx)
+			_ = eb.deferDecisionRouteObligation(workCtx, evt.ID(), err)
+			_ = lease.Release(workCtx)
 			continue
 		}
 		if err != nil {
-			if quarantineErr := eb.QuarantineRecoveredPipelineEvent(ctx, evt, err); quarantineErr != nil {
-				_ = lease.Release(ctx)
+			if quarantineErr := eb.QuarantineRecoveredPipelineEvent(workCtx, evt, err); quarantineErr != nil {
+				_ = lease.Release(workCtx)
 				return recovered, quarantineErr
 			}
-			_ = lease.Release(ctx)
+			_ = lease.Release(workCtx)
 			continue
 		}
-		if err := eb.SettleRecoveredPipelineEvent(ctx, evt); err != nil {
-			_ = lease.Release(ctx)
+		if err := eb.SettleRecoveredPipelineEvent(workCtx, evt); err != nil {
+			_ = lease.Release(workCtx)
 			return recovered, err
 		}
-		_ = lease.Release(ctx)
+		_ = lease.Release(workCtx)
 		recovered++
 	}
 	return recovered, nil
@@ -363,26 +377,27 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 		if !claimed {
 			continue
 		}
+		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
 		if record.ReplayFailure != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
-			_ = lease.Release(ctx)
+			eb.markPipelineReceipt(workCtx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
+			_ = lease.Release(workCtx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
+		recipients, err := eb.authoritativeRecipientsForEvent(workCtx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
-			_ = lease.Release(ctx)
+			eb.markPipelineReceipt(workCtx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
+			_ = lease.Release(workCtx)
 			return redelivered, err
 		}
-		if err := eb.publishPersistedRecipients(ctx, evt, recipients, true); err != nil {
-			_ = lease.Release(ctx)
+		if err := eb.publishPersistedRecipients(workCtx, evt, recipients, true); err != nil {
+			_ = lease.Release(workCtx)
 			if errors.Is(err, ErrRunDispatchBlocked) {
 				return redelivered, nil
 			}
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID(), "processed", nil)
-		_ = lease.Release(ctx)
+		eb.markPipelineReceipt(workCtx, evt.ID(), "processed", nil)
+		_ = lease.Release(workCtx)
 		redelivered++
 	}
 	return redelivered, nil

@@ -1505,7 +1505,7 @@ func (s *mutatingProbeDecisionCardStore) ListDecisionCards(_ context.Context, op
 	if strings.TrimSpace(opts.Cursor) != "" {
 		return []decisioncard.ListItem{}, "", nil
 	}
-	return []decisioncard.ListItem{{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, FlowInstance: s.card.FlowInstance, EntityID: s.card.EntityID, Stage: s.card.Stage, DecisionID: s.card.DecisionID, Title: s.card.Snapshot.Title, Status: s.card.Status, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}}, "", nil
+	return []decisioncard.ListItem{{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, FlowInstance: s.card.FlowInstance, EntityID: s.card.EntityID, Stage: s.card.Stage, DecisionID: s.card.DecisionID, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}}, "", nil
 }
 
 func (s *mutatingProbeDecisionCardStore) GetDecisionCard(_ context.Context, id string) (decisioncard.Card, error) {
@@ -1531,6 +1531,9 @@ func (s *mutatingProbeDecisionCardStore) DecideDecisionCard(_ context.Context, r
 	card.Status = decisioncard.StatusDecided
 	card.Verdict = req.Verdict
 	card.DecisionEventID = req.DecisionEventID
+	card.DecidedAt = req.Now
+	card.DeferredUntil = time.Time{}
+	s.card = card
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: 2}, nil
 }
 
@@ -1541,6 +1544,7 @@ func (s *mutatingProbeDecisionCardStore) DeferDecisionCard(_ context.Context, re
 	s.state.recordEffect()
 	card := s.card
 	card.DeferredUntil = req.Until
+	s.card = card
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: 2}, nil
 }
 

@@ -659,6 +659,21 @@ func (eb *EventBus) SettleRecoveredPipelineEvent(ctx context.Context, evt events
 	return nil
 }
 
+func (eb *EventBus) settleProcessedDecisionRouteIfPresent(ctx context.Context, evt events.Event) (bool, error) {
+	if evt.Type() != events.EventType("mailbox.card_decided") {
+		return false, nil
+	}
+	reader, ok := eb.store.(ProcessedPipelineReceiptReader)
+	if !ok || reader == nil {
+		return false, errors.New("processed pipeline receipt reader is required for decision route settlement")
+	}
+	processed, err := reader.HasProcessedPipelineReceipt(ctx, evt.ID())
+	if err != nil || !processed {
+		return false, err
+	}
+	return true, eb.SettleRecoveredPipelineEvent(ctx, evt)
+}
+
 // QuarantineRecoveredPipelineEvent atomically records a terminal pipeline
 // receipt and removes a non-retryable decision route from the due queue.
 func (eb *EventBus) QuarantineRecoveredPipelineEvent(ctx context.Context, evt events.Event, cause error) error {
