@@ -1,7 +1,7 @@
 version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
-audit_base: 13f8418633a8f7745aa685397366070932f9a2e5
+audit_base: 43f1a2b74d3b138fda843ee478cced02c8b61ad6
 working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
@@ -14,6 +14,8 @@ binding_context:
   inbound_fingerprint_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953153929
   inbound_ledger_direction: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953164256
   stateful_route_materialization_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953193542
+  normalized_batch_escalation: https://github.com/division-sh/swarm/issues/2007#issuecomment-4954782904
+  normalized_batch_insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4958394632
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -22,7 +24,9 @@ binding_context:
   delivery_terminal_taxonomy_watchpoint: 777
   exact_governing_spec_refs:
     - platform-spec.yaml#runtime.provider_trigger_adapters.standing_activation_model
+    - platform-spec.yaml#runtime.provider_trigger_adapters.compiled_admission_authority.provider_delivery_transaction
     - platform-spec.yaml#runtime.provider_trigger_adapters.manifest_vocabulary.ack.mode
+    - platform-spec.yaml#runtime.provider_trigger_adapters.manifest_vocabulary.normalized_events
     - platform-spec.yaml#platform_tables
     - platform-spec.yaml#platform_tables.destructive_reset_cleanup_policy
     - platform-spec.yaml#platform_events.event_construction.constructor_classes.diagnostic_direct
@@ -31,8 +35,109 @@ binding_context:
     - platform-spec.yaml#flow_model.flow_instance_authoring.template_instance_model.connect_time_lifecycle_rule
   implementation_spec_action: >-
     The implementation PR updates every exact section above for the ledger,
-    evidence-only inbound marker, transaction-local template/reply materialization,
-    acknowledgement, retry identity, retention, and destructive-reset behavior.
+    evidence-only inbound marker, ordered raw/normalized output membership,
+    transaction-local template/reply materialization, acknowledgement, stable
+    request retry identity, immutable output evidence, retention, and
+    destructive-reset behavior.
+
+normalized_batch_reaudit:
+  issue_category: high_risk_runtime_architecture_semantic_drift_failure_class_and_backend_parity
+  observed_symptom: >-
+    Current master permits one provider delivery to produce an ordered raw plus
+    normalized event batch, while the previously approved ledger can represent
+    only one executable publication event. Rebasing that model would drop child
+    identity, duplicate readback, rollback, or recovery coverage.
+  chosen_working_failure_class: ordered_provider_delivery_publication_operation_atomicity
+  immediate_parent_failure_class: typed_event_admission_and_inbound_publication_operations
+  parent_failure_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
+  broadest_parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+  class_stop_reason: >-
+    Raw and normalized outputs share one external provider identity, target,
+    acknowledgement, selected-store transaction, and retry result. Generic
+    EventBus publication, response-only provider challenges, diagnostic replay,
+    and agent directives have different identity and side-effect owners.
+  framing_decision: broad_enough_after_absorbing_current_master_ordered_batch
+  entry_point_not_boundary: >-
+    The merge conflict against PublishInboundDelivery was only the entry point.
+    The audit boundary includes request authentication and retry identity,
+    provider output projection, standing/run admission, all event/lifecycle/reply
+    mutations, evidence, response readback, dispatch/recovery, corruption,
+    schema/reset, and both selected stores.
+  full_execution_path:
+    - resolve_exact_loaded_standing_target
+    - authenticate_and_normalize_stable_provider_request_semantics
+    - load_parent_and_children_by_provider_identity_before_output_projection
+    - return_exact_committed_original_children_or_refuse_request_conflict
+    - for_absent_identity_derive_and_authorize_current_ordered_output_batch
+    - lock_identity_service_and_run_in_selected_store_mutation_and_recheck
+    - append_each_event_and_run_transaction_local_route_lifecycle_and_reply_planning
+    - persist_each_event_owned_scope_delivery_and_receipt_set_plus_child_integrity_link
+    - append_one_parent_evidence_event_and_finalize_parent
+    - commit_then_publish_staged_local_state_and_dispatch_or_recover_each_child
+    - return_original_ordered_child_ids_and_names_under_the_original_acknowledgement_mode
+  path_gates:
+    response_only_provider_challenge: different_semantic_concept_no_delivery_identity_or_event_batch
+    target_resolution_and_standing_admission: same_selected_class_execution_precondition
+    request_authentication_and_fingerprint: same_selected_class_retry_identity_owner
+    normalized_output_projection_for_absent_identity: same_selected_class_commit_time_output_owner
+    eventbus_lifecycle_reply_and_delivery_mutation: same_selected_class_atomic_side_effect_owner
+    post_commit_delivery_claims_and_sweeper: same_selected_class_consumer_but_existing_event_level_outcome_owner
+    generic_nonprovider_event_publish: different_semantic_concept_without_provider_operation_identity
+    diagnostic_direct_and_agent_directive: explicitly_split_to_closed_1150_and_1932_owners
+  canonical_owner_decision: >-
+    The parent/child selected-store mutation is a real semantic owner, not the
+    first local helper. It owns external request identity and ordered operation
+    membership while deliberately consuming, rather than duplicating, existing
+    event-level delivery and recovery owners.
+  systematic_consumption_audit:
+    providertriggers_InboundAdmissionPlan_request_authentication: moved_to_stable_request_projection_owner_in_this_work
+    providertriggers_Delivery_Events_ordered_output_projection: moved_to_absent_operation_only_projection_in_this_work
+    runtime_InboundGateway_duplicate_response: moved_to_committed_parent_child_readback_in_this_work
+    EventBus_PublishInboundDelivery_ordered_batch: moved_to_RunInboundPublicationMutation_in_this_work
+    postgres_ClaimInboundEventTx: invalid_independent_claim_owner_removed_in_this_work
+    sqlite_ClaimInboundEventTx: invalid_independent_claim_owner_removed_in_this_work
+    platform_inbound_recorded_direct_writers: invalid_evidence_as_identity_owner_removed_in_this_work
+    template_instance_and_reply_context_planners: moved_to_transaction_local_typed_consumers_in_this_work
+    event_deliveries_replay_scope_receipts_and_claims: already_canonical_event_level_dispatch_and_recovery_owners
+    delivery_sweeper_and_restart_recovery: moved_to_iterate_committed_children_then_consume_existing_event_owners
+    explicit_raw_provider_admission: same_selected_class_and_consumes_parent_child_owner
+    response_only_provider_challenge: different_semantic_concept_without_a_delivery_operation
+    generic_nonprovider_EventBus_publish: different_semantic_concept_without_provider_request_identity
+    diagnostic_direct_and_agent_directive_operations: explicitly_split_and_closed_under_1150_and_1932
+  old_non_authoritative_paths:
+    - RecordInboundEvent_and_DeleteInboundEvent_marker_compensation
+    - ClaimInboundEventTx_and_InboundDeliveryMutation_as_independent_operation_owner
+    - marker_only_purge_and_retention
+    - current_plan_event_names_as_duplicate_response_authority
+    - one_event_publication_id_and_parent_recipient_manifest
+    - child_owned_mutable_dispatch_or_recovery_state
+  tracker_state_decision: current_issue_updated_before_coding_no_new_child
+  watchlist_promotion_decision: absorb_batch_now_in_inbound_publication_operation_ownership
+  parent_action: absorb_ordered_batch_no_split
+  remaining_parent_tail:
+    - issue_2020_forked_freeze_invariant
+    - issue_2008_reusable_full_lifecycle_conformance_tier
+  tail_confidence: high
+  intended_closure_level: selected_failure_class_eliminated
+  chosen_class_closure_commitment: >-
+    The implementation PR must eliminate the ordered provider-delivery operation
+    atomicity class on both SQLite and PostgreSQL; a raw-only or first-event fix
+    is not closure.
+  closure_feasibility: >-
+    Feasible in one broad PR because the outputs already enter one typed EventBus
+    batch and one selected-store mutation. No same-concept output interpreter may
+    remain outside the parent/child owner; discovery of one stops implementation.
+  required_supported_surface_proof:
+    - real_swarm_serve_dev_default_sqlite_configured_provider_and_explicit_raw
+    - real_swarm_serve_dev_host_postgres_configured_provider_and_explicit_raw
+    - both_acknowledgement_modes_with_original_ordered_response_readback
+    - full_go_test_all_with_host_postgres
+  architecture_smell: >-
+    Provider request identity, commit-time output membership, and mutable event
+    delivery outcome were conflated. The long-run clean model separates those
+    three owners without introducing a second dispatch state machine.
+  architecture_tracking_decision: update_issue_2007_and_tracked_watchlist_node_now
+  blocking_condition: fresh_independent_gate_required_before_rebase_or_implementation
 
 tracked_watchlist_mapping:
   node: inbound_publication_operation_ownership
@@ -41,13 +146,17 @@ tracked_watchlist_mapping:
   selected_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
   promoted_now:
     - dedicated_inbound_publications_operation_ledger
+    - ordered_inbound_publication_events_membership_ledger
+    - provider_request_fingerprint_separate_from_commit_time_output_evidence
+    - existing_event_level_delivery_and_recovery_owners_remain_authoritative
     - transaction_local_template_instance_activation_or_reuse
     - transaction_local_reply_context_create_or_claim
-    - final_recipient_plan_derived_inside_the_publication_mutation
+    - per_event_final_recipient_plan_derived_inside_the_publication_mutation
     - evidence_only_platform_inbound_recorded_marker
     - permanent_identity_and_explicit_runtime_nuke_release_policy
   canonical_consumers:
-    - provider_trigger_semantic_projection
+    - provider_trigger_request_authentication_and_retry_projection
+    - provider_trigger_new_operation_output_projection
     - inbound_gateway_identity_first_admission
     - eventbus_canonical_subscribed_route_planner
     - template_instance_lifecycle_owner
@@ -63,6 +172,17 @@ tracked_watchlist_mapping:
     issue_777: delivery_terminal_taxonomy_remains_watchpoint
     issue_1770: superseded_standing_posture_remains_recorded
   parent_action: absorb_now_no_new_child
+  batch_cardinality: one_provider_delivery_parent_owns_one_or_more_ordered_executable_event_children
+  owner_separation:
+    request_identity: inbound_publications_parent_request_fingerprint
+    output_membership: inbound_publication_events_ordered_immutable_children
+    dispatch_and_recovery: existing_replay_scope_event_deliveries_event_receipts_and_claim_owners
+  no_second_dispatch_owner_rule: >-
+    Child rows record operation membership, order, commit-time output provenance,
+    and integrity summaries only. They contain no mutable dispatch status and no
+    independently authoritative recipient manifest. Dispatch and restart
+    recovery resolve each committed child event through existing event-owned
+    scope, delivery, receipt, and claim state without replanning.
   external_backup_status: non_authoritative_and_not_relied_upon
   immutable_reference_rule: >-
     The issue-thread amendment cites the commit containing this mapping. A
@@ -433,83 +553,124 @@ diagnostic_direct_event_admission:
       - inbound_publication_failure_logging
       - agent_llm_tool_activity_and_pipeline_aftermath_logging
   inbound_recorded_subtype:
-    owner: selected-store inbound_publications operation ledger
+    owner: selected-store parent inbound_publications plus ordered inbound_publication_events membership ledger
     statuses: [running, paused]
     global_no_run: forbidden_for_webhook_publication
     identity: [provider, entity_id, provider_event_id]
     publication_id: uuid_v5(inbound_publication_namespace, normalized_provider + NUL + entity_id + NUL + provider_event_id)
+    cardinality: one_parent_provider_delivery_to_one_or_more_ordered_executable_event_children
+    owner_model:
+      request_identity_and_acknowledgement: inbound_publications
+      ordered_commit_time_output_membership_and_integrity: inbound_publication_events
+      executable_event_and_route_plan: events_committed_replay_scope_and_event_deliveries
+      pipeline_outcome_and_recovery: event_receipts_delivery_claims_and_existing_sweeper
+      evidence_only_marker: platform.inbound_recorded_parent_event
     schema:
-      table: inbound_publications
-      primary_key: publication_id
-      columns:
-        publication_id: uuid_not_null
-        provider: text_not_null
-        entity_id: uuid_not_null
-        provider_event_id: text_not_null
-        semantic_fingerprint: text_not_null_inbound_semantic_v1_sha256
-        semantic_projection_version: text_not_null_equal_inbound_semantic_v1
-        stable_service_id: nullable_uuid_fk_standing_services
-        package_key: text_not_null
-        flow_id: text_not_null
-        instance_id: text_not_null
-        target_alias: text_not_null
-        target_flow_instance: text_not_null
-        expected_publication_sequence: bigint_nonnegative_not_null
-        resolved_run_id: uuid_not_null_fk_runs
-        marker_event_id: nullable_uuid_unique_fk_events
-        publication_event_id: nullable_uuid_unique_fk_events
-        acknowledgement_mode: enum_after_publish_durable_before_dispatch_not_null
-        recipient_manifest: canonical_json_array_not_null
-        recipient_manifest_fingerprint: text_not_null
-        recipient_count: integer_nonnegative_not_null
-        original_received_at: timestamp_not_null
-        original_user_agent: text_not_null
-        original_transport_metadata: canonical_json_object_not_null
-        state: enum_prepared_committed_not_null
-        created_at: timestamp_not_null
-        committed_at: nullable_timestamp
-      unique_constraints:
-        - [provider, entity_id, provider_event_id]
-        - [marker_event_id]
-        - [publication_event_id]
-      checks:
-        - prepared_implies_event_ids_and_committed_at_are_null
-        - committed_implies_event_ids_and_committed_at_are_nonnull
-        - recipient_count_equals_canonical_manifest_length
-        - global_marker_or_missing_resolved_run_is_forbidden
+      inbound_publications:
+        primary_key: publication_id
+        columns:
+          publication_id: uuid_not_null
+          provider: text_not_null
+          entity_id: uuid_not_null
+          provider_event_id: text_not_null
+          request_semantic_fingerprint: text_not_null_inbound_request_semantic_v1_sha256
+          request_projection_version: text_not_null_equal_inbound_request_semantic_v1
+          stable_service_id: nullable_uuid_fk_standing_services
+          package_key: text_not_null
+          flow_id: text_not_null
+          instance_id: text_not_null
+          target_alias: text_not_null
+          target_flow_instance: text_not_null
+          expected_publication_sequence: bigint_nonnegative_not_null
+          resolved_run_id: uuid_not_null_fk_runs
+          marker_event_id: nullable_uuid_unique_fk_events
+          acknowledgement_mode: enum_after_publish_durable_before_dispatch_not_null
+          output_count: integer_nonnegative_not_null
+          original_received_at: timestamp_not_null
+          original_user_agent: text_not_null
+          original_transport_metadata: canonical_json_object_not_null
+          state: enum_prepared_committed_not_null
+          created_at: timestamp_not_null
+          committed_at: nullable_timestamp
+        unique_constraints:
+          - [provider, entity_id, provider_event_id]
+          - [marker_event_id]
+        checks:
+          - prepared_implies_marker_event_id_and_committed_at_are_null
+          - committed_implies_marker_event_id_and_committed_at_are_nonnull
+          - committed_implies_output_count_greater_than_zero
+          - global_marker_or_missing_resolved_run_is_forbidden
+      inbound_publication_events:
+        primary_key: [publication_id, ordinal]
+        columns:
+          publication_id: uuid_not_null_fk_inbound_publications_on_delete_cascade
+          ordinal: integer_nonnegative_not_null
+          event_id: uuid_unique_not_null_fk_events
+          event_name: text_not_null
+          output_kind: enum_raw_normalized_not_null
+          pack_id: nullable_text
+          pack_version: nullable_text
+          pack_manifest_hash: nullable_text
+          observed_authorization_generation: nullable_text
+          event_integrity_fingerprint: text_not_null_sha256
+          recipient_manifest_fingerprint: text_not_null_sha256
+          recipient_count: integer_nonnegative_not_null
+        unique_constraints:
+          - [event_id]
+        checks:
+          - raw_implies_all_pack_and_authorization_fields_null
+          - normalized_implies_all_pack_and_authorization_fields_nonnull
+          - event_name_and_output_kind_match_the_linked_event_and_committed_authorization_evidence
+          - ordinals_are_contiguous_from_zero_and_count_equals_parent_output_count
       state_authority: >-
         prepared is transaction-local reservation state only. The same selected-
-        store transaction advances it to committed after marker, executable event,
-        replay scope, delivery manifest, and counters exist. A crash rolls the
-        whole transaction back; any durably visible prepared row is corruption
-        and startup/read/retry admission fails closed.
+        store transaction advances it to committed after the evidence marker,
+        every ordered executable event child, each event's replay scope and
+        delivery rows, and counters exist. A crash rolls the whole transaction
+        back; any durably visible prepared parent is corruption and startup,
+        read, and retry admission fail closed.
       outcome_authority: >-
-        The ledger stores no delivery success/failure enum. publication_event_id,
-        committed replay scope, event_deliveries, and event_receipts remain the
-        canonical execution and pipeline-outcome owners. recipient_manifest is
-        immutable publication-plan evidence, including explicit empty array, not
-        a second delivery-state machine.
+        Neither parent nor child stores delivery success, failure, claim, or
+        mutable dispatch state. Each child's linked event, committed replay
+        scope, event_deliveries, event_receipts, and existing delivery claims are
+        the only execution, route-manifest, pipeline-outcome, and recovery owners.
+        Child recipient count/fingerprint fields are immutable integrity
+        cross-check evidence only and cannot drive or override dispatch.
     backend_neutral_capability:
       - RunInboundPublicationMutation
       - LoadInboundPublicationByIdentity
       - ValidateInboundPublicationIntegrity
+    admission_sequence:
+      - resolve_the_exact_loaded_standing_target_and_authenticate_the_request
+      - extract_provider_authored_identity_type_and_canonical_request_semantics_without_projecting_outputs
+      - derive_publication_id_and_request_semantic_fingerprint
+      - load_and_integrity_validate_existing_parent_and_children_before_current_catalog_output_projection
+      - exact_committed_request_returns_original_children_and_original_acknowledgement_contract
+      - conflicting_committed_request_refuses_without_mutation
+      - absent_identity_uses_the_current_compiled_plan_to_derive_and_authorize_the_ordered_output_batch
+      - selected_store_mutation_rechecks_identity_under_lock_before_any_parent_child_or_event_insert
     capability_rule: >-
       RunInboundPublicationMutation owns begin, provider-identity serialization,
       standing/run locks, prepared-ledger insertion, commit, and rollback. For an
-      absent identity it invokes EventBus exactly once with a typed
-      InboundPublicationMutation; for an exact committed identity it returns the
-      existing operation without invoking planning/materialization; conflict
-      refuses. The callback exposes semantic operations and Context only, never a
-      raw SQL handle. Integrity validation is read-only and never repairs missing
-      coupled rows.
+      absent identity it invokes EventBus exactly once with the already-authorized
+      typed ordered output batch; for an exact committed request identity it
+      returns the original ordered children without invoking current-catalog
+      output projection, EventBus, planning, or lifecycle materialization;
+      conflict refuses. A race that observed absence before output projection is
+      rechecked under the identity lock and returns the winner's children on an
+      exact request fingerprint, never the loser's newly projected outputs. The
+      callback exposes semantic operations and Context only, never a raw SQL
+      handle. Integrity validation is read-only and never repairs missing or
+      contradictory coupled rows.
     mutation_operations:
       - Context
-      - AppendExecutableEvent
+      - AppendOrderedExecutableEvent
+      - LinkOrderedPublicationEventIntegrityEvidence
       - AppendInboundRecordedEvidence
       - InsertEventDeliveriesWithTargetsOrRoutes
       - UpsertCommittedSubscribedReplayScope
       - UpsertTargetFailureReceiptWhenRequired
-      - FinalizeCommittedPublicationWithCanonicalRecipientManifest
+      - FinalizeCommittedPublicationWithOrderedChildren
     transaction_carrier_rule: >-
       Store adapters for template-instance persistence, descriptor reload, and
       reply-context create/load/claim consume the mutation context and join the
@@ -518,25 +679,26 @@ diagnostic_direct_event_admission:
     concurrency:
       postgres: transaction-scoped advisory identity lock then row/run/service FOR UPDATE locks
       sqlite: one serialized runtime mutation with identity lookup before inserts
-    semantic_fingerprint:
-      owner: providertriggers canonical retry projection
+    request_semantic_fingerprint:
+      owner: providertriggers authenticated provider-request retry projection
       ordering: >-
-        Authenticate and normalize the provider request, derive the inbound
-        identity and semantic projection, then load the existing operation before
-        constructing a new persisted event envelope. The lookup owner is the
-        inbound_publications ledger, not platform.inbound_recorded. An exact
-        match returns the original publication event, original received_at, and
-        original transport evidence. Retry-local observations are never written
-        over the first row.
+        Authenticate and normalize the provider request, derive only its stable
+        inbound identity and request semantic projection, then load the existing
+        parent before evaluating pack-owned normalized-output branches or
+        constructing any persisted event envelope. The lookup owner is
+        inbound_publications, not platform.inbound_recorded. An exact committed
+        match returns the original ordered child IDs/names and original request
+        evidence. Only when no parent exists may the current compiled admission
+        owner derive and authorize the raw/normalized output batch before the
+        selected-store mutation. Retry-local observations never overwrite the
+        first row.
       included_fields:
         - normalized_provider
         - authoritative_provider_event_id
         - normalized_provider_event_type
-        - translated_platform_event_name
         - canonical_redacted_provider_body_or_form_data
         - target_entity_id
         - stable_ingress_service_identity_package_key_flow_id_and_instance
-        - manifest_metadata_derived_from_delivery_id_or_event_type
       excluded_fields:
         - received_at
         - user_agent_and_manifest_metadata_derived_from_user_agent
@@ -546,38 +708,57 @@ diagnostic_direct_event_admission:
         - standing_generation
         - bundle_revision_hash_or_source
         - boot_or_process_identity
+        - translated_raw_or_normalized_output_event_names
+        - output_kind_and_output_payload_projection
+        - pack_id_version_manifest_hash_and_catalog_generation
+        - current_normalized_branch_match_or_absence
         - computed_recipient_plan_delivery_routes_and_runtime_subscribers
         - current_retry_acknowledgement_mode
-      manifest_payload_projection: >-
-        For configured provider packs, hash provider, provider_event_id,
-        provider_event_type/event_type, emitted event name, entity/stable service
-        identity, canonical redacted payload (or canonical form payload), and only
-        metadata values sourced from delivery_id/event_type. Exclude received_at
-        and user_agent metadata even though both remain in the persisted first
-        publication for operator evidence.
-      raw_payload_projection: >-
-        For explicit raw admission, hash provider, provider_event_id,
-        provider_event_type, emitted event name, entity/stable service identity,
-        and canonical data. Raw admission currently adds no receipt timestamp or
-        user-agent fields; if observational fields are added later they remain
-        excluded unless the authoritative fingerprint contract changes.
+      provider_request_projection: >-
+        Hash provider-authored identity, authoritative provider event type, exact
+        canonical redacted body or form semantics, and stable target identity.
+        Do not hash a persisted output envelope or fields synthesized by the
+        current pack, because receipt observations and pack output projection are
+        not retry identity.
       canonicalization: >-
         Hash one typed canonical JSON projection with sorted object keys, exact
         array order, normalized event/provider tokens, and preserved scalar
-        types. Never hash serialized map iteration order or the full persisted
-        payload.
+        types. Never hash map iteration order, the full persisted event payload,
+        or the output batch.
       conflict_rule: >-
         Same inbound identity with a changed included field is a conflict. A
-        change only to an excluded observation is an exact retry.
+        change only to receipt observations, unrelated catalog membership, the
+        same pack's revision that preserves request identity but changes output
+        mapping, acknowledgement config, or current
+        standing generation remains an exact retry and returns the immutable
+        original child set. A catalog change alone never conflicts and never
+        reinterprets an already consumed identity.
+    commit_time_output_evidence:
+      owner: ordered inbound_publication_events children
+      rule: >-
+        A new operation records exactly the ordered outputs authorized by the
+        current compiled admission owner at commit time. Each child stores raw or
+        normalized kind, event identity/name, relevant pack id/version/manifest
+        hash, the catalog-wide authorization generation observed on original
+        commit, and integrity summaries. This evidence is immutable historical
+        provenance. It is never recomputed or compared against the current
+        catalog to decide an exact retry.
+      conditional_output_rule: >-
+        The raw event is ordinal zero. Zero, one, or multiple matched normalized
+        outputs follow in the exact compiled-plan order. A conditionally absent
+        normalized output creates no child and exact retry preserves that absence.
     event_identity: >-
-      Derive deterministic marker and executable publication event IDs from the
-      publication_id using separate typed labels. The ledger owns both IDs,
-      fingerprint, and original acknowledgement mode. platform.inbound_recorded
-      carries publication_id and publication_event_id as immutable audit evidence
-      but is not consulted as dedupe, retry, retention, or response-state truth.
+      Derive the deterministic marker event ID from publication_id and each
+      executable event ID from publication_id plus its zero-based ordinal using
+      disjoint typed labels. The parent owns provider identity, request
+      fingerprint, original acknowledgement mode, and marker linkage. Children
+      own ordered executable membership. platform.inbound_recorded carries
+      publication_id plus the ordered executable event IDs/names as immutable
+      audit evidence but is not consulted as dedupe, dispatch, retry, retention,
+      or response-state truth.
     current_generation_rule: >-
       Request resolution carries the expected standing publication sequence, but
-      no precomputed recipient manifest is authoritative. The runner locks the
+      no precomputed output or recipient manifest is authoritative. The runner locks the
       target run and standing service row before invoking EventBus. It requires
       target.run_id and publication sequence to equal the current published
       generation and requires running or paused. A stale target, retired
@@ -585,17 +766,18 @@ diagnostic_direct_event_admission:
       durable mutation; the caller may re-resolve only while provider identity is
       absent.
     transaction_local_route_materialization:
-      owner: EventBus canonical subscribed route planner inside InboundPublicationMutation
+      owner: EventBus canonical subscribed route planner inside the one ordered InboundPublicationMutation batch
       ordering:
-        - append_executable_event_in_mutation
-        - run_canonical_delivery_planner
+        - for_each_output_in_stable_ordinal_order_append_executable_event_in_mutation
+        - for_each_child_run_canonical_delivery_planner
         - activate_or_reuse_template_instance_through_transaction_local_typed_owner
         - create_or_claim_reply_context_through_transaction_local_typed_owner
         - reload_descriptors_through_mutation_context
-        - derive_final_recipient_plan_from_transaction_state_and_mutation_overlay
-        - persist_final_delivery_routes_scope_receipts_and_manifest
-        - append_platform_inbound_recorded_evidence
-        - finalize_ledger_and_counters
+        - derive_each_final_recipient_plan_from_transaction_state_and_mutation_overlay
+        - persist_each_event_owned_delivery_route_scope_and_receipt_set
+        - persist_each_ordered_child_membership_and_integrity_cross_check
+        - append_one_platform_inbound_recorded_evidence_for_the_ordered_child_set
+        - finalize_parent_output_count_and_counters
       template_instance_rule: >-
         Durable flow-instance/entity/config/route facts join the transaction.
         Process-local route-table, agent, handler, timer, auto-emit, and runtime-
@@ -608,12 +790,14 @@ diagnostic_direct_event_admission:
         or absent state; concurrent claims serialize on the durable row; exact
         inbound retry never invokes the claim again.
       topology_rule: >-
-        The final plan is derived after transaction-local lifecycle decisions.
-        It snapshots current subscribers/routes under EventBus synchronization,
-        merges only the mutation-local durable lifecycle overlay, and stores the
-        canonical manifest in the ledger. A concurrent route/subscriber change
-        is serialized before or after that snapshot; later topology change cannot
-        rewrite the committed manifest, and dispatch/recovery consumes only it.
+        Each event's final plan is derived after its transaction-local lifecycle
+        decisions. Planning snapshots current subscribers/routes under EventBus
+        synchronization and merges only the mutation-local durable lifecycle
+        overlay. The canonical route manifest remains event_deliveries; the child
+        stores only count/fingerprint cross-check evidence. A concurrent route or
+        subscriber change is serialized around the batch snapshot. Later topology
+        change cannot rewrite committed event_deliveries, and dispatch/recovery
+        consume only those event-level owners.
       preview_rule: >-
         Optional CheckPublishRecipientPlan preview remains non-mutating and may
         reject obvious invalidity, but it is advisory only. It is never passed to
@@ -626,12 +810,24 @@ diagnostic_direct_event_admission:
         Commit publishes the staged process-local route, agent, handler, timer,
         auto-emit, and runtime-context actions idempotently before delivery
         dispatch. A post-commit publication failure never rolls back or rewrites
-        the ledger/manifest and never derives a replacement plan. It leaves the
-        canonical deliveries recoverable; durable-before-dispatch remains
+        the parent, children, or event-owned manifests and never derives a
+        replacement plan. It leaves every child's canonical deliveries
+        recoverable; durable-before-dispatch remains
         accepted, while after-publish returns the existing provider failure.
-        Restart rebuilds process-local state from durable template/reply facts
-        and dispatches only the committed manifest.
+        Restart rebuilds process-local state from durable template/reply facts,
+        iterates the committed children in ordinal order, and recovers each child
+        only through existing event-level scope, delivery, receipt, and claim
+        owners.
       failure_injection_matrix:
+        each_event_ordinal:
+          - executable_event_failure
+          - route_planning_failure
+          - lifecycle_materialization_failure
+          - reply_context_failure
+          - replay_scope_failure
+          - delivery_route_failure
+          - target_failure_receipt_failure
+          - child_membership_failure
         template_created_then:
           - descriptor_reload_failure
           - reply_create_or_claim_failure
@@ -675,43 +871,55 @@ diagnostic_direct_event_admission:
         again.
     atomic_mutation:
       - lock_or_reserve_provider_identity_and_load_ledger_first
-      - exact_fingerprint_returns_existing_committed_operation
-      - conflicting_fingerprint_refuses_before_mutation
+      - exact_request_fingerprint_returns_existing_parent_and_ordered_children
+      - conflicting_request_fingerprint_refuses_before_mutation
       - current_generation_and_run_status_admission
       - insert_prepared_inbound_publications_row
-      - insert_executable_root_ingress_event
-      - transaction_local_template_instance_and_reply_context_materialization
-      - derive_final_recipient_plan_after_materialization
-      - insert_committed_subscribed_replay_scope
-      - insert_complete_delivery_route_manifest_including_canonical_empty_plan
-      - insert_platform_inbound_recorded_evidence
-      - synchronize_event_count_for_both_rows
-      - transition_ledger_prepared_to_committed_with_event_links
-      - commit_then_dispatch_or_queue_from_durable_manifest
+      - for_each_ordered_output_insert_executable_event
+      - for_each_ordered_output_transaction_local_template_instance_and_reply_context_materialization
+      - for_each_ordered_output_derive_final_recipient_plan_after_materialization
+      - for_each_ordered_output_insert_committed_subscribed_replay_scope
+      - for_each_ordered_output_insert_complete_event_delivery_manifest_including_canonical_empty_plan
+      - for_each_ordered_output_insert_child_membership_and_integrity_evidence
+      - insert_one_platform_inbound_recorded_evidence_for_all_ordered_child_ids_and_names
+      - synchronize_event_count_by_N_executable_plus_one_evidence
+      - transition_parent_prepared_to_committed_with_output_count
+      - commit_then_dispatch_or_queue_each_child_from_existing_event_owned_state
     duplicate_rule: >-
-      A committed ledger row is authoritative because the operation, evidence,
-      executable event, replay scope, and delivery manifest committed atomically.
-      An exact retry never creates another event. Durable-before-dispatch returns
-      the committed operation immediately. After-publish reconciles the linked
-      delivery manifest and waits for its normal publish outcome; it does not
-      mint or dispatch a second event. A committed ledger row missing any coupled
-      row is corruption and fails closed. Duplicate response/reconciliation uses
-      the original acknowledgement mode; a later pack/config change does not
-      reinterpret an already accepted provider delivery.
+      A committed parent is authoritative only when its evidence marker, complete
+      contiguous child set, every linked executable event, replay scope, and
+      event-owned delivery manifest pass integrity validation. An exact request
+      retry never projects or creates another output. Durable-before-dispatch
+      returns the original ordered child IDs/names immediately. After-publish
+      reconciles each linked child's canonical event-level outcome and waits for
+      normal completion; it does not mint or dispatch a second batch. Missing,
+      duplicate, non-contiguous, reordered, mismatched, or extra child/event
+      coupling is corruption and fails closed. Duplicate response and recovery
+      use the original acknowledgement mode and child set; later catalog, pack,
+      config, topology, or standing-generation change does not reinterpret it.
+    response_readback_contract: >-
+      Accepted and duplicate webhook responses return the exact original ordered
+      child event IDs and event names loaded from the committed ledger. The
+      platform.inbound_recorded payload carries the same ordered pairs. Neither
+      response reconstructs names from the current admission plan. A duplicate
+      after catalog or pack revision therefore reads back byte-for-byte identical
+      child identity/order evidence.
     acknowledgement_policies:
       durable_before_dispatch: >-
         After atomic publication commit, return accepted and dispatch the
-        committed manifest asynchronously. Exact retry returns accepted/duplicate
-        from the durable receipt; pending work remains owned by delivery recovery.
+        committed child set asynchronously. Exact retry returns accepted or
+        duplicate with the original ordered IDs/names; pending work remains owned
+        independently per child by existing delivery recovery.
       after_publish: >-
         After the same atomic publication commit, synchronously dispatch or
-        reconcile the committed manifest and wait for normal publish completion.
+        reconcile every committed child and wait for normal publish completion.
         A post-commit interceptor/delivery failure is returned under the existing
         provider failure contract without deleting publication evidence. Exact
-        retry loads the same event/scope/manifest: already successful returns
-        duplicate success, pending or retryable work resumes through canonical
-        delivery claims and waits, and terminal nonretryable failure returns the
-        same failure. It never inserts or dispatches a second event.
+        retry loads the same ordered children: already successful returns
+        duplicate success, pending or retryable child work resumes through
+        canonical delivery claims and waits, and terminal nonretryable child
+        failure returns the same failure. It never inserts or dispatches a second
+        batch.
     failure_rule: >-
       Planning, admission, or persistence failure commits no marker and a retry
       may resolve the new current standing generation. Post-commit dispatch
@@ -722,36 +930,40 @@ diagnostic_direct_event_admission:
       policy: permanent_dedupe
       rule: >-
         The ledger is the durable publication receipt and remains for the
-        lifetime of the coupled audit event, executable event, replay scope, and
-        delivery evidence. Inbound identity is never reused after success,
+        lifetime of the coupled audit event, ordered executable children, replay
+        scopes, and delivery evidence. Inbound identity is never reused after success,
         including across standing generation replacement. The unused
         PurgeInboundEventsBefore store capability and marker-only purge SQL are
         removed; there is no expiry or publication incarnation model.
       rationale: >-
         Marker-only expiry contradicts deterministic executable identity and can
         re-admit consumed provider work. Permanent operation retention adds one
-        semantic row beside already permanent evidence and is the smallest model
-        with one durable owner.
+        parent and the minimum ordered membership rows beside already permanent
+        event evidence. It does not add a second dispatch owner.
     reset_policy:
       standing_reset_repair_suspend_or_orphan: preserve_ledger_and_all_coupled_publication_rows
       bundle_delete: preserve_ledger_and_run_event_history_while_marking_source_deleted
       runtime_nuke: >-
-        Intentionally release all inbound identities only by deleting each ledger
-        row and its coupled marker, executable event, replay scope, deliveries,
-        receipts, and other event-owned rows in the same destructive-reset cleanup
-        transaction before deleting runs. Runtime ingress is closed and in-flight
-        after-publish work is quiesced before cleanup. Partial deletion rolls back;
-        no preserved-ledger/deleted-event mixed state is allowed.
+        Intentionally release all inbound identities only after runtime ingress is
+        closed and in-flight after-publish work is quiesced. In one destructive-
+        reset transaction delete each child event's receipts, claims, replay scope,
+        deliveries, and other event-owned rows; then ordered child rows; then the
+        parent; then marker and executable events; then runs. Partial deletion
+        rolls back. No preserved-parent, missing-child, or deleted-event mixed
+        state is allowed.
       post_nuke: >-
         A provider retry is a new publication because runtime.nuke explicitly
         discarded both idempotency authority and all coupled execution history.
     migration_policy: >-
       No legacy marker adoption, inferred event linkage, dual read, or tolerant
-      fallback exists. The authoritative platform shape includes
-      inbound_publications. Existing selected stores lacking the table or carrying
-      marker rows without ledger ownership fail exact schema compatibility before
-      runtime admission and receive the existing backend-specific fresh-store
-      remediation. Fresh/compatible stores use only the ledger owner.
+      fallback exists. The authoritative platform shape includes both
+      inbound_publications and inbound_publication_events with exact foreign keys,
+      uniqueness, output-kind/provenance checks, and destructive-reset ordering.
+      Existing selected stores lacking either table, carrying the obsolete
+      single-event ledger shape, or carrying marker rows without ledger ownership
+      fail exact schema compatibility before runtime admission and receive the
+      existing backend-specific fresh-store remediation. Fresh compatible stores
+      use only the parent/child ledger owner.
   agent_directive_subtype:
     owner: issue_1932_agent_directive_operation_reservation
     statuses: [running, paused]
@@ -881,18 +1093,19 @@ systematic_consumers:
     - postgres_and_sqlite_directive_generic_AppendEventTx
     - postgres_run_fork_delivery_event_replay_direct_insert
   inbound_publication_ledger_consumers:
-    - providertriggers_configured_pack_and_explicit_raw_semantic_projection
-    - runtime_InboundGateway_identity_first_admission_and_ack_response
-    - EventBus_transaction_local_canonical_route_plan_and_post_commit_dispatch_reconciliation
+    - providertriggers_configured_pack_and_explicit_raw_request_authentication_and_stable_request_projection
+    - providertriggers_absent_operation_only_raw_and_normalized_output_projection_and_authorization
+    - runtime_InboundGateway_identity_first_lookup_original_ordered_child_readback_and_ack_response
+    - EventBus_ordered_batch_transaction_local_canonical_route_plan_and_post_commit_dispatch_reconciliation
     - template_instance_activation_reuse_descriptor_reload_and_process_local_publication
     - reply_context_request_creation_response_claim_and_concurrent_claim_serialization
     - CheckPublishRecipientPlan_advisory_preview_never_commit_authority
     - standing_service_current_generation_and_publication_sequence_owner
-    - postgres_and_sqlite_event_delivery_scope_and_counter_mutation
-    - delivery_claim_receipt_retry_and_recovery_owners
-    - runtime_nuke_quiescence_cleanup_catalog_and_result_accounting
-    - schema_bootstrap_compatibility_platform_table_order_and_store_roles
-    - platform_inbound_recorded_operator_readback_as_evidence_only
+    - postgres_and_sqlite_parent_child_event_delivery_scope_and_counter_mutation
+    - existing_per_child_delivery_claim_receipt_retry_and_sweeper_recovery_owners
+    - runtime_nuke_quiescence_parent_child_event_cleanup_order_catalog_and_result_accounting
+    - schema_bootstrap_parent_child_foreign_key_compatibility_platform_table_order_and_store_roles
+    - platform_inbound_recorded_ordered_child_operator_readback_as_evidence_only
   already_aligned_or_distinct:
     - normal_completion_issue_994_prove_settled
     - unavailable_bundle_preservation_cleanup_complete_but_policy_distinct
@@ -946,55 +1159,67 @@ proof_manifestations:
     - runtime_logs_subscribe_logs_trace_debug_conversation_turn_and_compute_replay_readback_preserved
     - post_terminal_failure_completion_recovery_and_post_commit_logger_callers_persist_without_reopening
   inbound_publication:
-    - running_and_paused_current_generation_ledger_evidence_event_scope_and_delivery_manifest_commit_atomically
-    - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_mutation
-    - exact_duplicate_after_success_returns_accepted_without_second_event_or_dispatch
-    - same_identity_conflicting_semantic_fingerprint_refuses
-    - same_signed_configured_provider_delivery_at_different_received_at_is_exact_duplicate_on_both_backends
-    - same_signed_configured_provider_delivery_at_different_user_agent_is_exact_duplicate_on_both_backends
-    - exact_duplicate_preserves_original_received_at_user_agent_event_id_and_event_payload
-    - configured_manifest_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
-    - explicit_raw_body_event_type_event_name_entity_and_stable_service_conflicts_refuse
+    - raw_only_delivery_commits_one_parent_one_ordinal_zero_child_one_evidence_event_and_event_owned_route_state
+    - raw_plus_one_normalized_delivery_commits_two_stably_ordered_children
+    - raw_plus_multiple_normalized_delivery_commits_the_complete_compiled_order
+    - conditionally_absent_normalized_output_commits_only_raw_and_preserves_absence_on_retry
+    - running_and_paused_current_generation_parent_children_evidence_scopes_and_event_delivery_manifests_commit_atomically
+    - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_parent_child_or_event_mutation
+    - exact_duplicate_after_success_returns_original_ordered_child_ids_and_names_without_output_projection_eventbus_or_dispatch_duplication
+    - same_identity_changed_provider_authored_body_type_target_or_stable_service_fingerprint_refuses
+    - same_signed_delivery_at_different_received_at_or_user_agent_is_exact_duplicate_on_both_backends
+    - exact_duplicate_preserves_original_received_at_user_agent_ack_mode_child_ids_names_order_and_event_payloads
+    - unrelated_catalog_pack_change_does_not_conflict_or_reproject_committed_children
+    - same_pack_revision_that_preserves_request_identity_but_changes_manifest_hash_or_output_mapping_does_not_conflict_or_reproject_committed_children
+    - same_pack_revision_exact_retry_returns_original_commit_time_pack_and_authorization_evidence
+    - newly_absent_identity_uses_current_catalog_and_rejects_stale_missing_or_mismatched_normalized_authorization_before_mutation
+    - request_fingerprint_canonical_json_is_map_order_independent_array_order_preserving_and_excludes_output_projection
     - advisory_preview_then_stale_standing_sequence_refuses_before_route_materialization_or_rows
-    - route_plan_or_persistence_failure_leaves_no_marker_lifecycle_reply_or_process_local_side_effect_and_retry_can_target_next_generation
-    - injected_ledger_evidence_event_scope_delivery_counter_and_commit_failures_roll_back_every_row_on_both_backends
-    - new_template_activation_then_each_injected_publication_failure_rolls_back_durable_and_process_local_state
-    - existing_template_reuse_then_each_injected_publication_failure_preserves_exact_prior_state
-    - reply_context_creation_then_each_injected_publication_failure_rolls_back_to_absent
-    - reply_context_claim_then_each_injected_publication_failure_rolls_back_to_open
+    - route_plan_or_persistence_failure_leaves_no_parent_child_marker_lifecycle_reply_or_process_local_side_effect_and_retry_can_target_next_generation
+    - failure_at_each_executable_event_ordinal_rolls_back_parent_all_children_all_events_scopes_deliveries_receipts_lifecycle_reply_counters_and_local_publication
+    - injected_parent_child_evidence_scope_delivery_counter_finalization_and_commit_failures_roll_back_every_row_on_both_backends
+    - new_template_activation_then_each_ordinal_failure_rolls_back_durable_and_process_local_state
+    - existing_template_reuse_then_each_ordinal_failure_preserves_exact_prior_state
+    - reply_context_creation_then_each_ordinal_failure_rolls_back_to_absent
+    - reply_context_claim_then_each_ordinal_failure_rolls_back_to_open
     - concurrent_same_template_key_creates_exactly_one_instance_and_both_operations_use_committed_identity
     - concurrent_same_reply_context_claim_has_one_winner_and_one_zero_mutation_refusal
-    - concurrent_route_or_subscriber_change_is_serialized_around_final_transaction_local_snapshot
-    - exact_retry_invokes_no_second_template_activation_or_reply_create_or_claim
-    - post_commit_dispatch_failure_preserves_durable_manifest_and_retry_does_not_suppress_recovery
-    - post_commit_process_local_materialization_failure_preserves_manifest_and_recovers_without_replanning
+    - concurrent_route_or_subscriber_change_is_serialized_around_the_batch_transaction_snapshot
+    - concurrent_same_provider_identity_converges_on_one_parent_and_one_original_ordered_child_set_on_postgres_and_sqlite
+    - concurrent_loser_with_different_current_output_projection_returns_winner_children_when_request_fingerprint_matches
+    - exact_retry_invokes_no_current_catalog_output_projection_eventbus_template_activation_or_reply_create_or_claim
+    - post_commit_dispatch_failure_preserves_parent_children_and_event_owned_manifests_without_suppressing_recovery
+    - post_commit_process_local_materialization_failure_recovers_each_child_from_event_owned_state_without_replanning
+    - restart_recovery_iterates_every_committed_child_and_uses_only_existing_scope_delivery_receipt_and_claim_owners
+    - restart_recovery_never_reads_child_integrity_summaries_as_dispatch_state
     - former_marker_delete_rollback_failure_is_unrepresentable
     - standing_generation_replacement_after_failed_attempt_accepts_retry_once
-    - standing_generation_replacement_after_success_preserves_global_duplicate_consumption
-    - committed_ledger_missing_evidence_event_scope_or_delivery_manifest_fails_closed
-    - durable_prepared_ledger_row_fails_closed_as_corruption
-    - event_count_changes_by_two_on_new_publication_and_zero_on_duplicate
-    - durable_before_dispatch_returns_after_commit_before_blocked_post_commit_dispatch
-    - durable_before_dispatch_retry_returns_durable_duplicate_without_second_dispatch
-    - after_publish_waits_for_post_commit_dispatch_completion
-    - after_publish_interceptor_or_delivery_failure_returns_provider_failure_without_deleting_rows
-    - after_publish_retry_reconciles_same_manifest_without_second_event_or_manifest_and_uses_only_canonical_delivery_claims
-    - after_publish_terminal_nonretryable_failure_replays_same_failure
+    - standing_generation_replacement_after_success_preserves_global_duplicate_consumption_and_original_children
+    - committed_parent_missing_marker_or_any_child_event_scope_or_event_delivery_manifest_fails_closed
+    - duplicate_missing_noncontiguous_reordered_or_extra_child_ordinal_fails_closed_as_corruption
+    - child_event_name_kind_pack_authorization_or_integrity_mismatch_fails_closed_as_corruption
+    - parent_output_count_child_count_mismatch_fails_closed_as_corruption
+    - durable_prepared_parent_fails_closed_as_corruption
+    - event_count_changes_by_N_executable_plus_one_evidence_on_new_publication_and_zero_on_duplicate
+    - platform_inbound_recorded_payload_contains_the_original_ordered_child_ids_and_names
+    - accepted_and_duplicate_served_responses_return_the_original_ordered_child_ids_and_names
+    - durable_before_dispatch_returns_after_full_batch_commit_before_blocked_post_commit_dispatch
+    - durable_before_dispatch_retry_returns_durable_duplicate_without_second_batch_dispatch
+    - after_publish_waits_for_every_child_post_commit_dispatch_completion
+    - after_publish_interceptor_or_child_delivery_failure_returns_provider_failure_without_deleting_rows
+    - after_publish_retry_reconciles_original_children_without_second_batch_and_uses_only_canonical_delivery_claims
+    - after_publish_terminal_nonretryable_child_failure_replays_same_failure
     - marker_purge_capability_and_sql_are_removed_on_both_backends
-    - permanent_ledger_and_evidence_survive_terminal_delivery_and_standing_generation_replacement
-    - semantic_fingerprint_excludes_receipt_transport_run_generation_revision_and_route_plan_facts
-    - semantic_fingerprint_canonical_json_is_map_order_independent_and_array_order_preserving
-    - durable_before_dispatch_retry_with_changed_receipt_metadata_returns_original_publication
-    - after_publish_retry_with_changed_receipt_metadata_reconciles_original_publication
-    - standing_generation_replacement_with_changed_receipt_metadata_still_returns_original_duplicate
-    - stale_standing_publication_sequence_refuses_before_operation_and_replans_when_identity_absent
-    - committed_publication_restart_rebuilds_runtime_state_and_uses_only_existing_final_manifest_without_duplicate_dispatch
-    - runtime_nuke_quiesces_after_publish_then_atomically_deletes_ledger_and_all_coupled_rows
-    - runtime_nuke_injected_cleanup_failure_preserves_ledger_and_all_coupled_rows
+    - permanent_parent_children_and_evidence_survive_terminal_delivery_and_standing_generation_replacement
+    - stale_standing_publication_sequence_refuses_before_new_operation_and_replans_only_when_identity_absent
+    - runtime_nuke_quiesces_after_publish_then_atomically_deletes_event_owned_rows_children_parent_events_and_runs_in_order
+    - runtime_nuke_injected_failure_at_each_cleanup_layer_preserves_all_coupled_rows
     - post_runtime_nuke_provider_retry_is_one_new_publication_by_explicit_policy
-    - standing_reset_orphan_suspend_resume_and_bundle_delete_preserve_ledger_authority
-    - legacy_marker_without_ledger_fails_schema_compatibility_with_backend_fresh_store_remediation
-    - all_configured_provider_packs_and_explicit_raw_surface_pass_both_backend_served_proof
+    - standing_reset_orphan_suspend_resume_and_bundle_delete_preserve_parent_child_ledger_authority
+    - missing_parent_or_child_table_obsolete_single_event_shape_or_legacy_marker_fails_schema_compatibility_with_fresh_store_remediation
+    - postgres_foreign_keys_uniqueness_identity_locking_and_child_ordinal_integrity_are_proven
+    - sqlite_foreign_keys_uniqueness_serialized_identity_mutation_and_child_ordinal_integrity_are_proven
+    - all_configured_provider_packs_and_explicit_raw_surfaces_pass_both_backend_real_served_batch_proof
   agent_directive_reservation:
     - postgres_and_sqlite_exact_same_key_hash_return_existing_operation_and_event
     - postgres_and_sqlite_conflicting_same_key_hash_refuse_without_mutation
