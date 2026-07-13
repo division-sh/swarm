@@ -17,7 +17,7 @@ import (
 )
 
 type serveLifecycleWorkspaceFact struct {
-	Bundle   string
+	Context  string
 	Decision workspaceBackendSelection
 }
 
@@ -45,18 +45,13 @@ type serveLifecycleReadyFacts struct {
 type serveLifecycleNoticeKind string
 
 const (
-	serveLifecycleNoticeAbandonedWork serveLifecycleNoticeKind = "abandoned_work"
-	serveLifecycleNoticeRecoveredWork serveLifecycleNoticeKind = "recovered_work"
+	serveLifecycleNoticeNoActiveWork      serveLifecycleNoticeKind = "no_active_work"
+	serveLifecycleNoticeActiveWorkCleared serveLifecycleNoticeKind = "active_work_cleared"
+	serveLifecycleNoticeWorkRestored      serveLifecycleNoticeKind = "work_restored"
 )
 
 type serveLifecycleNotice struct {
-	Kind             serveLifecycleNoticeKind
-	Runs             int
-	Deliveries       int
-	Sessions         int
-	Timers           int
-	Containers       int
-	PipelineReceipts int
+	Kind serveLifecycleNoticeKind
 }
 
 // serveLifecyclePresenter is the sole human presentation owner for serve
@@ -225,14 +220,14 @@ func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) 
 	p.boot(3, "db_connection", "ok", detail)
 }
 
-func (p *serveLifecyclePresenter) recordWorkspace(bundle string, decision workspaceBackendSelection) {
+func (p *serveLifecyclePresenter) recordWorkspace(contextLabel string, decision workspaceBackendSelection) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.workspaces = append(p.workspaces, serveLifecycleWorkspaceFact{
-		Bundle:   strings.TrimSpace(bundle),
+		Context:  strings.TrimSpace(contextLabel),
 		Decision: decision,
 	})
 	if decision.UnsafeHost {
@@ -264,7 +259,11 @@ func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipeline
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeAbandonedWork, Runs: runs, Deliveries: deliveries, PipelineReceipts: pipelineReceipts})
+	kind := serveLifecycleNoticeNoActiveWork
+	if runs > 0 || deliveries > 0 || pipelineReceipts > 0 {
+		kind = serveLifecycleNoticeActiveWorkCleared
+	}
+	p.notices = append(p.notices, serveLifecycleNotice{Kind: kind})
 }
 
 func (p *serveLifecyclePresenter) recordRecoveredWork(runs, deliveries, sessions, timers, containers, pipelineReceipts int) {
@@ -273,7 +272,9 @@ func (p *serveLifecyclePresenter) recordRecoveredWork(runs, deliveries, sessions
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeRecoveredWork, Runs: runs, Deliveries: deliveries, Sessions: sessions, Timers: timers, Containers: containers, PipelineReceipts: pipelineReceipts})
+	if runs > 0 || deliveries > 0 || sessions > 0 || timers > 0 || containers > 0 || pipelineReceipts > 0 {
+		p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeWorkRestored})
+	}
 }
 
 func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Report) {
@@ -286,13 +287,17 @@ func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Re
 }
 
 func (p *serveLifecyclePresenter) readyPresentation(facts serveLifecycleReadyFacts) {
+	p.commitReady(facts, nil)
+}
+
+func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, publish func()) bool {
 	if p == nil {
-		return
+		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.failed || p.ready {
-		return
+		return false
 	}
 	p.ready = true
 	if !p.verbose {
@@ -302,6 +307,10 @@ func (p *serveLifecyclePresenter) readyPresentation(facts serveLifecycleReadyFac
 		p.writeResolvedFactsLocked(facts)
 	}
 	p.writeWarningsLocked()
+	if publish != nil {
+		publish()
+	}
+	return true
 }
 
 func (p *serveLifecyclePresenter) runtimeFailure(subject string, err error) {
@@ -314,6 +323,19 @@ func (p *serveLifecyclePresenter) runtimeFailure(subject string, err error) {
 		p.runtimeFailureName = displayServeLifecycleName(subject)
 	}
 	p.runtimeFailureErr = errors.Join(p.runtimeFailureErr, err)
+	if !p.ready && !p.failed {
+		p.failed = true
+		event := runtime.BootProgressEvent{
+			Step:   runtime.BootProgressTotalSteps,
+			Total:  runtime.BootProgressTotalSteps,
+			Name:   strings.TrimSpace(subject),
+			Status: "FAILED",
+			At:     time.Now().UTC(),
+		}
+		p.bootEvents[event.Step] = event
+		copy := event
+		p.failure = &copy
+	}
 }
 
 func (p *serveLifecyclePresenter) cleanupFailure(subject string, err error) {
@@ -496,23 +518,25 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 }
 
 func (p *serveLifecyclePresenter) workspaceDetailsLocked() []string {
-	seen := map[string]struct{}{}
-	details := make([]string, 0, len(p.workspaces))
+	contextsByDetail := map[string][]string{}
 	for _, fact := range p.workspaces {
 		detail := serveLifecycleWorkspaceDetail(fact.Decision)
-		if fact.Bundle != "" && len(p.workspaces) > 1 {
-			detail = fact.Bundle + " · " + detail
+		contextsByDetail[detail] = append(contextsByDetail[detail], fact.Context)
+	}
+	if len(contextsByDetail) == 0 {
+		return []string{"not required"}
+	}
+	details := make([]string, 0, len(contextsByDetail))
+	for detail, contexts := range contextsByDetail {
+		if len(contextsByDetail) > 1 {
+			labels := serveUniqueSortedStrings(contexts)
+			if len(labels) > 0 {
+				detail = strings.Join(labels, ", ") + " · " + detail
+			}
 		}
-		if _, ok := seen[detail]; ok {
-			continue
-		}
-		seen[detail] = struct{}{}
 		details = append(details, detail)
 	}
 	sort.Strings(details)
-	if len(details) == 0 {
-		return []string{"not required"}
-	}
 	return details
 }
 
@@ -628,10 +652,12 @@ func serveLifecycleWorkspaceDetail(decision workspaceBackendSelection) string {
 
 func serveLifecycleNoticeDetail(notice serveLifecycleNotice) string {
 	switch notice.Kind {
-	case serveLifecycleNoticeAbandonedWork:
-		return fmt.Sprintf("abandoned %d runs, %d deliveries, %d pipeline receipts", notice.Runs, notice.Deliveries, notice.PipelineReceipts)
-	case serveLifecycleNoticeRecoveredWork:
-		return fmt.Sprintf("recovered %d runs, %d deliveries, %d sessions, %d timers, %d containers, %d pipeline receipts", notice.Runs, notice.Deliveries, notice.Sessions, notice.Timers, notice.Containers, notice.PipelineReceipts)
+	case serveLifecycleNoticeNoActiveWork:
+		return "no active work to clear"
+	case serveLifecycleNoticeActiveWorkCleared:
+		return "active work cleared for a clean start"
+	case serveLifecycleNoticeWorkRestored:
+		return "unfinished work restored"
 	default:
 		return "completed"
 	}

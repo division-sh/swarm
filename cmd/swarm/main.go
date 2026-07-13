@@ -67,7 +67,7 @@ const (
 	defaultMCPListenAddr    = "127.0.0.1:8082"
 	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws /webhooks/"
 	serveMCPRoutes          = "/mcp /tools/"
-	serveReadinessRoutes    = "/healthz /readyz"
+	serveReadinessRoutes    = "/healthz"
 	serveExitDataIntegrity  = 78
 	runtimeStoreBackendHelp = "Runtime store backend: sqlite (local/dev default) or postgres (explicit opt-in production/external backend)"
 )
@@ -381,6 +381,7 @@ type serveOptions struct {
 	TestLLMRuntime                   runtimellm.Runtime
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
+	TestBeforeReadinessCommit        func() error
 }
 
 type serveRuntimeBundle struct {
@@ -1089,6 +1090,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
+	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
 		contextToolGatewayBinding := toolgateway.Binding{}
 		if i == 0 {
@@ -1102,7 +1104,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			})
 			return 3
 		}
-		presenter.recordWorkspace(loaded.serveIdentityDetail(), workspaceBackend)
+		presenter.recordWorkspace(workspaceLabels[i], workspaceBackend)
 		var bootProgress func(runtime.BootProgressEvent)
 		if i == 0 {
 			bootProgress = presenter.runtimeSink()
@@ -1300,22 +1302,26 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
 	presenter.boot(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
-	ready.Store(true)
 	if err := waitForServeHealthEndpoints(ctx, apiListener.Addr()); err != nil {
 		presenter.fail(21, "health_endpoints_respond", err)
 		return 1
 	}
-	readyAfter := time.Since(bootStartedAt)
 	presenter.boot(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialStore, apiListener.Addr())
 	if err != nil {
-		ready.Store(false)
 		presenter.fail(22, "ready", err)
 		return 1
 	}
+	if opts.TestBeforeReadinessCommit != nil {
+		if err := opts.TestBeforeReadinessCommit(); err != nil {
+			presenter.fail(22, "ready", err)
+			return 1
+		}
+	}
+	readyAfter := time.Since(bootStartedAt)
 	presenter.boot(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", readyAfter.Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	flowCount, agentCount, toolCount := serveLifecycleSourceCounts(runtimeContexts)
-	presenter.readyPresentation(serveLifecycleReadyFacts{
+	if !presenter.commitReady(serveLifecycleReadyFacts{
 		ProjectName: serveLifecycleProjectName(localState, loadedBundles),
 		BundleCount: len(loadedBundles),
 		FlowCount:   flowCount,
@@ -1325,7 +1331,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		MCPListener: addrString(mcpListener.Addr()),
 		ReadyAfter:  readyAfter,
 		Standing:    standing,
-	})
+	}, func() { ready.Store(true) }) {
+		return 1
+	}
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -1447,12 +1455,43 @@ func serveLifecycleProjectName(localState localRuntimeStateResolution, bundles [
 		}
 	}
 	if len(bundles) == 1 {
-		return bundles[0].serveIdentityDetail()
+		if label := serveRuntimeBundleAuthorLabel(bundles[0]); label != "" {
+			return label
+		}
 	}
 	if len(bundles) > 1 {
 		return fmt.Sprintf("%d persisted bundles", len(bundles))
 	}
 	return "runtime"
+}
+
+func serveRuntimeBundleAuthorLabel(bundle serveRuntimeBundle) string {
+	name := strings.TrimSpace(bundle.bootIdentity.WorkflowName)
+	version := strings.TrimSpace(bundle.bootIdentity.WorkflowVersion)
+	if name == "" {
+		return ""
+	}
+	if version == "" {
+		return name
+	}
+	return name + " " + version
+}
+
+func serveLifecycleWorkspaceLabels(bundles []serveRuntimeBundle) []string {
+	labels := make([]string, len(bundles))
+	counts := map[string]int{}
+	for i, bundle := range bundles {
+		labels[i] = serveRuntimeBundleAuthorLabel(bundle)
+		counts[labels[i]]++
+	}
+	for i, label := range labels {
+		if label == "" {
+			labels[i] = fmt.Sprintf("context %d", i+1)
+		} else if counts[label] > 1 {
+			labels[i] = fmt.Sprintf("%s context %d", label, i+1)
+		}
+	}
+	return labels
 }
 
 func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts serveOptions, workspaces serveWorkspaceLifecycle) error {
@@ -3116,9 +3155,6 @@ func waitForServeHealthEndpoints(ctx context.Context, addr net.Addr) error {
 	var lastErr error
 	for {
 		lastErr = probeServeHealthEndpoint(ctx, client, baseURL+"/healthz")
-		if lastErr == nil {
-			lastErr = probeServeHealthEndpoint(ctx, client, baseURL+"/readyz")
-		}
 		if lastErr == nil {
 			return nil
 		}

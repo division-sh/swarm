@@ -19435,7 +19435,16 @@ cli_specification:
           generations, policy/authentication field names, hashes, provenance, and implementation bookkeeping MUST NOT decide
           or leak into the concise author-facing vocabulary. Workspace text uses `docker · agent "<id>" runs in a container`,
           the no-work recovery outcome uses `clean start`, and standing ingress renders provider webhook URL plus bound/unbound
-          signing-reference state without credential values.
+          signing-reference state without credential values. Multi-context labels use author-facing workflow name/version and
+          aggregate identical workspace decisions; bundle hashes and fingerprints are never context labels. Recovery actions
+          render stable author outcomes such as `active work cleared for a clean start` or `unfinished work restored`, never
+          delivery/session/timer/container/receipt accounting.
+        readiness_commit_boundary: >
+          Initial serve readiness has one commit point after runtime contexts start, the non-readiness HTTP liveness probe
+          succeeds, standing-ingress facts validate, and every remaining startup gate succeeds. `/readyz`, `health.check`,
+          gated API/webhook routes, local foreground startup, and the human ready presentation consume that committed state.
+          They MUST NOT observe readiness while a proof-bearing startup gate can still fail. A server/runtime failure before
+          commit is a startup failure and suppresses both public and human readiness; post-commit failure is a runtime failure.
         concise_projection:
           required_facts:
           - bundle/source counts from loaded semantic sources

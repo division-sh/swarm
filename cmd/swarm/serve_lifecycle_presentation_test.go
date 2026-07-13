@@ -192,6 +192,65 @@ func TestServeLifecyclePresenterDoesNotContradictRuntimeFailureWithCleanShutdown
 	}
 }
 
+func TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &stdout, ErrorOutput: &stderr})
+	presenter.runtimeFailure("api server", errors.New("accept failed before readiness"))
+	published := false
+	if presenter.commitReady(serveLifecycleReadyFacts{ProjectName: "must-not-render"}, func() { published = true }) {
+		t.Fatal("readiness committed after a pre-ready runtime failure")
+	}
+	presenter.finish()
+
+	if published {
+		t.Fatal("public readiness was published after a pre-ready runtime failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("pre-ready runtime failure rendered readiness: %q", stdout.String())
+	}
+	if text := stderr.String(); !strings.Contains(text, "serve failed · api server · accept failed before readiness") || strings.Contains(text, "must-not-render") {
+		t.Fatalf("pre-ready runtime failure output is not one startup disposition:\n%s", text)
+	}
+}
+
+func TestServeLifecyclePresenterUsesAuthorSafeMultiContextWorkspaceProjection(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &out})
+	presenter.recordWorkspace("review 1.0.0", workspaceBackendSelection{Backend: workspace.BackendDocker})
+	presenter.recordWorkspace("notifications 2.0.0", workspaceBackendSelection{Backend: workspace.BackendDocker})
+	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "2 persisted bundles", BundleCount: 2})
+
+	text := out.String()
+	if strings.Count(text, "workspace                  docker · agent work runs in a container") != 1 {
+		t.Fatalf("identical workspace decisions were not aggregated:\n%s", text)
+	}
+	for _, forbidden := range []string{"bundle-v1:sha256:", "sha256:", "fingerprint"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("multi-context projection exposed %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &out})
+	presenter.recordAbandonedWork(1, 2, 3)
+	presenter.recordRecoveredWork(1, 2, 3, 4, 5, 6)
+	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+
+	text := out.String()
+	for _, want := range []string{"active work cleared for a clean start", "unfinished work restored"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("recovery projection missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("recovery projection exposed bookkeeping %q:\n%s", forbidden, text)
+		}
+	}
+}
+
 func TestServeLifecyclePresenterFailureUsesDiagnosticChannel(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	presenter := newServeLifecyclePresenter(serveOptions{Output: &stdout, ErrorOutput: &stderr})
@@ -388,6 +447,7 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 						Rule               string `yaml:"rule"`
 						OutputBoundary     string `yaml:"output_boundary"`
 						ProjectionBoundary string `yaml:"projection_boundary"`
+						ReadinessBoundary  string `yaml:"readiness_commit_boundary"`
 						SchemaDetail       string `yaml:"schema_inventory_detail"`
 						BootProgress       struct {
 							CanonicalNameOwner string `yaml:"canonical_name_owner"`
@@ -429,9 +489,14 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 			t.Fatalf("boot output boundary missing %q: %s", want, boot.OutputBoundary)
 		}
 	}
-	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound"} {
+	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound", "workflow name/version", "active work cleared", "never context labels"} {
 		if !strings.Contains(boot.ProjectionBoundary, want) {
 			t.Fatalf("boot projection boundary missing %q: %s", want, boot.ProjectionBoundary)
+		}
+	}
+	for _, want := range []string{"one commit point", "standing-ingress", "`/readyz`", "`health.check`", "local foreground startup", "server/runtime failure before"} {
+		if !strings.Contains(boot.ReadinessBoundary, want) {
+			t.Fatalf("boot readiness boundary missing %q: %s", want, boot.ReadinessBoundary)
 		}
 	}
 	for _, want := range []string{"coalesces repeated updates", "numeric order", "stderr", "canonical step name"} {
