@@ -304,7 +304,7 @@ func (f *fakeNotionManagedConnectorServer) requireSideEffectCall(t *testing.T, b
 	select {
 	case call := <-f.sideEffects:
 		return call
-	case <-time.After(5 * time.Second):
+	case <-time.After(connectorSupportedSurfaceAsyncTimeout):
 		t.Fatalf("%s %s: timed out waiting for fake Notion side effect", backend, context)
 		return notionManagedConnectorCall{}
 	}
@@ -459,7 +459,7 @@ func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackMa
 
 func waitForNotionManagedConnectorTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {

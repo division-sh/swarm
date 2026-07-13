@@ -473,7 +473,7 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 
 func waitForMicrosoftGraphTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {
@@ -616,7 +616,7 @@ func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManage
 
 func waitForMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string, want int, label string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var got int
 	for {
 		got = countMicrosoftGraphFailureEventsForSource(t, backend, sourceEventID)

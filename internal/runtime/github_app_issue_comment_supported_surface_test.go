@@ -295,7 +295,7 @@ func (f *fakeGitHubAppIssueCommentServer) requireSideEffectCall(t *testing.T, ba
 	select {
 	case call := <-f.sideEffects:
 		return call
-	case <-time.After(5 * time.Second):
+	case <-time.After(connectorSupportedSurfaceAsyncTimeout):
 		t.Fatalf("%s %s: timed out waiting for fake GitHub issue comment side effect", backend, context)
 		return githubAppIssueCommentCall{}
 	}
@@ -478,7 +478,7 @@ func assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t *testin
 
 func requireGitHubAppIssueCommentFailureEventEventually(t *testing.T, backend slackManagedConnectorBackend, label, sourceEventID string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	for {
 		if got := countGitHubAppIssueCommentFailureEventsForSource(t, backend, sourceEventID); got == 1 {
 			return
@@ -527,7 +527,7 @@ func loadGitHubAppIssueCommentInboundEventID(t *testing.T, backend slackManagedC
 
 func waitForGitHubAppIssueCommentTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {
