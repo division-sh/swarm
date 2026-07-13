@@ -20,6 +20,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -1429,6 +1430,66 @@ type publicationClaimBarrierStore struct {
 	release <-chan struct{}
 }
 
+type replayClaimBarrierStore struct {
+	*store.PostgresStore
+	eventID string
+	claimed chan<- struct{}
+	release <-chan struct{}
+}
+
+func (s *replayClaimBarrierStore) awaitClaim(ctx context.Context, lease runtimeownership.Lease, claimed bool, err error) (runtimeownership.Lease, bool, error) {
+	if err != nil || !claimed {
+		return lease, claimed, err
+	}
+	select {
+	case s.claimed <- struct{}{}:
+	case <-ctx.Done():
+		_ = lease.Release(context.WithoutCancel(ctx))
+		return nil, false, ctx.Err()
+	}
+	select {
+	case <-s.release:
+		return lease, true, nil
+	case <-ctx.Done():
+		_ = lease.Release(context.WithoutCancel(ctx))
+		return nil, false, ctx.Err()
+	}
+}
+
+func (s *replayClaimBarrierStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	lease, claimed, err := s.PostgresStore.ClaimPipelineReplay(ctx, eventID)
+	return s.awaitClaim(ctx, lease, claimed, err)
+}
+
+func (s *replayClaimBarrierStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	lease, claimed, err := s.PostgresStore.ClaimPipelineSettlement(ctx, eventID)
+	return s.awaitClaim(ctx, lease, claimed, err)
+}
+
+func (s *replayClaimBarrierStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	records, err := s.PostgresStore.ListEventsMissingPipelineReceipt(ctx, since, 200)
+	return filterReplayPoolRecords(records, s.eventID), err
+}
+
+func (s *replayClaimBarrierStore) ListEventsMissingPipelineReceiptForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	records, err := s.PostgresStore.ListEventsMissingPipelineReceiptForRun(ctx, runID, since, 200)
+	return filterReplayPoolRecords(records, s.eventID), err
+}
+
+func (s *replayClaimBarrierStore) ListDueDecisionRouteObligations(ctx context.Context, now time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	records, err := s.PostgresStore.ListDueDecisionRouteObligations(ctx, now, 200)
+	return filterReplayPoolRecords(records, s.eventID), err
+}
+
+func filterReplayPoolRecords(records []events.PersistedReplayEvent, eventID string) []events.PersistedReplayEvent {
+	for _, record := range records {
+		if record.Event.ID() == eventID {
+			return []events.PersistedReplayEvent{record}
+		}
+	}
+	return nil
+}
+
 func (s *publicationClaimBarrierStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	lease, claimed, err := s.PostgresStore.ClaimPipelinePublication(ctx, eventID)
 	if err != nil || !claimed {
@@ -1531,6 +1592,125 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			}
 		})
 	}
+}
+
+func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
+	const poolSize = 4
+	for _, surface := range []string{"generic_periodic", "decision_periodic", "run_queue", "startup"} {
+		t.Run(surface, func(t *testing.T) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			seedStore := &store.PostgresStore{DB: db}
+			eventIDs := make([]string, poolSize)
+			runIDs := make([]string, poolSize)
+			decisionRoute := surface == "decision_periodic"
+			for i := 0; i < poolSize; i++ {
+				runIDs[i] = uuid.NewString()
+				if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runIDs[i]); err != nil {
+					t.Fatalf("insert run: %v", err)
+				}
+				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
+			}
+			db.SetMaxOpenConns(poolSize)
+			db.SetMaxIdleConns(poolSize)
+
+			claimed := make(chan struct{}, poolSize)
+			release := make(chan struct{})
+			start := make(chan struct{})
+			errs := make(chan error, poolSize)
+			for i := 0; i < poolSize; i++ {
+				selected := &replayClaimBarrierStore{
+					PostgresStore: &store.PostgresStore{DB: db}, eventID: eventIDs[i], claimed: claimed, release: release,
+				}
+				bus, err := runtimebus.NewEventBus(selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				runID := runIDs[i]
+				go func() {
+					<-start
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					switch surface {
+					case "generic_periodic", "decision_periodic":
+						_, err := bus.SweepUndispatched(ctx, time.Hour, 10)
+						errs <- err
+					case "run_queue":
+						_, err := bus.ReleaseRunQueue(ctx, runID, time.Hour, 10)
+						errs <- err
+					case "startup":
+						errs <- runtimepipeline.NewRecoveryManagerWith(selected, bus).Recover(ctx)
+					}
+				}()
+			}
+			close(start)
+			for i := 0; i < poolSize; i++ {
+				requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL replay claim")
+			}
+			close(release)
+			for i := 0; i < poolSize; i++ {
+				if err := requireErrorBefore(t, errs, 10*time.Second, "pool-saturated replay"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, eventID := range eventIDs {
+				var count int
+				if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != 1 {
+					t.Fatalf("pipeline receipt count for %s = %d, want 1", eventID, count)
+				}
+				if decisionRoute {
+					var status string
+					if err := db.QueryRowContext(context.Background(), `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`, eventID).Scan(&status); err != nil || status != "completed" {
+						t.Fatalf("decision route status for %s = %q, %v; want completed", eventID, status, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID string, decisionRoute bool) string {
+	t.Helper()
+	eventID, entityID := uuid.NewString(), uuid.NewString()
+	eventType := events.EventType("custom.replay_pool_saturation")
+	payload := []byte(`{}`)
+	if decisionRoute {
+		card, err := decisioncard.New(decisioncard.Card{
+			CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
+			Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+			Snapshot: decisioncard.Snapshot{Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				"approve": {Verdict: "approve", AdvancesTo: "operating"},
+			}},
+			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := selected.CreateDecisionCard(context.Background(), card); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := selected.DecideDecisionCard(context.Background(), decisioncard.DecideRequest{
+			CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
+			DecisionEventID: eventID, Now: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		eventType = events.EventType("mailbox.card_decided")
+		payload = []byte(`{"card_id":"` + card.CardID + `"}`)
+	}
+	evt := eventtest.RootIngress(eventID, eventType, "test", "", payload, 0, runID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+	if err := selected.AppendEvent(context.Background(), evt); err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.UpsertCommittedReplayScope(context.Background(), eventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatal(err)
+	}
+	return eventID
 }
 
 func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {

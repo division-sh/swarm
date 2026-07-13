@@ -27,6 +27,28 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceipt(ctx context.Context, eventID,
 	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
+func (s *SQLiteRuntimeStore) HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false, nil
+	}
+	var processed bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM event_receipts
+			WHERE event_id = ?
+			  AND subscriber_type = 'platform'
+			  AND subscriber_id = 'pipeline'
+			  AND outcome = 'success'
+			  AND reason_code = 'pipeline_persisted'
+		)
+	`, eventID).Scan(&processed)
+	if err != nil {
+		return false, fmt.Errorf("load sqlite processed pipeline receipt: %w", err)
+	}
+	return processed, nil
+}
+
 func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
@@ -600,6 +622,14 @@ func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID st
 }
 
 func (s *SQLiteRuntimeStore) ClaimPipelinePublication(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, false, fmt.Errorf("event_id is required")
+	}
+	return s.claimPipelineEvent(eventID)
+}
+
+func (s *SQLiteRuntimeStore) ClaimPipelineSettlement(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")

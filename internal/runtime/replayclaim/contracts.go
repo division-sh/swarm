@@ -43,6 +43,13 @@ type PublicationOwner interface {
 	ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
 }
 
+// SettlementOwner acquires the event-identity exclusion without requiring the
+// pipeline receipt to be absent. Decision routes use it to finish convergence
+// after routing evidence was already persisted.
+type SettlementOwner interface {
+	ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
+}
+
 type ContextBindingLease interface {
 	runtimeownership.Lease
 	BindContext(context.Context) context.Context

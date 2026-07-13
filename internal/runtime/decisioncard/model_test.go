@@ -1,6 +1,7 @@
 package decisioncard
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,50 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/google/uuid"
 )
+
+func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 1, 2, 3, 4, time.UTC)
+	for name, value := range map[string]any{
+		"detail": Card{CardID: "card-1", CreatedAt: now, UpdatedAt: now},
+		"list":   ListItem{CardID: "card-1", CreatedAt: now, UpdatedAt: now},
+	} {
+		t.Run(name+"/unset", func(t *testing.T) {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got["deferred_until"]; ok {
+				t.Fatalf("unset deferred_until was serialized: %s", raw)
+			}
+			if name == "detail" {
+				if _, ok := got["decided_at"]; ok {
+					t.Fatalf("unset decided_at was serialized: %s", raw)
+				}
+			}
+		})
+	}
+
+	detailRaw, err := json.Marshal(Card{CardID: "card-1", DecidedAt: now, DeferredUntil: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listRaw, err := json.Marshal(ListItem{CardID: "card-1", DeferredUntil: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{"decided_at": now.Format(time.RFC3339Nano), "deferred_until": now.Add(time.Hour).Format(time.RFC3339Nano)} {
+		if !strings.Contains(string(detailRaw), `"`+field+`":"`+want+`"`) {
+			t.Fatalf("detail %s = %s, want %s", field, detailRaw, want)
+		}
+	}
+	if want := now.Add(time.Hour).Format(time.RFC3339Nano); !strings.Contains(string(listRaw), `"deferred_until":"`+want+`"`) {
+		t.Fatalf("list deferred_until = %s, want %s", listRaw, want)
+	}
+}
 
 func TestNewStampsDefaultCadenceAndStableHashes(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)

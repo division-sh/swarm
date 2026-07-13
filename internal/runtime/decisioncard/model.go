@@ -179,6 +179,24 @@ type Card struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
+func (c Card) MarshalJSON() ([]byte, error) {
+	type cardAlias Card
+	var decidedAt, deferredUntil *time.Time
+	if !c.DecidedAt.IsZero() {
+		value := c.DecidedAt.UTC()
+		decidedAt = &value
+	}
+	if !c.DeferredUntil.IsZero() {
+		value := c.DeferredUntil.UTC()
+		deferredUntil = &value
+	}
+	return json.Marshal(struct {
+		cardAlias
+		DecidedAt     *time.Time `json:"decided_at,omitempty"`
+		DeferredUntil *time.Time `json:"deferred_until,omitempty"`
+	}{cardAlias: cardAlias(c), DecidedAt: decidedAt, DeferredUntil: deferredUntil})
+}
+
 type InputDraft struct {
 	InputDraftID      string    `json:"input_draft_id"`
 	RunID             string    `json:"run_id"`
@@ -218,6 +236,19 @@ type ListItem struct {
 	DeferredUntil time.Time `json:"deferred_until,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (i ListItem) MarshalJSON() ([]byte, error) {
+	type listItemAlias ListItem
+	var deferredUntil *time.Time
+	if !i.DeferredUntil.IsZero() {
+		value := i.DeferredUntil.UTC()
+		deferredUntil = &value
+	}
+	return json.Marshal(struct {
+		listItemAlias
+		DeferredUntil *time.Time `json:"deferred_until,omitempty"`
+	}{listItemAlias: listItemAlias(i), DeferredUntil: deferredUntil})
 }
 
 type DecideRequest struct {

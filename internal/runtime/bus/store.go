@@ -159,6 +159,10 @@ type PipelineReceiptPersistence interface {
 	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
 }
 
+type ProcessedPipelineReceiptReader interface {
+	HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error)
+}
+
 // RunLifecyclePersistence is an optional capability for persisting canonical
 // terminal run lifecycle state once execution proves the run is done.
 type RunLifecyclePersistence interface {
