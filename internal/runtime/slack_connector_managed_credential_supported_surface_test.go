@@ -124,7 +124,7 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
-	source := slackManagedConnectorSource(t, fake.server.URL)
+	source := slackManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -322,7 +322,7 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 	}
 }
 
-func slackManagedConnectorSource(t *testing.T, baseURL string) semanticview.Source {
+func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{
@@ -342,7 +342,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL string) semanticview.Sour
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -368,7 +368,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL string) semanticview.Sour
 				"inbound.telegram": {nodeID},
 			},
 		},
-	})
+	}))
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -515,7 +515,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 
 func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
 	t.Helper()
-	source := slackManagedConnectorSource(t, baseURL)
+	source := slackManagedConnectorSource(t, baseURL, backend.flowInstance)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -681,6 +681,7 @@ func countSlackManagedConnectorActivityAttemptsForSource(t *testing.T, backend s
 
 func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
+	failureEventType := boundedProviderFlowID + ".slack_post_message.failed"
 	var count int
 	var err error
 	if backend.sqlite {
@@ -688,17 +689,17 @@ func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slac
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = ?
-			  AND event_name = 'slack_post_message.failed'
+			  AND event_name = ?
 			  AND source_event_id = ?
-		`, backend.runID, sourceEventID).Scan(&count)
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = $1::uuid
-			  AND event_name = 'slack_post_message.failed'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, sourceEventID).Scan(&count)
+			  AND event_name = $2
+			  AND source_event_id = $3::uuid
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	}
 	if err != nil {
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)

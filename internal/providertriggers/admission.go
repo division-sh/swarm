@@ -93,6 +93,30 @@ type InboundAdmissionPlan struct {
 	acknowledgedUnsigned  bool
 }
 
+// AdmittedRequest is the authenticated, retry-stable request identity. Its
+// private projection state can only be consumed by the plan that admitted it.
+type AdmittedRequest struct {
+	ProviderEventID           string
+	ProviderEventType         string
+	SemanticContentDigest     string
+	Response                  *Response
+	AcknowledgeBeforeDispatch bool
+
+	generationID      string
+	provider          string
+	manifestOwner     *Manifest
+	rawOwner          *RawAdmissionPolicy
+	manifestAdmission *manifestAdmission
+	rawAdmission      *rawRequestAdmission
+}
+
+type rawRequestAdmission struct {
+	request    Request
+	deliveryID string
+	eventType  string
+	payload    any
+}
+
 func (s *CatalogSnapshot) CompileAdmission(req CompileAdmissionRequest) (InboundAdmissionPlan, error) {
 	alias := strings.Trim(strings.TrimSpace(req.Alias), "/")
 	provider := NormalizeProviderName(req.Provider)
@@ -455,31 +479,93 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 }
 
 func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
+	admitted, err := p.AdmitRequest(req)
+	if err != nil {
+		return Delivery{}, err
+	}
+	return p.ProjectDelivery(admitted)
+}
+
+// AdmitRequest authenticates a request and resolves only the provider-owned
+// identity needed to consult the durable publication ledger. It deliberately
+// does not run normalized projection or construct executable output events.
+func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error) {
 	if !p.Valid() {
-		return Delivery{}, badRequest("compiled inbound admission plan is required")
+		return AdmittedRequest{}, badRequest("compiled inbound admission plan is required")
 	}
 	provider := NormalizeProviderName(req.Provider)
 	if provider == "" {
 		provider = p.provider
 	}
 	if provider != p.provider {
-		return Delivery{}, badRequest(fmt.Sprintf("compiled inbound admission plan provider %q does not match request provider %q", p.provider, provider))
+		return AdmittedRequest{}, badRequest(fmt.Sprintf("compiled inbound admission plan provider %q does not match request provider %q", p.provider, provider))
 	}
 	req = req.withProvider(provider)
 	if p.requiresSecret && strings.TrimSpace(req.Target.WebhookSecret) == "" {
-		return Delivery{}, unauthorized(provider + " webhook signing secret is required")
+		return AdmittedRequest{}, unauthorized(provider + " webhook signing secret is required")
 	}
 	if p.manifest != nil {
-		delivery, err := p.manifest.Accept(req)
+		manifestAdmission, err := p.manifest.admitRequest(req)
+		if err != nil {
+			return AdmittedRequest{}, err
+		}
+		if p.packIdentity == nil {
+			return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
+		}
+		admitted := AdmittedRequest{
+			ProviderEventID: manifestAdmission.deliveryID, ProviderEventType: manifestAdmission.eventType,
+			Response:                  manifestAdmission.response,
+			AcknowledgeBeforeDispatch: strings.TrimSpace(p.manifest.Ack.Mode) == "durable_before_dispatch",
+			generationID:              p.generationID, provider: p.provider, manifestOwner: p.manifest,
+			manifestAdmission: &manifestAdmission,
+		}
+		if admitted.Response == nil {
+			semanticContent := req.Payload
+			if strings.TrimSpace(p.manifest.PayloadSource) == "form" {
+				semanticContent = formValuesPayload(req.Form)
+			}
+			admitted.SemanticContentDigest, err = semanticContentDigest(semanticContent)
+			if err != nil {
+				return AdmittedRequest{}, err
+			}
+		}
+		return admitted, nil
+	}
+	rawAdmission, err := p.admitExplicitRaw(req)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	digest, err := semanticContentDigest(rawAdmission.payload)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	return AdmittedRequest{
+		ProviderEventID: rawAdmission.deliveryID, ProviderEventType: rawAdmission.eventType,
+		SemanticContentDigest: digest, generationID: p.generationID, provider: p.provider,
+		rawOwner: p.raw, rawAdmission: &rawAdmission,
+	}, nil
+}
+
+// ProjectDelivery constructs the raw and optional normalized executable
+// outputs only after the durable publication ledger has reported a miss.
+func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Delivery, error) {
+	if admitted.generationID != p.generationID || admitted.provider != p.provider {
+		return Delivery{}, badRequest("admitted request belongs to a different compiled admission plan")
+	}
+	if admitted.Response != nil {
+		return Delivery{Response: admitted.Response}, nil
+	}
+	if p.manifest != nil {
+		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {
+			return Delivery{}, badRequest("admitted request does not belong to the compiled pack admission plan")
+		}
+		delivery, err := p.manifest.projectAdmission(*admitted.manifestAdmission)
 		if err != nil {
 			var normalizationErr NormalizationError
 			if errors.As(err, &normalizationErr) && p.packIdentity != nil {
 				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID, p.packIdentity.Version, p.packIdentity.ManifestHash, normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
 			}
 			return Delivery{}, err
-		}
-		if p.packIdentity == nil {
-			return Delivery{}, badRequest("compiled pack admission requires verified pack identity")
 		}
 		for index := range delivery.Events {
 			if delivery.Events[index].Kind != OutputKindNormalized {
@@ -493,21 +579,31 @@ func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
 		}
 		return delivery, nil
 	}
-	return p.acceptExplicitRaw(req)
+	if admitted.rawOwner != p.raw || admitted.rawAdmission == nil {
+		return Delivery{}, badRequest("admitted request does not belong to the compiled raw admission plan")
+	}
+	raw := admitted.rawAdmission
+	return Delivery{
+		ProviderEventID: raw.deliveryID, ProviderEventType: raw.eventType,
+		Events: []DeliveryEvent{{Name: events.EventType(p.raw.Event), Kind: OutputKindRaw, Payload: map[string]any{
+			"provider": p.provider, "provider_event_id": raw.deliveryID,
+			"provider_event_type": raw.eventType, "data": raw.payload,
+		}}},
+	}, nil
 }
 
-func (p InboundAdmissionPlan) acceptExplicitRaw(req Request) (Delivery, error) {
+func (p InboundAdmissionPlan) admitExplicitRaw(req Request) (rawRequestAdmission, error) {
 	policy := p.raw
 	if policy == nil {
-		return Delivery{}, badRequest("compiled raw admission policy is required")
+		return rawRequestAdmission{}, badRequest("compiled raw admission policy is required")
 	}
 	if err := verifyRawAuthentication(policy.Authentication, req.Target.WebhookSecret, req.Headers, req.Body); err != nil {
-		return Delivery{}, err
+		return rawRequestAdmission{}, err
 	}
 	var parsed any
 	if policy.Payload == "json" {
 		if err := json.Unmarshal(req.Body, &parsed); err != nil {
-			return Delivery{}, badRequest("raw webhook payload must be valid JSON")
+			return rawRequestAdmission{}, badRequest("raw webhook payload must be valid JSON")
 		}
 	} else {
 		parsed = string(req.Body)
@@ -515,21 +611,23 @@ func (p InboundAdmissionPlan) acceptExplicitRaw(req Request) (Delivery, error) {
 	deliverySource := parsed
 	if policy.DeliveryID.Source == "json_path" && policy.Payload == "raw" {
 		if err := json.Unmarshal(req.Body, &deliverySource); err != nil {
-			return Delivery{}, badRequest("raw webhook delivery id JSON path requires a valid JSON request body")
+			return rawRequestAdmission{}, badRequest("raw webhook delivery id JSON path requires a valid JSON request body")
 		}
 	}
 	deliveryID, err := rawDeliveryID(policy.DeliveryID, req.Headers, deliverySource, req.Body)
 	if err != nil {
-		return Delivery{}, err
+		return rawRequestAdmission{}, err
 	}
-	payload := map[string]any{
-		"provider": p.provider, "provider_event_id": deliveryID,
-		"provider_event_type": NormalizeEventToken(policy.Event), "data": parsed,
+	return rawRequestAdmission{request: req, deliveryID: deliveryID, eventType: NormalizeEventToken(policy.Event), payload: parsed}, nil
+}
+
+func semanticContentDigest(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("marshal provider-authored semantic content: %w", err)
 	}
-	return Delivery{
-		ProviderEventID: deliveryID, ProviderEventType: NormalizeEventToken(policy.Event),
-		Events: []DeliveryEvent{{Name: events.EventType(policy.Event), Kind: OutputKindRaw, Payload: payload}},
-	}, nil
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func rawOutputName(outputs []OutputManifest) string {

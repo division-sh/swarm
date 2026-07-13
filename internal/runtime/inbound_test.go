@@ -20,12 +20,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -34,6 +36,43 @@ import (
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestInboundGatewayStandingServiceAdmissionClosesDrainsAndReopens(t *testing.T) {
+	gateway := NewInboundGateway(nil, nil, nil)
+	activeCtx, release, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1")
+	if !admitted || activeCtx == nil || release == nil {
+		t.Fatal("initial standing service admission was rejected")
+	}
+	if err := gateway.ReopenStandingServiceAdmission("service-1"); err != nil {
+		t.Fatalf("ReopenStandingServiceAdmission while already open: %v", err)
+	}
+	if err := gateway.CloseStandingServiceAdmission("service-1"); err != nil {
+		t.Fatalf("CloseStandingServiceAdmission: %v", err)
+	}
+	if _, _, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1"); admitted {
+		t.Fatal("closed standing service admitted a new request")
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := gateway.WaitForStandingServiceAdmission(waitCtx, "service-1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForStandingServiceAdmission while active = %v, want deadline", err)
+	}
+	if err := gateway.ReopenStandingServiceAdmission("service-1"); err == nil {
+		t.Fatal("ReopenStandingServiceAdmission succeeded before drain")
+	}
+	release()
+	if err := gateway.WaitForStandingServiceAdmission(context.Background(), "service-1"); err != nil {
+		t.Fatalf("WaitForStandingServiceAdmission after release: %v", err)
+	}
+	if err := gateway.ReopenStandingServiceAdmission("service-1"); err != nil {
+		t.Fatalf("ReopenStandingServiceAdmission: %v", err)
+	}
+	_, reopenedRelease, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1")
+	if !admitted {
+		t.Fatal("reopened standing service rejected admission")
+	}
+	reopenedRelease()
+}
 
 type testInboundTargetResolver interface {
 	ResolveInboundTarget(context.Context, string, string) (InboundTarget, error)
@@ -169,6 +208,7 @@ type capturingInboundEventStore struct {
 
 func (s *capturingInboundEventStore) AppendEvent(_ context.Context, evt events.Event) error {
 	s.events = append(s.events, evt)
+	s.recorded = true
 	return nil
 }
 
@@ -188,11 +228,9 @@ func (s *capturingInboundEventStore) RunEventMutation(ctx context.Context, fn fu
 }
 
 type inboundTestMutation struct {
-	ctx        context.Context
-	append     func(context.Context, events.Event) error
-	sink       *capturingInboundEventStore
-	pendingKey string
-	claim      runtimebus.InboundDeliveryClaim
+	ctx    context.Context
+	append func(context.Context, events.Event) error
+	sink   *capturingInboundEventStore
 }
 
 func runInboundTestMutation(ctx context.Context, appendEvent func(context.Context, events.Event) error, sink *capturingInboundEventStore, fn func(runtimebus.EventMutation) error) error {
@@ -201,13 +239,6 @@ func runInboundTestMutation(ctx context.Context, appendEvent func(context.Contex
 	mutation.ctx = runtimebus.WithEventMutationContext(runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit), mutation)
 	if err := fn(mutation); err != nil {
 		return err
-	}
-	if mutation.pendingKey != "" && mutation.sink != nil {
-		mutation.sink.seen[mutation.pendingKey] = struct{}{}
-		mutation.sink.recorded = true
-		mutation.sink.providerEventID = mutation.claim.ProviderEventID
-		mutation.sink.entityID = mutation.claim.EntityID
-		mutation.sink.provider = mutation.claim.Provider
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	return nil
@@ -235,21 +266,6 @@ func (*inboundTestMutation) UpsertPipelineReceipt(context.Context, string, strin
 func (*inboundTestMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return nil
 }
-func (m *inboundTestMutation) ClaimInboundEvent(_ context.Context, providerEventID, entityID, provider string) (bool, error) {
-	key := provider + "\x00" + entityID + "\x00" + providerEventID
-	if m.sink != nil && m.sink.duplicate {
-		return false, nil
-	}
-	if m.sink != nil {
-		if _, exists := m.sink.seen[key]; exists {
-			return false, nil
-		}
-	}
-	m.pendingKey = key
-	m.claim = runtimebus.InboundDeliveryClaim{ProviderEventID: providerEventID, EntityID: entityID, Provider: provider}
-	return true, nil
-}
-
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -304,6 +320,103 @@ type recordingInboundStore struct {
 	provider        string
 	store           runtimebus.EventStore
 	record          runtimeinbound.Record
+	integrityErr    error
+	integrityCalls  atomic.Int32
+}
+
+type concurrentInboundStore struct {
+	mu               sync.Mutex
+	store            runtimebus.EventStore
+	record           runtimeinbound.Record
+	inFlight         bool
+	firstRunEntered  chan struct{}
+	contenderEntered chan struct{}
+	releaseFirst     chan struct{}
+	committed        chan struct{}
+	callbackCalls    atomic.Int32
+}
+
+func newConcurrentInboundStore() *concurrentInboundStore {
+	return &concurrentInboundStore{
+		firstRunEntered: make(chan struct{}), contenderEntered: make(chan struct{}),
+		releaseFirst: make(chan struct{}), committed: make(chan struct{}),
+	}
+}
+
+func (s *concurrentInboundStore) bindTestInboundEventStore(store runtimebus.EventStore) {
+	s.store = store
+}
+
+func (s *concurrentInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+	s.mu.Lock()
+	if s.record.State == "committed" {
+		record := s.record
+		s.mu.Unlock()
+		if err := validateConcurrentInboundRetry(request, record); err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		record.Created = false
+		return record, nil
+	}
+	if s.inFlight {
+		committed := s.committed
+		select {
+		case <-s.contenderEntered:
+		default:
+			close(s.contenderEntered)
+		}
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return runtimeinbound.Record{}, ctx.Err()
+		case <-committed:
+		}
+		s.mu.Lock()
+		record := s.record
+		s.mu.Unlock()
+		if err := validateConcurrentInboundRetry(request, record); err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		record.Created = false
+		return record, nil
+	}
+	s.inFlight = true
+	close(s.firstRunEntered)
+	s.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return runtimeinbound.Record{}, ctx.Err()
+	case <-s.releaseFirst:
+	}
+	s.callbackCalls.Add(1)
+	record, err := runTestInboundPublication(ctx, s.store, request, true, fn)
+	if err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	s.mu.Lock()
+	s.record = record
+	s.inFlight = false
+	close(s.committed)
+	s.mu.Unlock()
+	return record, nil
+}
+
+func (s *concurrentInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record := s.record
+	record.Created = false
+	return record, record.State == "committed", nil
+}
+
+func (*concurrentInboundStore) ValidateInboundPublicationIntegrity(context.Context) error { return nil }
+
+func validateConcurrentInboundRetry(request runtimeinbound.Request, record runtimeinbound.Record) error {
+	if request.RequestProjectionVersion != record.RequestProjectionVersion || request.RequestFingerprint != record.RequestFingerprint {
+		return runtimeinbound.ErrRequestIdentityConflict
+	}
+	return nil
 }
 
 func (s *recordingInboundStore) bindTestInboundEventStore(store runtimebus.EventStore) {
@@ -372,7 +485,11 @@ func (m *testInboundPublicationMutation) FinalizeInboundPublication(_ context.Co
 func runTestInboundPublication(ctx context.Context, eventStore runtimebus.EventStore, request runtimeinbound.Request, inserted bool, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	if !inserted {
 		request.AcknowledgementMode = runtimeinbound.AcknowledgementDurableBeforeDispatch
-		return runtimeinbound.Record{Request: request, State: "committed"}, nil
+		eventID, _ := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
+		return runtimeinbound.Record{
+			Request: request, State: "committed", OutputCount: 1,
+			Events: []runtimeinbound.EventRecord{{Ordinal: 0, EventID: eventID, EventName: "inbound." + request.Provider}},
+		}, nil
 	}
 	mutation := newTestInboundPublicationMutation(ctx, eventStore)
 	if err := fn(mutation); err != nil {
@@ -381,33 +498,44 @@ func runTestInboundPublication(ctx context.Context, eventStore runtimebus.EventS
 	if !mutation.finalized {
 		return runtimeinbound.Record{}, errors.New("test inbound publication was not finalized")
 	}
-	var routes []events.DeliveryRoute
-	if err := json.Unmarshal(mutation.finalization.RecipientManifest, &routes); err != nil {
-		return runtimeinbound.Record{}, fmt.Errorf("decode test inbound recipient manifest: %w", err)
-	}
-	manifest, fingerprint, count, err := runtimeinbound.CanonicalRecipientManifest(routes)
-	if err != nil {
-		return runtimeinbound.Record{}, err
+	eventRecords := make([]runtimeinbound.EventRecord, len(mutation.finalization.Events))
+	for index, child := range mutation.finalization.Events {
+		var routes []events.DeliveryRoute
+		if err := json.Unmarshal(child.RecipientManifest, &routes); err != nil {
+			return runtimeinbound.Record{}, fmt.Errorf("decode test inbound recipient manifest: %w", err)
+		}
+		_, recipientFingerprint, count, err := runtimeinbound.CanonicalRecipientManifest(routes)
+		if err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(child.Event, child.Kind, child.Authorization)
+		if err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		eventRecords[index] = runtimeinbound.EventRecord{
+			Ordinal: child.Ordinal, EventID: child.Event.ID(), EventName: string(child.Event.Type()), Kind: child.Kind,
+			Authorization: child.Authorization, EventIntegrityFingerprint: eventFingerprint,
+			RecipientManifestFingerprint: recipientFingerprint, RecipientCount: count, Event: child.Event,
+		}
 	}
 	return runtimeinbound.Record{
-		Request:              request,
-		State:                "committed",
-		RecipientManifest:    manifest,
-		RecipientFingerprint: fingerprint,
-		RecipientCount:       count,
-		PublicationEvent:     mutation.finalization.PublicationEvent,
-		Created:              true,
+		Request: request, State: "committed", OutputCount: len(eventRecords), Events: eventRecords, Created: true,
 	}, nil
 }
 
 func (s *recordingInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
-	s.recorded = true
 	s.providerEventID = request.ProviderEventID
 	s.entityID = request.EntityID
 	s.provider = request.Provider
 	record, err := runTestInboundPublication(ctx, s.store, request, s.inserted, fn)
 	if err == nil {
+		s.recorded = true
 		s.record = record
+		if sink, ok := s.store.(*capturingInboundEventStore); ok {
+			sink.providerEventID = request.ProviderEventID
+			sink.entityID = request.EntityID
+			sink.provider = request.Provider
+		}
 	}
 	return record, err
 }
@@ -416,7 +544,10 @@ func (s *recordingInboundStore) LoadInboundPublicationByIdentity(context.Context
 	return s.record, s.record.State == "committed", nil
 }
 
-func (*recordingInboundStore) ValidateInboundPublicationIntegrity(context.Context) error { return nil }
+func (s *recordingInboundStore) ValidateInboundPublicationIntegrity(context.Context) error {
+	s.integrityCalls.Add(1)
+	return s.integrityErr
+}
 
 func (s *rollbackTrackingInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	s.recorded = true
@@ -450,8 +581,8 @@ func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
-	if store.recorded {
-		t.Fatal("legacy marker recorder was called outside the event mutation")
+	if !store.recorded || !store.rolled {
+		t.Fatal("publication runner did not own and roll back the failed mutation")
 	}
 }
 
@@ -696,6 +827,166 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
+}
+
+func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedRedactedSemantics(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{inserted: true}
+	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "text")
+	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
+	target := InboundTarget{
+		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", PackageKey: "retry-proof", FlowID: "ingress",
+		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
+		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
+		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
+		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
+	}
+
+	first := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(first, normalizedRetryRequest(`{"message":{"text":"hello"}}`), target, nil)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d, want 202 body=%s", first.Code, first.Body.String())
+	}
+	if !strings.Contains(first.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+		t.Fatalf("first response does not expose ordered committed children: %s", first.Body.String())
+	}
+	committedEventCount := len(eventStore.events)
+
+	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
+	target.AdmissionPlan = projectionFailingPlan
+	duplicate := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(duplicate, normalizedRetryRequest(`{"message":{"text":"hello"}}`), target, nil)
+	if duplicate.Code != http.StatusOK || !strings.Contains(duplicate.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate status = %d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	if !strings.Contains(duplicate.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+		t.Fatalf("duplicate response did not return original ordered children: %s", duplicate.Body.String())
+	}
+	if len(eventStore.events) != committedEventCount {
+		t.Fatalf("duplicate published %d additional events", len(eventStore.events)-committedEventCount)
+	}
+
+	target.AdmissionPlan = firstPlan
+	conflict := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(conflict, normalizedRetryRequest(`{"message":{"text":"changed"}}`), target, nil)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("changed redacted semantic status = %d, want 409 body=%s", conflict.Code, conflict.Body.String())
+	}
+	if len(eventStore.events) != committedEventCount {
+		t.Fatalf("conflicting retry published %d additional events", len(eventStore.events)-committedEventCount)
+	}
+}
+
+func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProjectionFailure(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := newConcurrentInboundStore()
+	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "text")
+	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
+	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
+	target := InboundTarget{
+		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", PackageKey: "retry-proof", FlowID: "ingress",
+		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
+		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
+		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
+		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
+	}
+
+	first := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		gateway.HandleResolvedWebhook(first, normalizedRetryRequest(`{"message":{"text":"hello"}}`), target, nil)
+	}()
+	select {
+	case <-store.firstRunEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first publication did not enter the identity owner")
+	}
+
+	contenderTarget := target
+	contenderTarget.AdmissionPlan = projectionFailingPlan
+	contender := httptest.NewRecorder()
+	contenderDone := make(chan struct{})
+	go func() {
+		defer close(contenderDone)
+		gateway.HandleResolvedWebhook(contender, normalizedRetryRequest(`{"message":{"text":"hello"}}`), contenderTarget, nil)
+	}()
+	select {
+	case <-store.contenderEntered:
+	case <-time.After(2 * time.Second):
+		close(store.releaseFirst)
+		<-firstDone
+		<-contenderDone
+		t.Fatalf("concurrent loser did not reach identity serialization; status=%d body=%s", contender.Code, contender.Body.String())
+	}
+	close(store.releaseFirst)
+	<-firstDone
+	<-contenderDone
+
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("winner status = %d, want 202 body=%s", first.Code, first.Body.String())
+	}
+	if contender.Code != http.StatusOK || !strings.Contains(contender.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("concurrent loser status = %d, want duplicate 200 body=%s", contender.Code, contender.Body.String())
+	}
+	if got := store.callbackCalls.Load(); got != 1 {
+		t.Fatalf("publication callback calls = %d, want 1", got)
+	}
+	if !strings.Contains(contender.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+		t.Fatalf("concurrent loser did not return winner batch: %s", contender.Body.String())
+	}
+}
+
+func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot) {
+	t.Helper()
+	manifest := providertriggers.Manifest{
+		Provider: "telegram", PayloadObjectRequired: true,
+		DeliveryID: providertriggers.ValueSource{Literal: "delivery-1", Required: true},
+		EventType:  providertriggers.ValueSource{Literal: "message", Required: true},
+		EventName:  providertriggers.EventNameManifest{Literal: "inbound.telegram"},
+		RedactKeys: []string{"text"},
+		NormalizedEvents: []providertriggers.NormalizedEventManifest{{
+			Event: "inbound.telegram.text_message",
+			Fields: map[string]runtimecontracts.FieldProjection{
+				"text": {From: "message.text", Type: projectedType},
+			},
+		}},
+	}
+	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
+		Manifest: manifest,
+		Identity: providertriggers.PackIdentity{
+			ID: "provider.telegram", Version: version,
+			ManifestHash: "sha256:" + strings.Repeat(version[:1], 64), Provenance: "platform",
+		},
+		Source: "test",
+	})
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram",
+		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatalf("CompileAdmission: %v", err)
+	}
+	return plan, catalog
+}
+
+func normalizedRetryRequest(body string) *http.Request {
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	return request
 }
 
 func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPublish(t *testing.T) {

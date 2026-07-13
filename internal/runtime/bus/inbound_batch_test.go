@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -10,16 +11,22 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
-type inboundBatchPreflightProofStore struct {
-	InMemoryEventStore
-	mutationCalls int
+type inboundBatchPreflightMutation struct {
+	EventMutation
+	appendCalls int
 }
 
-func (s *inboundBatchPreflightProofStore) RunEventMutation(context.Context, func(EventMutation) error) error {
-	s.mutationCalls++
-	return errors.New("mutation must not start during authorization preflight proof")
+func (m *inboundBatchPreflightMutation) Context() context.Context {
+	return WithEventMutationContext(context.Background(), m)
+}
+
+func (m *inboundBatchPreflightMutation) AppendEvent(context.Context, events.Event) error {
+	m.appendCalls++
+	return errors.New("mutation append sentinel")
 }
 
 type inboundBatchAuthorizationVerifier struct {
@@ -33,7 +40,7 @@ func (v inboundBatchAuthorizationVerifier) VerifyProviderOutputAuthorization(act
 	return nil
 }
 
-func TestPublishInboundDeliveryRejectsInvalidProviderOutputAuthorizationBeforeMutation(t *testing.T) {
+func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBeforeMutation(t *testing.T) {
 	expected := runtimeprovideroutput.Authorization{
 		Provider: "telegram", Event: "inbound.telegram.text_message",
 		PackID: "provider.telegram", PackVersion: "1.0.0",
@@ -44,36 +51,36 @@ func TestPublishInboundDeliveryRejectsInvalidProviderOutputAuthorizationBeforeMu
 		mutate func(*InboundDeliveryBatch)
 	}{
 		{name: "missing authorization", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization = runtimeprovideroutput.Authorization{}
+			batch.Events[1].Authorization = runtimeprovideroutput.Authorization{}
 		}},
 		{name: "partial authorization", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization.ManifestHash = ""
+			batch.Events[1].Authorization.ManifestHash = ""
 		}},
 		{name: "provider mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Claim.Provider = "telegram-stale"
-			batch.Events[0].Authorization.Provider = "telegram-stale"
+			batch.Provider = "telegram-stale"
+			batch.Events[1].Authorization.Provider = "telegram-stale"
 		}},
 		{name: "event mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
-			batch.Events[0].Authorization.Event = "inbound.telegram.edited_message"
+			batch.Events[1].Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
+			batch.Events[1].Authorization.Event = "inbound.telegram.edited_message"
 		}},
 		{name: "pack id mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization.PackID = "provider.telegram.stale"
+			batch.Events[1].Authorization.PackID = "provider.telegram.stale"
 		}},
 		{name: "pack version mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization.PackVersion = "0.9.0"
+			batch.Events[1].Authorization.PackVersion = "0.9.0"
 		}},
 		{name: "manifest hash mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization.ManifestHash = "sha256:" + strings.Repeat("b", 64)
+			batch.Events[1].Authorization.ManifestHash = "sha256:" + strings.Repeat("b", 64)
 		}},
 		{name: "stale generation", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[0].Authorization.GenerationID = "generation-stale"
+			batch.Events[1].Authorization.GenerationID = "generation-stale"
 		}},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &inboundBatchPreflightProofStore{}
+			store := &InMemoryEventStore{}
 			bus, err := NewEventBusWithOptions(store, EventBusOptions{
 				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 			})
@@ -82,44 +89,136 @@ func TestPublishInboundDeliveryRejectsInvalidProviderOutputAuthorizationBeforeMu
 			}
 			batch := inboundBatchPreflightBatch(expected)
 			tc.mutate(&batch)
-			if _, err := bus.PublishInboundDelivery(context.Background(), batch); err == nil {
-				t.Fatal("PublishInboundDelivery error = nil, want fail-closed authorization rejection")
+			mutation := &inboundBatchPreflightMutation{}
+			if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch); err == nil {
+				t.Fatal("PrepareInboundDeliveryBatchInMutation error = nil, want fail-closed authorization rejection")
 			}
-			if store.mutationCalls != 0 {
-				t.Fatalf("RunEventMutation calls = %d, want zero", store.mutationCalls)
+			if mutation.appendCalls != 0 {
+				t.Fatalf("AppendEvent calls = %d, want zero", mutation.appendCalls)
 			}
 		})
 	}
 }
 
-func TestPublishInboundDeliveryAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
+func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
 	expected := runtimeprovideroutput.Authorization{
 		Provider: "telegram", Event: "inbound.telegram.text_message",
 		PackID: "provider.telegram", PackVersion: "1.0.0",
 		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
 	}
-	store := &inboundBatchPreflightProofStore{}
+	store := &InMemoryEventStore{}
 	bus, err := NewEventBusWithOptions(store, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if _, err := bus.PublishInboundDelivery(context.Background(), inboundBatchPreflightBatch(expected)); err == nil || !strings.Contains(err.Error(), "mutation must not start") {
-		t.Fatalf("PublishInboundDelivery error = %v, want mutation sentinel", err)
+	mutation := &inboundBatchPreflightMutation{}
+	if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), inboundBatchPreflightBatch(expected)); err == nil || !strings.Contains(err.Error(), "mutation append sentinel") {
+		t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want mutation sentinel", err)
 	}
-	if store.mutationCalls != 1 {
-		t.Fatalf("RunEventMutation calls = %d, want one", store.mutationCalls)
+	if mutation.appendCalls != 1 {
+		t.Fatalf("AppendEvent calls = %d, want one", mutation.appendCalls)
+	}
+}
+
+func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBeforeMutation(t *testing.T) {
+	expected := runtimeprovideroutput.Authorization{
+		Provider: "telegram", Event: "inbound.telegram.text_message",
+		PackID: "provider.telegram", PackVersion: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
+	}
+	testCases := []struct {
+		name   string
+		mutate func(*InboundDeliveryBatch)
+	}{
+		{name: "normalized only", mutate: func(batch *InboundDeliveryBatch) { batch.Events = batch.Events[1:] }},
+		{name: "raw at ordinal one", mutate: func(batch *InboundDeliveryBatch) { batch.Events[0], batch.Events[1] = batch.Events[1], batch.Events[0] }},
+		{name: "two normalized branches", mutate: func(batch *InboundDeliveryBatch) {
+			second := batch.Events[1]
+			second.Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
+			second.Authorization.Event = "inbound.telegram.edited_message"
+			batch.Events = append(batch.Events, second)
+		}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &InMemoryEventStore{}
+			bus, err := NewEventBusWithOptions(store, EventBusOptions{
+				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			batch := inboundBatchPreflightBatch(expected)
+			tc.mutate(&batch)
+			mutation := &inboundBatchPreflightMutation{}
+			if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch); err == nil {
+				t.Fatal("PrepareInboundDeliveryBatchInMutation error = nil, want cardinality/order rejection")
+			}
+			if mutation.appendCalls != 0 {
+				t.Fatalf("AppendEvent calls = %d, want zero", mutation.appendCalls)
+			}
+		})
+	}
+}
+
+type inboundBatchOverlayMutation struct {
+	EventMutation
+	ctx      context.Context
+	overlays []*RouteTable
+}
+
+func (m *inboundBatchOverlayMutation) Context() context.Context {
+	return WithEventMutationContext(m.ctx, m)
+}
+
+func (m *inboundBatchOverlayMutation) AppendEvent(ctx context.Context, _ events.Event) error {
+	m.overlays = append(m.overlays, transactionRouteTableFromContext(ctx))
+	return nil
+}
+
+func (m *inboundBatchOverlayMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+
+func TestPrepareInboundDeliveryBatchSharesTransactionRouteOverlayAcrossOrderedChildren(t *testing.T) {
+	expected := runtimeprovideroutput.Authorization{
+		Provider: "telegram", Event: "inbound.telegram.text_message",
+		PackID: "provider.telegram", PackVersion: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
+	}
+	bus, err := NewEventBusWithOptions(&InMemoryEventStore{}, EventBusOptions{
+		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	mutation := &inboundBatchOverlayMutation{
+		ctx: runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{}),
+	}
+	if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), inboundBatchPreflightBatch(expected)); err != nil {
+		t.Fatalf("PrepareInboundDeliveryBatchInMutation: %v", err)
+	}
+	if len(mutation.overlays) != 2 || mutation.overlays[0] == nil || mutation.overlays[1] == nil {
+		t.Fatalf("transaction route overlays = %#v, want two non-nil observations", mutation.overlays)
+	}
+	if mutation.overlays[0] != mutation.overlays[1] {
+		t.Fatal("ordered inbound children used different transaction route overlays")
 	}
 }
 
 func inboundBatchPreflightBatch(authorization runtimeprovideroutput.Authorization) InboundDeliveryBatch {
 	return InboundDeliveryBatch{
-		Claim: InboundDeliveryClaim{ProviderEventID: "delivery-1", EntityID: "entity-1", Provider: "telegram"},
-		Events: []InboundDeliveryEvent{{
-			Event: inboundBatchPreflightEvent("inbound.telegram.text_message"), Kind: runtimeprovideroutput.KindNormalized,
-			Authorization: authorization,
-		}},
+		Provider: "telegram",
+		Events: []InboundDeliveryEvent{
+			{Event: inboundBatchPreflightEvent("inbound.telegram"), Kind: runtimeprovideroutput.KindRaw},
+			{
+				Event: inboundBatchPreflightEvent("inbound.telegram.text_message"), Kind: runtimeprovideroutput.KindNormalized,
+				Authorization: authorization,
+			},
+		},
 	}
 }
 

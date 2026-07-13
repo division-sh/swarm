@@ -411,17 +411,17 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 
 	tests := []struct {
-		provider string
-		body     []byte
-		headers  map[string]string
-		event    string
+		provider   string
+		body       []byte
+		headers    map[string]string
+		eventNames []string
 	}{
-		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"chat":{"id":42}}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, event: "inbound.telegram"},
-		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), event: "inbound.intercom"},
-		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), event: "inbound.acme_public"},
-		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, event: "inbound.partner_auth"},
-		{provider: "partner_open", body: []byte(`{"delivery":{"id":"partner-open-1"},"value":2}`), event: "inbound.partner_open"},
-		{provider: "partner_ack", body: []byte("raw-open-body"), event: "inbound.partner_ack"},
+		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"chat":{"id":42},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}},
+		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), eventNames: []string{"inbound.intercom"}},
+		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), eventNames: []string{"inbound.acme_public"}},
+		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, eventNames: []string{"inbound.partner_auth"}},
+		{provider: "partner_open", body: []byte(`{"delivery":{"id":"partner-open-1"},"value":2}`), eventNames: []string{"inbound.partner_open"}},
+		{provider: "partner_ack", body: []byte("raw-open-body"), eventNames: []string{"inbound.partner_ack"}},
 	}
 	for i := range tests {
 		test := &tests[i]
@@ -433,6 +433,18 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		status, response := sendInboundAdmissionSupportedRequest(t, baseURL, test.provider, test.body, test.headers)
 		if status != http.StatusAccepted {
 			t.Fatalf("%s status=%d response=%s\nserve output:\n%s", test.provider, status, response, process.outputString())
+		}
+		accepted := decodeInboundAdmissionPublicationResponse(t, response)
+		if strings.Join(accepted.EventNames, "\x00") != strings.Join(test.eventNames, "\x00") || len(accepted.EventIDs) != len(test.eventNames) {
+			t.Fatalf("%s accepted ordered children ids=%v names=%v, want names=%v", test.provider, accepted.EventIDs, accepted.EventNames, test.eventNames)
+		}
+		status, response = sendInboundAdmissionSupportedRequest(t, baseURL, test.provider, test.body, test.headers)
+		if status != http.StatusOK {
+			t.Fatalf("%s duplicate status=%d response=%s", test.provider, status, response)
+		}
+		duplicate := decodeInboundAdmissionPublicationResponse(t, response)
+		if duplicate.Status != "duplicate" || strings.Join(duplicate.EventIDs, "\x00") != strings.Join(accepted.EventIDs, "\x00") || strings.Join(duplicate.EventNames, "\x00") != strings.Join(accepted.EventNames, "\x00") {
+			t.Fatalf("%s duplicate readback=%#v, want original %#v", test.provider, duplicate, accepted)
 		}
 	}
 	status, _ := sendInboundAdmissionSupportedRequest(t, baseURL, "partner_auth", []byte(`{"value":1}`), map[string]string{
@@ -460,14 +472,16 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		}
 	}
 	for _, test := range tests {
-		var count int
-		if backend == "sqlite" {
-			err = sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, test.event).Scan(&count)
-		} else {
-			err = postgresStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, test.event).Scan(&count)
-		}
-		if err != nil || count != 1 {
-			t.Fatalf("%s persisted count=%d err=%v, want 1", test.event, count, err)
+		for _, eventName := range test.eventNames {
+			var count int
+			if backend == "sqlite" {
+				err = sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count)
+			} else {
+				err = postgresStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count)
+			}
+			if err != nil || count != 1 {
+				t.Fatalf("%s persisted count=%d err=%v, want 1", eventName, count, err)
+			}
 		}
 	}
 }
@@ -488,6 +502,21 @@ func waitForInboundAdmissionServeOutput(t *testing.T, process *serveRuntimeTestP
 			}
 		}
 	}
+}
+
+type inboundAdmissionPublicationResponse struct {
+	Status     string   `json:"status"`
+	EventIDs   []string `json:"event_ids"`
+	EventNames []string `json:"event_names"`
+}
+
+func decodeInboundAdmissionPublicationResponse(t testing.TB, raw string) inboundAdmissionPublicationResponse {
+	t.Helper()
+	var response inboundAdmissionPublicationResponse
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("decode inbound publication response: %v body=%s", err, raw)
+	}
+	return response
 }
 
 func sendInboundAdmissionSupportedRequest(t testing.TB, baseURL, provider string, body []byte, headers map[string]string) (int, string) {

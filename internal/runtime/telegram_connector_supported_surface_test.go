@@ -141,7 +141,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	defer server.Close()
 
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
-	source := telegramConnectorSupportedSurfaceSource(t, server.URL)
+	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -229,7 +229,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, baseURL string, calls <-chan telegramConnectorSupportedSurfaceCall) {
 	t.Helper()
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "", "")
-	source := telegramConnectorSupportedSurfaceSource(t, baseURL)
+	source := telegramConnectorSupportedSurfaceSource(t, baseURL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -268,7 +268,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 
 const telegramConnectorSupportedSurfaceNodeID = "telegram-responder"
 
-func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL string) semanticview.Source {
+func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{
@@ -287,7 +287,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL string) seman
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -317,7 +317,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL string) seman
 				"inbound.telegram": {telegramConnectorSupportedSurfaceNodeID},
 			},
 		},
-	})
+	}))
 	importSource := telegramConnectorSupportedSurfacePackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -723,6 +723,7 @@ func telegramConnectorSupportedSurfaceActivityStatusForEvent(t *testing.T, backe
 func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) int {
 	t.Helper()
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
+	failureEventType := boundedProviderFlowID + ".telegram_send_message.failed"
 	var count int
 	var err error
 	if backend.sqlite {
@@ -730,17 +731,17 @@ func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, b
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = ?
-			  AND event_name = 'telegram_send_message.failed'
+			  AND event_name = ?
 			  AND source_event_id = ?
-		`, backend.runID, inboundEventID).Scan(&count)
+		`, backend.runID, failureEventType, inboundEventID).Scan(&count)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = $1::uuid
-			  AND event_name = 'telegram_send_message.failed'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, inboundEventID).Scan(&count)
+			  AND event_name = $2
+			  AND source_event_id = $3::uuid
+		`, backend.runID, failureEventType, inboundEventID).Scan(&count)
 	}
 	if err != nil {
 		t.Fatalf("%s count failure events for provider event %s: %v", backend.name, providerEventID, err)
@@ -964,6 +965,14 @@ func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegram
 		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`,
 		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`,
 		backend.runID, telegramConnectorSupportedSurfaceNodeID))
+	parts = append(parts, "event_names="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
+		`SELECT COALESCE(string_agg(event_id::text || ':' || event_name, ',' ORDER BY created_at), '') FROM events WHERE run_id = $1::uuid`,
+		`SELECT COALESCE(group_concat(event_id || ':' || event_name, ','), '') FROM (SELECT event_id, event_name FROM events WHERE run_id = ? ORDER BY created_at)`,
+		backend.runID))
+	parts = append(parts, "activity_receipt="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
+		`SELECT COALESCE(r.outcome, '') || ':' || COALESCE(r.failure->>'class', '') || ':' || COALESCE(r.failure->'detail'->>'code', '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid AND e.event_name = 'platform.activity_requested' AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' ORDER BY r.processed_at DESC LIMIT 1`,
+		`SELECT COALESCE(r.outcome, '') || ':' || COALESCE(json_extract(r.failure, '$.class'), '') || ':' || COALESCE(json_extract(r.failure, '$.detail.code'), '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? AND e.event_name = 'platform.activity_requested' AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' ORDER BY r.processed_at DESC LIMIT 1`,
+		backend.runID))
 	parts = append(parts, "dead_letter="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
 		`SELECT COALESCE(failure->>'class', '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM dead_letters WHERE entity_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
 		`SELECT COALESCE(json_extract(failure, '$.class'), '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM dead_letters WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1`,

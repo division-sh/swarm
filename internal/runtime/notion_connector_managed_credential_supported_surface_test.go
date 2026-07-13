@@ -115,7 +115,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
-	source := notionManagedConnectorSource(t, fake.server.URL)
+	source := notionManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -327,7 +327,7 @@ func (f *fakeNotionManagedConnectorServer) providerHTTPRequestCount() int {
 	return int(f.notionCalls.Load())
 }
 
-func notionManagedConnectorSource(t *testing.T, baseURL string) semanticview.Source {
+func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{
@@ -360,7 +360,7 @@ func notionManagedConnectorSource(t *testing.T, baseURL string) semanticview.Sou
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -386,7 +386,7 @@ func notionManagedConnectorSource(t *testing.T, baseURL string) semanticview.Sou
 				"inbound.telegram": {nodeID},
 			},
 		},
-	})
+	}))
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -442,7 +442,7 @@ func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerc
 
 func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
 	t.Helper()
-	source := notionManagedConnectorSource(t, baseURL)
+	source := notionManagedConnectorSource(t, baseURL, backend.flowInstance)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -575,6 +575,7 @@ func countNotionManagedConnectorActivityAttemptsForSource(t *testing.T, backend 
 
 func countNotionManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
+	failureEventType := boundedProviderFlowID + ".notion_append_block_children.failed"
 	var count int
 	var err error
 	if backend.sqlite {
@@ -582,17 +583,17 @@ func countNotionManagedConnectorFailureEventsForSource(t *testing.T, backend sla
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = ?
-			  AND event_name = 'notion_append_block_children.failed'
+			  AND event_name = ?
 			  AND source_event_id = ?
-		`, backend.runID, sourceEventID).Scan(&count)
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = $1::uuid
-			  AND event_name = 'notion_append_block_children.failed'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, sourceEventID).Scan(&count)
+			  AND event_name = $2
+			  AND source_event_id = $3::uuid
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	}
 	if err != nil {
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)

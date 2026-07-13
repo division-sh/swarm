@@ -248,6 +248,15 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
 		t.Fatalf("suppressed lookup = %#v", lookup)
 	}
+	if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
+		t.Fatalf("RestoreStandingServiceTargets: %v", err)
+	}
+	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
+		t.Fatalf("restored lookup = %#v", lookup)
+	}
+	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
+		t.Fatalf("second SuppressStandingServiceTargets: %v", err)
+	}
 	published := target
 	published.RunID = "run-2"
 	published.Generation = 2
@@ -299,7 +308,8 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	gateway := NewInboundGateway(bus, nil, nil)
+	publicationStore := &recordingInboundStore{inserted: true, store: eventStore}
+	gateway := NewInboundGateway(bus, nil, nil, publicationStore)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	body := []byte(`{"action":"created","issue":{"number":7}}`)
 	mac := hmac.New(sha256.New, []byte("github-secret"))

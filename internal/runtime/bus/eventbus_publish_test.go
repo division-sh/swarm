@@ -2303,7 +2303,7 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	}
 }
 
-func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) {
+func TestPrepareInboundDeliveryBatchRollsBackAllDerivedEventsWithCallerMutation(t *testing.T) {
 	testCases := []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner)
@@ -2337,11 +2337,9 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, db, eventStore, runner := tc.setup(t)
-			proofStore := &failingInboundBatchStore{EventStore: eventStore, runner: runner, failAppend: 2}
 			rawID := uuid.NewString()
 			normalizedID := uuid.NewString()
 			entityID := uuid.NewString()
-			providerEventID := "provider-delivery-rollback"
 			authorization := runtimeprovideroutput.Authorization{
 				Provider: "proof-provider", Event: "inbound.proof.normalized", PackID: "provider.proof",
 				PackVersion: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
@@ -2349,18 +2347,14 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 			source := inboundBatchAuthorizedSource{
 				Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), authorizations: []runtimeprovideroutput.Authorization{authorization},
 			}
-			eb, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{
+			eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
 				ContractBundle: source, ProviderOutputVerifier: source,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			batch := runtimebus.InboundDeliveryBatch{
-				Claim: runtimebus.InboundDeliveryClaim{
-					ProviderEventID: providerEventID,
-					EntityID:        entityID,
-					Provider:        "proof-provider",
-				},
+				Provider: "proof-provider",
 				Events: []runtimebus.InboundDeliveryEvent{
 					{Event: eventtest.RootIngress(rawID, events.EventType("inbound.proof"), "inbound-gateway", "", []byte(`{"raw":true}`), 0, eventBusTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()), Kind: runtimeprovideroutput.KindRaw},
 					{
@@ -2371,8 +2365,13 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 				},
 			}
 
-			if _, err := eb.PublishInboundDelivery(ctx, batch); err == nil || !strings.Contains(err.Error(), "injected normalized append failure") {
-				t.Fatalf("PublishInboundDelivery error = %v, want injected normalized append failure", err)
+			err = runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				wrapped := &failingInboundBatchMutation{EventMutation: mutation, failAppend: 2}
+				_, prepareErr := eb.PrepareInboundDeliveryBatchInMutation(wrapped.Context(), batch)
+				return prepareErr
+			})
+			if err == nil || !strings.Contains(err.Error(), "injected normalized append failure") {
+				t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want injected normalized append failure", err)
 			}
 			eventsCount, markerCount := tc.count(t, ctx, db, rawID, normalizedID)
 			if eventsCount != 0 || markerCount != 0 {
@@ -2400,18 +2399,6 @@ func (s inboundBatchAuthorizedSource) VerifyProviderOutputAuthorization(actual r
 	return errors.New("authorization does not match test catalog owner")
 }
 
-type failingInboundBatchStore struct {
-	runtimebus.EventStore
-	runner     runtimebus.EventMutationRunner
-	failAppend int
-}
-
-func (s *failingInboundBatchStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	return s.runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		return fn(&failingInboundBatchMutation{EventMutation: mutation, failAppend: s.failAppend})
-	})
-}
-
 type failingInboundBatchMutation struct {
 	runtimebus.EventMutation
 	appendCount int
@@ -2428,14 +2415,6 @@ func (m *failingInboundBatchMutation) AppendEvent(ctx context.Context, evt event
 		return errors.New("injected normalized append failure")
 	}
 	return m.EventMutation.AppendEvent(ctx, evt)
-}
-
-func (m *failingInboundBatchMutation) ClaimInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
-	inbound, ok := m.EventMutation.(runtimebus.InboundDeliveryMutation)
-	if !ok {
-		return false, errors.New("selected-store mutation does not support inbound claims")
-	}
-	return inbound.ClaimInboundEvent(ctx, providerEventID, entityID, provider)
 }
 
 func countPostgresInboundBatchRows(t *testing.T, ctx context.Context, db *sql.DB, rawID, normalizedID string) (int, int) {

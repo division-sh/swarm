@@ -145,6 +145,72 @@ func TestNormalizedEventManifestRejectsOverlappingBranchesAtLoad(t *testing.T) {
 	}
 }
 
+func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
+		Event: "inbound.telegram.message_copy",
+		Fields: map[string]runtimecontracts.FieldProjection{
+			"text": {From: "message.text", Type: "text"},
+		},
+	})
+	_, err := manifest.Accept(Request{
+		Target: Target{EntityID: "entity-1"},
+		Payload: map[string]any{
+			"update_id": json.Number("123"),
+			"message": map[string]any{
+				"message_id": json.Number("7"), "chat": map[string]any{"id": json.Number("42")}, "text": "hello",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "matched multiple branches") {
+		t.Fatalf("Accept error = %v, want forced runtime multi-match rejection", err)
+	}
+}
+
+func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.RedactKeys = []string{"text"}
+	catalog, err := NewCatalogSnapshot(CatalogEntry{
+		Manifest: manifest,
+		Identity: PackIdentity{
+			ID: "provider.telegram", Version: "1.0.0",
+			ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
+		},
+		Source: "test",
+	})
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram",
+		Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatalf("CompileAdmission: %v", err)
+	}
+	request := Request{
+		Target: Target{EntityID: "entity-1"},
+		Payload: map[string]any{
+			"update_id": json.Number("123"),
+			"message": map[string]any{
+				"message_id": json.Number("7"), "chat": map[string]any{"id": json.Number("42")}, "text": "first",
+			},
+		},
+	}
+	first, err := plan.AdmitRequest(request)
+	if err != nil {
+		t.Fatalf("AdmitRequest(first): %v", err)
+	}
+	request.Payload.(map[string]any)["message"].(map[string]any)["text"] = "second"
+	second, err := plan.AdmitRequest(request)
+	if err != nil {
+		t.Fatalf("AdmitRequest(second): %v", err)
+	}
+	if first.SemanticContentDigest == second.SemanticContentDigest {
+		t.Fatal("semantic digest collapsed a changed redacted value consumed by normalized projection")
+	}
+}
+
 func TestNormalizedEventManifestRejectsHostileProjectionSyntax(t *testing.T) {
 	for _, path := range []string{"$.message.text", "message..text", "payload.message.text", "entity.id", "message[0].text", "message.text == 'x'"} {
 		t.Run(path, func(t *testing.T) {

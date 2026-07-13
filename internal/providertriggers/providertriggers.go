@@ -892,58 +892,85 @@ func (m Manifest) Validate() error {
 	return nil
 }
 
+type manifestAdmission struct {
+	request    Request
+	provider   string
+	deliveryID string
+	eventType  string
+	response   *Response
+}
+
 func (m Manifest) Accept(req Request) (Delivery, error) {
+	admitted, err := m.admitRequest(req)
+	if err != nil {
+		return Delivery{}, err
+	}
+	return m.projectAdmission(admitted)
+}
+
+func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	provider := NormalizeProviderName(m.Provider)
 	secret := strings.TrimSpace(req.Target.WebhookSecret)
 	if m.Secret.Required && secret == "" {
-		return Delivery{}, unauthorized(provider + " webhook signing secret is required")
+		return manifestAdmission{}, unauthorized(provider + " webhook signing secret is required")
 	}
 	if m.Signature.Type != "" {
 		if err := m.verifySignature(secret, req); err != nil {
-			return Delivery{}, err
+			return manifestAdmission{}, err
 		}
 	}
 	if m.PayloadObjectRequired {
 		if _, ok := req.Payload.(map[string]any); !ok {
-			return Delivery{}, badRequest(firstNonEmpty(m.PayloadObjectError, provider+" payload object is required"))
+			return manifestAdmission{}, badRequest(firstNonEmpty(m.PayloadObjectError, provider+" payload object is required"))
 		}
 	}
 	if m.Challenge != nil {
 		matched, err := m.Challenge.When.Evaluate(req.Payload)
 		if err != nil {
-			return Delivery{}, err
+			return manifestAdmission{}, err
 		}
 		if matched {
 			value, ok := stringFromJSONPath(req.Payload, m.Challenge.Response.JSONPath)
 			if !ok || strings.TrimSpace(value) == "" {
-				return Delivery{}, badRequest(firstNonEmpty(m.Challenge.Response.MissingErr, provider+" challenge is required"))
+				return manifestAdmission{}, badRequest(firstNonEmpty(m.Challenge.Response.MissingErr, provider+" challenge is required"))
 			}
 			status := m.Challenge.Response.Status
 			if status == 0 {
 				status = http.StatusOK
 			}
 			contentType := firstNonEmpty(m.Challenge.Response.ContentType, "text/plain; charset=utf-8")
-			return Delivery{Response: &Response{Status: status, ContentType: contentType, Body: []byte(value)}}, nil
+			return manifestAdmission{request: req, provider: provider, response: &Response{Status: status, ContentType: contentType, Body: []byte(value)}}, nil
 		}
 	}
 	if m.DeliveryCondition != nil {
 		matched, err := m.DeliveryCondition.Evaluate(req.Payload)
 		if err != nil {
-			return Delivery{}, err
+			return manifestAdmission{}, err
 		}
 		if !matched {
-			return Delivery{}, badRequest(firstNonEmpty(m.DeliveryCondition.MismatchErr, "unsupported "+provider+" payload type"))
+			return manifestAdmission{}, badRequest(firstNonEmpty(m.DeliveryCondition.MismatchErr, "unsupported "+provider+" payload type"))
 		}
 	}
 	deliveryID, ok := m.DeliveryID.Resolve(req)
 	if !ok || strings.TrimSpace(deliveryID) == "" {
-		return Delivery{}, badRequest(firstNonEmpty(m.DeliveryID.MissingError, provider+" delivery id is required"))
+		return manifestAdmission{}, badRequest(firstNonEmpty(m.DeliveryID.MissingError, provider+" delivery id is required"))
 	}
 	rawEventType, ok := m.EventType.Resolve(req)
 	if !ok || strings.TrimSpace(rawEventType) == "" {
-		return Delivery{}, badRequest(firstNonEmpty(m.EventType.MissingError, provider+" event type is required"))
+		return manifestAdmission{}, badRequest(firstNonEmpty(m.EventType.MissingError, provider+" event type is required"))
 	}
 	eventType := NormalizeEventToken(rawEventType)
+	return manifestAdmission{request: req, provider: provider, deliveryID: strings.TrimSpace(deliveryID), eventType: eventType}, nil
+}
+
+func (m Manifest) projectAdmission(admitted manifestAdmission) (Delivery, error) {
+	if admitted.response != nil {
+		return Delivery{Response: admitted.response}, nil
+	}
+	req := admitted.request
+	provider := admitted.provider
+	deliveryID := admitted.deliveryID
+	eventType := admitted.eventType
 	entityID := req.Target.EffectiveEntityID()
 	payload := m.buildPublishPayload(provider, entityID, deliveryID, eventType, req)
 	normalized, err := m.normalizedDeliveryEvents(req.Payload)

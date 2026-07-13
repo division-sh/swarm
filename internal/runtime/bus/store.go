@@ -244,14 +244,6 @@ type EventMutation interface {
 	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
 }
 
-// InboundDeliveryMutation extends the selected-store event mutation with the
-// external delivery identity claim. The marker and every event/lifecycle write
-// performed through the mutation commit or roll back together.
-type InboundDeliveryMutation interface {
-	EventMutation
-	ClaimInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error)
-}
-
 type EventMutationRunner interface {
 	RunEventMutation(ctx context.Context, fn func(EventMutation) error) error
 }
@@ -290,10 +282,6 @@ func WithoutEventMutationContext(ctx context.Context) context.Context {
 
 type TransactionalEventReplayScopePersistence interface {
 	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-type TransactionalInboundEventPersistence interface {
-	ClaimInboundEventTx(ctx context.Context, tx *sql.Tx, providerEventID, entityID, provider string) (bool, error)
 }
 
 // TransactionalEventStore is the backend-local raw-SQL helper used below

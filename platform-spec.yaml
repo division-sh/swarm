@@ -7946,12 +7946,14 @@ tool_model:
         authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
         request authentication, or readiness.
       provider_delivery_transaction: >
-        `runtime/bus.EventBus.PublishInboundDelivery` is the sole provider-delivery mutation owner. In one selected-store
-        transaction it claims `platform.inbound_recorded`, appends the raw event and every matched normalized event, plans
-        exact routes, materializes select-or-create run/entity/flow-instance/route state, and persists delivery, replay, and
-        receipt rows. Any failure rolls back the complete set; no compensating marker deletion path exists. Commit precedes
-        durable webhook acknowledgement. Runtime agent process startup is a post-commit side effect queued before event
-        dispatch; persisted flow-instance and route authority remain transaction participants.
+        `RunInboundPublicationMutation` is the sole provider-delivery mutation owner. In one selected-store transaction it
+        reserves the provider request identity, persists the `platform.inbound_recorded` evidence event, appends the raw
+        event and zero or one exclusive normalized event as an ordered immutable batch, plans exact routes, materializes
+        select-or-create run/entity/flow-instance/route state, and persists each event's delivery, replay, and receipt rows.
+        Any failure rolls back the parent, every child, every event, and all derived state; no compensating marker deletion
+        path or EventBus-owned claim remains. Commit precedes durable webhook acknowledgement. Runtime agent process startup
+        is a post-commit side effect queued before event dispatch; persisted flow-instance and route authority remain
+        transaction participants.
     pack_envelope_source_authority:
       owner: internal/packs universal envelope plus body-specific verifiers such as internal/providertriggers and internal/providerconnectors
       status: >
@@ -8154,11 +8156,13 @@ tool_model:
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
-        Both modes consume the same committed inbound_publications operation and immutable recipient manifest.
+        Both modes consume the same committed inbound_publications operation, immutable ordered event batch, and each
+        event's immutable commit-time recipient-manifest fingerprint.
         `after_publish` returns after normal post-commit dispatch/reconciliation completes. `durable_before_dispatch` returns
-        after the ledger row, evidence event, executable event, recipient manifest, subscribed replay scope, deliveries,
-        receipts, and counters commit atomically, without waiting for post-commit pipeline dispatch, system-node execution,
-        or agent handling. Exact committed retry returns the stored operation without invoking EventBus or replanning.
+        after the parent, all child memberships, evidence event, executable events, recipient manifests, subscribed replay
+        scopes, deliveries, receipts, and counters commit atomically, without waiting for post-commit pipeline dispatch,
+        system-node execution, or agent handling. Exact committed retry returns the original ordered child batch without
+        invoking current output projection, normalization, EventBus, or replanning.
       redact_keys: payload keys that must be replaced before publication or readback.
       signed_payload_recipe_discipline: >
         Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
@@ -8910,7 +8914,12 @@ flow_model:
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, immutable admission plan, credential store, ingress controller,
         store, EventBus, and runtime. Primary-runtime fallback, request-time provider catalog lookup, and parallel alias
-        registries are forbidden. Replacement and
+        registries are forbidden. Operator suspend and reset first close service-scoped gateway admission, withdraw that
+        service from manager visibility, and drain already-admitted publication plus runtime work before beginning the
+        durable lifecycle mutation. New requests fail with service-unavailable semantics while that barrier is closed.
+        A pre-commit failure restores manager visibility and reopens admission only after the drain; restoration failure
+        leaves the service fail closed. Resume and an active reset publish committed targets before reopening admission.
+        Replacement and
         deactivation atomically reject new predecessor admission while manager visibility is serialized. Before replacement
         quiescence begins, the RuntimeContextManager marks the predecessor unavailable and process readiness becomes false;
         `/readyz`, `/v1/rpc`, `/v1/ws`, and `/webhooks/...` fail with service-unavailable semantics until one loaded runtime
@@ -10631,6 +10640,7 @@ platform_tables:
         - event_receipts
         - dead_letters
       delete_by_run_lineage:
+        - inbound_publication_events
         - run_fork_delivery_event_replays
         - run_fork_selected_contract_executions
         - run_fork_selected_contract_branch_divergences
@@ -10929,19 +10939,19 @@ platform_tables:
         );
     inbound_publications:
       description: >-
-        Permanent inbound provider operation/idempotency owner. The row reserves one
-        provider identity, binds its retry-stable semantic fingerprint to one executable
-        event and one platform.inbound_recorded evidence event, and stores the immutable
-        final recipient-plan manifest. Delivery rows and receipts remain execution/outcome
-        authority. A prepared row is transaction-local only; any durable prepared row is corruption.
+        Permanent inbound provider request/idempotency owner. The parent reserves one
+        provider identity and binds a retry-stable request fingerprint to one immutable
+        ordered executable-event batch and one platform.inbound_recorded evidence event.
+        Output projection and current pack generation are not request identity. A prepared
+        row is transaction-local only; any durable prepared row is corruption.
       ddl: |
         CREATE TABLE inbound_publications (
             publication_id              UUID PRIMARY KEY,
             provider                    TEXT NOT NULL,
             entity_id                   UUID NOT NULL,
             provider_event_id           TEXT NOT NULL,
-            semantic_fingerprint        TEXT NOT NULL,
-            semantic_projection_version TEXT NOT NULL CHECK (semantic_projection_version = 'inbound-semantic-v1'),
+            request_fingerprint         TEXT NOT NULL,
+            request_projection_version  TEXT NOT NULL CHECK (request_projection_version = 'inbound-request-semantic-v1'),
             stable_service_id            UUID NOT NULL REFERENCES standing_services(service_id),
             package_key                  TEXT NOT NULL,
             flow_id                      TEXT NOT NULL,
@@ -10951,22 +10961,43 @@ platform_tables:
             expected_publication_sequence BIGINT NOT NULL CHECK (expected_publication_sequence >= 0),
             resolved_run_id              UUID NOT NULL REFERENCES runs(run_id),
             marker_event_id              UUID UNIQUE REFERENCES events(event_id),
-            publication_event_id         UUID UNIQUE REFERENCES events(event_id),
             acknowledgement_mode         TEXT NOT NULL CHECK (acknowledgement_mode IN ('after_publish', 'durable_before_dispatch')),
-            recipient_manifest           JSONB NOT NULL DEFAULT '[]',
-            recipient_manifest_fingerprint TEXT NOT NULL DEFAULT '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
-            recipient_count              INTEGER NOT NULL DEFAULT 0 CHECK (recipient_count >= 0),
+            output_count                 INTEGER NOT NULL DEFAULT 0 CHECK (output_count >= 0 AND output_count <= 2),
             original_received_at         TIMESTAMPTZ NOT NULL,
             original_user_agent          TEXT NOT NULL,
             original_transport_metadata  JSONB NOT NULL DEFAULT '{}',
             state                        TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
             created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             committed_at                 TIMESTAMPTZ,
-            CHECK ((state = 'prepared' AND marker_event_id IS NULL AND publication_event_id IS NULL AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND publication_event_id IS NOT NULL AND committed_at IS NOT NULL)),
+            CHECK ((state = 'prepared' AND marker_event_id IS NULL AND output_count = 0 AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND output_count >= 1 AND output_count <= 2 AND committed_at IS NOT NULL)),
             UNIQUE (provider, entity_id, provider_event_id),
             INDEX idx_inbound_publications_run (resolved_run_id, created_at),
             INDEX idx_inbound_publications_service (stable_service_id, created_at),
             INDEX idx_inbound_publications_state (state, created_at)
+        );
+    inbound_publication_events:
+      description: >-
+        Immutable ordered membership and provenance for one committed inbound publication.
+        Ordinal contiguity is validated by the publication finalizer and every integrity
+        read; it is not delegated to a row CHECK. Existing events, deliveries, receipts,
+        claims, and sweepers remain mutable dispatch and recovery authority.
+      ddl: |
+        CREATE TABLE inbound_publication_events (
+            publication_id                UUID NOT NULL REFERENCES inbound_publications(publication_id) ON DELETE CASCADE,
+            ordinal                       INTEGER NOT NULL CHECK (ordinal >= 0),
+            event_id                      UUID NOT NULL UNIQUE REFERENCES events(event_id),
+            event_name                    TEXT NOT NULL,
+            output_kind                   TEXT NOT NULL CHECK (output_kind IN ('raw', 'normalized')),
+            pack_id                       TEXT,
+            pack_version                  TEXT,
+            manifest_hash                 TEXT,
+            observed_generation_id        TEXT,
+            event_integrity_fingerprint   TEXT NOT NULL,
+            recipient_manifest_fingerprint TEXT NOT NULL,
+            recipient_count               INTEGER NOT NULL CHECK (recipient_count >= 0),
+            PRIMARY KEY (publication_id, ordinal),
+            CHECK ((output_kind = 'raw' AND pack_id IS NULL AND pack_version IS NULL AND manifest_hash IS NULL AND observed_generation_id IS NULL) OR (output_kind = 'normalized' AND pack_id IS NOT NULL AND pack_version IS NOT NULL AND manifest_hash IS NOT NULL AND observed_generation_id IS NOT NULL)),
+            INDEX idx_inbound_publication_events_event (event_id)
         );
     agent_directive_operations:
       description: >-
@@ -14315,16 +14346,20 @@ platform_events:
       scope: entity or global
       payload:
         publication_id: uuid
-        publication_event_id: uuid
         provider: string
         provider_event_id: string
         entity_id: uuid
+        event_ids: array<string>
+        event_names: array<string>
+        output_count: integer
       required:
       - publication_id
-      - publication_event_id
       - provider
       - provider_event_id
       - entity_id
+      - event_ids
+      - event_names
+      - output_count
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.

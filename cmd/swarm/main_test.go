@@ -3588,8 +3588,11 @@ func TestRunServeRuntimeJoinsEarlyStartupAndStoreCleanupFailure(t *testing.T) {
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		RequireBundleMatch: false,
-		Output:             &stdout,
-		ErrorOutput:        &stderr,
+		TestBeforeReadinessCommit: func() error {
+			return errors.New("startup failed before readiness commit")
+		},
+		Output:      &stdout,
+		ErrorOutput: &stderr,
 	})
 	if code == 0 {
 		t.Fatalf("runServeRuntime code = 0, want startup failure\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
@@ -8443,6 +8446,10 @@ func requireServedJSONRPCError(t *testing.T, endpoint, method string, params map
 }
 
 func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[string]any) servedJSONRPCEnvelope {
+	return requestServedJSONRPCWithTimeout(t, endpoint, method, params, 5*time.Second)
+}
+
+func requestServedJSONRPCWithTimeout(t *testing.T, endpoint, method string, params map[string]any, timeout time.Duration) servedJSONRPCEnvelope {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -8459,7 +8466,7 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		t.Fatalf("post %s request: %v", method, err)
 	}

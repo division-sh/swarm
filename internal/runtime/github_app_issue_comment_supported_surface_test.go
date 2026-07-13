@@ -119,7 +119,7 @@ func runGitHubAppIssueCommentSurface(t *testing.T, backend slackManagedConnector
 		Status:         runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:      time.Now().Add(-time.Hour),
 	})
-	source := githubAppIssueCommentSource(t, fake.server.URL)
+	source := githubAppIssueCommentSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
@@ -343,7 +343,7 @@ func publishGitHubIssueCommentFromSender(t *testing.T, backend slackManagedConne
 	waitForInboundBusQuiescence(t, bus)
 }
 
-func githubAppIssueCommentSource(t *testing.T, baseURL string) semanticview.Source {
+func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
@@ -370,7 +370,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL string) semanticview.Sour
 			"inbound.github.issue_comment": handler,
 		},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -396,7 +396,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL string) semanticview.Sour
 				"inbound.github.issue_comment": {nodeID},
 			},
 		},
-	})
+	}))
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -454,7 +454,7 @@ func assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t *testin
 	t.Helper()
 	beforeTokens := fake.tokenRequestCount()
 	beforeComments := fake.commentRequestCount()
-	source := githubAppIssueCommentSource(t, fake.server.URL)
+	source := githubAppIssueCommentSource(t, fake.server.URL, backend.flowInstance)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
@@ -643,6 +643,7 @@ func countGitHubAppIssueCommentActivityAttemptsForSource(t *testing.T, backend s
 
 func countGitHubAppIssueCommentFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
+	failureEventType := boundedProviderFlowID + ".github_create_issue_comment.failed"
 	var count int
 	var err error
 	if backend.sqlite {
@@ -650,17 +651,17 @@ func countGitHubAppIssueCommentFailureEventsForSource(t *testing.T, backend slac
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = ?
-			  AND event_name = 'github_create_issue_comment.failed'
+			  AND event_name = ?
 			  AND source_event_id = ?
-		`, backend.runID, sourceEventID).Scan(&count)
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
 			SELECT COUNT(*)
 			FROM events
 			WHERE run_id = $1::uuid
-			  AND event_name = 'github_create_issue_comment.failed'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, sourceEventID).Scan(&count)
+			  AND event_name = $2
+			  AND source_event_id = $3::uuid
+		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
 	}
 	if err != nil {
 		t.Fatalf("%s count GitHub failure events for source event %s: %v", backend.name, sourceEventID, err)

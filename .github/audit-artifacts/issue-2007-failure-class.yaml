@@ -16,6 +16,7 @@ binding_context:
   stateful_route_materialization_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4953193542
   normalized_batch_escalation: https://github.com/division-sh/swarm/issues/2007#issuecomment-4954782904
   normalized_batch_insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4958394632
+  normalized_batch_approved_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4958580209
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -137,7 +138,7 @@ normalized_batch_reaudit:
     delivery outcome were conflated. The long-run clean model separates those
     three owners without introducing a second dispatch state machine.
   architecture_tracking_decision: update_issue_2007_and_tracked_watchlist_node_now
-  blocking_condition: fresh_independent_gate_required_before_rebase_or_implementation
+  blocking_condition: satisfied_by_normalized_batch_approved_gate
 
 tracked_watchlist_mapping:
   node: inbound_publication_operation_ownership
@@ -172,7 +173,7 @@ tracked_watchlist_mapping:
     issue_777: delivery_terminal_taxonomy_remains_watchpoint
     issue_1770: superseded_standing_posture_remains_recorded
   parent_action: absorb_now_no_new_child
-  batch_cardinality: one_provider_delivery_parent_owns_one_or_more_ordered_executable_event_children
+  batch_cardinality: one_provider_delivery_parent_owns_one_or_two_ordered_executable_event_children
   owner_separation:
     request_identity: inbound_publications_parent_request_fingerprint
     output_membership: inbound_publication_events_ordered_immutable_children
@@ -558,7 +559,7 @@ diagnostic_direct_event_admission:
     global_no_run: forbidden_for_webhook_publication
     identity: [provider, entity_id, provider_event_id]
     publication_id: uuid_v5(inbound_publication_namespace, normalized_provider + NUL + entity_id + NUL + provider_event_id)
-    cardinality: one_parent_provider_delivery_to_one_or_more_ordered_executable_event_children
+    cardinality: one_parent_provider_delivery_to_one_or_two_ordered_executable_event_children
     owner_model:
       request_identity_and_acknowledgement: inbound_publications
       ordered_commit_time_output_membership_and_integrity: inbound_publication_events
@@ -575,7 +576,7 @@ diagnostic_direct_event_admission:
           provider_event_id: text_not_null
           request_semantic_fingerprint: text_not_null_inbound_request_semantic_v1_sha256
           request_projection_version: text_not_null_equal_inbound_request_semantic_v1
-          stable_service_id: nullable_uuid_fk_standing_services
+          stable_service_id: uuid_not_null_fk_standing_services
           package_key: text_not_null
           flow_id: text_not_null
           instance_id: text_not_null
@@ -617,9 +618,10 @@ diagnostic_direct_event_admission:
           recipient_count: integer_nonnegative_not_null
         unique_constraints:
           - [event_id]
-        checks:
+        row_checks:
           - raw_implies_all_pack_and_authorization_fields_null
           - normalized_implies_all_pack_and_authorization_fields_nonnull
+        finalization_and_integrity_invariants:
           - event_name_and_output_kind_match_the_linked_event_and_committed_authorization_evidence
           - ordinals_are_contiguous_from_zero_and_count_equals_parent_output_count
       state_authority: >-
@@ -696,7 +698,7 @@ diagnostic_direct_event_admission:
         - normalized_provider
         - authoritative_provider_event_id
         - normalized_provider_event_type
-        - canonical_redacted_provider_body_or_form_data
+        - nonreversible_sha256_of_canonical_unredacted_provider_body_or_form_data
         - target_entity_id
         - stable_ingress_service_identity_package_key_flow_id_and_instance
       excluded_fields:
@@ -716,7 +718,9 @@ diagnostic_direct_event_admission:
         - current_retry_acknowledgement_mode
       provider_request_projection: >-
         Hash provider-authored identity, authoritative provider event type, exact
-        canonical redacted body or form semantics, and stable target identity.
+        non-reversible SHA-256 of canonical unredacted body or form semantics,
+        and stable target identity. Redaction changes publication/readback only;
+        it cannot collapse two distinct semantically consumed requests.
         Do not hash a persisted output envelope or fields synthesized by the
         current pack, because receipt observations and pack output projection are
         not retry identity.
@@ -744,9 +748,12 @@ diagnostic_direct_event_admission:
         provenance. It is never recomputed or compared against the current
         catalog to decide an exact retry.
       conditional_output_rule: >-
-        The raw event is ordinal zero. Zero, one, or multiple matched normalized
-        outputs follow in the exact compiled-plan order. A conditionally absent
-        normalized output creates no child and exact retry preserves that absence.
+        The raw event is ordinal zero. Zero or one matched normalized output may
+        follow at ordinal one. Pairwise-overlapping normalized branches fail at
+        pack load and a forced runtime multi-match fails with zero mutation. A
+        conditionally absent normalized output creates no child and exact retry
+        preserves that absence. Multiple-normalized fanout requires a separate
+        spec gate.
     event_identity: >-
       Derive the deterministic marker event ID from publication_id and each
       executable event ID from publication_id plus its zero-based ordinal using
@@ -1161,7 +1168,8 @@ proof_manifestations:
   inbound_publication:
     - raw_only_delivery_commits_one_parent_one_ordinal_zero_child_one_evidence_event_and_event_owned_route_state
     - raw_plus_one_normalized_delivery_commits_two_stably_ordered_children
-    - raw_plus_multiple_normalized_delivery_commits_the_complete_compiled_order
+    - overlapping_normalized_branches_refuse_at_pack_load
+    - forced_runtime_multi_match_refuses_with_zero_mutation
     - conditionally_absent_normalized_output_commits_only_raw_and_preserves_absence_on_retry
     - running_and_paused_current_generation_parent_children_evidence_scopes_and_event_delivery_manifests_commit_atomically
     - completed_cancelled_failed_forked_and_retired_generation_refuse_before_any_parent_child_or_event_mutation

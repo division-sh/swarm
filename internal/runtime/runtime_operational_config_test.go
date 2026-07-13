@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -128,6 +129,38 @@ func testOperationalRuntimeConfig() *config.Config {
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
 		},
+	}
+}
+
+func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	catalog, err := providertriggers.NewCatalogSnapshot()
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	sentinel := errors.New("inbound publication corruption")
+	corrupt := &recordingInboundStore{integrityErr: sentinel}
+	_, err = NewRuntime(context.Background(), RuntimeDeps{
+		Config: testOperationalRuntimeConfig(), Stores: Stores{InboundStore: corrupt},
+		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
+	})
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "validate inbound publication integrity at startup") {
+		t.Fatalf("NewRuntime corruption error = %v", err)
+	}
+	if corrupt.integrityCalls.Load() != 1 {
+		t.Fatalf("integrity calls = %d, want 1", corrupt.integrityCalls.Load())
+	}
+
+	healthy := &recordingInboundStore{}
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{
+		Config: testOperationalRuntimeConfig(), Stores: Stores{InboundStore: healthy},
+		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime healthy store: %v", err)
+	}
+	if healthy.integrityCalls.Load() != 1 || rt.InboundGateway == nil || rt.InboundGateway.store != healthy {
+		t.Fatal("runtime did not validate and bind the selected inbound publication owner")
 	}
 }
 

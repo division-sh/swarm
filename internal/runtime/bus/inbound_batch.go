@@ -9,26 +9,15 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
-type InboundDeliveryClaim struct {
-	ProviderEventID string
-	EntityID        string
-	Provider        string
-}
-
 type InboundDeliveryBatch struct {
-	Claim                     InboundDeliveryClaim
-	Events                    []InboundDeliveryEvent
-	AcknowledgeBeforeDispatch bool
+	Provider string
+	Events   []InboundDeliveryEvent
 }
 
 type InboundDeliveryEvent struct {
 	Event         events.Event
 	Kind          runtimeprovideroutput.Kind
 	Authorization runtimeprovideroutput.Authorization
-}
-
-type InboundDeliveryBatchResult struct {
-	Duplicate bool
 }
 
 // ProviderOutputAuthorizationVerifier is the current immutable verified-pack
@@ -38,93 +27,75 @@ type ProviderOutputAuthorizationVerifier interface {
 	VerifyProviderOutputAuthorization(runtimeprovideroutput.Authorization) error
 }
 
-type acknowledgedInboundMutationContextKey struct{}
-
-func withAcknowledgedInboundMutation(ctx context.Context) context.Context {
-	return context.WithValue(ctx, acknowledgedInboundMutationContextKey{}, true)
-}
-
-func acknowledgedInboundMutation(ctx context.Context) bool {
-	value, _ := ctx.Value(acknowledgedInboundMutationContextKey{}).(bool)
-	return value
-}
-
-// PublishInboundDelivery persists one provider marker and every derived event
-// through one selected-store mutation. Route planning and template lifecycle
-// materialization therefore participate in the same transaction.
-func (eb *EventBus) PublishInboundDelivery(ctx context.Context, batch InboundDeliveryBatch) (InboundDeliveryBatchResult, error) {
-	result := InboundDeliveryBatchResult{}
-	if eb == nil || eb.store == nil {
-		return result, fmt.Errorf("event bus store is required")
+// PrepareInboundDeliveryBatchInMutation persists and plans every executable
+// event through the inbound publication mutation that already owns the SQL
+// transaction. It never claims request identity or opens another transaction.
+func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, batch InboundDeliveryBatch) ([]PreparedPublish, error) {
+	if eb == nil {
+		return nil, fmt.Errorf("event bus is required")
 	}
 	validated, err := preflightInboundDeliveryBatch(eb.providerOutputAuthorizationVerifier(), batch)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	runner, ok := eb.store.(EventMutationRunner)
-	if !ok || runner == nil {
-		return result, fmt.Errorf("typed event mutation runner is required for inbound delivery")
+	mutation, ok := eb.eventMutationFromContext(ctx)
+	if !ok || mutation == nil {
+		return nil, fmt.Errorf("typed event mutation context is required for inbound delivery")
 	}
-	err = runner.RunEventMutation(ctx, func(mutation EventMutation) error {
-		inbound, ok := mutation.(InboundDeliveryMutation)
-		if !ok || inbound == nil {
-			return fmt.Errorf("selected-store event mutation does not support inbound delivery claims")
+	txctx, err := eb.withTransactionRouteOverlay(mutation.Context())
+	if err != nil {
+		return nil, err
+	}
+	prepared := make([]PreparedPublish, 0, len(validated.Events))
+	for _, item := range validated.Events {
+		itemCtx := txctx
+		if item.Kind == runtimeprovideroutput.KindRaw {
+			itemCtx = withoutProviderOutputAuthorization(itemCtx)
+		} else {
+			itemCtx = withProviderOutputAuthorization(itemCtx, item.Authorization)
 		}
-		txctx := mutation.Context()
-		if batch.AcknowledgeBeforeDispatch {
-			txctx = withAcknowledgedInboundMutation(txctx)
-		}
-		inserted, err := inbound.ClaimInboundEvent(txctx, batch.Claim.ProviderEventID, batch.Claim.EntityID, batch.Claim.Provider)
+		publication, err := eb.PreparePublishInMutation(itemCtx, item.Event)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if !inserted {
-			result.Duplicate = true
-			return nil
-		}
-		for _, item := range validated.Events {
-			event := item.Event
-			if item.Kind == runtimeprovideroutput.KindRaw {
-				txctx = withoutProviderOutputAuthorization(txctx)
-			} else {
-				txctx = withProviderOutputAuthorization(txctx, item.Authorization)
-			}
-			if err := eb.PublishInMutation(txctx, event); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return result, err
+		prepared = append(prepared, publication)
+	}
+	return prepared, nil
 }
 
 func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier, batch InboundDeliveryBatch) (InboundDeliveryBatch, error) {
-	claimProvider := strings.TrimSpace(batch.Claim.Provider)
-	if strings.TrimSpace(batch.Claim.ProviderEventID) == "" || strings.TrimSpace(batch.Claim.EntityID) == "" || claimProvider == "" {
-		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery claim requires provider_event_id, entity_id, and provider")
+	provider := strings.TrimSpace(batch.Provider)
+	if provider == "" {
+		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires provider")
 	}
-	if len(batch.Events) == 0 {
-		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires at least one event")
+	if len(batch.Events) < 1 || len(batch.Events) > 2 {
+		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires raw plus zero or one normalized event")
 	}
 	validated := batch
-	validated.Claim.Provider = claimProvider
+	validated.Provider = provider
 	validated.Events = append([]InboundDeliveryEvent(nil), batch.Events...)
 	for index := range validated.Events {
 		item := &validated.Events[index]
 		authorization := item.Authorization.Normalized()
 		switch item.Kind {
 		case runtimeprovideroutput.KindRaw:
+			if index != 0 {
+				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery raw provider output must be ordinal 0")
+			}
 			if !authorization.Empty() {
 				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d raw provider output must not carry normalized-output authorization", index)
 			}
 			item.Authorization = runtimeprovideroutput.Authorization{}
 		case runtimeprovideroutput.KindNormalized:
+			if index != 1 {
+				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery normalized provider output must be ordinal 1")
+			}
 			if !authorization.Valid() {
 				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output requires complete verified-pack authorization", index)
 			}
 			eventName := strings.TrimSpace(string(item.Event.Type()))
-			if authorization.Provider != claimProvider || authorization.Event != eventName {
-				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output authorization does not match delivery claim/event", index)
+			if authorization.Provider != provider || authorization.Event != eventName {
+				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output authorization does not match provider/event", index)
 			}
 			if verifier == nil {
 				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output has no current compiled authorization owner", index)
