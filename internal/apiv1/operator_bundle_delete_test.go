@@ -157,13 +157,11 @@ func TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext(t *testing.T) {
 	}
 }
 
-func TestOperatorBundleDeleteForcePartialRequiresCleanupEvidenceBeforeDeactivation(t *testing.T) {
+func TestOperatorBundleDeleteForceDoesNotInferRuntimeDeactivationFromResult(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name       string
-		result     bundledelete.Result
-		wantLoaded bool
-		wantCause  string
+		name   string
+		result bundledelete.Result
 	}{
 		{
 			name: "pre_cleanup_inventory_failure_stays_loaded",
@@ -176,7 +174,6 @@ func TestOperatorBundleDeleteForcePartialRequiresCleanupEvidenceBeforeDeactivati
 				PartialFailure: true,
 				Errors:         []bundledelete.PartialError{{Scope: "managed_containers", Message: "inventory failed"}},
 			},
-			wantLoaded: true,
 		},
 		{
 			name: "cleanup_started_partial_failure_deactivates",
@@ -194,7 +191,6 @@ func TestOperatorBundleDeleteForcePartialRequiresCleanupEvidenceBeforeDeactivati
 				},
 				Errors: []bundledelete.PartialError{{Scope: "managed_containers", Message: "stop failed"}},
 			},
-			wantCause: swruntime.RuntimeContextCauseUnavailable,
 		},
 	}
 	for _, tt := range tests {
@@ -218,14 +214,8 @@ func TestOperatorBundleDeleteForcePartialRequiresCleanupEvidenceBeforeDeactivati
 				t.Fatalf("bundle.delete partial error = %#v", resp.Error)
 			}
 			lookup := manager.LookupBundleHashStatus(runStartTestBundleHash)
-			if tt.wantLoaded {
-				if !lookup.Loaded() {
-					t.Fatalf("runtime context lookup after pre-cleanup partial = %#v, want loaded", lookup)
-				}
-				return
-			}
-			if lookup.Loaded() || lookup.Cause != tt.wantCause {
-				t.Fatalf("runtime context lookup after cleanup-started partial = %#v, want cause %s", lookup, tt.wantCause)
+			if !lookup.Loaded() {
+				t.Fatalf("runtime context lookup after force result = %#v, want coordinator-owned quiescence only", lookup)
 			}
 		})
 	}
@@ -381,6 +371,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			runtimeContexts := newBundleDeleteRuntimeContextManager(t)
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -393,6 +384,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 					Events:           bus,
 					Source:           source,
 					RunBundleContext: pg,
+					RuntimeContexts:  runtimeContexts,
 					Bundle: runtimecontracts.BundleIdentity{
 						WorkflowName:    "review",
 						WorkflowVersion: "1.0.0",
@@ -405,6 +397,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 						Locks:              pg,
 						ContainerInventory: emptyBundleDeleteContainerInventory{},
 						Containers:         noopBundleDeleteContainers{},
+						RuntimeQuiescer:    runtimeContexts,
 						Now:                func() time.Time { return time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC) },
 					},
 				}),

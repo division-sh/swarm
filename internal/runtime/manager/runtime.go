@@ -121,7 +121,7 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	if operationID == "" {
 		operationID = uuid.NewString()
 	}
-	if err := am.startAgentLoopTransition(ctx, agent, agent.Subscriptions(), "restart", operationID, nil); err != nil {
+	if err := am.startAgentLoopTransition(ctx, agent, agent.Subscriptions(), "restart", operationID, nil, sessions.LifecycleMutationPlan{}); err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
 	}
 	token, _ := am.lifecycle.token(agentID)
@@ -1452,15 +1452,15 @@ func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, r
 }
 
 func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
-	_ = am.startAgentLoopTransition(parent, agent, agent.Subscriptions(), "start", "", nil)
+	_ = am.startAgentLoopTransition(parent, agent, agent.Subscriptions(), "start", "", nil, sessions.LifecycleMutationPlan{})
 }
 
 func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, agent Agent, subscriptions []events.EventType) {
-	_ = am.startAgentLoopTransition(parent, agent, subscriptions, "start", "", nil)
+	_ = am.startAgentLoopTransition(parent, agent, subscriptions, "start", "", nil, sessions.LifecycleMutationPlan{})
 }
 
-func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent Agent, subscriptions []events.EventType, trigger, operationID string, rec *PersistedAgent) error {
-	loopCtx, token, done, err := am.lifecycle.replaceLoop(parent, agent.ID(), trigger, operationID, rec)
+func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent Agent, subscriptions []events.EventType, trigger, operationID string, rec *PersistedAgent, subordinate sessions.LifecycleMutationPlan) error {
+	loopCtx, token, done, err := am.lifecycle.replaceLoop(parent, agent.ID(), trigger, operationID, rec, subordinate)
 	if err != nil {
 		return err
 	}

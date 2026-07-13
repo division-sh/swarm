@@ -57,8 +57,7 @@ func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanag
 	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
 
-func (startupRecoveryManagerStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (startupRecoveryManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
@@ -92,9 +91,6 @@ func (s *startupRecoveryFlakyManagerStore) LoadAgents(context.Context) ([]runtim
 	return nil, nil
 }
 
-func (*startupRecoveryFlakyManagerStore) MarkAgentTerminated(context.Context, string) error {
-	return nil
-}
 func (*startupRecoveryFlakyManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }
@@ -126,9 +122,6 @@ func (s *startupManagerReplayRuntimeStore) LoadAgents(context.Context) ([]runtim
 	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
 
-func (*startupManagerReplayRuntimeStore) MarkAgentTerminated(context.Context, string) error {
-	return nil
-}
 func (*startupManagerReplayRuntimeStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }

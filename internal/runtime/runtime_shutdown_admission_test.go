@@ -43,10 +43,6 @@ func (*runtimeShutdownManagerStore) LoadAgents(context.Context) ([]runtimemanage
 	return nil, nil
 }
 
-func (*runtimeShutdownManagerStore) MarkAgentTerminated(context.Context, string) error {
-	return nil
-}
-
 func (*runtimeShutdownManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }

@@ -61,9 +61,9 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		t.Fatal("expected EnsureEntitySchema to require entity_id")
 	}
 
-	// MarkAgentTerminated: validation.
-	if err := pg.MarkAgentTerminated(ctx, ""); err == nil {
-		t.Fatal("expected MarkAgentTerminated validation error")
+	// Canonical lifecycle transition: validation.
+	if _, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{}); err == nil {
+		t.Fatal("expected lifecycle transition validation error")
 	}
 
 	// Routing rule required fields.

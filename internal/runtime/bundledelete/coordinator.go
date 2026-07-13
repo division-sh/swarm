@@ -17,9 +17,14 @@ type Coordinator struct {
 	Locks              LockManager
 	ContainerInventory ManagedContainerInventoryReader
 	Containers         ManagedContainerStopper
+	RuntimeQuiescer    RuntimeQuiescer
 	Now                func() time.Time
 	Operation          string
 	LockKey            string
+}
+
+type RuntimeQuiescer interface {
+	QuiesceBundleRuntime(context.Context, string) error
 }
 
 func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) {
@@ -101,6 +106,12 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 		result.DeliveriesCancelled = len(result.Plan.ActiveDeliveries)
 		result.ContainersStopped = len(containerResult.Selected)
 		return result, nil
+	}
+	if c.RuntimeQuiescer == nil {
+		return Result{}, fmt.Errorf("bundle delete runtime quiescer is required")
+	}
+	if err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash); err != nil {
+		return Result{}, err
 	}
 
 	cleanup, err := c.Cleaner.ApplyBundleForceDeletePreservationCleanup(ctx, preservationcleanup.Request{

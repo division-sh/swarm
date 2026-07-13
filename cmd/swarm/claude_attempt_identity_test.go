@@ -438,7 +438,8 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
-		return claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: runtimesessions.NewPostgresRegistry(db, time.Minute)}
+		pg.SetSessionLockTTL(time.Minute)
+		return claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: pg}
 	default:
 		t.Fatalf("unknown Claude proof backend %q", name)
 		return claudeAttemptProofBackend{}

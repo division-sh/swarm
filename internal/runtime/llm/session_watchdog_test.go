@@ -47,8 +47,9 @@ func waitForWatchdogUpdate(t *testing.T, store *captureConversationStore) Conver
 	t.Helper()
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if store.watchdogUpdate.Watchdog != nil {
-			return store.watchdogUpdate
+		update := store.capturedWatchdogUpdate()
+		if update.Watchdog != nil {
+			return update
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -59,7 +60,6 @@ func waitForWatchdogUpdate(t *testing.T, store *captureConversationStore) Conver
 func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput(t *testing.T) {
 	prevPoll := sessionWatchdogPollInterval
 	sessionWatchdogPollInterval = 5 * time.Millisecond
-	defer func() { sessionWatchdogPollInterval = prevPoll }()
 
 	store := &captureConversationStore{}
 	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
@@ -71,7 +71,10 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    60 * time.Millisecond,
 	})
-	t.Cleanup(func() { _ = writer.Close() })
+	defer func() {
+		_ = writer.Close()
+		sessionWatchdogPollInterval = prevPoll
+	}()
 
 	writer.WriteStdout([]byte(`{"type":"assistant","message":"working"}`))
 	update := waitForWatchdogUpdate(t, store)
@@ -111,7 +114,6 @@ func TestSessionWatchdogMonitorWriter_SkipsStatelessModes(t *testing.T) {
 func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *testing.T) {
 	prevPoll := sessionWatchdogPollInterval
 	sessionWatchdogPollInterval = 5 * time.Millisecond
-	defer func() { sessionWatchdogPollInterval = prevPoll }()
 
 	store := &captureConversationStore{}
 	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
@@ -123,7 +125,10 @@ func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *test
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
-	t.Cleanup(func() { _ = writer.Close() })
+	defer func() {
+		_ = writer.Close()
+		sessionWatchdogPollInterval = prevPoll
+	}()
 
 	update := waitForWatchdogUpdate(t, store)
 	if update.Watchdog.State != conversationWatchdogStateNoOutput {

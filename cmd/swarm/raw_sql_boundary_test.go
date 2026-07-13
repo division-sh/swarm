@@ -302,11 +302,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1986,
 			Reason:         "operator dependency wiring names the selected workflow mutation capability",
 		},
-		"internal/runtime/sessions/postgres.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "Postgres session registry is an explicit backend-specific SQL owner",
-		},
 		"internal/runtime/workspace/host_manager.go": {
 			Classification: rawSQLWorkspaceProcessBoundary,
 			Issue:          1783,

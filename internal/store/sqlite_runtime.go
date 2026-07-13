@@ -410,55 +410,6 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 	return out, rows.Err()
 }
 
-func (s *SQLiteRuntimeStore) MarkAgentTerminated(ctx context.Context, agentID string) error {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return fmt.Errorf("agent_id is required")
-	}
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required")
-	}
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	now := s.now()
-	if err := s.runRuntimeMutation(ctx, "sqlite mark agent terminated", func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `
-			UPDATE agents
-			SET status = 'terminated',
-			    last_active_at = ?
-			WHERE agent_id = ?
-		`, now, agentID); err != nil {
-			return fmt.Errorf("mark sqlite agent terminated: %w", err)
-		}
-		if _, err := tx.ExecContext(txctx, `
-			UPDATE agent_sessions
-			SET status = 'terminated',
-			    termination_reason = 'cancelled',
-			    terminated_at = COALESCE(terminated_at, ?),
-			    lease_holder = NULL,
-			    lease_expires_at = NULL,
-			    updated_at = ?
-			WHERE agent_id = ?
-			  AND status IN ('active', 'suspended')
-		`, now, now, agentID); err != nil {
-			return fmt.Errorf("mark sqlite agent terminated sessions: %w", err)
-		}
-		if _, err := tx.ExecContext(txctx, `
-			UPDATE agent_conversation_audits
-			SET status = 'terminated',
-			    updated_at = ?
-			WHERE agent_id = ?
-			  AND status = 'active'
-		`, now, agentID); err != nil {
-			return fmt.Errorf("mark sqlite agent terminated conversation audits: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("mark sqlite agent terminated: %w", err)
-	}
-	return nil
-}
-
 func (s *SQLiteRuntimeStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
 	if strings.TrimSpace(entityID) == "" {
 		return fmt.Errorf("entity_id is required")

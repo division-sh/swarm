@@ -19,7 +19,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -174,6 +173,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	llmRuntime := newScriptedLLMRuntime()
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := &store.PostgresStore{DB: db}
+	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(context.Background(), catalogRuntimeRunID))
 	t.Cleanup(cancel)
@@ -190,7 +190,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:          pg,
 		RuntimeLogStore:     pg,
-		SessionRegistry:     sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
+		SessionRegistry:     pg,
 		ManagerStore:        pg,
 		ScheduleStore:       pg,
 		StartupOwnership:    pg,

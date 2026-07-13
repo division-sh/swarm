@@ -130,10 +130,10 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 	now := s.now()
 
 	return s.runRuntimeMutation(ctx, "sqlite conversation upsert", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureRunRow(txctx, tx, runID, "", "", now); err != nil {
-			return err
-		}
 		if resolved.Stateless {
+			if err := sqliteEnsureRunRow(txctx, tx, runID, "", "", now); err != nil {
+				return err
+			}
 			identity := taskAuditIdentityFromConversation(rec)
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO agent_conversation_audits (
@@ -173,6 +173,12 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 		}
 		if strings.TrimSpace(rec.SessionID) == "" {
 			return fmt.Errorf("session_id is required for live session conversation persistence")
+		}
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, agentID, "upsert_conversation", false); err != nil {
+			return err
+		}
+		if err := sqliteEnsureRunRow(txctx, tx, runID, "", "", now); err != nil {
+			return err
 		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions
@@ -287,6 +293,9 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 	}
 	var rows int64
 	if err := s.runRuntimeMutation(ctx, "sqlite live session watchdog update", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, agentID, "update_watchdog", false); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions
 			SET runtime_state = json_patch(COALESCE(runtime_state, '{}'), ?),

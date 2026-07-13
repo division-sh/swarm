@@ -137,8 +137,9 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 	}
 
 	var lease *sessions.Lease
+	var hydrated ConversationRecord
 	if !resolved.Stateless {
-		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
+		lease, hydrated, err = acquireLiveSessionAndConversation(ctx, r.sessions, r.conversations, agentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
 			return nil, err
 		}
@@ -179,16 +180,13 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 		}(),
 		SystemPrompt: augmentAgentSystemPrompt(systemPrompt, actor, tools),
 		Tools:        tools,
-		Messages:     nil,
+		Messages:     append([]Message(nil), hydrated.Messages...),
+		TurnCount:    hydrated.TurnCount,
+		Watchdog:     hydrated.Watchdog,
 	}
-	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode.String(), resolved.Scope.String(), resolved.ScopeKey); err == nil && ok {
-			s.Messages = rec.Messages
-			s.TurnCount = rec.TurnCount
-			s.RetryReason = strings.TrimSpace(rec.RetryReason)
-			s.RetriesFromSessionID = strings.TrimSpace(rec.RetriesFromSessionID)
-			s.Watchdog = rec.Watchdog
-		}
+	if !resolved.Stateless {
+		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
+		s.RetriesFromSessionID = strings.TrimSpace(hydrated.RetriesFromSessionID)
 	}
 	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))
 	return s, nil

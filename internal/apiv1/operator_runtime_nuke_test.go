@@ -17,6 +17,7 @@ import (
 func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	owners := newRecordingRuntimeNukeOwners()
+	fixture := newOperatorRuntimeContextFixture(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -24,6 +25,7 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
+			RuntimeContexts:  fixture.manager,
 			ResetCoordinator: owners,
 			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
 			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
@@ -49,6 +51,11 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	}
 	if !owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || !owners.lastQuiescence.Result.IncludeBundles || !owners.lastCleanup.Result.IncludeBundles || !owners.lastContainers.Result.IncludeBundles {
 		t.Fatalf("include_bundles default not propagated through owners: plan=%#v quiescence=%v cleanup=%v containers=%v", owners.lastPlan, owners.lastQuiescence.Result.IncludeBundles, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
+	}
+	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
+		if lookup := fixture.manager.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
+			t.Fatalf("dry-run unloaded runtime context %s: %#v", bundleHash, lookup)
+		}
 	}
 }
 
@@ -188,7 +195,7 @@ func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntime
 	if len(replayOwners.calls) != 0 {
 		t.Fatalf("runtime.nuke partial replay owner calls = %d, want 0", len(replayOwners.calls))
 	}
-	assertRuntimeContextsUnloaded(t, replayFixture.manager)
+	assertRuntimeContextsLoaded(t, replayFixture.manager)
 }
 
 func assertRuntimeContextsUnloaded(t *testing.T, manager *swruntime.RuntimeContextManager) {
@@ -201,7 +208,17 @@ func assertRuntimeContextsUnloaded(t *testing.T, manager *swruntime.RuntimeConte
 	}
 }
 
-func TestOperatorRuntimeNukeExcludeBundlesLeavesRuntimeContextsLoaded(t *testing.T) {
+func assertRuntimeContextsLoaded(t *testing.T, manager *swruntime.RuntimeContextManager) {
+	t.Helper()
+	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
+		lookup := manager.LookupBundleHashStatus(bundleHash)
+		if !lookup.Loaded() {
+			t.Fatalf("runtime context %s after idempotent replay = %#v, want no repeated side effect", bundleHash, lookup)
+		}
+	}
+}
+
+func TestOperatorRuntimeNukeExcludeBundlesStillQuiescesRuntimeContexts(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
@@ -224,12 +241,7 @@ func TestOperatorRuntimeNukeExcludeBundlesLeavesRuntimeContextsLoaded(t *testing
 	if resp.Error != nil {
 		t.Fatalf("runtime.nuke include_bundles=false error = %#v", resp.Error)
 	}
-	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
-		lookup := fixture.manager.LookupBundleHashStatus(bundleHash)
-		if !lookup.Loaded() {
-			t.Fatalf("runtime context %s after include_bundles=false = %#v, want loaded", bundleHash, lookup)
-		}
-	}
+	assertRuntimeContextsUnloaded(t, fixture.manager)
 }
 
 func TestOperatorRuntimeNukeAuthFailureDoesNotTouchResetOwners(t *testing.T) {

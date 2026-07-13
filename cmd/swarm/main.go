@@ -213,6 +213,7 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Locks:              pg,
 				ContainerInventory: req.Workspaces,
 				Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
+				RuntimeQuiescer:    req.RuntimeContextManager,
 			},
 			ConversationForks:         pg,
 			ConversationForkLifecycle: pg,
@@ -292,6 +293,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
+	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 	bundle := storeBundle{
 		Postgres:                    pg,
 		SQLDB:                       pg.DB,
@@ -301,7 +303,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		SchemaBootstrapper:          pg,
 		EventStore:                  pg,
 		PipelineStore:               runtimepipeline.NewWorkflowInstanceStore(pg.DB),
-		SessionRegistry:             sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
+		SessionRegistry:             pg,
 		ConversationStore:           pg,
 		ManagerStore:                pg,
 		ScheduleStore:               pg,

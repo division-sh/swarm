@@ -140,8 +140,7 @@ func (s *recoveryTestStore) UpsertAgent(context.Context, PersistedAgent) error {
 func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return append([]PersistedAgent(nil), s.agents...), nil
 }
-func (s *recoveryTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (s *recoveryTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }

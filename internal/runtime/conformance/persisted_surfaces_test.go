@@ -73,7 +73,9 @@ func conformanceProviderCredentialResolver(t testing.TB, key, value string) runt
 
 func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
 	t.Helper()
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	registry := &store.PostgresStore{DB: db}
+	registry.SetSessionLockTTL(30 * time.Second)
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, agentID, runtimeMode, sessionScope, "test-owner", scopeKey)
 	if err != nil {
 		t.Fatalf("Acquire(%s,%s,%s): %v", agentID, runtimeMode, scopeKey, err)
@@ -286,11 +288,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	pg.SetSessionLockTTL(30 * time.Second)
 	credentials := conformanceProviderCredentialResolver(t, "ANTHROPIC_API_KEY", "test-key")
 	runtime, err := (runtimellm.RuntimeFactory{
 		Cfg:                  &config.Config{},
-		Sessions:             registry,
+		Sessions:             pg,
 		Conversations:        pg,
 		LockOwner:            "worker-1",
 		Events:               bus,
@@ -447,7 +449,8 @@ printf '{"result":"ok"}'
 	t.Setenv("SWARM_FAKE_DOCKER_STATE", dockerState)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	pg.SetSessionLockTTL(30 * time.Second)
+	registry := runtimesessions.Registry(pg)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1529,8 +1532,10 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	lease, err := registry.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "conformance", "global")
+	pg.SetSessionLockTTL(30 * time.Second)
+	registry := runtimesessions.Registry(pg)
+	leaseCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+	lease, err := registry.Acquire(leaseCtx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "conformance", "global")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}

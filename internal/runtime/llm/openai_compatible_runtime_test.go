@@ -72,7 +72,7 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	cfg := openAICompatibleTestConfig(server.URL)
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
-		Sessions:             sessions.NewInMemoryRegistry(time.Second),
+		Sessions:             atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)},
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key").Store,

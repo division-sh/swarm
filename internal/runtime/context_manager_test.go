@@ -337,6 +337,29 @@ func TestRuntimeContextManagerDeactivationPropagatesShutdownOptions(t *testing.T
 	}
 }
 
+func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
+	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := NewRuntimeContextManager(nil, contextDef)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	first := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+	if first.ShutdownErr == nil || !first.Changed {
+		t.Fatalf("first deactivation = %#v, want changed shutdown failure", first)
+	}
+	entry := manager.contexts[runtimeContextTestHashA]
+	if entry == nil || entry.shutdownComplete {
+		t.Fatal("failed shutdown was marked complete")
+	}
+	second := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	if second.ShutdownErr != nil || second.Changed {
+		t.Fatalf("retry deactivation = %#v, want successful retry without visibility transition", second)
+	}
+	if !entry.shutdownComplete {
+		t.Fatal("successful shutdown retry was not marked complete")
+	}
+}
+
 func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
 	t.Helper()
 	return testBundleContextWithAgents(t, bundleHash, eventName)

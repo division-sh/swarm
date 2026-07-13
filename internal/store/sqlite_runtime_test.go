@@ -19,6 +19,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -1450,7 +1451,7 @@ func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Now().UTC()
 	store.SetNowFnForTest(func() time.Time { return now })
@@ -1805,8 +1806,8 @@ func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *test
 	}
 }
 
-func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
-	ctx := context.Background()
+func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *testing.T) {
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
@@ -1855,8 +1856,17 @@ func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
 		t.Fatalf("seed task audit: %v", err)
 	}
 
-	if err := store.MarkAgentTerminated(ctx, "agent-cleanup-1"); err != nil {
-		t.Fatalf("MarkAgentTerminated: %v", err)
+	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "sqlite-test-terminate-agent-cleanup-1",
+		AgentID: "agent-cleanup-1", Trigger: "test", ExpectedPhase: runtimemanager.AgentLifecycleRegistered,
+		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
+		ConfigRevision: "test", RunMode: runtimemanager.AgentRunModeStopped,
+		Subordinate: runtimesessions.LifecycleMutationPlan{
+			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonCancelled,
+		},
+		Now: now,
+	}); err != nil {
+		t.Fatalf("terminate through lifecycle authority: %v", err)
 	}
 
 	var (
@@ -1910,8 +1920,8 @@ func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
 	if !ok || terminatedAt.IsZero() {
 		t.Fatalf("session terminated_at = %v ok=%v, want non-zero", terminatedAt, ok)
 	}
-	if auditStatus != "terminated" || activeAuditCount != 0 {
-		t.Fatalf("audit status = %q active_count=%d, want terminated and no active audits", auditStatus, activeAuditCount)
+	if auditStatus != "active" || activeAuditCount != 1 {
+		t.Fatalf("audit status = %q active_count=%d, want immutable active evidence", auditStatus, activeAuditCount)
 	}
 }
 

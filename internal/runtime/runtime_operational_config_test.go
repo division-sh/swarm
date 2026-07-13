@@ -39,8 +39,7 @@ func (s *recoveryGuardManagerStore) LoadAgents(context.Context) ([]runtimemanage
 	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
 
-func (*recoveryGuardManagerStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (*recoveryGuardManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }

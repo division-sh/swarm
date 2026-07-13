@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -37,7 +38,7 @@ func TestReconfigureAgent_RotatesFlowScopedSession(t *testing.T) {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	seedCtx := models.WithActor(context.Background(), cfg)
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), sessions.NormalizeSessionScope(cfg.SessionScope), "reconfigure", cfg.CanonicalFlowPath())
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
@@ -76,7 +77,7 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	seedCtx := models.WithActor(context.Background(), cfg)
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), sessions.NormalizeSessionScope(cfg.SessionScope), "reconfigure", cfg.EffectiveEntityID())
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
