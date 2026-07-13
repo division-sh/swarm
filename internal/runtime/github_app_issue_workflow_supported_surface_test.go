@@ -114,7 +114,7 @@ func runGitHubAppIssueWorkflowSurface(t *testing.T, backend slackManagedConnecto
 		Status:         runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:      time.Now().Add(-time.Hour),
 	})
-	source := githubAppIssueWorkflowSource(t, fake.server.URL)
+	source := githubAppIssueWorkflowSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
@@ -449,7 +449,7 @@ func githubIssueOpenedPayload(installationID string, issueNumber int, title stri
 	return []byte(fmt.Sprintf(`{"action":"opened","installation":{"id":%s},"repository":{"name":"octo-repo","owner":{"login":"octo-org"}},"issue":{"number":%d,"title":%q},"sender":{"login":"octocat","type":"User"}}`, installationID, issueNumber, title))
 }
 
-func githubAppIssueWorkflowSource(t *testing.T, baseURL string) semanticview.Source {
+func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	commentHandler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
@@ -524,7 +524,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL string) semanticview.Sou
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issues": addLabelsHandler},
 		},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -563,7 +563,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL string) semanticview.Sou
 				"inbound.github.issues":        {createNodeID, labelNodeID},
 			},
 		},
-	})
+	}))
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -636,7 +636,7 @@ func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testi
 	beforeComments := fake.commentRequestCount()
 	beforeIssues := fake.issueRequestCount()
 	beforeLabels := fake.labelRequestCount()
-	source := githubAppIssueWorkflowSource(t, fake.server.URL)
+	source := githubAppIssueWorkflowSource(t, fake.server.URL, backend.flowInstance)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
@@ -648,7 +648,7 @@ func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testi
 	if got := countGitHubActivityAttemptsForSource(t, backend, "github.create_issue_comment", inboundEventID); got != 1 {
 		t.Fatalf("%s %s activity attempts = %d, want one failed claim", backend.name, label, got)
 	}
-	requireGitHubFailureEventEventually(t, backend, label, "github_create_issue_comment.failed", inboundEventID)
+	requireGitHubFailureEventEventually(t, backend, label, boundedProviderFlowID+".github_create_issue_comment.failed", inboundEventID)
 	if got := fake.tokenRequestCount(); got != beforeTokens {
 		t.Fatalf("%s %s token requests = %d, want still %d", backend.name, label, got, beforeTokens)
 	}

@@ -1525,7 +1525,7 @@ func TestPostgresStore_InboundEvidenceOwnerRejectsPayloadValidatorFailureBeforeP
 	evt := eventtest.PersistedProjection(eventID,
 		events.EventType("platform.inbound_recorded"),
 		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
-		[]byte(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`"}`),
+		[]byte(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
 		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt)
 	if err == nil {
@@ -1557,7 +1557,7 @@ func TestPostgresStore_InboundEvidenceOwnerPlatformCatalogSchemaMatchesPayload(t
 	evt := eventtest.PersistedProjection(eventID,
 		events.EventType("platform.inbound_recorded"),
 		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
-		[]byte(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`"}`),
+		[]byte(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
 		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt); err != nil {
 		t.Fatalf("append typed inbound evidence: %v", err)
@@ -1575,7 +1575,7 @@ func TestPostgresStore_InboundEvidenceOwnerPlatformCatalogSchemaMatchesPayload(t
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
 		t.Fatalf("unmarshal inbound event payload: %v", err)
 	}
-	for _, key := range []string{"publication_id", "publication_event_id", "provider", "provider_event_id", "entity_id"} {
+	for _, key := range []string{"publication_id", "provider", "provider_event_id", "entity_id", "event_ids", "event_names", "output_count"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("inbound payload missing %s: %#v", key, payload)
 		}

@@ -999,9 +999,9 @@ func seedPostgresInboundGatewayRuntime(
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ($1, 'test', 'static', $2::jsonb, 'active', now())
+		VALUES ($1, $2, 'static', $3::jsonb, 'active', now())
 		ON CONFLICT (instance_id) DO UPDATE SET config = EXCLUDED.config, status = EXCLUDED.status
-	`, flowInstance, string(configBytes)); err != nil {
+	`, flowInstance, boundedProviderFlowID, string(configBytes)); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1069,8 +1069,8 @@ func seedSQLiteInboundGatewayRuntime(
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, 'test', 'static', ?, 'active', ?)
-	`, flowInstance, string(configBytes), now); err != nil {
+		VALUES (?, ?, 'static', ?, 'active', ?)
+	`, flowInstance, boundedProviderFlowID, string(configBytes), now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `

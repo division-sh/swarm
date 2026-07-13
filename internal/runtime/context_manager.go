@@ -588,9 +588,9 @@ func (m *RuntimeContextManager) standingServiceSuppressedLocked(serviceID string
 	return suppressed
 }
 
-// SuppressStandingServiceTargets withdraws process ingress only after the
-// durable desired-state transition commits. Declaration targets remain in the
-// context so alias collision authority and later resume are preserved.
+// SuppressStandingServiceTargets withdraws process ingress before a lifecycle
+// transition drains admitted work. Declaration targets remain in the context
+// so alias collision authority and rollback/resume publication are preserved.
 func (m *RuntimeContextManager) SuppressStandingServiceTargets(serviceID string) error {
 	if m == nil {
 		return nil
@@ -610,6 +610,29 @@ func (m *RuntimeContextManager) SuppressStandingServiceTargets(serviceID string)
 		if !alreadySuppressed {
 			delete(m.suppressedStandingServices, serviceID)
 		}
+		return err
+	}
+	return nil
+}
+
+// RestoreStandingServiceTargets rolls back process-only suppression when the
+// corresponding durable lifecycle transition did not commit.
+func (m *RuntimeContextManager) RestoreStandingServiceTargets(serviceID string) error {
+	if m == nil {
+		return nil
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return fmt.Errorf("standing service_id is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, suppressed := m.suppressedStandingServices[serviceID]; !suppressed {
+		return nil
+	}
+	delete(m.suppressedStandingServices, serviceID)
+	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+		m.suppressedStandingServices[serviceID] = struct{}{}
 		return err
 	}
 	return nil

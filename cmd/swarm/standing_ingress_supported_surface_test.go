@@ -119,6 +119,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			TestLLMRuntime:          telegramPhraseBotLLMRuntime{},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
 	case servedparity.BackendExplicitPostgres:
@@ -150,6 +151,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			TestLLMRuntime:          telegramPhraseBotLLMRuntime{},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
 	default:
@@ -189,7 +191,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if resumed.EffectiveState != "active" || resumed.Transition != "operator_resumed" || resumed.RunID != firstRunID {
 		t.Fatalf("%s resume result = %#v", backend, resumed)
 	}
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002); entity == "" {
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 42); entity == "" {
 		t.Fatalf("%s resumed standing service returned empty entity", backend)
 	}
 	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "resume")
@@ -200,7 +202,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if reset.EffectiveState != "active" || reset.Transition != "reset" || reset.Generation != firstGeneration+1 || reset.RunID == firstRunID {
 		t.Fatalf("%s reset result = %#v", backend, reset)
 	}
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003); entity == "" {
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003, 42); entity == "" {
 		t.Fatalf("%s reset standing service returned empty entity", backend)
 	}
 	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "reset")
@@ -227,9 +229,15 @@ type servedStandingOperationResult struct {
 func invokeServedStandingOperation(t *testing.T, endpoint, method, serviceID, idempotencyKey string) servedStandingOperationResult {
 	t.Helper()
 	var result servedStandingOperationResult
-	requireServedJSONRPCResult(t, endpoint, method, map[string]any{
+	response := requestServedJSONRPCWithTimeout(t, endpoint, method, map[string]any{
 		"service_id": serviceID, "reason": "served parity proof", "idempotency_key": idempotencyKey,
-	}, &result)
+	}, 15*time.Second)
+	if response.Error != nil {
+		t.Fatalf("%s error = %#v", method, response.Error)
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode %s result: %v\n%s", method, err, string(response.Result))
+	}
 	return result
 }
 
@@ -381,7 +389,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := sqliteStore.DB.QueryRow(`
 		SELECT current_run_id
 		FROM standing_services
-		WHERE flow_id = 'telegram-chat'
+		WHERE flow_id = 'telegram-ingress'
 		  AND declaration_present = TRUE
 		  AND effective_state = 'active'
 	`).Scan(&standingRunID); err != nil {
@@ -390,7 +398,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := sqliteStore.DB.QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
-		WHERE flow_id = 'telegram-chat'
+		WHERE flow_id = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -558,7 +566,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT current_run_id::text
 		FROM standing_services
-		WHERE flow_id = 'telegram-chat'
+		WHERE flow_id = 'telegram-ingress'
 		  AND declaration_present = TRUE
 		  AND effective_state = 'active'
 	`).Scan(&standingRunID); err != nil {
@@ -567,7 +575,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
-		WHERE flow_id = 'telegram-chat'
+		WHERE flow_id = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -669,13 +677,26 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 			if changed == before {
 				t.Fatal("standing activation block not found")
 			}
+			changed = strings.Replace(changed, `  - id: telegram-chat
+    flow: telegram-chat
+    mode: template
+`, "", 1)
 			writeStandingCandidateFile(t, packagePath, changed)
-			changedNodes := strings.Replace(string(baseNodes), "    inbound.telegram:\n      activity:", "    inbound.telegram:\n      select_or_create_entity:\n        by:\n          service_id: payload.provider\n      activity:", 1)
-			if changedNodes == string(baseNodes) {
-				t.Fatal("standing handler marker not found")
-			}
-			writeStandingCandidateFile(t, nodesPath, changedNodes)
-			t.Cleanup(func() { _ = os.WriteFile(nodesPath, baseNodes, 0o600) })
+			nonStandingSchema := strings.Replace(string(baseFlowSchema), `pins:
+  inputs:
+    events:
+      - name: telegram_update
+        event: inbound.telegram
+        source: external
+  outputs:
+    events: []
+`, `pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`, 1)
+			writeStandingCandidateFile(t, flowSchemaPath, nonStandingSchema)
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
 			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-ingress-v2")
@@ -686,15 +707,15 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 				_ = os.Rename(renamedDir, flowDir)
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-chat", "name: telegram-chat-v2", 1))
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "nodes.yaml"), strings.ReplaceAll(string(baseNodes), "telegram-chat.telegram_send_message", "telegram-chat-v2.telegram_send_message"))
-			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-chat", "telegram-chat-v2"))
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
+			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-ingress", "telegram-ingress-v2"))
 		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
 	}
 	for _, mutation := range mutations {
 		mutation := mutation
 		t.Run(mutation.name, func(t *testing.T) {
 			writeStandingCandidateFile(t, packagePath, string(basePackage))
+			writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 			if _, err := os.Stat(flowDir); err != nil {
 				t.Fatalf("standing flow directory unavailable before mutation: %v", err)
 			}
@@ -706,6 +727,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 		})
 	}
 	writeStandingCandidateFile(t, packagePath, string(basePackage))
+	writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 }
 
 func writeStandingCandidateFile(t testing.TB, path, body string) {

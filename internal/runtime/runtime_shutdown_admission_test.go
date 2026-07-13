@@ -277,7 +277,8 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 }
 
 func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testing.T) {
-	eventStore := &cancellationBlockingInboundStore{
+	eventStore := &capturingInboundEventStore{}
+	publicationStore := &cancellationBlockingInboundStore{
 		entered: make(chan struct{}, 1),
 	}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -285,7 +286,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &Runtime{Bus: bus}
-	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed)
+	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, publicationStore)
 	gateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 	rt.InboundGateway = gateway.InboundGateway
 	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
@@ -309,7 +310,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		response <- rec
 	}()
 	select {
-	case <-eventStore.entered:
+	case <-publicationStore.entered:
 	case <-time.After(time.Second):
 		t.Fatal("webhook did not enter blocking persistence")
 	}

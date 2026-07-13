@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	storepkg "github.com/division-sh/swarm/internal/store"
 )
@@ -106,6 +107,53 @@ func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence 
 		InstanceID: flowInstance, FlowInstance: flowInstance, EntityID: entityID,
 		EntitySlug: entityID, Alias: entityID,
 	}
+}
+
+const boundedProviderFlowID = "bounded_inbound"
+
+// boundedStandingConnectorBundle puts connector consumers in the exact static
+// flow path targeted by the bounded standing-ingress fixture. Process-served
+// tests separately prove real standing singleton materialization.
+func boundedStandingConnectorBundle(flowInstance string, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if bundle == nil || flowInstance == "" {
+		return bundle
+	}
+	inputs := []string(nil)
+	if bundle.RootSchema != nil {
+		inputs = append(inputs, bundle.RootSchema.Pins.Inputs.Events...)
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: boundedProviderFlowID, Flow: boundedProviderFlowID},
+		Path:  flowInstance,
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: inputs}},
+		},
+		Nodes:  bundle.Nodes,
+		Events: bundle.Events,
+		Agents: bundle.Agents,
+		Tools:  bundle.Tools,
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	bundle.Nodes = nil
+	bundle.Events = nil
+	bundle.Agents = nil
+	bundle.Tools = nil
+	bundle.FlowTree = runtimecontracts.FlowTree{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			boundedProviderFlowID: &root.Children[0],
+		},
+	}
+	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{
+		boundedProviderFlowID: flow.Schema,
+	}
+	if bundle.Semantics.FlowInputs == nil {
+		bundle.Semantics.FlowInputs = map[string][]string{}
+	}
+	bundle.Semantics.FlowInputs[boundedProviderFlowID] = append([]string(nil), inputs...)
+	return bundle
 }
 
 func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {

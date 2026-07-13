@@ -380,14 +380,13 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
-	Event               events.Event
-	plan                RoutePlan
-	targetFailure       bool
-	dispatchQueued      bool
-	queueReason         string
-	direct              bool
-	acknowledgedInbound bool
-	publicationClaim    *pipelinePublicationClaim
+	Event            events.Event
+	plan             RoutePlan
+	targetFailure    bool
+	dispatchQueued   bool
+	queueReason      string
+	direct           bool
+	publicationClaim *pipelinePublicationClaim
 }
 
 func (p PreparedPublish) DeliveryRoutes() []events.DeliveryRoute {
@@ -470,11 +469,10 @@ func (eb *EventBus) preparePublishInMutation(ctx context.Context, evt events.Eve
 		return PreparedPublish{}, err
 	}
 	prepared := PreparedPublish{
-		Event:               evt,
-		plan:                inboundPlan,
-		direct:              replayScope == runtimereplayclaim.CommittedReplayScopeDirect,
-		acknowledgedInbound: acknowledgedInboundMutation(txctx),
-		publicationClaim:    publicationClaim,
+		Event:            evt,
+		plan:             inboundPlan,
+		direct:           replayScope == runtimereplayclaim.CommittedReplayScopeDirect,
+		publicationClaim: publicationClaim,
 	}
 	if inboundPlan.TargetFailure != "" {
 		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
@@ -539,10 +537,6 @@ func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared
 	txctx := mutation.Context()
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
 		dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx))
-		if prepared.acknowledgedInbound {
-			eb.DispatchPreparedPublishAsync(dispatchCtx, prepared)
-			return
-		}
 		_ = eb.DispatchPreparedPublish(dispatchCtx, prepared)
 	}) {
 		return errors.New("event mutation post-commit actions are required")

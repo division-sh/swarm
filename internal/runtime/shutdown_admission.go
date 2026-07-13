@@ -31,6 +31,22 @@ func (a *shutdownAdmission) Closed() bool {
 	return a.closed
 }
 
+func (a *shutdownAdmission) ReopenIfDrained() bool {
+	if a == nil {
+		return true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.closed {
+		return true
+	}
+	if len(a.active) != 0 {
+		return false
+	}
+	a.closed = false
+	return true
+}
+
 func (a *shutdownAdmission) Begin() (func(), bool) {
 	_, release, admitted := a.BeginContext(context.Background())
 	return release, admitted

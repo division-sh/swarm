@@ -479,6 +479,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 	}
 	args := []any{pq.Array(runIDs)}
 	switch table {
+	case "inbound_publication_events":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM inbound_publication_events c WHERE EXISTS (SELECT 1 FROM inbound_publications p WHERE p.publication_id = c.publication_id AND p.resolved_run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM inbound_publication_events c USING inbound_publications p WHERE c.publication_id = p.publication_id AND p.resolved_run_id = ANY($1::uuid[])`, args, nil
 	case "inbound_publications":
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`, args, nil

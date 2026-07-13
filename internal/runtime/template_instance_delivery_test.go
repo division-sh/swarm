@@ -928,18 +928,23 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				})
 
 				batch := providerRollbackInboundBatch()
-				if _, err := bus.PublishInboundDelivery(ctx, batch); err == nil || !strings.Contains(err.Error(), "injected provider rollback checkpoint") {
-					t.Fatalf("PublishInboundDelivery error = %v, want injected checkpoint", err)
+				runner := eventStore.(runtimebus.EventMutationRunner)
+				err = runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+					_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch)
+					return prepareErr
+				})
+				if err == nil || !strings.Contains(err.Error(), "injected provider rollback checkpoint") {
+					t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want injected checkpoint", err)
 				}
 				assertProviderRollbackTablesEmpty(t, ctx, db)
 
 				if checkpoint.retry {
-					result, err := bus.PublishInboundDelivery(ctx, batch)
+					err := runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+						_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch)
+						return prepareErr
+					})
 					if err != nil {
-						t.Fatalf("retry PublishInboundDelivery: %v", err)
-					}
-					if result.Duplicate {
-						t.Fatal("retry was classified duplicate after rolled-back pre-commit failure")
+						t.Fatalf("retry PrepareInboundDeliveryBatchInMutation: %v", err)
 					}
 					assertProviderRollbackRetryCommitted(t, ctx, db)
 				}
@@ -1075,14 +1080,6 @@ func (m *providerRollbackMutation) Context() context.Context {
 	return runtimebus.WithEventMutationContext(m.EventMutation.Context(), m)
 }
 
-func (m *providerRollbackMutation) ClaimInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
-	inbound, ok := m.EventMutation.(runtimebus.InboundDeliveryMutation)
-	if !ok {
-		return false, errors.New("selected-store mutation does not support inbound claims")
-	}
-	return inbound.ClaimInboundEvent(ctx, providerEventID, entityID, provider)
-}
-
 func (m *providerRollbackMutation) AppendEvent(ctx context.Context, evt events.Event) error {
 	m.proof.appends++
 	if m.proof.appends == 2 {
@@ -1181,9 +1178,7 @@ func providerRollbackInboundBatch() runtimebus.InboundDeliveryBatch {
 	entityID := "22222222-2222-4222-8222-222222222222"
 	now := time.Now().UTC()
 	return runtimebus.InboundDeliveryBatch{
-		Claim: runtimebus.InboundDeliveryClaim{
-			ProviderEventID: "provider-rollback-delivery", EntityID: entityID, Provider: "telegram",
-		},
+		Provider: "telegram",
 		Events: []runtimebus.InboundDeliveryEvent{
 			{Event: eventtest.RootIngress(
 				uuid.NewString(), "inbound.telegram", "inbound-gateway", "", []byte(`{"raw":true}`), 0,
@@ -1194,7 +1189,6 @@ func providerRollbackInboundBatch() runtimebus.InboundDeliveryBatch {
 				templateInstanceDeliveryRunID, "", events.EventEnvelope{}, now,
 			), Kind: runtimeprovideroutput.KindNormalized, Authorization: providerRollbackAuthorization()},
 		},
-		AcknowledgeBeforeDispatch: true,
 	}
 }
 
@@ -1221,7 +1215,7 @@ func assertProviderRollbackTablesEmpty(t *testing.T, ctx context.Context, db *sq
 func assertProviderRollbackRetryCommitted(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	for table, minimum := range map[string]int{
-		"events": 3, "event_deliveries": 1, "flow_instances": 1, "entity_state": 1, "routing_rules": 1,
+		"events": 2, "event_deliveries": 1, "flow_instances": 1, "entity_state": 1, "routing_rules": 1,
 	} {
 		var count int
 		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {

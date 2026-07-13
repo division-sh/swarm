@@ -668,6 +668,11 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	stores := boot.Stores
 	opts := boot.Options
 	source := boot.Source
+	if stores.InboundStore != nil {
+		if err := stores.InboundStore.ValidateInboundPublicationIntegrity(ctx); err != nil {
+			return nil, fmt.Errorf("validate inbound publication integrity at startup: %w", err)
+		}
+	}
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	rt := &Runtime{
 		ownerID:              newRuntimeOwnerID(),
@@ -948,7 +953,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed)
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)

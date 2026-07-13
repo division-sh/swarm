@@ -134,11 +134,13 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 		{
 			eventType: "platform.inbound_recorded",
 			payload: map[string]any{
-				"publication_id":       "00000000-0000-0000-0000-000000000125",
-				"publication_event_id": "00000000-0000-0000-0000-000000000126",
-				"provider":             "github",
-				"provider_event_id":    "provider-evt-1",
-				"entity_id":            "00000000-0000-0000-0000-000000000127",
+				"publication_id":    "00000000-0000-0000-0000-000000000125",
+				"provider":          "github",
+				"provider_event_id": "provider-evt-1",
+				"entity_id":         "00000000-0000-0000-0000-000000000127",
+				"event_ids":         []any{"00000000-0000-0000-0000-000000000126"},
+				"event_names":       []any{"inbound.github.push"},
+				"output_count":      float64(1),
 			},
 		},
 		{

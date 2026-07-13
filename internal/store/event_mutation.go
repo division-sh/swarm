@@ -124,20 +124,6 @@ func (m *sqlEventMutation) RecordDeadLetter(ctx context.Context, rec runtimedead
 	return recorder.RecordDeadLetterTx(m.operationContext(ctx), m.tx, rec)
 }
 
-func (m *sqlEventMutation) ClaimInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
-	if m == nil {
-		return false, fmt.Errorf("event mutation store is required")
-	}
-	if err := m.validatePipelineTransaction(ctx); err != nil {
-		return false, err
-	}
-	writer, ok := m.store.(runtimebus.TransactionalInboundEventPersistence)
-	if !ok || writer == nil {
-		return false, fmt.Errorf("event mutation store does not support inbound delivery claims")
-	}
-	return writer.ClaimInboundEventTx(m.operationContext(ctx), m.tx, providerEventID, entityID, provider)
-}
-
 func (s *SQLiteRuntimeStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
 	if fn == nil {
 		return nil

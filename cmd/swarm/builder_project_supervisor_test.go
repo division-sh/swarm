@@ -1059,19 +1059,33 @@ func (s *processIngressProofStore) RunInboundPublicationMutation(ctx context.Con
 	if !mutation.finalized {
 		return runtimeinbound.Record{}, errors.New("process ingress publication was not finalized")
 	}
-	var routes []events.DeliveryRoute
-	if err := json.Unmarshal(mutation.finalization.RecipientManifest, &routes); err != nil {
-		return runtimeinbound.Record{}, fmt.Errorf("decode process ingress recipient manifest: %w", err)
+	children := make([]runtimeinbound.EventRecord, len(mutation.finalization.Events))
+	for i, finalized := range mutation.finalization.Events {
+		var routes []events.DeliveryRoute
+		if err := json.Unmarshal(finalized.RecipientManifest, &routes); err != nil {
+			return runtimeinbound.Record{}, fmt.Errorf("decode process ingress recipient manifest: %w", err)
+		}
+		_, recipientFingerprint, recipientCount, err := runtimeinbound.CanonicalRecipientManifest(routes)
+		if err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(finalized.Event, finalized.Kind, finalized.Authorization)
+		if err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		children[i] = runtimeinbound.EventRecord{
+			Ordinal:                      finalized.Ordinal,
+			EventID:                      finalized.Event.ID(),
+			EventName:                    string(finalized.Event.Type()),
+			Kind:                         finalized.Kind,
+			Authorization:                finalized.Authorization,
+			EventIntegrityFingerprint:    eventFingerprint,
+			RecipientManifestFingerprint: recipientFingerprint,
+			RecipientCount:               recipientCount,
+			Event:                        finalized.Event,
+		}
 	}
-	manifest, fingerprint, count, err := runtimeinbound.CanonicalRecipientManifest(routes)
-	if err != nil {
-		return runtimeinbound.Record{}, err
-	}
-	return runtimeinbound.Record{
-		Request: request, State: "committed", RecipientManifest: manifest,
-		RecipientFingerprint: fingerprint, RecipientCount: count,
-		PublicationEvent: mutation.finalization.PublicationEvent, Created: true,
-	}, nil
+	return runtimeinbound.Record{Request: request, State: "committed", OutputCount: len(children), Events: children, Created: true}, nil
 }
 func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
@@ -1091,61 +1105,6 @@ func (*processIngressEventStore) InsertEventDeliveries(context.Context, string, 
 }
 func (*processIngressEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
-}
-
-func (s *processIngressEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	if s.seen == nil {
-		s.seen = map[string]struct{}{}
-	}
-	postCommit := make([]func(), 0, 4)
-	mutation := &processIngressEventMutation{store: s}
-	mutation.ctx = runtimebus.WithEventMutationContext(runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit), mutation)
-	if err := fn(mutation); err != nil {
-		return err
-	}
-	if mutation.pendingKey != "" {
-		s.seen[mutation.pendingKey] = struct{}{}
-		s.recorded = true
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
-type processIngressEventMutation struct {
-	ctx        context.Context
-	store      *processIngressEventStore
-	pendingKey string
-}
-
-func (m *processIngressEventMutation) Context() context.Context { return m.ctx }
-func (m *processIngressEventMutation) AppendEvent(ctx context.Context, event events.Event) error {
-	return m.store.AppendEvent(ctx, event)
-}
-func (*processIngressEventMutation) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
-}
-func (*processIngressEventMutation) InsertEventDeliveriesWithTargets(context.Context, string, []string, map[string]events.RouteIdentity) error {
-	return nil
-}
-func (*processIngressEventMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
-	return nil
-}
-func (*processIngressEventMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-func (*processIngressEventMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*processIngressEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	return nil
-}
-func (m *processIngressEventMutation) ClaimInboundEvent(_ context.Context, providerEventID, entityID, provider string) (bool, error) {
-	key := provider + "\x00" + entityID + "\x00" + providerEventID
-	if _, exists := m.store.seen[key]; exists {
-		return false, nil
-	}
-	m.pendingKey = key
-	return true, nil
 }
 
 func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGrace(t *testing.T) {

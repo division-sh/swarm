@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -1099,13 +1100,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
 	if err := rt.PrepareInitialStartupOwnership(ctx); err != nil {
-		reporter.emit(5, "startup_ownership_lease", "FAILED", err.Error())
-		log.Printf("acquire startup ownership before recovery: %v", err)
+		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
 	defer func() {
 		if err := rt.ReleasePreparedStartupOwnership(context.Background()); err != nil {
-			log.Printf("release prepared startup ownership: %v", err)
+			presenter.cleanupFailure("startup ownership release", err)
 		}
 	}()
 	bootReport := primaryContext.validation.BootReport
@@ -1126,27 +1126,26 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	if err := reconcileServeStandingServices(ctx, runtimeContexts); err != nil {
-		reporter.emit(5, "runtime_context", "FAILED", err.Error())
-		log.Printf("reconcile standing services: %v", err)
+		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 	if opts.AbandonActiveRuns {
 		if stores.RunQuiescenceStore == nil {
-			slog.Error("abandon active runs failed", "error", "selected store active-run quiescence owner is required")
+			presenter.fail(5, "run_quiescence", errors.New("selected store active-run quiescence owner is required"))
 			return 3
 		}
 		result, err := stores.RunQuiescenceStore.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
 		if err != nil {
-			slog.Error("abandon active runs failed", "error", err)
+			presenter.fail(5, "run_quiescence", err)
 			return 3
 		}
-		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d sessions=%d timers=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.SessionCount, result.TimerCount, result.PipelineReceiptCount)
+		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
-	if exitCode := runServeUnavailableBundleStartupRecovery(ctx, storeFacade, cfg, loadedBundle, source, mountSources, primaryWorkspaceBackend); exitCode != 0 {
+	if exitCode := runServeUnavailableBundleStartupRecovery(ctx, storeFacade, cfg, loadedBundle, source, mountSources, primaryWorkspaceBackend, presenter); exitCode != 0 {
 		return exitCode
 	}
 	if err := enforceServeBundleMatchAdmissionForHashes(ctx, storeFacade.runBundleAvailabilityStore(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
-		slog.Error("bundle match admission failed", "error", err)
+		presenter.fail(5, "bundle_match_admission", err)
 		return 3
 	}
 	runtimeContextManager, err := runtime.NewRuntimeContextManagerWithAdmission(runtimeContextAvailabilityReader(stores), admissionState)
@@ -1237,7 +1236,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,
-		StandingServices:          serveStandingServiceController{store: rt.Stores.PipelineStore, contexts: runtimeContexts, manager: runtimeContextManager},
+		StandingServices:          &serveStandingServiceController{store: rt.Stores.PipelineStore, contexts: runtimeContexts, manager: runtimeContextManager},
 		RuntimeIngress:            rt.RuntimeIngress,
 		RuntimeContexts:           apiStoreCaps.RuntimeContexts,
 		ResetCoordinator:          apiStoreCaps.ResetCoordinator,
@@ -1286,8 +1285,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	if err := reportServeStandingReadiness(ctx, rt.Stores.PipelineStore, opts.Output); err != nil {
-		reporter.emit(22, "ready", "FAILED", err.Error())
-		log.Printf("standing service readiness: %v", err)
+		presenter.fail(22, "ready", err)
 		return 1
 	}
 	if opts.TestRuntimeReadyHook != nil {
@@ -1365,28 +1363,32 @@ type serveStandingServiceController struct {
 	store    *runtimepipeline.WorkflowInstanceStore
 	contexts []serveRuntimeBundleContext
 	manager  *runtime.RuntimeContextManager
+	mu       sync.Mutex
 }
 
-func (c serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+func (c *serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
 	if c.store == nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
 	}
-	result, err := c.store.SuspendStandingService(ctx, operation)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	owner, err := c.closeAndDrain(ctx, operation.ServiceID)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if c.manager != nil {
-		if err := c.manager.SuppressStandingServiceTargets(result.ServiceID); err != nil {
-			return runtimepipeline.StandingServiceReconciliation{}, err
-		}
+	result, err := c.store.SuspendStandingService(ctx, operation)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
 	}
 	return result, nil
 }
 
-func (c serveStandingServiceController) ResumeStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+func (c *serveStandingServiceController) ResumeStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
 	if c.store == nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	result, err := c.store.ResumeStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
@@ -1394,26 +1396,125 @@ func (c serveStandingServiceController) ResumeStandingService(ctx context.Contex
 	if err := c.publishActiveService(ctx, result.ServiceID); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	return result, nil
-}
-
-func (c serveStandingServiceController) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c.store == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
-	}
-	result, err := c.store.ResetStandingService(ctx, operation)
-	if err != nil {
+	if owner, err := c.runtimeForStandingService(result.ServiceID); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
-	}
-	if result.EffectiveState == "active" {
-		if err := c.publishActiveService(ctx, result.ServiceID); err != nil {
-			return runtimepipeline.StandingServiceReconciliation{}, err
+	} else if owner.InboundGateway != nil {
+		if err := owner.InboundGateway.ReopenStandingServiceAdmission(result.ServiceID); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, c.failClosedAfterReopen(result.ServiceID, err)
 		}
 	}
 	return result, nil
 }
 
-func (c serveStandingServiceController) publishActiveService(ctx context.Context, serviceID string) error {
+func (c *serveStandingServiceController) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
+	if c.store == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	owner, err := c.closeAndDrain(ctx, operation.ServiceID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
+	result, err := c.store.ResetStandingService(ctx, operation)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
+	}
+	if result.EffectiveState == "active" {
+		if err := c.publishActiveService(ctx, result.ServiceID); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, err
+		}
+		if owner.InboundGateway != nil {
+			if err := owner.InboundGateway.ReopenStandingServiceAdmission(result.ServiceID); err != nil {
+				return runtimepipeline.StandingServiceReconciliation{}, c.failClosedAfterReopen(result.ServiceID, err)
+			}
+		}
+	}
+	return result, nil
+}
+
+func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string) (*runtime.Runtime, error) {
+	owner, err := c.runtimeForStandingService(serviceID)
+	if err != nil {
+		return nil, err
+	}
+	if owner.InboundGateway != nil {
+		if err := owner.InboundGateway.CloseStandingServiceAdmission(serviceID); err != nil {
+			return nil, err
+		}
+	}
+	if c.manager != nil {
+		if err := c.manager.SuppressStandingServiceTargets(serviceID); err != nil {
+			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+		}
+	}
+	if owner.InboundGateway != nil {
+		if err := owner.InboundGateway.WaitForStandingServiceAdmission(ctx, serviceID); err != nil {
+			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+		}
+	}
+	if err := owner.WaitForQuiescence(ctx); err != nil {
+		return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+	}
+	return owner, nil
+}
+
+func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, serviceID string) error {
+	if c.manager != nil {
+		if err := c.manager.RestoreStandingServiceTargets(serviceID); err != nil {
+			return fmt.Errorf("restore standing service %s process targets: %w", serviceID, err)
+		}
+	}
+	if owner != nil && owner.InboundGateway != nil {
+		if err := owner.InboundGateway.ReopenStandingServiceAdmission(serviceID); err != nil {
+			return c.failClosedAfterReopen(serviceID, err)
+		}
+	}
+	return nil
+}
+
+func (c *serveStandingServiceController) failClosedAfterReopen(serviceID string, reopenErr error) error {
+	reopenErr = fmt.Errorf("reopen standing service %s admission: %w", serviceID, reopenErr)
+	if c.manager == nil {
+		return reopenErr
+	}
+	if err := c.manager.SuppressStandingServiceTargets(serviceID); err != nil {
+		return errors.Join(reopenErr, fmt.Errorf("restore fail-closed standing service %s suppression: %w", serviceID, err))
+	}
+	return reopenErr
+}
+
+func (c *serveStandingServiceController) runtimeForStandingService(serviceID string) (*runtime.Runtime, error) {
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return nil, fmt.Errorf("standing service_id is required")
+	}
+	var owner *runtime.Runtime
+	for _, contextDef := range c.contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		candidates, err := contextDef.runtime.PlanStandingServiceCandidates()
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range candidates {
+			if candidate.ServiceID != serviceID {
+				continue
+			}
+			if owner != nil && owner != contextDef.runtime {
+				return nil, fmt.Errorf("standing service %s has more than one loaded runtime owner", serviceID)
+			}
+			owner = contextDef.runtime
+		}
+	}
+	if owner == nil {
+		return nil, &runtimepipeline.StandingServiceError{ServiceID: serviceID, Err: runtimepipeline.ErrStandingServiceNotFound}
+	}
+	return owner, nil
+}
+
+func (c *serveStandingServiceController) publishActiveService(ctx context.Context, serviceID string) error {
 	for _, contextDef := range c.contexts {
 		if contextDef.runtime == nil {
 			continue
@@ -1512,6 +1613,10 @@ func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeCont
 	targets := map[string]runtime.StandingTarget{}
 	for _, contextDef := range manager.LoadedContexts() {
 		for _, target := range contextDef.StandingTargets {
+			lookup := manager.LookupIngress(target.Alias, target.Provider)
+			if !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
+				continue
+			}
 			key := serveStandingIngressKey(target.BundleHash, target.Alias, target.Provider)
 			if _, exists := targets[key]; exists {
 				return nil, fmt.Errorf("standing ingress readiness has duplicate loaded target %s/%s", target.Alias, target.Provider)
@@ -1641,20 +1746,6 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 	return errors.Join(shutdownErr, cleanupErr)
 }
 
-func logWorkspaceBackendDecision(out io.Writer, decision workspaceBackendSelection) {
-	detail := workspaceBackendDecisionDetail(decision)
-	log.Print(detail)
-	if out != nil {
-		fmt.Fprintln(out, detail)
-	}
-	if warning := workspaceBackendUnsafeWarning(decision); warning != "" {
-		log.Print(warning)
-		if out != nil {
-			fmt.Fprintln(out, warning)
-		}
-	}
-}
-
 func runServeUnavailableBundleStartupRecovery(
 	ctx context.Context,
 	storeFacade selectedRuntimeStoreFacade,
@@ -1663,6 +1754,7 @@ func runServeUnavailableBundleStartupRecovery(
 	source semanticview.Source,
 	mountSources workspaceMountSources,
 	workspaceBackend workspaceBackendSelection,
+	presenter *serveLifecyclePresenter,
 ) int {
 	recoveryStore := storeFacade.startupRecoveryStore()
 	if recoveryStore == nil {
@@ -1670,7 +1762,7 @@ func runServeUnavailableBundleStartupRecovery(
 	}
 	recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
 	if err != nil {
-		slog.Error("configure recovery workspaces", "error", err)
+		presenter.fail(5, "recovery_workspace", err)
 		return 1
 	}
 	recoveryContainers := runtimestartuprecovery.ManagedContainerOwner(serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces})
@@ -1684,13 +1776,14 @@ func runServeUnavailableBundleStartupRecovery(
 		RequestedAt:        time.Now().UTC(),
 	})
 	if err != nil {
-		slog.Error("unavailable bundle startup recovery failed", "error", err)
+		presenter.fail(5, "startup_recovery", err)
 		if runtimestartuprecovery.IsDataIntegrityError(err) {
 			return serveExitDataIntegrity
 		}
 		return 3
 	}
 	if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
+		presenter.recordClosedUnavailableWork()
 		log.Printf("unavailable bundle startup recovery complete: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
 			len(recovery.Cleanup.Runs),
 			len(recovery.Cleanup.Deliveries),
@@ -1704,9 +1797,6 @@ func runServeUnavailableBundleStartupRecovery(
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
-	if err := validateServePersistedStandingOwnership(ctx, contexts); err != nil {
-		return err
-	}
 	started := make([]*runtime.Runtime, 0, len(contexts))
 	registered := make([]string, 0, len(contexts))
 	rollback := func() {
