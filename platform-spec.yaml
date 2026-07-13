@@ -4516,6 +4516,19 @@ engine:
         a literal "postgres" password as hardcoded fallback. Operators may use legacy env names only by explicitly naming
         them through database.password_env. Plaintext database.password is unsupported and MUST fail closed with migration
         guidance. DSN construction MUST receive already-resolved password material and MUST NOT resolve password sources.
+    postgres_temporal_schema_authority:
+      promoted_by: '#2050'
+      activation_owner: '#2051'
+      status: design_locked_not_activated
+      owner: run_model.fork.temporal_frontier.schema_apply and privilege_contract
+      migration_invocation: swarm schema apply --runtime-role <postgres-role> --config <explicit-migration-config>
+      runtime_invocation: swarm serve --config <runtime-config>
+      rules:
+      - The migration invocation and runtime invocation use the same typed database config shape but distinct PostgreSQL logins.
+      - The explicit migration config authenticates as the schema-owning migration login and is never loaded by serve.
+      - Runtime config authenticates as the restricted metadata-declared runtime role and cannot own or migrate schema.
+      - Login creation, passwords, and role provisioning remain operator/DBA work; Swarm does not mint or persist them.
+      - #2050 does not add the command or alter startup behavior. #2051 activates both surfaces atomically with the temporal generation.
     runtime_backend_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >
@@ -4560,6 +4573,11 @@ engine:
         - Postgres remains authoritative when the canonical backend selector resolves to postgres.
         - Postgres bootstrap may use pgcrypto, Postgres compatibility migrations, Postgres DDL execution, and Postgres
           catalog inspection.
+        - >
+          The temporal-frontier target is the explicit exception design-locked at
+          run_model.fork.temporal_frontier. When #2051 activates that generation, `swarm schema apply` becomes the only
+          PostgreSQL temporal schema/migration writer and `swarm serve` becomes read-only schema/privilege admission.
+          #2050 records that target only; current production bootstrap remains unchanged until the atomic cutover.
       sqlite:
         status: explicit_local_runtime_schema_bootstrap
         owner: internal/store.SQLiteSchemaStore and SQLite dialect translation
@@ -11480,7 +11498,9 @@ platform_tables:
     runtime_store_metadata:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
         build and exact platform specification created the store; they never decide whether a later build may open it.
-        Products never read or write this table.'
+        Products never read or write this table. The inactive temporal-frontier-v1 target adds schema_generation,
+        schema_ddl_sha256, schema_owner_role, and runtime_role through the one-shot migration owned by
+        run_model.fork.temporal_frontier; normal boot does not add those columns in #2050.'
       ddl: "CREATE TABLE runtime_store_metadata (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    swarm_version\
         \     TEXT NOT NULL,\n    platform_version  TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL\n);"
   notes:
@@ -11490,7 +11510,9 @@ platform_tables:
     migrations: 'Pre-1.0 selected stores are not migrated or adopted at boot. Boot derives the complete required platform
       shape from this specification, probes the actual selected-backend catalog before persistent mutation, and accepts only
       a fresh empty namespace or an exactly compatible store carrying immutable runtime_store_metadata origin evidence.
-      Partial, un-stamped, conflicting, or drifted stores fail closed with backend-specific fresh-store remediation.'
+      Partial, un-stamped, conflicting, or drifted stores fail closed with backend-specific fresh-store remediation. The
+      design-locked temporal-frontier-v1 exception is not a boot migration: after #2051 activation only the explicit
+      `swarm schema apply` owner may perform its one recognized catalog-checksummed edge.'
     index_syntax: INDEX declarations are logical — the implementer may use CREATE INDEX statements or database-specific syntax.
       The spec declares intent, not SQL dialect.
   diagnostics_encoding:
@@ -11561,7 +11583,7 @@ platform_tables:
     digest_queries: Digest/reporting code should query entity_state for current metrics and spend_ledger for cost aggregates.
       No entity_metrics table.
   migration_policy:
-    status: pre_1_0_no_migration
+    status: pre_1_0_no_boot_migration_with_inactive_temporal_frontier_design
     compatibility_authority: actual_selected_backend_catalog_shape
     origin_evidence: runtime_store_metadata
     origin_validity: >
@@ -11579,6 +11601,11 @@ platform_tables:
     fresh_bootstrap: >
       Fresh platform creation is backend-serialized and atomically commits the complete platform schema plus exactly one
       immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
+    temporal_frontier_target: >
+      run_model.fork.temporal_frontier design-locks the only recognized existing-store migration exception. #2050 does not
+      activate it. #2051 must move fresh PostgreSQL creation and recognized upgrade to explicit `swarm schema apply`, remove
+      temporal DDL from serve, and admit runtime only after exact generation/checksum/owner/grant validation. SQLite keeps
+      its separately governed local bootstrap behavior.
     generated_node_state: >
       Contract-generated node-state tables are classified only after platform acceptance. Missing tables may be created;
       existing incompatible tables fail before node-state mutation through the same typed backend-specific compatibility
@@ -11601,6 +11628,10 @@ platform_tables:
       are not supported entity current-state read authority.
     bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
       Called by both production boot and test setup. Single code path.
+    temporal_frontier_design_exception: >
+      #2050's PostgreSQL conformance prototype executes only in
+      TestTemporalFrontierPostgresDesignConformance. Generic store bootstrap MUST NOT create the inactive temporal schema;
+      production and generic-test activation belongs atomically to #2051.
   credentials_policy:
     description: Webhook secrets, API keys, and other credentials are NOT stored in platform tables. The platform provides
       a config surface; products choose their storage strategy.
@@ -11718,6 +11749,318 @@ run_model:
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
+    temporal_frontier:
+      promoted_by: '#2050'
+      parent_tracker: '#2049'
+      production_activation_owner: '#2051'
+      status: design_locked_not_activated
+      closure_level: spec_schema_design_locked
+      canonical_owner: PostgreSQL run-scoped transactional persistence revision
+      activation_boundary: >
+        This section is the authoritative target contract, but #2050 MUST NOT add these objects to
+        platform_tables.tables, execute this DDL during runtime boot, install production triggers, migrate production
+        writers/readers, or accept the new metadata generation. #2051 must activate the complete writer-plus-reader
+        migration atomically after a fresh independent pre-audit. Until then, current production behavior remains
+        unchanged and this design MUST NOT be cited as proof that timestamp-fork correctness is fixed.
+      semantics:
+        event_occurrence_time: >
+          events.created_at is occurrence/admission data only. Caller-supplied, backfilled, future, and mixed-clock
+          timestamps remain valid facts but never decide persisted frontier membership or transition order.
+        membership: >
+          A committed run-scoped fact belongs to the one revision allocated for its persistence transaction. A
+          transaction touching multiple runs declares the complete run set first, locks frontiers in ascending UUID
+          order, and allocates one revision per declared run. All facts for one run in that transaction share that
+          revision; monotonically allocated ordinals provide deterministic within-revision rendering only. Rollback
+          publishes neither the transaction declaration, revision, ordinals, nor history.
+        isolation: >
+          Historical planning reads one read-only REPEATABLE READ snapshot and classifies by revision. Activation then
+          performs a fresh source-frontier revalidation inside its mutation transaction. A historical workset never
+          substitutes for activation-time source advancement safety.
+        runless: >
+          A fact with no direct run derives its run through its declared immutable lineage owner (for example, a receipt
+          through its event). If derivation yields no run, temporal revision and ordinal remain NULL. Derivation failure,
+          ambiguity, or disagreement fails closed; writers never guess from timestamps or ambient current-run state.
+        mutable_projection: >
+          Mutable rows are current projections, not historical truth. Every admitted INSERT, UPDATE, and DELETE writes
+          typed before/after transition evidence under the same run revision. An ownership-moving UPDATE requires every
+          distinct non-NULL OLD.run_id and NEW.run_id in the sealed declaration and records evidence for both runs.
+        immutable_events: >
+          Run-scoped events are immutable after insertion. Runtime receives INSERT but not UPDATE or DELETE authority.
+          Trigger enforcement rejects UPDATE even if a grant drifts and permits DELETE only through whole-run destructive
+          authority with a sealed destructive declaration.
+        destructive_cleanup: >
+          Whole-run deletion declares destructive mode, locks the frontier before run-owned facts, records one durable
+          run_deletion_tombstone outside the run cascade, and then deletes the run. It never allocates an ordinary
+          revision. An unversioned legacy run therefore remains destructible without fabricating normal history.
+      selectors:
+        public:
+        - default_latest_event
+        - explicit_event_uuid
+        resolution: >
+          Default/latest resolves the last persisted source-run event and uses its temporal revision. Explicit selection
+          resolves that exact source-run event UUID and uses its temporal revision. Event UUID is the bookmark; displayed
+          occurrence/recorded timestamps are diagnostics only.
+        invalid:
+        - rfc3339_timestamp
+        - created_at_event_id_cutoff
+        - caller_supplied_revision
+        migration: >
+          #2051 deletes the internal RFC3339 branch in resolveRunForkPoint and all timestamp planner/advancement
+          predicates. There is no compatibility parser, timestamp fallback, or dual selector authority.
+      transaction_contract:
+        xid_type: xid8
+        declaration_owner: run_temporal_transactions
+        declaration_rule: >
+          Owner-only swarm_declare_temporal_runs(uuid[], mode) inserts exactly one durable header for
+          pg_current_xact_id(). Runtime can call only swarm_claim_temporal_runs(uuid[]), which delegates with normal mode;
+          swarm_destroy_run is the only runtime surface that may delegate with destructive mode. The sorted,
+          duplicate-free run_ids array and mode are sealed: a second declaration must match byte-for-byte or fail. Full
+          xid8 is retained; txid_current() bigint truncation and xid32 storage are forbidden.
+        modes:
+          normal: Requires model_version=1 and history_complete=true for every run; allocates revisions.
+          destructive: Permits versioned or unversioned whole-run cleanup; allocates no ordinary revision.
+        ordinal_rule: >
+          run_temporal_revisions.next_ordinal starts at zero. Each guarded fact/history operation atomically increments it
+          and receives the resulting positive integer. A multi-run ownership move receives one ordinal in each run.
+        retention: >
+          Transaction headers are committed audit authority and survive while referenced by a revision or deletion
+          tombstone. Compaction may remove an unreferenced header only after the configured audit-retention floor and may
+          never renumber, truncate, or reuse xid8 values.
+        lock_order:
+        - Take a non-locking identity snapshot sufficient to derive every affected run.
+        - Call swarm_claim_temporal_runs with the complete set; its private declaration owner locks frontiers in ascending UUID order.
+        - Lock temporal fact rows in deterministic table-name then primary-key order.
+        - Revalidate identities and the affected run set; drift rolls back and retries from the beginning.
+        - Mutate only the captured primary keys. No temporal fact FOR UPDATE, UPDATE, or DELETE may precede declaration.
+      schema_contract:
+        generation: temporal-frontier-v1
+        ddl_status: exact_target_ddl_inactive_until_2051
+        tables:
+          run_temporal_transactions:
+            ddl: |
+              CREATE TABLE run_temporal_transactions (
+                  transaction_id XID8 PRIMARY KEY,
+                  run_ids UUID[] NOT NULL,
+                  mode TEXT NOT NULL CHECK (mode IN ('normal', 'destructive')),
+                  declared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                  CHECK (cardinality(run_ids) > 0)
+              );
+          run_temporal_frontiers:
+            ddl: |
+              CREATE TABLE run_temporal_frontiers (
+                  run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+                  model_version INTEGER NOT NULL CHECK (model_version IN (0, 1)),
+                  current_revision BIGINT NOT NULL DEFAULT 0 CHECK (current_revision >= 0),
+                  history_complete BOOLEAN NOT NULL DEFAULT FALSE,
+                  CHECK ((model_version = 0 AND history_complete = FALSE AND current_revision = 0)
+                      OR (model_version = 1 AND history_complete = TRUE))
+              );
+          run_temporal_revisions:
+            ddl: |
+              CREATE TABLE run_temporal_revisions (
+                  run_id UUID NOT NULL REFERENCES run_temporal_frontiers(run_id) ON DELETE CASCADE,
+                  revision BIGINT NOT NULL CHECK (revision > 0),
+                  transaction_id XID8 NOT NULL REFERENCES run_temporal_transactions(transaction_id),
+                  next_ordinal INTEGER NOT NULL DEFAULT 0 CHECK (next_ordinal >= 0),
+                  recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                  PRIMARY KEY (run_id, revision),
+                  UNIQUE (run_id, transaction_id)
+              );
+          runtime_store_migrations:
+            ddl: |
+              CREATE TABLE runtime_store_migrations (
+                  migration_id TEXT PRIMARY KEY,
+                  from_generation TEXT NOT NULL,
+                  to_generation TEXT NOT NULL,
+                  ddl_sha256 TEXT NOT NULL CHECK (ddl_sha256 ~ '^[0-9a-f]{64}$'),
+                  schema_owner_role TEXT NOT NULL,
+                  runtime_role TEXT NOT NULL,
+                  applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                  CHECK (schema_owner_role <> runtime_role)
+              );
+          run_deletion_tombstones:
+            ddl: |
+              CREATE TABLE run_deletion_tombstones (
+                  deletion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  run_id UUID NOT NULL UNIQUE,
+                  source_model_version INTEGER NOT NULL CHECK (source_model_version IN (0, 1)),
+                  last_revision BIGINT CHECK (last_revision IS NULL OR last_revision >= 0),
+                  transaction_id XID8 NOT NULL REFERENCES run_temporal_transactions(transaction_id),
+                  deleted_by TEXT NOT NULL,
+                  deleted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                  CHECK ((source_model_version = 0 AND last_revision IS NULL)
+                      OR (source_model_version = 1 AND last_revision IS NOT NULL))
+              );
+          run_lifecycle_history:
+            ddl: |
+              CREATE TABLE run_lifecycle_history (
+                  history_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                  run_id UUID NOT NULL,
+                  revision BIGINT NOT NULL,
+                  ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+                  operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+                  fact_id TEXT NOT NULL,
+                  before_state JSONB,
+                  after_state JSONB,
+                  FOREIGN KEY (run_id, revision) REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE,
+                  UNIQUE (run_id, revision, ordinal)
+              );
+          event_delivery_history:
+            ddl: |
+              CREATE TABLE event_delivery_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE event_delivery_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          event_receipt_history:
+            ddl: |
+              CREATE TABLE event_receipt_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE event_receipt_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          timer_history:
+            ddl: |
+              CREATE TABLE timer_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE timer_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          entity_state_history:
+            ddl: |
+              CREATE TABLE entity_state_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE entity_state_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          agent_session_history:
+            ddl: |
+              CREATE TABLE agent_session_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE agent_session_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          conversation_audit_history:
+            ddl: |
+              CREATE TABLE conversation_audit_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE conversation_audit_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          reply_context_history:
+            ddl: |
+              CREATE TABLE reply_context_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE reply_context_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+          activity_attempt_history:
+            ddl: |
+              CREATE TABLE activity_attempt_history (LIKE run_lifecycle_history INCLUDING ALL);
+              ALTER TABLE activity_attempt_history ADD FOREIGN KEY (run_id, revision)
+                  REFERENCES run_temporal_revisions(run_id, revision) ON DELETE CASCADE;
+        existing_table_columns:
+          runtime_store_metadata:
+            ddl: |
+              ALTER TABLE runtime_store_metadata
+                  ADD COLUMN schema_generation TEXT,
+                  ADD COLUMN schema_ddl_sha256 TEXT,
+                  ADD COLUMN schema_owner_role TEXT,
+                  ADD COLUMN runtime_role TEXT;
+          immutable_append_facts:
+            tables: [events, entity_mutations, dead_letters, agent_turns]
+            columns: temporal_revision BIGINT, temporal_ordinal INTEGER
+          event_receipts_derived_identity:
+            ddl: |
+              ALTER TABLE event_receipts
+                  ADD COLUMN temporal_run_id UUID REFERENCES runs(run_id) ON DELETE CASCADE,
+                  ADD COLUMN temporal_revision BIGINT,
+                  ADD COLUMN temporal_ordinal INTEGER;
+              UPDATE event_receipts AS receipt
+              SET temporal_run_id = event.run_id
+              FROM events AS event
+              WHERE event.event_id = receipt.event_id;
+          mutable_projection_facts:
+            tables: [runs, event_deliveries, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
+            columns: temporal_revision BIGINT, temporal_ordinal INTEGER
+        history_shape_rule: >
+          LIKE is notation for the exact common history shape above, not shared storage. #2051 may spell each CREATE TABLE
+          out after canonical SQL rendering, but every table must retain its own primary key, unique run/revision/ordinal
+          key, foreign key, operation check, fact identity, and typed before/after JSON projection. Generic catch-all
+          history and mutable current rows as history are forbidden.
+      fact_family_contract:
+        append_only_with_revision: [events, entity_mutations, dead_letters, agent_turns, selected fork lineage rows]
+        typed_transition_history: [runs, event_deliveries, event_receipts, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
+        current_projection_only: [runs, event_deliveries, timers, entity_state, agent_sessions, reply_contexts, activity_attempts]
+        global_not_run_historical: [routing_rules, bundles, runtime_store_metadata, runtime_store_migrations]
+        derived_run_identity:
+          event_receipts: >
+            events.run_id through immutable event_id, persisted as trigger-owned temporal_run_id. The recognized migration
+            deterministically projects that existing FK lineage; this is identity normalization, not historical backfill.
+          dead_letters: original event lineage
+          runless_events: explicit NULL revision and ordinal
+      trigger_contract:
+        functions: [swarm_declare_temporal_runs, swarm_claim_temporal_runs, swarm_next_temporal_ordinal, swarm_guard_events, swarm_guard_event_deliveries, swarm_guard_event_receipts, swarm_destroy_run]
+        properties:
+        - Every function is owned by the schema-owner/migration login, is SECURITY DEFINER, schema-qualifies all objects,
+          and pins search_path to pg_catalog plus the runtime schema.
+        - PUBLIC receives no EXECUTE. Runtime receives EXECUTE only on the normal-only swarm_claim_temporal_runs(uuid[])
+          wrapper and swarm_destroy_run; the mode-bearing declaration function, trigger functions, and ordinal helpers are
+          unavailable as direct bypass surfaces.
+        - Every temporal trigger is ENABLE ALWAYS. Runtime admission verifies trigger name, table/function OIDs,
+          tgenabled='A', function owner, prosecdef=true, proconfig search_path, and function checksum.
+        - Event INSERT overwrites caller revision/ordinal. Event UPDATE always rejects. Event DELETE requires destructive
+          mode and never writes ordinary history.
+        - Mutable UPDATE and DELETE guard OLD.run_id before mutation; ownership moves independently guard every distinct
+          OLD and NEW non-NULL run and write typed evidence for each.
+        - Cascade-triggered fact deletion accepts only the same sealed destructive transaction that owns the run tombstone.
+      privilege_contract:
+        schema_owner_migration_login:
+          attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS]
+          owns: [runtime schema, temporal tables, temporal functions, temporal triggers, runtime_store_metadata, runtime_store_migrations]
+          use: one-shot swarm schema apply only
+        runtime_login:
+          attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner]
+          schema: USAGE only; no CREATE
+          tables:
+            read: [runtime_store_metadata, runtime_store_migrations, run_temporal_frontiers, run_temporal_revisions, temporal history, runtime fact tables]
+            insert_only: [events, append-only run fact tables]
+            guarded_insert_update: [runs]
+            guarded_insert_update_delete: [event_deliveries, event_receipts, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
+            denied_all_dml: [run_temporal_transactions, run_temporal_frontiers, run_temporal_revisions, temporal history, run_deletion_tombstones, runtime_store_metadata, runtime_store_migrations]
+            denied_direct_mutation: [events.UPDATE, events.DELETE, runs.DELETE]
+          functions:
+            execute: [swarm_claim_temporal_runs, swarm_destroy_run]
+            denied: [swarm_declare_temporal_runs, all trigger functions, swarm_next_temporal_ordinal]
+        admission: >
+          Serve verifies current_user equals metadata.runtime_role, differs from metadata.schema_owner_role, is not a
+          member of that role, and lacks SUPERUSER, BYPASSRLS, CREATEROLE, schema CREATE, table ownership, trigger/history/
+          metadata DML, and forbidden function EXECUTE. Any missing required grant or extra forbidden grant fails boot.
+      schema_apply:
+        command: swarm schema apply --runtime-role <postgres-role> --config <explicit-migration-config>
+        authority: >
+          The explicit config uses the same typed database connection shape as serve but authenticates as the migration
+          owner. The runtime role is named separately and must already exist. Login provisioning is operator/DBA work.
+          Serve never loads, discovers, or falls back to migration credentials.
+        migration_id: temporal-frontier-v1
+        recognized_legacy: >
+          Only a runtime_store_metadata platform_version=0.7.0 store whose complete catalog checksum matches the registered
+          pre-temporal shape is eligible. Missing/unknown metadata, partial temporal objects, checksum drift, or an
+          unregistered shape fails closed; there is no heuristic repair or timestamp-derived backfill.
+        active_run_gate: >
+          Before DDL, report every runs row in running or paused status and abort with no mutation. Operators must drain or
+          terminate those runs explicitly. Terminal legacy runs are retained as model_version=0/history_complete=false.
+        transaction:
+          isolation: SERIALIZABLE
+          order:
+          - Acquire the temporal-schema exclusive advisory lock.
+          - Lock recognized legacy tables ACCESS EXCLUSIVE in deterministic name order so first upgrade excludes old binaries.
+          - Re-read metadata, catalog checksum, active runs, owner identity, and migration edge.
+          - Normalize only the registered legacy shape; create the temporal model and guarded functions/triggers.
+          - Insert model_version=0 frontiers for retained legacy runs without synthesizing revisions or histories.
+          - Apply exact ownership, revocations, grants, ENABLE ALWAYS triggers, and catalog validation.
+          - Insert migration ledger and update metadata generation/DDL checksum/roles last, then commit.
+        rollback: Any failure rolls back DDL, grants, ledger, and metadata. Reapply of the exact committed migration is a no-op after full revalidation; a different checksum fails closed.
+      deployment_exclusion:
+        lock_key: hashtextextended('swarm:temporal-schema:' || current_database() || ':' || runtime_schema, 0)::bigint
+        runtime: New temporal-aware serve holds the shared session advisory lock for its database connection lifetime.
+        migration: schema apply requires the exclusive lock and emits a visible active-runtime diagnostic when unavailable.
+        first_upgrade: ACCESS EXCLUSIVE legacy table locks cover old binaries that do not yet hold the shared advisory lock.
+      runtime_admission:
+        schema_mutation: forbidden
+        checks: [platform version, schema generation, canonical DDL checksum, migration ledger, schema owner, runtime role, role attributes and membership, exact grants, temporal columns and constraints, trigger/function OIDs and checksums, ENABLE ALWAYS state]
+        second_boot: Two independent runtime-login boots must pass the same read-only admission without executing DDL, DML, GRANT, REVOKE, ALTER, or role changes.
+      required_conformance:
+        committed_record: internal/runtime/conformance/testdata/temporal_frontier_design_record.yaml
+        postgres_test: TestTemporalFrontierPostgresDesignConformance
+        runner: go run ./cmd/swarm-test-postgres -- go test ./internal/runtime/conformance -run '^TestTemporalFrontierPostgresDesignConformance$' -count=1
+        scope: Design/schema/privilege feasibility only; passing does not prove production writer or reader migration.
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
       point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts
       for non-mutating contract/frontier/route admission, and returns execution_ready=false
@@ -12434,17 +12777,17 @@ run_model:
         delivery_event_replay_ready primitive, selected-contract frontier execution when independently admitted, and
         timer reconstruction where the timer owner has proven active-at-T lineage. Unsupported historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
-    parallel_safety: 'Timestamp-based fork handles parallel agent execution naturally. At timestamp T, all
-      concurrent branches either committed their mutations or did not. No DAG traversal, no branch
-      classification, no sibling carry-over logic. The reconstructed state is simply "what was the world at T."'
+    parallel_safety: 'Parallel fork membership is owned by run_model.fork.temporal_frontier, not wall-clock order.
+      Competing persistence transactions serialize per affected run, and a committed revision is either wholly visible
+      or absent from the planner snapshot. Cross-run transactions declare and lock runs in deterministic UUID order.'
     contract_swap: 'When --contracts specifies a new contract path, any admitted fork-local delivery/event work must use
       the selected handler logic uniformly with no mixed-version state. This intent is not itself an execution owner.
       Runtime/store readiness for selected-contract boot/resume is governed by
       runtime.run_fork.contract_swap_boot_resume_admission, and mutation remains limited to separately approved bounded
       owners for admitted fork work.'
-    timestamp_precision: 'Events committed in the same millisecond are disambiguated by (created_at, event_id)
-      composite ordering. The fork point is inclusive: mutations from the target moment are included in
-      reconstructed state. Only mutations strictly after T are undone.'
+    timestamp_precision: 'Timestamps have no frontier precision semantics. The explicit/default fork event resolves an
+      inclusive temporal revision; all same-run facts in that revision are included and facts in later revisions are
+      excluded. temporal_ordinal is a deterministic rendering order inside one revision, never a membership boundary.'
     isolation: 'Forked runs are fully isolated. They get their own event stream, their own entity state copies,
       and their own agent sessions. Fork state materialization writes entity_state rows under the fork run_id while
       preserving entity_id from the source run. Results can be compared side-by-side with the original run.'
