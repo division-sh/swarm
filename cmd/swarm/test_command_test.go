@@ -32,6 +32,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 
 	var calls []jsonRPCRequest
 	var publishCalls int
+	var traceCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
 			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
@@ -75,11 +76,16 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "run.trace":
+			traceCalls++
 			row := validRunCommandTraceRow("event-1")
 			row["event_name"] = "item.received"
+			rows := []map[string]any{row}
 			followUp := validRunCommandTraceRow("event-2")
 			followUp["event_name"] = "item.processed"
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{row, followUp}})
+			if traceCalls > 1 {
+				rows = append(rows, followUp)
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
 		case eventObservationMethodList:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"events": []any{}})
 		case entityListMethod:
@@ -119,6 +125,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		eventPublishMethod,
 		"run.diagnose",
 		"run.diagnose",
+		"run.trace",
 		"run.trace",
 		eventObservationMethodList,
 		entityListMethod,
