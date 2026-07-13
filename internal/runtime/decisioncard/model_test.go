@@ -228,6 +228,40 @@ func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *te
 	}
 }
 
+func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
+	valid, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"revise": {
+			Verdict: "revise", AdvancesTo: "building",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{
+				"feedback": {Type: "text", Required: true},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	staleContent := valid
+	staleContent.CardContentHash = "sha256:stale-content"
+	if err := staleContent.Validate(); err == nil || !strings.Contains(err.Error(), "content hash does not match") {
+		t.Fatalf("stale content hash validation error = %v", err)
+	}
+
+	staleSchema := valid
+	staleSchema.DecisionSchemaHash = "sha256:stale-schema"
+	if err := staleSchema.Validate(); err == nil || !strings.Contains(err.Error(), "schema hash does not match") {
+		t.Fatalf("stale schema hash validation error = %v", err)
+	}
+
+	changedSnapshot := valid
+	outcome := changedSnapshot.Snapshot.Outcomes["revise"]
+	outcome.Input["feedback"] = runtimecontracts.WorkflowGateInputField{Type: "text", Required: false}
+	changedSnapshot.Snapshot.Outcomes["revise"] = outcome
+	if err := changedSnapshot.Validate(); err == nil || !strings.Contains(err.Error(), "content hash does not match") {
+		t.Fatalf("changed snapshot under stale hashes validation error = %v", err)
+	}
+}
+
 func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 	tests := []struct {
 		name     string

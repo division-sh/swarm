@@ -362,7 +362,11 @@ contract_formats:
           constraint consumed by mailbox.decide. Acceptance-changing edits MUST
           change it. Title, verdict/input labels, descriptions, display hints,
           and other presentation metadata MUST NOT change it; those remain
-          covered by card_content_hash. There is no legacy schema-hash
+          covered by card_content_hash. Card creation and every persisted-card
+          create/read validation MUST use the same hash owner: validation
+          recomputes both hashes from the decoded snapshot and requires exact
+          equality before the card can be persisted, returned, or mutated.
+          Nonempty strings are not hash proof. There is no legacy schema-hash
           compatibility path. mailbox.get returns the frozen snapshot; live
           entity context is supplementary and never reconstructs what was shown.
         cadence: >

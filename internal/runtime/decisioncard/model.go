@@ -365,6 +365,16 @@ func (c Card) Validate() error {
 	if err := validateSnapshotContract(c.Snapshot); err != nil {
 		return err
 	}
+	contentHash, schemaHash, err := snapshotHashes(c.Snapshot)
+	if err != nil {
+		return err
+	}
+	if c.CardContentHash != contentHash {
+		return fmt.Errorf("decision card content hash does not match its snapshot")
+	}
+	if c.DecisionSchemaHash != schemaHash {
+		return fmt.Errorf("decision card schema hash does not match its semantic input contract")
+	}
 	if c.Status == StatusDecided {
 		if err := ValidateDecision(c, c.Verdict, c.Fields); err != nil {
 			return fmt.Errorf("decided card outcome evidence is invalid: %w", err)
@@ -517,22 +527,32 @@ func New(card Card) (Card, error) {
 	if err := validateSnapshotContract(card.Snapshot); err != nil {
 		return Card{}, err
 	}
-	schema, err := projectDecisionSchema(card.Snapshot)
+	contentHash, schemaHash, err := snapshotHashes(card.Snapshot)
 	if err != nil {
 		return Card{}, err
 	}
-	card.CardContentHash, err = canonicaljson.Hash(card.Snapshot)
-	if err != nil {
-		return Card{}, fmt.Errorf("hash decision card content: %w", err)
-	}
-	card.DecisionSchemaHash, err = canonicaljson.Hash(schema)
-	if err != nil {
-		return Card{}, fmt.Errorf("hash decision card schema: %w", err)
-	}
+	card.CardContentHash = contentHash
+	card.DecisionSchemaHash = schemaHash
 	if err := card.Validate(); err != nil {
 		return Card{}, err
 	}
 	return card, nil
+}
+
+func snapshotHashes(snapshot Snapshot) (string, string, error) {
+	schema, err := projectDecisionSchema(snapshot)
+	if err != nil {
+		return "", "", err
+	}
+	contentHash, err := canonicaljson.Hash(snapshot)
+	if err != nil {
+		return "", "", fmt.Errorf("hash decision card content: %w", err)
+	}
+	schemaHash, err := canonicaljson.Hash(schema)
+	if err != nil {
+		return "", "", fmt.Errorf("hash decision card schema: %w", err)
+	}
+	return contentHash, schemaHash, nil
 }
 
 func projectDecisionSchema(snapshot Snapshot) (decisionSchemaProjection, error) {
