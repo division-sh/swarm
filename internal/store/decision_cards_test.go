@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -112,6 +113,74 @@ func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceO
 			}
 		})
 	}
+}
+
+func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
+
+			staleCreate := newDecisionCardTestCard(t, runID, now)
+			setDecisionCardFeedbackRequired(staleCreate.Snapshot.Outcomes, false)
+			if err := cardStore.CreateDecisionCard(ctx, staleCreate); err == nil || !strings.Contains(err.Error(), "content hash does not match") {
+				t.Fatalf("CreateDecisionCard with changed snapshot error = %v, want stale content hash rejection", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, staleCreate.CardID); !errors.Is(err, decisioncard.ErrNotFound) {
+				t.Fatalf("GetDecisionCard after rejected changed snapshot error = %v, want ErrNotFound", err)
+			}
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10})
+			if err != nil || len(changes) != 0 {
+				t.Fatalf("changes after rejected changed snapshot = %#v, %v", changes, err)
+			}
+
+			persisted := newDecisionCardTestCard(t, runID, now.Add(time.Minute))
+			if err := cardStore.CreateDecisionCard(ctx, persisted); err != nil {
+				t.Fatalf("CreateDecisionCard valid card: %v", err)
+			}
+			setDecisionCardFeedbackRequired(persisted.Snapshot.Outcomes, false)
+			snapshot, err := json.Marshal(persisted.Snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			updateSnapshot := `UPDATE decision_cards SET snapshot = ? WHERE card_id = ?`
+			args := []any{string(snapshot), persisted.CardID}
+			if postgres {
+				updateSnapshot = `UPDATE decision_cards SET snapshot = $1::jsonb WHERE card_id = $2::uuid`
+			}
+			if _, err := db.ExecContext(ctx, updateSnapshot, args...); err != nil {
+				t.Fatalf("corrupt persisted snapshot: %v", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, persisted.CardID); err == nil || !strings.Contains(err.Error(), "content hash does not match") {
+				t.Fatalf("changed snapshot readback error = %v, want stale content hash rejection", err)
+			}
+
+			contentHash, err := canonicaljson.Hash(persisted.Snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updateContentHash := `UPDATE decision_cards SET card_content_hash = ? WHERE card_id = ?`
+			args = []any{contentHash, persisted.CardID}
+			if postgres {
+				updateContentHash = `UPDATE decision_cards SET card_content_hash = $1 WHERE card_id = $2::uuid`
+			}
+			if _, err := db.ExecContext(ctx, updateContentHash, args...); err != nil {
+				t.Fatalf("align corrupted card content hash: %v", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, persisted.CardID); err == nil || !strings.Contains(err.Error(), "schema hash does not match") {
+				t.Fatalf("changed semantic schema readback error = %v, want stale schema hash rejection", err)
+			}
+		})
+	}
+}
+
+func setDecisionCardFeedbackRequired(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, required bool) {
+	outcome := outcomes["revise"]
+	outcome.Input["feedback"] = runtimecontracts.WorkflowGateInputField{Type: "text", Required: required}
+	outcomes["revise"] = outcome
 }
 
 func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) {
