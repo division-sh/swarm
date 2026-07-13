@@ -19437,7 +19437,11 @@ cli_specification:
           the no-work recovery outcome uses `clean start`, and standing ingress renders provider webhook URL plus bound/unbound
           signing-reference state without credential values. Multi-context labels use author-facing workflow name/version and
           aggregate identical workspace decisions; bundle hashes and fingerprints are never context labels. Recovery actions
-          render stable author outcomes such as `active work cleared for a clean start` or `unfinished work restored`, never
+          distinguish replay restoration from unavailable-bundle preservation cleanup: the latter renders `unfinished work
+          could not be resumed and was closed`, matching its cancelled/stopped/terminated/dead-lettered mutations. It MUST NOT
+          be described as restored. The initial `recovery_enabled_with_persisted_work` admission fact renders `persisted work
+          recovery enabled`; it MUST NOT claim restoration because schedule and manager replay outcomes are owned by later
+          runtime facts. Active-run abandon renders `active work cleared for a clean start`. None of these outcomes renders
           delivery/session/timer/container/receipt accounting.
         readiness_commit_boundary: >
           Initial serve readiness has one commit point after runtime contexts start, the non-readiness HTTP liveness probe

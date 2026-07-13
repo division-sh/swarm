@@ -47,7 +47,7 @@ type serveLifecycleNoticeKind string
 const (
 	serveLifecycleNoticeNoActiveWork      serveLifecycleNoticeKind = "no_active_work"
 	serveLifecycleNoticeActiveWorkCleared serveLifecycleNoticeKind = "active_work_cleared"
-	serveLifecycleNoticeWorkRestored      serveLifecycleNoticeKind = "work_restored"
+	serveLifecycleNoticeUnavailableClosed serveLifecycleNoticeKind = "unavailable_work_closed"
 )
 
 type serveLifecycleNotice struct {
@@ -266,15 +266,13 @@ func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipeline
 	p.notices = append(p.notices, serveLifecycleNotice{Kind: kind})
 }
 
-func (p *serveLifecyclePresenter) recordRecoveredWork(runs, deliveries, sessions, timers, containers, pipelineReceipts int) {
+func (p *serveLifecyclePresenter) recordClosedUnavailableWork() {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if runs > 0 || deliveries > 0 || sessions > 0 || timers > 0 || containers > 0 || pipelineReceipts > 0 {
-		p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeWorkRestored})
-	}
+	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeUnavailableClosed})
 }
 
 func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Report) {
@@ -549,7 +547,7 @@ func (p *serveLifecyclePresenter) recoveryDetailLocked() (string, string) {
 	case "recovery_disabled_no_persisted_work", "recovery_enabled_no_persisted_work", "no_active_run":
 		return "clean start", ""
 	case "recovery_enabled_with_persisted_work":
-		return "restored persisted work", ""
+		return "persisted work recovery enabled", ""
 	case "recovery_disabled_with_manager_snapshot_work":
 		return "started without manager replay", ""
 	}
@@ -656,8 +654,8 @@ func serveLifecycleNoticeDetail(notice serveLifecycleNotice) string {
 		return "no active work to clear"
 	case serveLifecycleNoticeActiveWorkCleared:
 		return "active work cleared for a clean start"
-	case serveLifecycleNoticeWorkRestored:
-		return "unfinished work restored"
+	case serveLifecycleNoticeUnavailableClosed:
+		return "unfinished work could not be resumed and was closed"
 	default:
 		return "completed"
 	}

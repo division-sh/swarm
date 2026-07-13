@@ -1034,14 +1034,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return 3
 		}
 		if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
-			presenter.recordRecoveredWork(
-				len(recovery.Cleanup.Runs),
-				len(recovery.Cleanup.Deliveries),
-				len(recovery.Cleanup.Sessions),
-				len(recovery.Cleanup.Timers),
-				len(recovery.StoppedContainers),
-				recovery.Cleanup.PipelineReceiptCount,
-			)
+			presenter.recordClosedUnavailableWork()
 		}
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)

@@ -235,11 +235,11 @@ func TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping(t *te
 	var out bytes.Buffer
 	presenter := newServeLifecyclePresenter(serveOptions{Output: &out})
 	presenter.recordAbandonedWork(1, 2, 3)
-	presenter.recordRecoveredWork(1, 2, 3, 4, 5, 6)
+	presenter.recordClosedUnavailableWork()
 	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
 
 	text := out.String()
-	for _, want := range []string{"active work cleared for a clean start", "unfinished work restored"} {
+	for _, want := range []string{"active work cleared for a clean start", "unfinished work could not be resumed and was closed"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("recovery projection missing %q:\n%s", want, text)
 		}
@@ -248,6 +248,21 @@ func TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping(t *te
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("recovery projection exposed bookkeeping %q:\n%s", forbidden, text)
 		}
+	}
+}
+
+func TestServeLifecyclePresenterDoesNotTreatRecoveryAdmissionAsRestoration(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: &out})
+	presenter.boot(7, "recovery_decision", "allowed", "recovery_enabled_with_persisted_work")
+	presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+
+	text := out.String()
+	if !strings.Contains(text, "recovery                   persisted work recovery enabled") {
+		t.Fatalf("recovery admission projection missing:\n%s", text)
+	}
+	if strings.Contains(text, "restored") {
+		t.Fatalf("recovery admission was presented as a terminal restoration:\n%s", text)
 	}
 }
 
@@ -489,7 +504,7 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 			t.Fatalf("boot output boundary missing %q: %s", want, boot.OutputBoundary)
 		}
 	}
-	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound", "workflow name/version", "active work cleared", "never context labels"} {
+	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound", "workflow name/version", "active work cleared", "could not be resumed and was closed", "persisted work recovery enabled", "later runtime facts", "MUST NOT", "never context labels"} {
 		if !strings.Contains(boot.ProjectionBoundary, want) {
 			t.Fatalf("boot projection boundary missing %q: %s", want, boot.ProjectionBoundary)
 		}
