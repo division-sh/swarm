@@ -549,7 +549,6 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sql
 }
 
 func standingPostgresDiagnostics(dsn string) string {
-	// routing-example-census: provider-ingress issue=none owner=standing_ingress proof=TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return err.Error()
@@ -602,7 +601,6 @@ func standingPostgresDiagnostics(dsn string) string {
 }
 
 func standingSQLiteDiagnostics(path string) string {
-	// routing-example-census: provider-ingress issue=none owner=standing_ingress proof=TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies
 	store, err := store.NewSQLiteRuntimeStore(path)
 	if err != nil {
 		return err.Error()

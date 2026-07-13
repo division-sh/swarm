@@ -525,7 +525,6 @@ func TestRun_FailsClosedForInvalidRenamedTemplateInstanceKeyAdapters(t *testing.
 }
 
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=bootverify.composition_connect_diagnostics proof=TestRun_FailsClosedForInvalidParentCompositionConnect
 	tests := []struct {
 		name      string
 		opts      compositionConnectFixtureOptions

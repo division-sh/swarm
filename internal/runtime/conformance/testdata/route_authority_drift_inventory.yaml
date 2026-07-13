@@ -718,6 +718,7 @@ seam_families:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
+      - internal/runtime/testfixtures/canonicalrouting/artifact_registry.yaml
     search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier, connect_route_plan, event_delivery_plan_compatibility]
     notes: >
       The matrix proves selected route-authority rows. This inventory proves

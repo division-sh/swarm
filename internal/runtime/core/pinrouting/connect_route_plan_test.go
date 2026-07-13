@@ -1094,7 +1094,6 @@ func TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTar
 }
 
 func TestLowerCompositionConnectRoutePlanFailsClosedForInvalidInputs(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=pinrouting.typed_route_plan_lowering proof=TestLowerCompositionConnectRoutePlanFailsClosedForInvalidInputs
 	tests := []struct {
 		name    string
 		connect runtimecontracts.FlowPackageConnect

@@ -172,7 +172,6 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityAcceptsExternalProof
 	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{
 		externalRequestedSwarm: `
     source: external webhook

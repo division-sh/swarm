@@ -240,7 +240,6 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 }
 
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=platform_spec.routing_contract proof=TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority
 	root := loadPlatformSpecYAMLNode(t)
 
 	targetRequiredMissing := collectMappingValuesByKey(root, "target_required_missing")
