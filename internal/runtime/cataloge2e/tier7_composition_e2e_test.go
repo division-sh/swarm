@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier7CompositionFixtures = []string{
@@ -28,6 +30,14 @@ var tier7StaticMultiEntityRetiredFixtures = map[string]struct{}{
 }
 
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-agent-emits-to-node"),
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-dual-delivery"),
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-full-lifecycle"),
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-multi-gate-pipeline"),
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-two-node-chain"),
+		canonicalrouting.ArtifactID("tests/tier7-composition/test-wildcard-cross-flow"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier7CompositionFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier7-composition", fixtureName)

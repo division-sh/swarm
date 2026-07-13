@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier6EventLoopFixtures = []string{
@@ -25,6 +27,19 @@ var tier6EventLoopFixtures = []string{
 var tier6ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-atomicity-commit"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-atomicity-guard-rollback"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-atomicity-rollback"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-chain-depth-limit"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-cross-entity-concurrent"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-dead-letter"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-entity-serialization"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-event-persisted-before-delivery"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-event-validation"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-guards-pre-handler-state"),
+		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-on-complete-atomicity-chain"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier6EventLoopFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", fixtureName)

@@ -13,8 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func canonicalExampleNames() []string {
-	return []string{
+func canonicalExampleNames() []ArtifactID {
+	return []ArtifactID{
 		RootIngress,
 		ParentConnect,
 		TemplateSelectExisting,
@@ -24,9 +24,27 @@ func canonicalExampleNames() []string {
 	}
 }
 
+func TestCanonicalPositiveFixtureOwnerSetIsClosed(t *testing.T) {
+	for _, id := range canonicalExampleNames() {
+		if _, ok := canonicalExamplePath(id); !ok {
+			t.Fatalf("canonical artifact %q was rejected", id)
+		}
+	}
+	for _, id := range []ArtifactID{
+		"notify-all-children",
+		"examples/routing/notify-all-children",
+		"tests/tier7-composition/test-full-lifecycle",
+	} {
+		if root, ok := canonicalExamplePath(id); ok {
+			t.Fatalf("non-canonical artifact %q resolved to positive owner %q", id, root)
+		}
+	}
+}
+
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
+	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey)
 	for _, name := range canonicalExampleNames() {
-		t.Run(name, func(t *testing.T) {
+		t.Run(string(name), func(t *testing.T) {
 			root := ExampleRoot(t, name)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 				RepoRoot(t),
@@ -46,7 +64,11 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
 	// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
-	want := canonicalExampleNames()
+	artifactIDs := canonicalExampleNames()
+	want := make([]string, 0, len(artifactIDs))
+	for _, id := range artifactIDs {
+		want = append(want, filepath.Base(string(id)))
+	}
 	sort.Strings(want)
 	entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))
 	if err != nil {
@@ -66,7 +88,7 @@ func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
 
 	for _, name := range want {
 		t.Run(name, func(t *testing.T) {
-			root := ExampleRoot(t, name)
+			root := ExampleRoot(t, ArtifactID("examples/routing/"+name))
 			readme, err := os.ReadFile(filepath.Join(root, "README.md"))
 			if err != nil {
 				t.Fatal(err)

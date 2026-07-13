@@ -2834,11 +2834,11 @@ func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 
 func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, mint string) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
-	if strings.TrimSpace(mint) != "uuid" {
-		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), "            mint: uuid\n", "            mint: "+strings.TrimSpace(mint)+"\n")
+	mode := canonicalrouting.CreateMintUUID
+	if strings.TrimSpace(mint) == runtimecontracts.FlowInputResolutionMintEventID {
+		mode = canonicalrouting.CreateMintEventID
 	}
-	return root
+	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: mode})
 }
 
 func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {

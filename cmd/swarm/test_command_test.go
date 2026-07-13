@@ -1397,7 +1397,7 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 
 func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *testing.T) {
 	tests := []struct {
-		example        string
+		example        canonicalrouting.ArtifactID
 		deliveredNodes map[string]int
 	}{
 		{canonicalrouting.RootIngress, map[string]int{"item-handler": 1, "item-observer": 1}},
@@ -1408,7 +1408,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 		{canonicalrouting.TemplateCreateMintedKey, map[string]int{"producer-node": 1, "validator-node": 1}},
 	}
 	for _, test := range tests {
-		t.Run(test.example, func(t *testing.T) {
+		t.Run(string(test.example), func(t *testing.T) {
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
 			contractsPath := canonicalrouting.ExampleRoot(t, test.example)

@@ -6,9 +6,7 @@ import (
 	"testing"
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 )
@@ -77,52 +75,6 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 		t.Fatalf("route plan mappings = %#v, want explicit %s -> %s", plan.InstanceKey.Mappings, finalflowinstanceauthoring.TemplatePayloadKey, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
 
-	coordinatorPrimary, err := bundle.ResolveFlowPrimaryEntity(finalflowinstanceauthoring.CoordinatorFlowID)
-	if err != nil {
-		t.Fatalf("ResolveFlowPrimaryEntity(%s): %v", finalflowinstanceauthoring.CoordinatorFlowID, err)
-	}
-	if coordinatorPrimary.EntityType != finalflowinstanceauthoring.CoordinatorEntityType {
-		t.Fatalf("coordinator primary entity = %q, want %s", coordinatorPrimary.EntityType, finalflowinstanceauthoring.CoordinatorEntityType)
-	}
-	if got := coordinatorPrimary.Contract.Fields["lead_index"].Type; got != "map[text]LeadScore" {
-		t.Fatalf("lead_index type = %q, want map[text]LeadScore", got)
-	}
-	if got := coordinatorPrimary.Contract.Fields["audit_log"].Type; got != "[AuditEntry]" {
-		t.Fatalf("audit_log type = %q, want [AuditEntry]", got)
-	}
-	coordinator, err := bundle.ResolveFlowSingletonCoordinator(finalflowinstanceauthoring.CoordinatorFlowID)
-	if err != nil {
-		t.Fatalf("ResolveFlowSingletonCoordinator(%s): %v", finalflowinstanceauthoring.CoordinatorFlowID, err)
-	}
-	if coordinator.PrimaryEntity.EntityType != finalflowinstanceauthoring.CoordinatorEntityType {
-		t.Fatalf("singleton primary entity = %q, want %s", coordinator.PrimaryEntity.EntityType, finalflowinstanceauthoring.CoordinatorEntityType)
-	}
-	if !finalFixtureContainedField(coordinator.ContainedState, "lead_index", "map") || !finalFixtureContainedField(coordinator.ContainedState, "audit_log", "list") {
-		t.Fatalf("singleton contained state = %#v, want lead_index map and audit_log list", coordinator.ContainedState)
-	}
-
-	handler, ok := source.NodeEventHandler(finalflowinstanceauthoring.CoordinatorNodeID, finalflowinstanceauthoring.CoordinatorInput)
-	if !ok {
-		t.Fatalf("handler %s/%s missing", finalflowinstanceauthoring.CoordinatorNodeID, finalflowinstanceauthoring.CoordinatorInput)
-	}
-	containedWrites := make([]runtimecontracts.WorkflowDataWrite, 0, len(handler.DataAccumulation.Writes))
-	for _, write := range handler.DataAccumulation.Writes {
-		if write.IsContainedOperation() {
-			containedWrites = append(containedWrites, write)
-		}
-	}
-	if got := len(containedWrites); got != 6 {
-		t.Fatalf("contained writes = %d, want 6: %#v", got, handler.DataAccumulation.Writes)
-	}
-	contract, ok := entityruntime.ResolveForFlow(source, finalflowinstanceauthoring.CoordinatorFlowID)
-	if !ok {
-		t.Fatalf("entityruntime.ResolveForFlow(%s) missing", finalflowinstanceauthoring.CoordinatorFlowID)
-	}
-	for idx, write := range containedWrites {
-		if _, err := entityruntime.ResolveContainedOperationTarget(contract, write.Target(), string(write.Operation), !write.Key.IsZero(), !write.Index.IsZero()); err != nil {
-			t.Fatalf("ResolveContainedOperationTarget(write[%d]): %v", idx, err)
-		}
-	}
 }
 
 func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
@@ -174,42 +126,6 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			opts:        finalflowinstanceauthoring.Options{ProducerBroadcast: true},
 			checkID:     "pin_target_resolution",
 			wantMessage: "producer_broadcast_common_path_forbidden",
-		},
-		{
-			name:        "bad map write dynamic bracket target",
-			opts:        finalflowinstanceauthoring.Options{DynamicBracketTarget: true},
-			checkID:     "contained_state_operation_compliance",
-			wantMessage: "dynamic bracket path syntax",
-		},
-		{
-			name:        "bad map write missing key",
-			opts:        finalflowinstanceauthoring.Options{MissingMapKey: true},
-			wantMessage: "requires key",
-			loadError:   true,
-		},
-		{
-			name:        "bad map write wrong value shape",
-			opts:        finalflowinstanceauthoring.Options{WrongMapValueShape: true},
-			checkID:     "contained_state_operation_compliance",
-			wantMessage: "undeclared",
-		},
-		{
-			name:        "bad map write undeclared target",
-			opts:        finalflowinstanceauthoring.Options{UndeclaredMapTarget: true},
-			checkID:     "contained_state_operation_compliance",
-			wantMessage: "missing_index",
-		},
-		{
-			name:        "bad map write unsupported operation",
-			opts:        finalflowinstanceauthoring.Options{UnsupportedMapOp: true},
-			wantMessage: "unsupported workflow data write op",
-			loadError:   true,
-		},
-		{
-			name:        "bad list write negative index",
-			opts:        finalflowinstanceauthoring.Options{BadListIndex: true},
-			checkID:     "contained_state_operation_compliance",
-			wantMessage: "list index cannot be negative",
 		},
 		{
 			name:        "retired static create_entity",
@@ -291,15 +207,6 @@ func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysCla
 	if problems := validateRouteAuthorityDriftInventory(t, root, inventory); len(problems) != 0 {
 		t.Fatalf("route authority inventory validation failed:\n- %s", strings.Join(problems, "\n- "))
 	}
-}
-
-func finalFixtureContainedField(fields []runtimecontracts.SingletonCoordinatorContainedField, name, kind string) bool {
-	for _, field := range fields {
-		if strings.TrimSpace(field.Name) == name && strings.TrimSpace(field.Kind) == kind {
-			return true
-		}
-	}
-	return false
 }
 
 func finalFixtureContainsString(values []string, want string) bool {

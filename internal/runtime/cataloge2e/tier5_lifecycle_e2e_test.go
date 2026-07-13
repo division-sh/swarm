@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type catalogExcludedFixture struct {
@@ -31,6 +33,20 @@ var tier5LifecycleFixtures = []string{
 var tier5ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-auto-emit-on-create"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-create-flow-instance"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-create-flow-instance-config"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-template-no-boot-instance"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-terminal-state-preserves"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-terminal-state-rejects"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-timer-cancel"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-timer-fire"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-timer-recurring"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-timer-start-on"),
+		canonicalrouting.ArtifactID("tests/tier5-flow-lifecycle/test-wildcard-subscription"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier5LifecycleFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", fixtureName)

@@ -119,6 +119,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 }
 
 func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=pipeline.query_entities_flow_scope proof=internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 

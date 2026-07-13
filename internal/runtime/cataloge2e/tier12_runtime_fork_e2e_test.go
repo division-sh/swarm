@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -30,6 +31,10 @@ var tier12RuntimeForkFixtures = []string{
 }
 
 func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier12-runtime-fork/test-non-agent-replay-fail-closed"),
+		canonicalrouting.ArtifactID("tests/tier12-runtime-fork/test-selected-contract-fork-execution"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
 

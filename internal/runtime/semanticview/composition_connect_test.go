@@ -107,30 +107,7 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 
 func writeCompositionConnectSemanticFixture(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "    to: consumer.work_ready\n", `    to: consumer.work_ready
-    map:
-      work_id:
-        source: payload.work_id
-        target: entity.work_id
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows/producer/schema.yaml"), "        event: work.ready\n", `        event: work.ready
-        key: work_id
-        carries: [work_id]
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows/consumer/schema.yaml"), "        event: work.ready\n", `        event: work.ready
-        address:
-          by: work_id
-          source: payload.work_id
-          target: entity.work_id
-          cardinality: one
-`)
-	canonicalrouting.WriteFile(t, root, "flows/consumer/entities.yaml", `
-work:
-  work_id:
-    type: text
-`)
-	return root
+	return canonicalrouting.CopyParentConnectAddressVariant(t, canonicalrouting.ParentConnectAddressSemanticView)
 }
 
 func writeRootCompositionConnectSemanticFixture(t *testing.T) string {

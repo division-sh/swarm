@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier2AccumulationFixtures = []string{
@@ -25,6 +27,19 @@ var tier2AccumulationFixtures = []string{
 var tier2ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier2AccumulationCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-all"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-crash-recovery"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-expected-from-entity"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-from-filter"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-idempotent"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-on-complete-rollback"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-on-timeout"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-partial"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-threshold"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-timeout"),
+		canonicalrouting.ArtifactID("tests/tier2-accumulation/test-accumulate-with-compute"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier2AccumulationFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", fixtureName)

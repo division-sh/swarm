@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier10PolicyPatternFixtures = []string{
@@ -19,6 +21,14 @@ var tier10PolicyPatternFixtures = []string{
 var tier10ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier10PolicyPatternCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-capacity-query"),
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-counter-escalate"),
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-hard-gate-override"),
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-multi-guard-partial"),
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-threshold-three-way"),
+		canonicalrouting.ArtifactID("tests/tier10-policy-patterns/test-policy-timeout-elapsed"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier10PolicyPatternFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier10-policy-patterns", fixtureName)

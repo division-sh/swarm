@@ -98,68 +98,68 @@ reviewer-agent:
 
 func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		opts    eventMetadataFlowAuthorityFixtureOptions
-		want    string
-		wantMsg string
+		name       string
+		invalidity canonicalrouting.ParentConnectEventMetadataInvalidity
+		want       string
+		wantMsg    string
 	}{
 		{
-			name:    "producer names flow auto emit",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{flowStartedSwarm: "producer: producer"},
-			want:    "swarm.producer",
-			wantMsg: "flow producer auto_emit_on_create producer",
+			name:       "producer names flow auto emit",
+			invalidity: canonicalrouting.ParentConnectMetadataProducerFlowAutoEmit,
+			want:       "swarm.producer",
+			wantMsg:    "flow producer auto_emit_on_create producer",
 		},
 		{
-			name:    "producer names flow output pin",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployDoneSwarm: "producer: deploy_done"},
-			want:    "swarm.producer",
-			wantMsg: "flow producer output pin producer",
+			name:       "producer names flow output pin",
+			invalidity: canonicalrouting.ParentConnectMetadataProducerFlowOutput,
+			want:       "swarm.producer",
+			wantMsg:    "flow producer output pin producer",
 		},
 		{
-			name:    "consumer names flow input pin",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployCompletedSwarm: "consumer: consumer"},
-			want:    "swarm.consumer",
-			wantMsg: "flow consumer input pin consumer",
+			name:       "consumer names flow input pin",
+			invalidity: canonicalrouting.ParentConnectMetadataConsumerFlowInput,
+			want:       "swarm.consumer",
+			wantMsg:    "flow consumer input pin consumer",
 		},
 		{
-			name:    "producer names parent connect output",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployDoneSwarm: "producer: producer.deploy_done"},
-			want:    "swarm.producer",
-			wantMsg: "parent connect output producer",
+			name:       "producer names parent connect output",
+			invalidity: canonicalrouting.ParentConnectMetadataProducerConnectOutput,
+			want:       "swarm.producer",
+			wantMsg:    "parent connect output producer",
 		},
 		{
-			name:    "consumer names parent connect input",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployCompletedSwarm: "consumer: consumer.deploy_completed"},
-			want:    "swarm.consumer",
-			wantMsg: "parent connect input consumer",
+			name:       "consumer names parent connect input",
+			invalidity: canonicalrouting.ParentConnectMetadataConsumerConnectInput,
+			want:       "swarm.consumer",
+			wantMsg:    "parent connect input consumer",
 		},
 		{
-			name:    "producer rejects wrong-event flow output pin",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{flowStartedSwarm: "producer: deploy_done"},
-			want:    "swarm.producer",
-			wantMsg: "flow producer output pin producer",
+			name:       "producer rejects wrong-event flow output pin",
+			invalidity: canonicalrouting.ParentConnectMetadataProducerWrongFlowEvent,
+			want:       "swarm.producer",
+			wantMsg:    "flow producer output pin producer",
 		},
 		{
-			name:    "consumer rejects wrong-event flow input pin",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployDoneSwarm: "consumer: deploy_completed"},
-			want:    "swarm.consumer",
-			wantMsg: "flow consumer input pin consumer",
+			name:       "consumer rejects wrong-event flow input pin",
+			invalidity: canonicalrouting.ParentConnectMetadataConsumerWrongFlowEvent,
+			want:       "swarm.consumer",
+			wantMsg:    "flow consumer input pin consumer",
 		},
 		{
-			name:    "producer rejects wrong-event parent connect output",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{flowStartedSwarm: "producer: producer.deploy_done"},
-			want:    "swarm.producer",
-			wantMsg: "parent connect output producer",
+			name:       "producer rejects wrong-event parent connect output",
+			invalidity: canonicalrouting.ParentConnectMetadataProducerWrongConnectEvent,
+			want:       "swarm.producer",
+			wantMsg:    "parent connect output producer",
 		},
 		{
-			name:    "consumer rejects wrong-event parent connect input",
-			opts:    eventMetadataFlowAuthorityFixtureOptions{deployDoneSwarm: "consumer: consumer.deploy_completed"},
-			want:    "swarm.consumer",
-			wantMsg: "parent connect input consumer",
+			name:       "consumer rejects wrong-event parent connect input",
+			invalidity: canonicalrouting.ParentConnectMetadataConsumerWrongConnectEvent,
+			want:       "swarm.consumer",
+			wantMsg:    "parent connect input consumer",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadEventMetadataFlowAuthorityFixture(t, tc.opts)
+			source := loadEventMetadataFlowAuthorityFixture(t, tc.invalidity)
 
 			report := Run(context.Background(), source, Options{})
 
@@ -268,90 +268,12 @@ observer:
 	return root
 }
 
-type eventMetadataFlowAuthorityFixtureOptions struct {
-	flowStartedSwarm     string
-	deployDoneSwarm      string
-	deployCompletedSwarm string
-}
-
-func loadEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowAuthorityFixtureOptions) semanticview.Source {
+func loadEventMetadataFlowAuthorityFixture(t *testing.T, invalidity canonicalrouting.ParentConnectEventMetadataInvalidity) semanticview.Source {
 	t.Helper()
-	root := writeEventMetadataFlowAuthorityFixture(t, opts)
+	root := canonicalrouting.CopyParentConnectEventMetadataInvalidity(t, invalidity)
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec))
-}
-
-func writeEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowAuthorityFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.event_metadata_authority proof=internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityRejectsFlowSurfaceRestatements
-	t.Helper()
-	opts.flowStartedSwarm = canonicalParentConnectMetadataRole(opts.flowStartedSwarm)
-	opts.deployDoneSwarm = canonicalParentConnectMetadataRole(opts.deployDoneSwarm)
-	opts.deployCompletedSwarm = canonicalParentConnectMetadataRole(opts.deployCompletedSwarm)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), "pins:\n", `auto_emit_on_create:
-  event: flow.started
-pins:
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `      - name: work_ready
-        event: work.ready
-`, `      - name: work_ready
-        event: work.ready
-      - name: deploy_done
-        event: deploy.done
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `      - name: work_ready
-        event: work.ready
-`, `      - name: work_ready
-        event: work.ready
-      - name: deploy_completed
-        event: deploy.completed
-        source: external
-`)
-	canonicalrouting.WriteFile(t, root, "flows/producer/events.yaml",
-		eventMetadataAuthorityEventEntry("flow.started", opts.flowStartedSwarm)+
-			eventMetadataAuthorityRoutedEventEntry("work.requested", "")+
-			eventMetadataAuthorityRoutedEventEntry("work.ready", opts.deployDoneSwarm)+
-			eventMetadataAuthorityRoutedEventEntry("deploy.done", ""))
-	canonicalrouting.WriteFile(t, root, "flows/consumer/events.yaml",
-		eventMetadataAuthorityRoutedEventEntry("work.ready", opts.deployCompletedSwarm)+
-			eventMetadataAuthorityRoutedEventEntry("deploy.completed", ""))
-	return root
-}
-
-func canonicalParentConnectMetadataRole(raw string) string {
-	replacer := strings.NewReplacer(
-		"producer.deploy_done", "producer.work_ready",
-		"consumer.deploy_completed", "consumer.work_ready",
-	)
-	return replacer.Replace(raw)
-}
-
-func writeEventMetadataFlowAuthorityFlow(t *testing.T, root, flowID, schema, events string) {
-	t.Helper()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), schema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), events)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "{}\n")
-}
-
-func eventMetadataAuthorityEventEntry(eventName, swarm string) string {
-	eventName = strings.TrimSpace(eventName)
-	swarm = indentEventMetadataAuthoritySwarm(swarm)
-	if swarm == "" {
-		return eventName + ": {}\n"
-	}
-	return eventName + ":\n  swarm:\n" + swarm + "\n"
-}
-
-func eventMetadataAuthorityRoutedEventEntry(eventName, swarm string) string {
-	entry := eventMetadataAuthorityEventEntry(eventName, swarm)
-	if strings.HasSuffix(entry, ": {}\n") {
-		return strings.TrimSuffix(entry, " {}\n") + "\n  work_id: text\n"
-	}
-	return entry + "  work_id: text\n"
 }
 
 func eventMetadataAuthorityEventsYAML(opts eventMetadataAuthorityFixtureOptions) string {

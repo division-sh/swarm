@@ -42,34 +42,31 @@ func Write(t testing.TB, opts Options) string {
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectOrCreate)
 	addDataAccumulationOverlay(t, root)
 	applyNegativeMutation(t, root, opts)
+	addLifecycleOverlay(t, root)
 	return root
 }
 
 func addDataAccumulationOverlay(t testing.TB, root string) {
 	t.Helper()
 	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
-	canonicalrouting.ReplaceFile(t, producerEvents,
+	canonicalrouting.ApplyOverlayMutation(t, producerEvents,
 		"account.requested:\n  account_id: text\n",
 		"account.requested:\n  account_id: text\n  score: text\n  decision: text\n")
-	canonicalrouting.ReplaceFile(t, producerEvents,
+	canonicalrouting.ApplyOverlayMutation(t, producerEvents,
 		"account.ready:\n  account_id: text\n",
 		"account.ready:\n  account_id: text\n  score: text\n  decision: text\n")
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "events.yaml"),
-		"account_id: text\n", "account_id: text\n  score: text\n  decision: text\n")
+	canonicalrouting.ApplyOverlayMutation(t, filepath.Join(root, "flows", "account", "events.yaml"),
+		"  account_id: text\n", "  account_id: text\n  score: text\n  decision: text\n")
 	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
-	canonicalrouting.ReplaceFile(t, producerNodes,
+	canonicalrouting.ApplyOverlayMutation(t, producerNodes,
 		"          account_id: payload.account_id\n",
 		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
-	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
-	canonicalrouting.ReplaceFile(t, accountSchema,
-		"mode: template\n",
-		"mode: template\ninitial_state: pending\nstates: [pending, done]\nterminal_states: [done]\n")
 	accountEntities := filepath.Join(root, "flows", "account", "entities.yaml")
-	canonicalrouting.ReplaceFile(t, accountEntities,
+	canonicalrouting.ApplyOverlayMutation(t, accountEntities,
 		"    _unused_reason: receiver instance identity\n",
 		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
 	accountNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
-	canonicalrouting.ReplaceFile(t, accountNodes,
+	canonicalrouting.ApplyOverlayMutation(t, accountNodes,
 		"    account.ready: {}\n",
 		`    account.ready:
       data_accumulation:
@@ -84,30 +81,25 @@ func addDataAccumulationOverlay(t testing.TB, root string) {
 `)
 }
 
+func addLifecycleOverlay(t testing.TB, root string) {
+	t.Helper()
+	canonicalrouting.ApplyOverlay(t, root, "flows/account/schema.yaml",
+		"initial_state: pending\nstates: [pending, done]\nterminal_states: [done]\n")
+}
+
 func applyNegativeMutation(t testing.TB, root string, opts Options) {
 	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=internal/runtime/conformance/template_flow_pilot_conformance_test.go:TestTemplateFlowPilotConformance_FailClosedMatrix
 	t.Helper()
-	packageFile := filepath.Join(root, "package.yaml")
 	if opts.BadConnectMapping {
-		canonicalrouting.ReplaceFile(t, packageFile,
-			"  - from: producer.account_ready\n    to: account.account_ready\n",
-			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: missing_account_id\n        target: account_id\n")
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateBadConnectMapping)
 	}
 	if opts.UnsupportedReceiverSelection {
-		accountNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
-		canonicalrouting.ReplaceFile(t, accountNodes,
-			"    account.ready:\n      data_accumulation:\n",
-			"    account.ready:\n      select_entity:\n        by:\n          account_id: payload.account_id\n      data_accumulation:\n")
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateReceiverSelector)
 	}
-	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
 	if opts.ProducerTarget {
-		canonicalrouting.ReplaceFile(t, producerNodes,
-			"        event: account.ready\n        fields:\n",
-			"        event: account.ready\n        target:\n          flow: account\n          match:\n            account_id: payload.account_id\n        fields:\n")
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateProducerTarget)
 	}
 	if opts.ProducerBroadcast {
-		canonicalrouting.ReplaceFile(t, producerNodes,
-			"        event: account.ready\n        fields:\n",
-			"        event: account.ready\n        broadcast: true\n        fields:\n")
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateProducerBroadcast)
 	}
 }

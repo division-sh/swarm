@@ -7580,6 +7580,7 @@ func writeStateReachabilityFixture(t *testing.T) string {
 }
 
 func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler string) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.state_reachability proof=internal/runtime/bootverify/report_test.go:TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState
 	t.Helper()
 	root := t.TempDir()
 

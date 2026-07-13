@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier4CrossEntityFixtures = []string{
@@ -20,6 +22,13 @@ var tier4ExcludedFixtures = map[string]catalogExcludedFixture{
 }
 
 func TestTier4CrossEntityCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier4-cross-entity/test-clear-multiple-targets"),
+		canonicalrouting.ArtifactID("tests/tier4-cross-entity/test-clear-state"),
+		canonicalrouting.ArtifactID("tests/tier4-cross-entity/test-create-entity"),
+		canonicalrouting.ArtifactID("tests/tier4-cross-entity/test-query-filter"),
+		canonicalrouting.ArtifactID("tests/tier4-cross-entity/test-query-group-by"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier4CrossEntityFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier4-cross-entity", fixtureName)
