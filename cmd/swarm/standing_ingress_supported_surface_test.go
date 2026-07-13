@@ -18,7 +18,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -79,7 +79,6 @@ func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, 
 }
 
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/standing_ingress_supported_surface_test.go:writeStandingTelegramServeFixture"))
 	isolateCLIAPIConfigEnv(t)
 	calls := make(chan map[string]any, 4)
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -656,165 +655,6 @@ func standingSQLiteDiagnostics(path string) string {
 }
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
-	// routing-example-census: provider-ingress issue=none owner=standing_ingress proof=cmd/swarm/standing_ingress_supported_surface_test.go:TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies
 	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-		"package.yaml": `name: standing-telegram-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: telegram-ingress
-    flow: telegram-ingress
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-  - id: telegram-chat
-    flow: telegram-chat
-    mode: template
-`,
-		"schema.yaml": "name: standing-telegram-proof\n",
-		"policy.yaml": "{}\n",
-		"tools.yaml":  "{}\n",
-		"agents.yaml": "{}\n",
-		"events.yaml": "{}\n",
-		"nodes.yaml":  "{}\n",
-		"flows/telegram-ingress/schema.yaml": `name: telegram-ingress
-mode: singleton
-stages:
-  active:
-    initial: true
-    gate:
-      decision: standing_review
-      outcomes:
-        keep:
-          advances_to: done
-  done:
-    terminal: true
-pins:
-  inputs:
-    events:
-      - name: telegram_update
-        event: inbound.telegram
-        source: external
-  outputs:
-    events: []
-`,
-		"flows/telegram-ingress/types.yaml": "{}\n",
-		"flows/telegram-ingress/entities.yaml": `telegram_service:
-  service_id:
-    type: text
-    initial: standing
-  active_chats:
-    type: map[text]json
-    initial: {}
-`,
-		"flows/telegram-ingress/events.yaml": "{}\n",
-		"flows/telegram-ingress/nodes.yaml":  "{}\n",
-		"flows/telegram-ingress/tools.yaml":  "{}\n",
-		"flows/telegram-ingress/policy.yaml": "{}\n",
-		"flows/telegram-ingress/agents.yaml": "{}\n",
-		"flows/telegram-chat/schema.yaml": `name: telegram-chat
-mode: template
-instance:
-  by: chat_id
-  on_missing: create
-  on_conflict: reuse
-initial_state: active
-states: [active]
-pins:
-  inputs:
-    events:
-      - name: telegram_text_message
-        event: inbound.telegram.text_message
-        source: external
-        resolution:
-          mode: select-or-create
-          instance_key: chat_id
-        carries:
-          chat_id:
-            from: payload.chat_id
-            type: text
-  outputs:
-    events: []
-`,
-		"flows/telegram-chat/types.yaml": "{}\n",
-		"flows/telegram-chat/entities.yaml": `chat:
-  chat_id:
-    type: text
-    indexed: true
-    _unused_reason: populated from the normalized input resolution carry
-  last_message:
-    type: text
-    initial: ""
-`,
-		"flows/telegram-chat/events.yaml": `telegram.reply_requested:
-  chat_id: text
-  text: text
-`,
-		"flows/telegram-chat/nodes.yaml": `telegram-responder:
-  id: telegram-responder
-  execution_type: system_node
-  subscribes_to: [telegram.reply_requested]
-  event_handlers:
-    telegram.reply_requested:
-      activity:
-        id: telegram_send_message
-        tool: telegram.send_message
-        input:
-          chat_id:
-            cel: payload.chat_id
-          text:
-            cel: payload.text
-`,
-		"flows/telegram-chat/tools.yaml": fmt.Sprintf(`telegram.send_message:
-  category: provider_connector
-  description: send Telegram messages
-  handler_type: http
-  effect_class: non_idempotent_write
-  credentials: [telegram_bot_token]
-  input_schema:
-    type: object
-    properties:
-      chat_id: {type: string}
-      text: {type: string}
-    required: [chat_id, text]
-  output_schema: {type: object}
-  response_success: {kind: http_status_2xx}
-  http:
-    method: POST
-    url: %s/bot{{credentials.telegram_bot_token}}/sendMessage
-    body:
-      chat_id: "{{input.chat_id}}"
-      text: "{{input.text}}"
-`, strings.TrimRight(telegramBaseURL, "/")),
-		"flows/telegram-chat/policy.yaml": "{}\n",
-		"flows/telegram-chat/agents.yaml": `phrase-bot:
-  id: phrase-bot-{instance_id}
-  role: phrase_bot
-  prompt_ref: phrase-bot
-  model: regular
-  mode: session_per_entity
-  subscriptions:
-    - inbound.telegram.text_message
-  emit_events:
-    - telegram.reply_requested
-`,
-		"flows/telegram-chat/prompts/phrase-bot.md": `Reply to each Telegram message by emitting telegram.reply_requested with the same chat_id.
-`,
-	}
-	for name, contents := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", path, err)
-		}
-		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-			t.Fatalf("write %s: %v", path, err)
-		}
-	}
-	return root
+	return canonicalrouting.CopyStandingTelegramServe(t, telegramBaseURL)
 }

@@ -88,7 +88,6 @@ func addTemplateLifecycleOverlay(t testing.TB, root string) {
 }
 
 func applyRoutingMutation(t testing.TB, root string, opts Options) {
-	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go:TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix
 	t.Helper()
 	if opts.MissingOutputKey {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateMissingInstanceKey)

@@ -26,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1655,7 +1654,6 @@ func requireNoProjectedScores(t *testing.T, result ExecutionResult) {
 }
 
 func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/engine/executor_test.go:loadEngineProjectionFlowBundle"))
 	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     source,
@@ -5196,7 +5194,6 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 }
 
 func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/engine/executor_test.go:loadEngineSingletonCoordinatorFlowBundle"))
 	bundle := loadEngineSingletonCoordinatorFlowBundle(t)
 	if _, err := bundle.ResolveFlowSingletonCoordinator("coordinator"); err != nil {
 		t.Fatalf("ResolveFlowSingletonCoordinator: %v", err)
@@ -6331,7 +6328,6 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 }
 
 func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	// routing-example-census: different-concept issue=none owner=engine.entity_projection proof=internal/runtime/engine/executor_test.go:TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent
 	t.Helper()
 	root := t.TempDir()
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `

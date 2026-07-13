@@ -10,7 +10,6 @@ import (
 )
 
 func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/composition_connect_test.go:writeCompositionConnectSemanticFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -70,7 +69,6 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 }
 
 func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/composition_connect_test.go:writeRootCompositionConnectSemanticFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -113,43 +111,8 @@ func writeCompositionConnectSemanticFixture(t *testing.T) string {
 }
 
 func writeRootCompositionConnectSemanticFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=semanticview.root_connect_projection proof=internal/runtime/semanticview/composition_connect_test.go:TestCompositionConnectFactsExposeRootProducerEndpoint
 	t.Helper()
-	root := t.TempDir()
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: root-composition-connect-semantic
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - from: .root_ready
-    to: consumer.ready
-    delivery: one
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: root-composition-connect-semantic
-pins:
-  outputs:
-    events:
-      - name: root_ready
-        event: root.ready
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "root.ready: {}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeCompositionConnectFlow(t, root, "consumer", `
-pins:
-  inputs:
-    events:
-      - name: ready
-        event: root.ready
-`, "root.ready: {}\n", "{}\n")
-	return root
+	return canonicalrouting.CopyRootOutputConnect(t, canonicalrouting.RootConnectNoEmitter)
 }
 
 func writeCompositionConnectFlow(t *testing.T, root, flowID, schemaTail, events, entities string) {

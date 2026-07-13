@@ -12,7 +12,6 @@ import (
 )
 
 func TestEventMetadataAuthorityRejectsInternalSwarmRestatements(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityRejectsInternalSwarmRestatements"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:writeEventMetadataAuthorityFixture"))
 	for _, tc := range []struct {
 		name    string
 		opts    eventMetadataAuthorityFixtureOptions
@@ -173,7 +172,6 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:eventMetadataAuthorityEventsYAML"))
 	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{
 		externalRequestedSwarm: `
     source: external webhook
@@ -279,7 +277,6 @@ func loadEventMetadataFlowAuthorityFixture(t *testing.T, invalidity canonicalrou
 }
 
 func eventMetadataAuthorityEventsYAML(opts eventMetadataAuthorityFixtureOptions) string {
-	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityAcceptsExternalProof
 	externalSwarm := indentEventMetadataAuthoritySwarm(opts.externalRequestedSwarm)
 	if strings.TrimSpace(externalSwarm) == "" {
 		externalSwarm = "    source: external"

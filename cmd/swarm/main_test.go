@@ -3997,7 +3997,6 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServedJoinProofFixture"))
 	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
@@ -4129,8 +4128,6 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=runtime.run_fork_identity proof=cmd/swarm/main_test.go:TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity"))
 
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -4141,49 +4138,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection(source): %v", err)
 	}
-	targetRoot := filepath.Join(t.TempDir(), "target-contracts")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "package.yaml"), `
-name: cross-bundle-target
-version: 1.0.0
-description: Cross-bundle target fixture for run.fork.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), `
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [task.requested]
-  outputs:
-    events: [task.completed]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "nodes.yaml"), `
-test-node:
-  id: test-node
-  execution_type: system_node
-  subscribes_to: [task.requested]
-  produces: [task.completed]
-  event_handlers:
-    task.requested:
-      advances_to: done
-      emit:
-        event: task.completed
-        broadcast: true
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "events.yaml"), `
-task.requested:
-  swarm:
-    source: external
-task.completed:
-  swarm:
-    source: external
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "entities.yaml"), `{}`)
+	targetRoot := canonicalrouting.CopyRunForkTarget(t)
 	targetBundle := loadWorkflowValidationBundleAt(t, targetRoot)
 	targetProjection, err := runtimecontracts.BuildBundleCatalogProjection(targetBundle)
 	if err != nil {
@@ -4454,7 +4409,6 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -4570,7 +4524,6 @@ func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
 }
 
 func TestServedParityHarnessAgentDirectiveOutcomeLifecycle(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle)
 	servedparity.Run(t, scenario, runServedAgentDirectiveBackendProof)
 }
@@ -4595,7 +4548,6 @@ func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
 }
 
 func TestServedParityHarnessTestSetupEntitiesLifecycle(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServedTestSetupFixture"))
 	scenario := servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle)
 	servedparity.Run(t, scenario, runServedTestSetupEntitiesBackendProof)
 }
@@ -7284,61 +7236,8 @@ func writeServedExternalEventFixture(t *testing.T) string {
 }
 
 func writeServedTestSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=cmd/swarm/main_test.go:TestServedParityHarnessTestSetupEntitiesLifecycle
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: served-test-setup
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: served-test-setup
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
-pins:
-  inputs:
-    events:
-      - name: widget_started
-        event: widget.started
-        source: external
-      - name: widget_scored
-        event: widget.scored
-        source: external
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-widget:
-  score: integer
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-widget.scored:
-  swarm:
-    source: external
-  delta: integer
-widget.started:
-  swarm:
-    source: external
-  seed: boolean
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-scorer:
-  id: scorer
-  execution_type: system_node
-  subscribes_to: [widget.scored]
-  event_handlers:
-    widget.scored:
-      data_accumulation:
-        source_event: widget.scored
-        writes:
-          - target_field: score
-            expression: entity.score + payload.delta
-      advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	return root
+	return canonicalrouting.CopyServedTestSetup(t)
 }
 
 func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
@@ -7365,131 +7264,8 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
 }
 
 func writeServedJoinProofFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=engine.join proof=cmd/swarm/main_test.go:TestRunServeRuntimeJoinFailureReachesAPIAndCLI
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: served-join-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: served-join-proof
-stages:
-  new:
-    initial: true
-  dispatching:
-    {}
-  awaiting: {}
-  ready:
-    terminal: true
-  attention:
-    terminal: true
-pins:
-  inputs:
-    events:
-      - name: order_started
-        event: order.started
-        source: external
-      - name: order_dispatched
-        event: order.dispatched
-        source: external
-      - name: item_completed
-        event: item.completed
-        source: external
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-order:
-  expected:
-    type: "[text]"
-    initial: []
-  dispatch_id: text
-  probe: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), `
-types:
-  JoinResult:
-    ok: boolean
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-order.started:
-  swarm:
-    source: external
-  expected: "[text]"
-  dispatch_id: text
-order.dispatched:
-  swarm:
-    source: external
-item.completed:
-  swarm:
-    source: external
-  dispatch_id: text
-  member_id: text
-  result: JoinResult
-fork.probe:
-  swarm:
-    source: external
-  marker: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-starter:
-  id: starter
-  execution_type: system_node
-  subscribes_to: [order.started]
-  event_handlers:
-    order.started:
-      create_entity: true
-      data_accumulation:
-        source_event: order.started
-        writes:
-          - source_field: expected
-            target_field: expected
-          - source_field: dispatch_id
-            target_field: dispatch_id
-      advances_to: dispatching
-dispatcher:
-  id: dispatcher
-  execution_type: system_node
-  subscribes_to: [order.dispatched]
-  event_handlers:
-    order.dispatched:
-      advances_to: awaiting
-join-node:
-  id: join-node
-  execution_type: system_node
-  subscribes_to: [item.completed]
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members:
-          from: entity.expected
-          by: payload.member_id
-        window:
-          from: entity.dispatch_id
-          by: payload.dispatch_id
-        output: payload.result
-        on_complete:
-          advances_to: ready
-        timeout:
-          after: 1h
-          advances_to: attention
-fork-probe:
-  id: fork-probe
-  execution_type: system_node
-  subscribes_to: [fork.probe]
-  event_handlers:
-    fork.probe:
-      data_accumulation:
-        source_event: fork.probe
-        writes:
-          - source_field: marker
-            target_field: probe
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	return root
+	return canonicalrouting.CopyServedJoinProof(t)
 }
 
 func servedJoinEntityID(t *testing.T, db *sql.DB, runID string) string {
@@ -9386,7 +9162,6 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 }
 
 func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeArtifactRepoCommitServeFixture"))
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -9692,7 +9467,6 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 }
 
 func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServeRuntimeAgentSlugFixtureWithKey"))
 	isolateCLIAPIConfigEnv(t)
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -12238,7 +12012,6 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 }
 
 func TestRunVerifyCommandFormatsPreBootLoaderDiagnostics(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommandFormatsPreBootLoaderDiagnostics"))
 	tests := []struct {
 		name     string
 		write    func(t *testing.T, root string)
@@ -12648,7 +12421,6 @@ func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
 }
 
 func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyLintEvidenceFixture"))
 	root := writeVerifyLintEvidenceFixture(t)
 
 	var stdout, stderr bytes.Buffer
@@ -12689,7 +12461,6 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 }
 
 func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootFindings(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 
@@ -12713,90 +12484,13 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 }
 
 func writeVerifyLintEvidenceFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=cli.verify_lint_evidence proof=cmd/swarm/main_test.go:TestRunVerifyCommand_SurfacesLintEvidence
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-lint-evidence
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-lint-evidence`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-case:
-  untouched:
-    type: integer
-    _unused_reason: verify command lint evidence proof field
-  priority:
-    type: integer
-    _unused_reason: child read-pin coverage proof field
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-pins:
-  inputs:
-    events:
-      - name: task.assigned
-        source: external
-    reads: [priority]
-  outputs:
-    events: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
-case:
-  priority:
-    type: integer
-    _unused_reason: verify lint evidence child primary entity proof field
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned:
-  swarm:
-    source: external (verify lint evidence test)
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-reader:
-  id: reader
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      guard:
-        check: "entity.priority >= 0"
-      advances_to: done
-`)
-	return root
+	return canonicalrouting.CopyVerifyLintEvidence(t, false)
 }
 
 func writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t *testing.T) string {
 	t.Helper()
-	root := writeVerifyLintEvidenceFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-strict-schema-agent:
-  id: strict-schema-agent
-  role: strict_schema_agent
-  prompt_ref: strict-schema-agent
-  model: regular
-  mode: task
-  subscriptions: [task.assigned]
-  emit_events: [missing.event]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "strict-schema-agent.md"), `
-Emit the missing event when requested.
-`)
-	return root
+	return canonicalrouting.CopyVerifyLintEvidence(t, true)
 }
 
 func TestRunVerifyCommand_AllowsBootTimerWithoutCancelOn(t *testing.T) {
@@ -12996,76 +12690,7 @@ support-node:
 }
 
 func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=cli.tutorial_lint proof=cmd/swarm/main_test.go:TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence"))
-
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: ticket-flow
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: ticket-flow
-initial_state: open
-terminal_states: [resolved]
-states: [open, assigned, resolved]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-ticket:
-  category:
-    type: text
-    initial: ""
-  priority:
-    type: text
-    initial: ""
-  resolution:
-    type: text
-    initial: ""
-    _unused_reader_reason: External operator readout from the persisted ticket record
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-ticket.classified:
-  swarm:
-    source: external (first-flow verify proof)
-  category: text
-  priority: text
-ticket.assigned:
-  category: text
-  priority: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-classifier:
-  id: classifier
-  execution_type: system_node
-  subscribes_to: [ticket.classified]
-  produces: [ticket.assigned]
-  event_handlers:
-    ticket.classified:
-      guard:
-        check: "entity.category != '' && entity.priority != ''"
-      emit:
-        event: ticket.assigned
-        broadcast: true
-        fields:
-          category: entity.category
-          priority: entity.priority
-      advances_to: assigned
-assignee:
-  id: assignee
-  execution_type: system_node
-  subscribes_to: [ticket.assigned]
-  event_handlers:
-    ticket.assigned:
-      guard:
-        check: "entity.category != ''"
-      advances_to: resolved
-`)
-
+	root := canonicalrouting.CopyFirstFlowTutorial(t)
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
@@ -13084,7 +12709,6 @@ assignee:
 }
 
 func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyModelAliasFixture"))
 	root := t.TempDir()
 	writeVerifyModelAliasFixture(t, root, "not_configured")
 
@@ -13132,7 +12756,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 }
 
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommandFormatsPreBootLoaderDiagnostics"))
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-prompt-writer-coverage
@@ -13244,8 +12867,6 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=contracts.state_schema proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat"))
 
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -13302,8 +12923,6 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=engine.accumulation_projection proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsAccumulatorEntityProjection
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsAccumulatorEntityProjection"))
 
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
@@ -13416,7 +13035,6 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 }
 
 func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
 		eventSource: "external (verify accumulator safety proof)",
 		completion:  "timeout",
@@ -13614,42 +13232,8 @@ func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID strin
 }
 
 func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentKey, agentID string) string {
-	// routing-example-census: different-concept issue=none owner=runtime.agent_slug_admission proof=cmd/swarm/main_test.go:TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
-name: %s
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`, workflowName))
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [agent.requested]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-agent.requested:
-  swarm:
-    source: external
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
-%s:
-  id: %s
-  role: %s
-  prompt_ref: %s
-  model: regular
-  mode: task
-  subscriptions: [agent.requested]
-`, agentKey, agentID, agentID, agentID))
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", agentID+".md"), "Handle assigned work.\n")
-	return root
+	return canonicalrouting.CopyAgentSlugAdmission(t, workflowName, agentKey, agentID)
 }
 
 func writeServeRuntimeNativeBashFixture(t *testing.T) string {
@@ -13671,94 +13255,11 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 }
 
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.artifact_repo_admission proof=cmd/swarm/main_test.go:TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: artifact-root-startup
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
-pins:
-  inputs:
-    events: [artifact.requested]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-core:
-  repo_url:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  current_ref:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  file_manifest:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  status:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  failure:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  last_request_id:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-  last_source_event_id:
-    type: text
-    _unused_reason: artifact startup admission proof output field
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-artifact.requested:
-  swarm:
-    source: external
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-artifact-writer:
-  id: artifact-writer
-  execution_type: system_node
-  subscribes_to: [artifact.requested]
-  event_handlers:
-    artifact.requested:
-      action:
-        id: artifact_repo_commit
-        artifact_repo:
-          provider: local_git
-          repo_id:
-            literal: "11111111-1111-1111-1111-111111111111"
-          namespace:
-            literal: local-proof
-          request_id:
-            literal: "22222222-2222-2222-2222-222222222222"
-          allowed_paths:
-            - readme.md
-          files:
-            - path:
-                literal: readme.md
-              content:
-                literal: "# Demo\n"
-              content_type: markdown
-          output:
-            repo_url: repo_url
-            current_ref: current_ref
-            file_manifest: file_manifest
-            status: status
-            failure: failure
-            last_request_id: last_request_id
-            last_source_event_id: last_source_event_id
-`)
-	return root
+	return canonicalrouting.CopyArtifactRepoCommitAdmission(t)
 }
 
 func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
-	// routing-example-census: different-concept issue=none owner=runtime.model_alias_validation proof=cmd/swarm/main_test.go:TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias
 	t.Helper()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-model-alias
@@ -15696,7 +15197,6 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 }
 
 func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyMissingPinWarningFixture"))
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))))
@@ -15719,92 +15219,8 @@ func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testin
 }
 
 func writeVerifyMissingPinWarningFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_producer_path proof=cmd/swarm/main_test.go:TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-missing-pin-warning
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: verify-missing-pin-warning
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [task.requested]
-  outputs:
-    events: [task.completed]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-task.requested:
-  swarm:
-    source: external
-task.completed: {}
-child/task.assigned: {}
-child/task.result: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-dispatcher:
-  id: dispatcher
-  execution_type: system_node
-  subscribes_to: [task.requested, child/task.result]
-  produces: [task.completed, child/task.assigned]
-  event_handlers:
-    task.requested:
-      emit: child/task.assigned
-    child/task.result:
-      advances_to: done
-      emit:
-        event: task.completed
-        broadcast: true
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, working, done]
-pins:
-  inputs:
-    events: [task.assigned, task.feedback]
-  outputs:
-    events: [task.result]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
-work_item: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned: {}
-task.feedback:
-  comment: string
-task.result: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-worker:
-  id: worker
-  execution_type: system_node
-  subscribes_to: [task.assigned, task.feedback]
-  produces: [task.result]
-  event_handlers:
-    task.assigned:
-      advances_to: working
-    task.feedback:
-      advances_to: done
-      emit:
-        event: task.result
-        broadcast: true
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
-	return root
+	return canonicalrouting.CopyVerifyMissingPin(t)
 }
 
 func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {

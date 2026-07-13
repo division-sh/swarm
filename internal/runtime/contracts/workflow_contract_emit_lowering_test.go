@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,7 +112,6 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 }
 
 func TestEmitFromSugarDoesNotBleedIntoTargetMatch(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_emit_lowering_test.go:TestEmitFromSugarDoesNotBleedIntoTargetMatch"))
 	var spec EmitSpec
 	err := yaml.Unmarshal([]byte(`
 event: account.bucketed

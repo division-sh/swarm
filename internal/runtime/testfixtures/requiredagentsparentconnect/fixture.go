@@ -22,7 +22,6 @@ func LoadBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 }
 
 func Write(t testing.TB) string {
-	// routing-example-census: different-concept issue=none owner=flow_required_agent_authority proof=internal/runtime/bootverify/report_test.go:TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs
 	t.Helper()
 	return canonicalrouting.CopyParentConnectRequiredAgent(t)
 }

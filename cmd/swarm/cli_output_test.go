@@ -5,18 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestCLIOutputModesForLocalConsumers(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/cli_output_test.go:outputModeVerifyFixture"))
 	t.Setenv("SWARM_API_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
@@ -733,61 +732,6 @@ func newCLIOutputColorPolicyRPCServer(t *testing.T, wantMethod string, result ma
 }
 
 func outputModeVerifyFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=cli.output_mode_rendering proof=cmd/swarm/cli_output_test.go:TestCLIOutputModesForLocalConsumers
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: output-mode-verify
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: output-mode-verify`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-pins:
-  inputs:
-    events:
-      - name: task.assigned
-        source: external
-    reads: [priority]
-  outputs:
-    events: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
-case:
-  priority:
-    type: integer
-    _unused_reason: output-mode child primary entity proof field
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned:
-  swarm:
-    source: external (output mode verify test)
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-reader:
-  id: reader
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      guard:
-        check: "entity.priority >= 0"
-      advances_to: done
-`)
-	return root
+	return canonicalrouting.CopyOutputModeVerify(t)
 }

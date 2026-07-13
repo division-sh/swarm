@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
 
@@ -160,8 +160,6 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 }
 
 func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=cmd/swarm/describe_test.go:TestDescribeRoutesHumanAndJSONAreDeterministic
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe.go:writeDescribeText"), canonicalrouting.SourceID("cmd/swarm/describe.go:writeRoutingTopologyText"), canonicalrouting.SourceID("cmd/swarm/describe_test.go:TestDescribeRoutesHumanAndJSONAreDeterministic"))
 
 	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var firstJSON, firstHuman string
@@ -294,7 +292,6 @@ func TestDescribeRoutesRendersFindingLinkedLegacyQualifiedSubscriptions(t *testi
 }
 
 func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	contractsRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
 
 	var stdout, stderr bytes.Buffer
@@ -370,8 +367,6 @@ func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
 }
 
 func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:TestDescribeCommandRendersDefaultedTemplateInstancePolicies"), canonicalrouting.SourceID("cmd/swarm/describe_test.go:writeDescribeDefaultedTemplatePolicyContracts"))
 	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
@@ -419,7 +414,6 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 }
 
 func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:writeDescribeStageGraphContracts"))
 	contractsRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
@@ -687,107 +681,8 @@ account:
 }
 
 func writeDescribeStageGraphContracts(t testing.TB) string {
-	// routing-example-census: different-concept issue=none owner=cli.stage_graph_presentation proof=cmd/swarm/describe_test.go:TestDescribeCommandGraphRendersStageGraph
 	t.Helper()
-	root := t.TempDir()
-	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
-name: stage-graph
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-`)
-	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: stage-graph\n")
-	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-stages:
-  waiting:
-    initial: true
-  active:
-    timers:
-      - after: 48h
-        emit: ticket.sla_escalated
-      - after: 72h
-        advances_to: timed_out
-  review:
-    terminal: true
-  timed_out:
-    terminal: true
-`)
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "tools.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
-ticket.opened:
-  swarm:
-    source: external
-  entity_id: string
-  line_items: "[text]"
-ticket.closed:
-  swarm:
-    source: external
-  entity_id: string
-  line_item_id: string
-  result: string
-ticket.sla_escalated:
-  swarm:
-    consumer: [operator]
-  entity_id: string
-line_item.requested:
-  swarm:
-    consumer: [worker]
-  line_item_id: string
-  line_item_index: integer
-accumulate.timeout:
-  swarm:
-    source: platform
-`)
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
-ticket:
-  expected_line_item_ids:
-    type: "[text]"
-    initial: []
-`)
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
-support-node:
-  id: support-node
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-  event_handlers:
-    ticket.opened:
-      create_entity: true
-      fan_out:
-        items_from: payload.line_items
-        as: line_item
-        identity: line_item
-        emit:
-          event: line_item.requested
-          fields:
-            line_item_id: line_item
-            line_item_index: fan_out.index
-      advances_to: active
-    ticket.closed:
-      join:
-        stage: active
-        members:
-          from: entity.expected_line_item_ids
-          by: payload.line_item_id
-        output: payload.result
-        on_complete:
-          advances_to: review
-        timeout:
-          after: 1h
-          advances_to: timed_out
-`)
-	return root
+	return canonicalrouting.CopyDescribeStageGraph(t)
 }
 
 func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {

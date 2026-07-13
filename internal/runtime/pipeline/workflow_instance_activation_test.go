@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"time"
@@ -611,7 +610,6 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 }
 
 func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/workflow_instance_activation_test.go:TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0
@@ -662,7 +660,6 @@ pins:
 }
 
 func TestTemplateInstanceSystemNodeDeliveryLocalizesConcreteEventToHandlerKey(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/workflow_instance_activation_test.go:TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0
@@ -745,7 +742,6 @@ opco.ceo_ready:
 }
 
 func TestTemplateInstanceRecordEvidenceUsesLocalizedHandlerEvidenceTarget(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/workflow_instance_activation_test.go:TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0

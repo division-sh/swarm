@@ -62,7 +62,6 @@ func ExampleRoot(t testing.TB) string {
 }
 
 func WriteVariant(t testing.TB, opts Options) string {
-	// routing-example-census: different-concept issue=none owner=examples.routing.notify_all_children proof=internal/runtime/conformance/template_flow_pilot_conformance_test.go:TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority
 	t.Helper()
 	root := t.TempDir()
 	copyTree(t, ExampleRoot(t), root)

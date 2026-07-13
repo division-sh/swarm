@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"net/http"
 	"strings"
 	"testing"
@@ -258,7 +257,6 @@ func TestRawAdmissionBase64SignatureComparisonIsCaseSensitive(t *testing.T) {
 }
 
 func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/providertriggers/admission_test.go:TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID"))
 	catalog, err := NewCatalogSnapshot()
 	if err != nil {
 		t.Fatal(err)

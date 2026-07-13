@@ -1666,8 +1666,6 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 }
 
 func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/eventbus_target_routes_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/eventbus_target_routes_test.go:routedRootNodeFixtureFiles"))
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
@@ -1732,7 +1730,6 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 }
 
 func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInternalSubscription(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/eventbus_target_routes_test.go:routedRootNodeFixtureFiles"))
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})

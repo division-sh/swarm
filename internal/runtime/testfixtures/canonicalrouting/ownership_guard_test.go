@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"net/http"
 	"os"
@@ -23,31 +26,24 @@ import (
 )
 
 type artifactRegistry struct {
-	Artifacts  []artifactRegistryEntry  `yaml:"artifacts"`
-	Groups     []artifactRegistryGroup  `yaml:"groups"`
-	FileScopes []rawFileScope           `yaml:"file_scopes"`
-	GoGroups   []goSourceExceptionGroup `yaml:"go_groups"`
+	Artifacts []artifactRegistryEntry `yaml:"artifacts"`
+	Groups    []artifactRegistryGroup `yaml:"groups"`
+	Sources   []sourceRegistryEntry   `yaml:"sources"`
 }
 
-type rawFileScope struct {
-	File        string `yaml:"file"`
-	Disposition string `yaml:"disposition"`
-	Owner       string `yaml:"owner"`
-	Proof       string `yaml:"proof"`
-	Issue       int    `yaml:"issue"`
-}
-
-type goSourceExceptionGroup struct {
+type sourceRegistryEntry struct {
+	ID          SourceID `yaml:"id"`
 	File        string   `yaml:"file"`
-	Functions   []string `yaml:"functions"`
+	Function    string   `yaml:"function"`
 	Disposition string   `yaml:"disposition"`
 	Owner       string   `yaml:"owner"`
-	Proofs      []string `yaml:"proofs"`
-	Issue       string   `yaml:"issue"`
+	Proof       string   `yaml:"proof"`
+	Issue       int      `yaml:"issue"`
 }
 
-type rawBundleSite struct {
-	Name string
+type goPackageBundleSource struct {
+	File     string
+	Function string
 }
 
 type artifactRegistryGroup struct {
@@ -240,25 +236,35 @@ import (
     "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 func proofHelper(t *testing.T) {
-    canonicalrouting.ProveSource(t, canonicalrouting.SourceID("fixture/source.go:build"))
+	canonicalrouting.ProveSource(t, buildSource(t))
+}
+func build() {}
+func other() {}
+func buildSource(t *testing.T) canonicalrouting.SourceToken {
+	return canonicalrouting.ExecuteSource(t,
+		canonicalrouting.SourceID("fixture/fixture_test.go:buildSource"), func() { build() })
+}
+func otherSource(t *testing.T) canonicalrouting.SourceToken {
+	return canonicalrouting.ExecuteSource(t,
+		canonicalrouting.SourceID("fixture/fixture_test.go:otherSource"), func() { other() })
 }
 func TestUnrelated(t *testing.T) {
-    canonicalrouting.ProveSource(t, canonicalrouting.SourceID("fixture/source.go:other"))
+	canonicalrouting.ProveSource(t, otherSource(t))
 }
 func TestExact(t *testing.T) {
-    canonicalrouting.ProveSource(t, canonicalrouting.SourceID("fixture/source.go:build"))
+	canonicalrouting.ProveSource(t, buildSource(t))
 }
 func TestConditional(t *testing.T) {
-    if false {
-        canonicalrouting.ProveSource(t, canonicalrouting.SourceID("fixture/source.go:build"))
-    }
+	if false {
+		canonicalrouting.ProveSource(t, buildSource(t))
+	}
 }
 `
 	if err := os.WriteFile(filepath.Join(root, "fixture_test.go"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	proofs := directExecutableSourceProofs(t, repo)
-	sourceID := SourceID("fixture/source.go:build")
+	sourceID := SourceID("fixture/fixture_test.go:buildSource")
 	if _, ok := proofs["fixture/fixture_test.go:proofHelper"]; ok {
 		t.Fatal("ordinary helper was accepted as executable source proof")
 	}
@@ -276,68 +282,49 @@ func TestConditional(t *testing.T) {
 func TestCanonicalRoutingSourceProofRegistryEqualsDirectDeclarations(t *testing.T) {
 	repo := RepoRoot(t)
 	registry := loadArtifactRegistry(t, repo)
-	registered := map[SourceID]string{}
-	register := func(id SourceID, owner string) {
-		t.Helper()
-		if previous, duplicate := registered[id]; duplicate {
-			t.Fatalf("routing source ID %q has duplicate owners %q and %q", id, previous, owner)
-		}
-		registered[id] = owner
-	}
-	for _, scope := range registry.FileScopes {
-		file := filepath.ToSlash(filepath.Clean(strings.TrimSpace(scope.File)))
-		register(SourceID(file+":file-scope"), "file-scope:"+scope.Owner)
-	}
-	for _, group := range registry.GoGroups {
-		register(rawSourceGroupID(group), "group:"+group.Owner)
-	}
-
 	proofs := directExecutableSourceProofs(t, repo)
-	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
-		fset := token.NewFileSet()
-		parsed, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
-		if err != nil {
-			return err
+	registered := map[SourceID]sourceRegistryEntry{}
+	registeredFunctions := map[string]SourceID{}
+	for _, entry := range registry.Sources {
+		entry.ID = SourceID(strings.TrimSpace(string(entry.ID)))
+		entry.File = filepath.ToSlash(filepath.Clean(strings.TrimSpace(entry.File)))
+		entry.Function = strings.TrimSpace(entry.Function)
+		entry.Proof = strings.TrimSpace(entry.Proof)
+		if entry.ID == "" || entry.File == "." || entry.Function == "" || entry.Owner == "" || !pathQualifiedGoSymbol(entry.Proof) {
+			t.Fatalf("incomplete routing source registry entry: %#v", entry)
 		}
-		rel, err := filepath.Rel(repo, path)
-		if err != nil {
-			return err
+		wantID := SourceID(entry.File + ":" + entry.Function)
+		if entry.ID != wantID {
+			t.Fatalf("routing source %q must use function-derived ID %q", entry.ID, wantID)
 		}
-		file := filepath.ToSlash(rel)
-		for _, declaration := range parsed.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
-				continue
-			}
-			start := fset.Position(function.Pos()).Offset
-			end := fset.Position(function.End()).Offset
-			if function.Doc != nil {
-				start = fset.Position(function.Doc.Pos()).Offset
-			}
-			if start < 0 || end > len(raw) || start >= end {
-				continue
-			}
-			marker, found := routingSourceDeclaration(string(raw[start:end]))
-			if !found {
-				continue
-			}
-			id := SourceID(file + ":" + function.Name.Name)
-			register(id, "source:"+marker["owner"])
-			proof := marker["proof"]
-			declared, executable := proofs[proof]
-			if !executable {
-				t.Fatalf("routing source %q proof %q is not an executable test", id, proof)
-			}
-			if _, exact := declared[id]; !exact {
-				t.Fatalf("routing source %q proof %q does not directly declare its SourceID", id, proof)
-			}
+		switch entry.Disposition {
+		case "parser-only", "different-concept", "provider-ingress", "harness":
+		default:
+			t.Fatalf("routing source %q has unsupported disposition %q", entry.ID, entry.Disposition)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+		if entry.Issue < 0 {
+			t.Fatalf("routing source %q has invalid issue %d", entry.ID, entry.Issue)
+		}
+		if _, duplicate := registered[entry.ID]; duplicate {
+			t.Fatalf("duplicate routing source ID %q", entry.ID)
+		}
+		functionKey := entry.File + ":" + entry.Function
+		if previous, duplicate := registeredFunctions[functionKey]; duplicate {
+			t.Fatalf("routing source function %q has duplicate IDs %q and %q", functionKey, previous, entry.ID)
+		}
+		if !goFunctionExists(t, filepath.Join(repo, filepath.FromSlash(entry.File)), entry.Function) {
+			t.Fatalf("routing source %q names a missing source function", entry.ID)
+		}
+		declared, executable := proofs[entry.Proof]
+		if !executable {
+			t.Fatalf("routing source %q proof %q is not an executable test", entry.ID, entry.Proof)
+		}
+		if _, exact := declared[entry.ID]; !exact {
+			t.Fatalf("routing source %q proof %q does not execute the exact source constructor", entry.ID, entry.Proof)
+		}
+		registered[entry.ID] = entry
+		registeredFunctions[functionKey] = entry.ID
 	}
-
 	declared := map[SourceID]struct{}{}
 	for _, ids := range proofs {
 		for id := range ids {
@@ -354,6 +341,20 @@ func TestCanonicalRoutingSourceProofRegistryEqualsDirectDeclarations(t *testing.
 			t.Fatalf("direct executable proof declares stale or unregistered routing source %q", id)
 		}
 	}
+}
+
+func goFunctionExists(t testing.TB, path, name string) bool {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse routing source file %s: %v", path, err)
+	}
+	for _, declaration := range parsed.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
@@ -436,56 +437,64 @@ func TestCanonicalRoutingParserSnippetCannotMaterializeBundle(t *testing.T) {
 }
 
 func TestCanonicalRoutingRawPositiveBundleConstructionFailsClosed(t *testing.T) {
-	cases := map[string]struct {
-		source   string
-		wantSite string
-	}{
-		"direct": {source: `package fixture
+	cases := map[string]map[string]string{
+		"unknown-helper": {"fixture_test.go": `package fixture
 func build() {
-  write("package.yaml", "name: fixture")
-  write("schema.yaml", "pins: {inputs: {events: [{source: external}]}}")
-}`, wantSite: "build"},
-		"constant-indirected": {source: `package fixture
+  saveArtifacts(map[string]string{
+    "package.yaml": "name: fixture",
+    "schema.yaml": "pins: {inputs: {events: [{source: external}]}}",
+  })
+}`},
+		"cross-file": {
+			"names_test.go": `package fixture
 const packageFile = "package.yaml"
 const schemaFile = "schema.yaml"
 const pinsKey = "pins"
-const sourceKey = "source"
+`,
+			"bundle_test.go": `package fixture
 var bundleFiles = map[string]string{
   packageFile: "name: fixture",
-  schemaFile: pinsKey + ": {inputs: {events: [{" + sourceKey + ": external}]}}",
+  schemaFile: pinsKey + ": {inputs: {events: [{source: external}]}}",
 }
-func build() { materialize(bundleFiles) }`, wantSite: "file-scope"},
-		"ceremonial-canonical-copy": {source: `package fixture
-func build(t T) {
-  root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-  write(root, "package.yaml", "name: fixture")
-  write(root, "schema.yaml", "pins: {inputs: {events: [{source: external}]}}")
-
-}`, wantSite: "build"},
+func build() { saveArtifacts(bundleFiles) }
+`,
+		},
 	}
-	for name, testCase := range cases {
+	for name, files := range cases {
 		t.Run(name, func(t *testing.T) {
-			sites := prohibitedRawBundleSites("fixture.go", []byte(testCase.source))
-			if len(sites) == 0 {
-				t.Fatalf("raw positive bundle construction %s escaped the closed API guard", name)
-			}
-			found := false
-			for _, site := range sites {
-				found = found || site.Name == testCase.wantSite
-			}
-			if !found {
-				t.Fatalf("raw positive bundle construction %s sites = %#v, want %q", name, sites, testCase.wantSite)
+			if !goPackageContainsCompleteRoutingBundle(files) {
+				t.Fatalf("complete raw routing bundle escaped package capability guard: %s", name)
 			}
 		})
 	}
+
+	t.Run("parser-only-snippet", func(t *testing.T) {
+		files := map[string]string{"fixture_test.go": `package fixture
+func parse(t T) {
+  canonicalrouting.NewParserSnippet(t, "pins: {inputs: {events: [{source: external}]}}")
+}`}
+		if goPackageContainsCompleteRoutingBundle(files) {
+			t.Fatal("non-materializing parser snippet was classified as a complete bundle")
+		}
+	})
 }
 
 func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
 	repo := RepoRoot(t)
-	sourceProofs := directExecutableSourceProofs(t, repo)
-	registryClassifications := registeredRawSourceExceptions(t, repo, sourceProofs)
 	var violations []string
-	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
+	packages, err := repositoryGoPackages(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, files := range packages {
+		if strings.HasPrefix(key, "internal/runtime/testfixtures/canonicalrouting:") {
+			continue
+		}
+		for _, source := range completeGoPackageRoutingBundleSources(files) {
+			violations = append(violations, key+":"+source.File+":"+source.Function+" contains a complete Go-authored routing bundle")
+		}
+	}
+	err = walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
 		rel, err := filepath.Rel(repo, path)
 		if err != nil {
 			return err
@@ -493,20 +502,6 @@ func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
 		file := filepath.ToSlash(rel)
 		if strings.HasPrefix(file, "internal/runtime/testfixtures/canonicalrouting/") {
 			return nil
-		}
-		sites := prohibitedRawBundleSites(path, raw)
-		classifications := sourceClassifiedRawBundleSites(t, path, file, raw, sites, sourceProofs)
-		for _, site := range sites {
-			key := file + ":" + site.Name
-			_, sourceClassified := classifications[site.Name]
-			_, registryClassified := registryClassifications[key]
-			if sourceClassified && registryClassified {
-				violations = append(violations, key+" has duplicate source and registry declarations")
-				continue
-			}
-			if !sourceClassified && !registryClassified {
-				violations = append(violations, key)
-			}
 		}
 		for _, retired := range []string{
 			"canonicalrouting.ApplyOverlayMutation",
@@ -530,187 +525,6 @@ func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
 	}
 }
 
-func sourceClassifiedRawBundleSites(
-	t testing.TB,
-	path string,
-	file string,
-	raw []byte,
-	sites []rawBundleSite,
-	sourceProofs map[string]map[SourceID]struct{},
-) map[string]struct{} {
-	t.Helper()
-	result := map[string]struct{}{}
-	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
-	if err != nil {
-		t.Fatalf("parse raw source declarations %s: %v", path, err)
-	}
-	prohibited := map[string]struct{}{}
-	for _, site := range sites {
-		prohibited[site.Name] = struct{}{}
-	}
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		if _, required := prohibited[function.Name.Name]; !required {
-			continue
-		}
-		start := fset.Position(function.Pos()).Offset
-		end := fset.Position(function.End()).Offset
-		if function.Doc != nil {
-			start = fset.Position(function.Doc.Pos()).Offset
-		}
-		if start < 0 || end > len(raw) || start >= end {
-			continue
-		}
-		marker, found := routingSourceDeclaration(string(raw[start:end]))
-		if !found {
-			continue
-		}
-		switch marker["disposition"] {
-		case "different-concept", "provider-ingress", "harness":
-		default:
-			t.Fatalf("raw source declaration %s:%s has unsupported disposition %q", path, function.Name.Name, marker["disposition"])
-		}
-		if marker["owner"] == "" || marker["issue"] == "" || marker["proof"] == "" {
-			t.Fatalf("raw source declaration %s:%s is incomplete", path, function.Name.Name)
-		}
-		if !pathQualifiedGoSymbol(marker["proof"]) {
-			t.Fatalf("raw source declaration %s:%s proof %q must be path-qualified as *_test.go:TestXxx", path, function.Name.Name, marker["proof"])
-		}
-		sourceID := SourceID(file + ":" + function.Name.Name)
-		declared, exists := sourceProofs[marker["proof"]]
-		if !exists {
-			t.Fatalf("raw source declaration %s:%s proof %q is not an executable test", path, function.Name.Name, marker["proof"])
-		}
-		if _, exact := declared[sourceID]; !exact {
-			t.Fatalf("raw source declaration %s:%s proof %q does not directly call canonicalrouting.ProveSource with source ID %q", path, function.Name.Name, marker["proof"], sourceID)
-		}
-		result[function.Name.Name] = struct{}{}
-	}
-	return result
-}
-
-func registeredRawSourceExceptions(
-	t testing.TB,
-	repo string,
-	sourceProofs map[string]map[SourceID]struct{},
-) map[string]struct{} {
-	t.Helper()
-	result := map[string]struct{}{}
-	registry := loadArtifactRegistry(t, repo)
-	for _, scope := range registry.FileScopes {
-		switch scope.Disposition {
-		case "different-concept", "provider-ingress", "harness":
-		default:
-			t.Fatalf("raw file-scope entry %s has unsupported disposition %q", scope.File, scope.Disposition)
-		}
-		file := filepath.ToSlash(filepath.Clean(strings.TrimSpace(scope.File)))
-		if file == "." || strings.TrimSpace(scope.Owner) == "" || !pathQualifiedGoSymbol(scope.Proof) {
-			t.Fatalf("raw file-scope entry is incomplete: %#v", scope)
-		}
-		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(file))); err != nil {
-			t.Fatalf("raw file-scope entry %s: %v", file, err)
-		}
-		sourceID := SourceID(file + ":file-scope")
-		declared, exists := sourceProofs[scope.Proof]
-		if !exists {
-			t.Fatalf("raw file-scope entry %s proof %q is not an executable test", file, scope.Proof)
-		}
-		if _, exact := declared[sourceID]; !exact {
-			t.Fatalf("raw file-scope entry %s proof %q does not directly call canonicalrouting.ProveSource with source ID %q", file, scope.Proof, sourceID)
-		}
-		key := file + ":file-scope"
-		if _, duplicate := result[key]; duplicate {
-			t.Fatalf("duplicate raw file-scope registry entry %s", key)
-		}
-		result[key] = struct{}{}
-	}
-	for _, group := range registry.GoGroups {
-		switch group.Disposition {
-		case "canonical-overlay", "different-concept", "provider-ingress", "harness", "parser-only":
-		default:
-			t.Fatalf("raw source registry entry %s has unsupported disposition %q", group.File, group.Disposition)
-		}
-		if strings.TrimSpace(group.Owner) == "" || len(group.Proofs) == 0 || len(group.Functions) == 0 {
-			t.Fatalf("raw source registry entry has incomplete owner/proof: %#v", group)
-		}
-		file := filepath.ToSlash(filepath.Clean(strings.TrimSpace(group.File)))
-		sourceID := rawSourceGroupID(group)
-		functions := goFunctionsInFile(t, filepath.Join(repo, filepath.FromSlash(file)))
-		for _, proof := range group.Proofs {
-			if !pathQualifiedGoSymbol(proof) {
-				t.Fatalf("raw source registry entry %s proof %q must be path-qualified as *_test.go:TestXxx", file, proof)
-			}
-			declared, exists := sourceProofs[proof]
-			if !exists {
-				t.Fatalf("raw source registry entry %s proof %q is not an executable test", file, proof)
-			}
-			if _, exact := declared[sourceID]; !exact {
-				t.Fatalf("raw source registry entry %s proof %q does not directly call canonicalrouting.ProveSource with source ID %q", file, proof, sourceID)
-			}
-		}
-		for _, function := range group.Functions {
-			function = strings.TrimSpace(function)
-			if _, exists := functions[function]; !exists {
-				t.Fatalf("raw source registry entry %s names missing function %s", file, function)
-			}
-			key := file + ":" + function
-			if _, duplicate := result[key]; duplicate {
-				t.Fatalf("duplicate raw source registry entry %s", key)
-			}
-			result[key] = struct{}{}
-		}
-	}
-	return result
-}
-
-func rawSourceGroupID(group goSourceExceptionGroup) SourceID {
-	file := filepath.ToSlash(filepath.Clean(strings.TrimSpace(group.File)))
-	return SourceID(file + ":" + strings.TrimSpace(group.Functions[0]))
-}
-
-func goFunctionsInFile(t testing.TB, path string) map[string]struct{} {
-	t.Helper()
-	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse raw source registry file %s: %v", path, err)
-	}
-	result := map[string]struct{}{}
-	for _, declaration := range parsed.Decls {
-		if function, ok := declaration.(*ast.FuncDecl); ok {
-			result[function.Name.Name] = struct{}{}
-		}
-	}
-	return result
-}
-
-func routingSourceDeclaration(source string) (map[string]string, bool) {
-	const prefix = "routing-example-census:"
-	for _, line := range strings.Split(source, "\n") {
-		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "//"))
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, prefix)))
-		if len(fields) == 0 {
-			return map[string]string{}, true
-		}
-		result := map[string]string{"disposition": fields[0]}
-		for _, field := range fields[1:] {
-			key, value, ok := strings.Cut(field, "=")
-			if ok {
-				result[strings.TrimSpace(key)] = strings.TrimSpace(value)
-			}
-		}
-		return result, true
-	}
-	return nil, false
-}
-
 func TestCanonicalRoutingTrackedSplitsRemainOpen(t *testing.T) {
 	if os.Getenv("SWARM_CANONICAL_ROUTING_VERIFY_TRACKER_REMOTE") != "1" {
 		t.Skip("remote tracker verification is enforced by CI")
@@ -726,21 +540,10 @@ func TestCanonicalRoutingTrackedSplitsRemainOpen(t *testing.T) {
 			issues[entry.Issue] = struct{}{}
 		}
 	}
-	for _, scope := range registry.FileScopes {
-		if scope.Issue > 0 {
-			issues[scope.Issue] = struct{}{}
+	for _, source := range registry.Sources {
+		if source.Issue > 0 {
+			issues[source.Issue] = struct{}{}
 		}
-	}
-	for _, group := range registry.GoGroups {
-		issue := strings.TrimSpace(group.Issue)
-		if issue == "" || issue == "none" {
-			continue
-		}
-		value, err := strconv.Atoi(issue)
-		if err != nil || value <= 0 {
-			t.Fatalf("raw source group %s has invalid split issue %q", group.File, group.Issue)
-		}
-		issues[value] = struct{}{}
 	}
 	ordered := make([]int, 0, len(issues))
 	for issue := range issues {
@@ -811,34 +614,62 @@ func directExecutableArtifactProofs(t testing.TB, repo string) map[string]map[Ar
 
 func directExecutableSourceProofs(t testing.TB, repo string) map[string]map[SourceID]struct{} {
 	t.Helper()
+	packages, err := repositoryGoPackages(repo)
+	if err != nil {
+		t.Fatalf("index routing source packages: %v", err)
+	}
+	constructors := directSourceConstructors(t, packages)
 	proofs := map[string]map[SourceID]struct{}{}
-	fset := token.NewFileSet()
-	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
-		if !strings.HasSuffix(path, "_test.go") {
-			return nil
+	for packageKey, files := range packages {
+		paths := make([]string, 0, len(files))
+		for path := range files {
+			paths = append(paths, path)
 		}
-		parsed, err := parser.ParseFile(fset, path, raw, 0)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(repo, path)
-		if err != nil {
-			return err
-		}
-		for _, decl := range parsed.Decls {
-			function, ok := decl.(*ast.FuncDecl)
-			if !ok || !executableGoTest(function) {
+		sort.Strings(paths)
+		for _, file := range paths {
+			if !strings.HasSuffix(file, "_test.go") {
 				continue
 			}
-			key := filepath.ToSlash(rel) + ":" + function.Name.Name
-			proofs[key] = directSourceProveCalls(function, parsed.Name.Name)
+			parsed, err := parser.ParseFile(token.NewFileSet(), file, files[file], 0)
+			if err != nil {
+				t.Fatalf("parse source proof file %s: %v", file, err)
+			}
+			for _, declaration := range parsed.Decls {
+				function, ok := declaration.(*ast.FuncDecl)
+				if !ok || !executableGoTest(function) {
+					continue
+				}
+				key := filepath.ToSlash(file) + ":" + function.Name.Name
+				proofs[key] = directSourceConstructorProofs(function, packageKey, constructors)
+			}
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("index direct routing source proofs: %v", err)
 	}
 	return proofs
+}
+
+func directSourceConstructors(t testing.TB, packages map[string]map[string]string) map[string]SourceID {
+	t.Helper()
+	constructors := map[string]SourceID{}
+	for packageKey, files := range packages {
+		for file, source := range files {
+			parsed, err := parser.ParseFile(token.NewFileSet(), file, source, 0)
+			if err != nil {
+				t.Fatalf("parse source constructor file %s: %v", file, err)
+			}
+			for _, declaration := range parsed.Decls {
+				function, ok := declaration.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				id, ok := directSourceConstructorID(function, filepath.ToSlash(file), parsed.Name.Name)
+				if !ok {
+					continue
+				}
+				constructors[packageKey+":"+function.Name.Name] = id
+			}
+		}
+	}
+	return constructors
 }
 
 func executableGoTest(function *ast.FuncDecl) bool {
@@ -900,7 +731,11 @@ func directProveCalls(function *ast.FuncDecl, packageName string) map[ArtifactID
 	return result
 }
 
-func directSourceProveCalls(function *ast.FuncDecl, packageName string) map[SourceID]struct{} {
+func directSourceConstructorProofs(
+	function *ast.FuncDecl,
+	packageKey string,
+	constructors map[string]SourceID,
+) map[SourceID]struct{} {
 	result := map[SourceID]struct{}{}
 	testParameter := function.Type.Params.List[0].Names[0].Name
 	for _, statement := range function.Body.List {
@@ -909,7 +744,7 @@ func directSourceProveCalls(function *ast.FuncDecl, packageName string) map[Sour
 			continue
 		}
 		call, ok := expression.X.(*ast.CallExpr)
-		if !ok || len(call.Args) < 2 || !isCanonicalSourceProveCall(call.Fun, packageName) {
+		if !ok || len(call.Args) < 2 || !isCanonicalSourceProveCall(call.Fun, packageNameForKey(packageKey)) {
 			continue
 		}
 		handle, ok := call.Args[0].(*ast.Ident)
@@ -917,12 +752,78 @@ func directSourceProveCalls(function *ast.FuncDecl, packageName string) map[Sour
 			continue
 		}
 		for _, argument := range call.Args[1:] {
-			if id, ok := directSourceID(argument); ok {
+			constructorCall, ok := argument.(*ast.CallExpr)
+			if !ok || len(constructorCall.Args) != 1 {
+				continue
+			}
+			constructor, ok := constructorCall.Fun.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			constructorHandle, ok := constructorCall.Args[0].(*ast.Ident)
+			if !ok || constructorHandle.Name != testParameter {
+				continue
+			}
+			if id, exists := constructors[packageKey+":"+constructor.Name]; exists {
 				result[id] = struct{}{}
 			}
 		}
 	}
 	return result
+}
+
+func packageNameForKey(packageKey string) string {
+	separator := strings.LastIndex(packageKey, ":")
+	if separator < 0 {
+		return packageKey
+	}
+	return packageKey[separator+1:]
+}
+
+func directSourceConstructorID(function *ast.FuncDecl, file, packageName string) (SourceID, bool) {
+	if function.Recv != nil || function.Body == nil || function.Type.Results == nil ||
+		len(function.Type.Results.List) != 1 || !sourceTokenResult(function.Type.Results.List[0].Type, packageName) ||
+		function.Type.Params == nil || len(function.Type.Params.List) != 1 ||
+		len(function.Type.Params.List[0].Names) != 1 {
+		return "", false
+	}
+	testParameter := function.Type.Params.List[0].Names[0].Name
+	for _, statement := range function.Body.List {
+		returned, ok := statement.(*ast.ReturnStmt)
+		if !ok || len(returned.Results) != 1 {
+			continue
+		}
+		call, ok := returned.Results[0].(*ast.CallExpr)
+		if !ok || len(call.Args) != 3 || !isCanonicalExecuteSourceCall(call.Fun, packageName) {
+			continue
+		}
+		handle, handleOK := call.Args[0].(*ast.Ident)
+		id, idOK := directSourceID(call.Args[1])
+		constructor, constructorOK := call.Args[2].(*ast.FuncLit)
+		if !handleOK || handle.Name != testParameter || !idOK || !constructorOK ||
+			constructor.Type.Params == nil || len(constructor.Type.Params.List) != 0 ||
+			constructor.Type.Results != nil {
+			continue
+		}
+		want := SourceID(filepath.ToSlash(file) + ":" + function.Name.Name)
+		if id != want {
+			return "", false
+		}
+		return id, true
+	}
+	return "", false
+}
+
+func sourceTokenResult(expression ast.Expr, packageName string) bool {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return packageName == "canonicalrouting" && value.Name == "SourceToken"
+	case *ast.SelectorExpr:
+		pkg, ok := value.X.(*ast.Ident)
+		return ok && pkg.Name == "canonicalrouting" && value.Sel.Name == "SourceToken"
+	default:
+		return false
+	}
 }
 
 func isCanonicalProveCall(function ast.Expr, packageName string) bool {
@@ -944,6 +845,18 @@ func isCanonicalSourceProveCall(function ast.Expr, packageName string) bool {
 	case *ast.SelectorExpr:
 		pkg, ok := value.X.(*ast.Ident)
 		return ok && pkg.Name == "canonicalrouting" && value.Sel.Name == "ProveSource"
+	default:
+		return false
+	}
+}
+
+func isCanonicalExecuteSourceCall(function ast.Expr, packageName string) bool {
+	switch value := function.(type) {
+	case *ast.Ident:
+		return packageName == "canonicalrouting" && value.Name == "ExecuteSource"
+	case *ast.SelectorExpr:
+		pkg, ok := value.X.(*ast.Ident)
+		return ok && pkg.Name == "canonicalrouting" && value.Sel.Name == "ExecuteSource"
 	default:
 		return false
 	}
@@ -1031,73 +944,195 @@ func pathQualifiedGoSymbol(symbol string) bool {
 	return strings.HasSuffix(file, "_test.go") && file != "." && goTestName(name)
 }
 
-func prohibitedRawBundleSource(raw []byte) bool {
-	return prohibitedBundleFileSet(raw) && rawContainsRoutingVocabulary(raw) && rawMaterializesBundle(raw)
+func repositoryGoPackages(repo string) (map[string]map[string]string, error) {
+	packages := map[string]map[string]string{}
+	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(repo, path)
+		if err != nil {
+			return err
+		}
+		file := filepath.ToSlash(rel)
+		dir := filepath.ToSlash(filepath.Dir(rel))
+		key := dir + ":" + parsed.Name.Name
+		if packages[key] == nil {
+			packages[key] = map[string]string{}
+		}
+		packages[key][file] = string(raw)
+		return nil
+	})
+	return packages, err
 }
 
-func prohibitedRawBundleSites(path string, raw []byte) []rawBundleSite {
+func goPackageContainsCompleteRoutingBundle(files map[string]string) bool {
+	return len(completeGoPackageRoutingBundleSources(files)) != 0
+}
+
+func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageBundleSource {
 	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, path, raw, 0)
-	if err != nil {
-		return []rawBundleSite{{Name: "<unparseable>"}}
+	parsedFiles := make([]*ast.File, 0, len(files))
+	fileNames := map[*ast.File]string{}
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
 	}
-	var sites []rawBundleSite
-	for _, declaration := range parsed.Decls {
-		start := fset.Position(declaration.Pos()).Offset
-		end := fset.Position(declaration.End()).Offset
-		if start < 0 || end > len(raw) || start >= end {
-			continue
+	sort.Strings(paths)
+	for _, path := range paths {
+		parsed, err := parser.ParseFile(fset, path, files[path], 0)
+		if err != nil {
+			return []goPackageBundleSource{{File: path, Function: "<unparseable>"}}
 		}
-		source := raw[start:end]
-		switch value := declaration.(type) {
-		case *ast.FuncDecl:
-			if prohibitedRawBundleSource(source) {
-				sites = append(sites, rawBundleSite{Name: value.Name.Name})
+		parsedFiles = append(parsedFiles, parsed)
+		fileNames[parsed] = filepath.ToSlash(path)
+	}
+	if len(parsedFiles) == 0 {
+		return nil
+	}
+
+	info := &types.Info{
+		Types: map[ast.Expr]types.TypeAndValue{},
+		Defs:  map[*ast.Ident]types.Object{},
+		Uses:  map[*ast.Ident]types.Object{},
+	}
+	config := types.Config{Importer: importer.Default(), Error: func(error) {}}
+	_, _ = config.Check("canonicalrouting/sourcecensus", fset, parsedFiles, info)
+
+	initializers := map[types.Object][]ast.Expr{}
+	for _, file := range parsedFiles {
+		for _, declaration := range file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.CONST && general.Tok != token.VAR {
+				continue
 			}
-		case *ast.GenDecl:
-			if (value.Tok == token.VAR || value.Tok == token.CONST) &&
-				prohibitedBundleFileSet(source) && rawContainsRoutingVocabulary(raw) {
-				sites = append(sites, rawBundleSite{Name: "package-scope"})
+			for _, specification := range general.Specs {
+				value, ok := specification.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for index, name := range value.Names {
+					object := info.Defs[name]
+					if object == nil || len(value.Values) == 0 {
+						continue
+					}
+					valueIndex := index
+					if valueIndex >= len(value.Values) {
+						valueIndex = len(value.Values) - 1
+					}
+					initializers[object] = append(initializers[object], value.Values[valueIndex])
+				}
 			}
 		}
 	}
-	if len(sites) == 0 && prohibitedRawBundleSource(raw) {
-		sites = append(sites, rawBundleSite{Name: "file-scope"})
+
+	var result []goPackageBundleSource
+	for _, file := range parsedFiles {
+		for _, declaration := range file.Decls {
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				if value.Body != nil && sourceNodeContainsCompleteBundle(value.Body, info, initializers) {
+					result = append(result, goPackageBundleSource{File: fileNames[file], Function: value.Name.Name})
+				}
+			case *ast.GenDecl:
+				if (value.Tok == token.CONST || value.Tok == token.VAR) && sourceNodeContainsCompleteBundle(value, info, initializers) {
+					result = append(result, goPackageBundleSource{File: fileNames[file], Function: "package-scope"})
+				}
+			}
+		}
 	}
-	return sites
+	return result
 }
 
-func prohibitedBundleFileSet(raw []byte) bool {
-	source := string(raw)
-	if !strings.Contains(source, "package.yaml") {
+func sourceNodeContainsCompleteBundle(
+	node ast.Node,
+	info *types.Info,
+	initializers map[types.Object][]ast.Expr,
+) bool {
+	values := map[string]struct{}{}
+	visitedObjects := map[types.Object]struct{}{}
+	var collect func(ast.Node)
+	collect = func(current ast.Node) {
+		ast.Inspect(current, func(candidate ast.Node) bool {
+			if candidate == nil {
+				return false
+			}
+			if expression, ok := candidate.(ast.Expr); ok {
+				if typed, exists := info.Types[expression]; exists && typed.Value != nil && typed.Value.Kind() == constant.String {
+					values[constant.StringVal(typed.Value)] = struct{}{}
+				}
+			}
+			identifier, ok := candidate.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			object := info.Uses[identifier]
+			if object == nil {
+				return true
+			}
+			if _, visited := visitedObjects[object]; visited {
+				return true
+			}
+			visitedObjects[object] = struct{}{}
+			for _, initializer := range initializers[object] {
+				collect(initializer)
+			}
+			return true
+		})
+	}
+	collect(node)
+
+	hasPackageFile := false
+	hasSchemaFile := false
+	hasRoutingAuthority := false
+	for value := range values {
+		hasPackageFile = hasPackageFile || strings.Contains(value, "package.yaml")
+		hasSchemaFile = hasSchemaFile || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml")
+		hasRoutingAuthority = hasRoutingAuthority || yamlTextContainsCanonicalRoutingAuthority(value)
+	}
+	return hasPackageFile && hasSchemaFile && hasRoutingAuthority
+}
+
+func yamlTextContainsCanonicalRoutingAuthority(text string) bool {
+	decoder := yaml.NewDecoder(strings.NewReader(text))
+	for {
+		var doc yaml.Node
+		if err := decoder.Decode(&doc); err != nil {
+			return false
+		}
+		for _, node := range doc.Content {
+			if yamlNodeContainsCanonicalRoutingAuthority(node) {
+				return true
+			}
+		}
+	}
+}
+
+func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
+	if node == nil {
 		return false
 	}
-	return strings.Contains(source, "schema.yaml") || strings.Contains(source, "nodes.yaml")
-}
-
-func rawMaterializesBundle(raw []byte) bool {
-	source := string(raw)
-	for _, token := range []string{
-		"os.WriteFile(", "materialize(", "loadWorkflowTemp", "writeFile(", "write(",
-		"FixtureFile(", "fixtureFile(", "BundleFile(", "bundleFile(",
-	} {
-		if strings.Contains(source, token) {
-			return true
+	if node.Kind == yaml.MappingNode {
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			key := strings.TrimSpace(node.Content[index].Value)
+			value := node.Content[index+1]
+			switch key {
+			case "connect", "resolution", "replies_to":
+				return true
+			case "source":
+				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
+					return true
+				}
+			}
+			if yamlNodeContainsCanonicalRoutingAuthority(value) {
+				return true
+			}
 		}
+		return false
 	}
-	return false
-}
-
-func rawContainsRoutingVocabulary(raw []byte) bool {
-	source := string(raw)
-	for _, token := range []string{
-		`"pins"`, "pins:", `"connect"`, "connect:", `"resolution"`, "resolution:",
-		`"instance"`, "instance:", `"subscribes_to"`, "subscribes_to:",
-		`"subscriptions"`, "subscriptions:", `"event_handlers"`, "event_handlers:",
-		`"emit"`, "emit:", `"source"`, "source: external", `"replies_to"`, "replies_to:",
-		`"carries"`, "carries:",
-	} {
-		if strings.Contains(source, token) {
+	for _, child := range node.Content {
+		if yamlNodeContainsCanonicalRoutingAuthority(child) {
 			return true
 		}
 	}

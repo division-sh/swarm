@@ -14,13 +14,11 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/artifact_action_result_delivery_test.go:artifactActionResultDeliveryFixtureFiles"))
 	tests := []struct {
 		name            string
 		requestEventID  string

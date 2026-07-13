@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 )
 
@@ -470,8 +469,6 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 }
 
 func TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/tools/emit_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/tools/emit_test.go:TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode"))
 	root := t.TempDir()
 	writeEmitFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: provider-schema-validation

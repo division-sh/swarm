@@ -1,14 +1,12 @@
 package swarmflowtest
 
 import (
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestCatalogRunner_AccumulationRemainsPendingUntilExpectedCount(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_harness_semantics_test.go:TestCatalogCasePresent_RequiresAllCoreFiles"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: pending-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -67,7 +65,6 @@ expected:
 }
 
 func TestCatalogRunner_AccumulationThresholdCompletesAtThreshold(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_harness_semantics_test.go:TestCatalogCasePresent_RequiresAllCoreFiles"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: threshold-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -128,7 +125,6 @@ expected:
 }
 
 func TestCatalogRunner_AccumulationIgnoresDuplicateItems(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_harness_semantics_test.go:TestCatalogCasePresent_RequiresAllCoreFiles"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: idempotent-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -235,7 +231,6 @@ func TestCatalogGuardPasses_ComparisonAndReferenceSemantics(t *testing.T) {
 }
 
 func TestCatalogCasePresent_RequiresAllCoreFiles(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_harness_semantics_test.go:TestCatalogCasePresent_RequiresAllCoreFiles"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: catalog-case\n")
 	writeCatalogCaseFile(t, dir, "schema.yaml", "initial_state: pending\n")

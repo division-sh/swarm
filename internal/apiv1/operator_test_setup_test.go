@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -19,7 +18,6 @@ import (
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/apiv1/operator_test_setup_test.go:testSetupValidationBundle"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(testSetupValidationBundle(t))
@@ -340,111 +338,13 @@ func countTestSetupEntityRows(t *testing.T, db *sql.DB) int {
 }
 
 func testSetupValidationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=internal/apiv1/operator_test_setup_test.go:TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency
 	t.Helper()
-	root := t.TempDir()
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: review
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: static
-  - id: secondary
-    flow: secondary
-    mode: static
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: review
-initial_state: new
-terminal_states: [done]
-states: [new, done]
-pins:
-  inputs:
-    events: [scan.requested]
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "events.yaml"), `
-scan.requested:
-  swarm:
-    source: external
-  topic: text
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-scan-orchestrator:
-  id: scan-orchestrator
-  execution_type: system_node
-  subscribes_to: [scan.requested]
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
-name: operating
-mode: static
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, waiting, ready]
-pins:
-  inputs:
-    events: [opco.product_review_requested]
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
-product:
-  product_id: text
-  note: text
-  review_score: integer
-  business_brief: Brief
-  feature_list: list<Feature>
-  review_scores: map[text]integer
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "types.yaml"), `
-types:
-  Brief:
-    summary: text
-  Feature:
-    name: text
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
-opco.product_review_requested:
-  swarm:
-    source: external
-  note: text
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
-reviewer:
-  id: reviewer
-  execution_type: system_node
-  subscribes_to: [opco.product_review_requested]
-  gate_state:
-    gates: [review_ready]
-  event_handlers:
-    opco.product_review_requested:
-      sets_gate: review_ready
-      advances_to: ready
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "schema.yaml"), `
-name: secondary
-mode: static
-initial_state: open
-terminal_states: [closed]
-states: [open, closed]
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "entities.yaml"), `
-ticket:
-  ticket_id: text
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "events.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "nodes.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "policy.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "tools.yaml"), `{}`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "agents.yaml"), `{}`)
 	repoRoot := runCompletionRepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.CopyTestSetupValidation(t),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -160,7 +159,6 @@ validation:
 }
 
 func TestPolicyDocumentValidationRejectsUnknownFields(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/flowmodel/model_test.go:TestPolicyDocumentValidationRejectsUnknownFields"))
 	tests := []struct {
 		name     string
 		body     string

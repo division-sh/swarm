@@ -63,75 +63,79 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 }
 
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
-	ProveSource(
-		// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
-		t, SourceID("internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract"))
+	ProveSource(t, canonicalRoutingTeachingContractSource(t))
+}
 
-	artifactIDs := canonicalExampleNames()
-	want := make([]string, 0, len(artifactIDs))
-	for _, id := range artifactIDs {
-		want = append(want, filepath.Base(string(id)))
-	}
-	sort.Strings(want)
-	entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "notify-all-children" {
-			continue
-		}
-		got = append(got, entry.Name())
-	}
-	sort.Strings(got)
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("canonical routing inventory = %v, want %v", got, want)
-	}
-
-	for _, name := range want {
-		t.Run(name, func(t *testing.T) {
-			root := ExampleRoot(t, ArtifactID("examples/routing/"+name))
-			readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
+	t.Helper()
+	return ExecuteSource(t,
+		SourceID("internal/runtime/testfixtures/canonicalrouting/fixture_test.go:canonicalRoutingTeachingContractSource"), func() {
+			artifactIDs := canonicalExampleNames()
+			want := make([]string, 0, len(artifactIDs))
+			for _, id := range artifactIDs {
+				want = append(want, filepath.Base(string(id)))
+			}
+			sort.Strings(want)
+			entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			text := string(readme)
-			for _, required := range []string{
-				"swarm verify --contracts examples/routing/" + name,
-				"swarm serve --contracts examples/routing/" + name,
-				"swarm event publish",
-				"Expected:",
-			} {
-				if !strings.Contains(text, required) {
-					t.Fatalf("README missing %q", required)
+			var got []string
+			for _, entry := range entries {
+				if !entry.IsDir() || entry.Name() == "notify-all-children" {
+					continue
 				}
+				got = append(got, entry.Name())
 			}
-			if !strings.Contains(text, "If ") && !strings.Contains(text, "On ") && !strings.Contains(text, "For ") {
-				t.Fatal("README must state recovery or fail-closed guidance")
+			sort.Strings(got)
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("canonical routing inventory = %v, want %v", got, want)
 			}
 
-			err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-				if info.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
-					return nil
-				}
-				raw, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				for _, forbidden := range []string{"delivery:", "on_missing:", "on_conflict:", "broadcast:"} {
-					if strings.Contains(string(raw), forbidden) {
-						t.Fatalf("%s teaches retired/transitional field %s", path, forbidden)
+			for _, name := range want {
+				t.Run(name, func(t *testing.T) {
+					root := ExampleRoot(t, ArtifactID("examples/routing/"+name))
+					readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+					if err != nil {
+						t.Fatal(err)
 					}
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatal(err)
+					text := string(readme)
+					for _, required := range []string{
+						"swarm verify --contracts examples/routing/" + name,
+						"swarm serve --contracts examples/routing/" + name,
+						"swarm event publish",
+						"Expected:",
+					} {
+						if !strings.Contains(text, required) {
+							t.Fatalf("README missing %q", required)
+						}
+					}
+					if !strings.Contains(text, "If ") && !strings.Contains(text, "On ") && !strings.Contains(text, "For ") {
+						t.Fatal("README must state recovery or fail-closed guidance")
+					}
+
+					err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+						if err != nil {
+							return err
+						}
+						if info.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
+							return nil
+						}
+						raw, err := os.ReadFile(path)
+						if err != nil {
+							return err
+						}
+						for _, forbidden := range []string{"delivery:", "on_missing:", "on_conflict:", "broadcast:"} {
+							if strings.Contains(string(raw), forbidden) {
+								t.Fatalf("%s teaches retired/transitional field %s", path, forbidden)
+							}
+						}
+						return nil
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
 		})
-	}
 }

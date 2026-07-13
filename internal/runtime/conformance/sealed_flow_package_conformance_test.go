@@ -14,12 +14,10 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/sealedpackage"
 )
 
 func TestSealedFlowPackageConformance_CoversBoundaryOwners(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/sealedpackage/fixture.go:Write"))
 	source := sealedpackage.LoadSource(t, sealedpackage.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {

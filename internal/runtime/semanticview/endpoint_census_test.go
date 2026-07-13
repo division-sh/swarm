@@ -9,7 +9,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -416,7 +415,6 @@ func (s endpointSourceFiles) NodeContractSource(nodeID string) (runtimecontracts
 }
 
 func TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/endpoint_census_test.go:TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner"))
 	path := filepath.Join(t.TempDir(), "nodes.yaml")
 	body := fmt.Sprintf("# unique source: %s\nworker-node:\n  event_handlers:\n    work.requested: {}\n", path)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

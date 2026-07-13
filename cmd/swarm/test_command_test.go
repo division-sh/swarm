@@ -142,7 +142,6 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 }
 
 func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:writeScenarioSetupFixture"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioSetupFixture(t)
@@ -261,7 +260,6 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 }
 
 func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:writeScenarioRootSetupFixture"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioRootSetupFixture(t)
@@ -1088,7 +1086,6 @@ steps:
 }
 
 func TestSwarmTestRejectsInvalidSetupBeforeRPC(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:TestScenarioSetupParserRejectsAmbiguousSetupForms"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioSetupFixture(t)
@@ -1132,7 +1129,6 @@ steps:
 }
 
 func TestScenarioSetupParserRejectsAmbiguousSetupForms(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:TestScenarioSetupParserRejectsAmbiguousSetupForms"))
 	for _, raw := range []string{
 		`
 setup:
@@ -1805,157 +1801,13 @@ expect:
 }
 
 func writeScenarioSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=cmd/swarm/test_command_test.go:TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scenario-setup-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: static
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: scenario-setup-fixture
-initial_state: new
-terminal_states: [done]
-states: [new, done]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
-name: operating
-mode: static
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, waiting, ready]
-pins:
-  inputs:
-    events: [opco.product_review_requested]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
-product:
-  product_id: text
-  note: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
-opco.product_review_requested:
-  swarm:
-    source: external
-  note: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
-reviewer:
-  id: reviewer
-  execution_type: system_node
-  subscribes_to: [opco.product_review_requested]
-  gate_state:
-    gates: [review_ready]
-  event_handlers:
-    opco.product_review_requested:
-      data_accumulation:
-        source_event: opco.product_review_requested
-        writes:
-          - source_field: note
-            target_field: note
-      clear_gates: [review_ready]
-      advances_to: ready
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tests", "setup-target.yaml"), `
-name: setup target and expectation
-setup:
-  entities:
-    - as: product
-      type: product
-      current_state: waiting
-      fields: {product_id: p-1, note: seeded}
-      gates: {review_ready: true}
-steps:
-  - publish: opco.product_review_requested
-    target: product
-    payload: {note: approved}
-expect:
-  entities:
-    - ref: product
-      current_state: ready
-      fields: {product_id: p-1, note: approved}
-      gates: {review_ready: false}
-`)
-	return root
+	return canonicalrouting.CopyScenarioSetup(t)
 }
 
 func writeScenarioRootSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=cmd/swarm/test_command_test.go:TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scenario-root-setup-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: scenario-root-setup-fixture
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
-pins:
-  inputs:
-    events: [widget.scored]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-widget:
-  score: integer
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-widget.scored:
-  swarm:
-    source: external
-  delta: integer
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-scorer:
-  id: scorer
-  execution_type: system_node
-  subscribes_to: [widget.scored]
-  event_handlers:
-    widget.scored:
-      data_accumulation:
-        source_event: widget.scored
-        writes:
-          - target_field: score
-            expression: entity.score + payload.delta
-      advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", "root-setup.yaml"), `
-name: root setup and expectation
-setup:
-  entities:
-    - as: widget
-      type: widget
-      current_state: waiting
-      fields: {score: 5}
-steps:
-  - publish: widget.scored
-    payload: {delta: 7}
-expect:
-  entities:
-    - ref: widget
-      current_state: done
-      fields: {score: 12}
-`)
-	return root
+	return canonicalrouting.CopyScenarioRootSetup(t)
 }
 
 func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {
