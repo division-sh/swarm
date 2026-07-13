@@ -701,6 +701,31 @@ func BenchmarkRowStateLeaseLifecycle(b *testing.B) {
 	}
 }
 
+func BenchmarkFreshPhysicalLifecycle(b *testing.B) {
+	manager := integrationManager(b)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	var acquireTime, releaseTime time.Duration
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		started := time.Now()
+		sandbox, err := manager.Acquire(ctx, true)
+		acquireTime += time.Since(started)
+		if err != nil {
+			b.Fatal(err)
+		}
+		started = time.Now()
+		if err := sandbox.Release(ctx); err != nil {
+			b.Fatal(err)
+		}
+		releaseTime += time.Since(started)
+	}
+	if b.N > 0 {
+		b.ReportMetric(float64(acquireTime.Nanoseconds())/float64(b.N), "acquire-ns/op")
+		b.ReportMetric(float64(releaseTime.Nanoseconds())/float64(b.N), "release-ns/op")
+	}
+}
+
 func TestRowStateLeaseProcessDeathReconciliationFencesRoleAndRetiresSlot(t *testing.T) {
 	manager := integrationManager(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
