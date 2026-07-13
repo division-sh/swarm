@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -236,6 +237,95 @@ func TestReconfigureAgent_RepeatedTargetEdgesAreDistinctOccurrences(t *testing.T
 	}
 	if rec, ok := registry.Snapshot(cfg.ID); !ok || rec.SessionID != previousSessionID {
 		t.Fatalf("same-current session = %#v ok=%v, want unchanged %q", rec, ok, previousSessionID)
+	}
+}
+
+func TestReconfigureAgent_ConcurrentPartialPatchesSerializeFromCurrentConfig(t *testing.T) {
+	registry := sessions.NewInMemoryRegistry(0)
+	firstBuildEntered := make(chan struct{}, 1)
+	releaseFirstBuild := make(chan struct{})
+	secondBuildEntered := make(chan struct{}, 1)
+	releaseSecondBuild := make(chan struct{})
+	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+		if cfg.ID == "serialized-partial-patch-agent" {
+			switch {
+			case cfg.ConversationMode == sessions.RuntimeModeTask.String() && len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-a":
+				firstBuildEntered <- struct{}{}
+				<-releaseFirstBuild
+			case len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-b":
+				secondBuildEntered <- struct{}{}
+				<-releaseSecondBuild
+			}
+		}
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{Sessions: registry})
+	cfg := models.AgentConfig{
+		ID:               "serialized-partial-patch-agent",
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "support/serialized",
+		Tools:            []string{"tool-a"},
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
+	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.RuntimeModeSession, sessions.SessionScopeFlow, "reconfigure", cfg.CanonicalFlowPath())
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	initialGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- am.ReconfigureAgent(cfg.ID, models.AgentConfig{ConversationMode: sessions.RuntimeModeTask.String()})
+	}()
+	<-firstBuildEntered
+	secondStarted := make(chan struct{})
+	secondErr := make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		secondErr <- am.ReconfigureAgent(cfg.ID, models.AgentConfig{Tools: []string{"tool-b"}})
+	}()
+	<-secondStarted
+
+	secondBuiltBeforeFirstCommit := false
+	select {
+	case <-secondBuildEntered:
+		secondBuiltBeforeFirstCommit = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(releaseFirstBuild)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("task reconfigure: %v", err)
+	}
+	if !secondBuiltBeforeFirstCommit {
+		<-secondBuildEntered
+	}
+	close(releaseSecondBuild)
+	if err := <-secondErr; err != nil {
+		t.Fatalf("tools reconfigure: %v", err)
+	}
+	if secondBuiltBeforeFirstCommit {
+		t.Fatal("disjoint partial patch was built before the prior reconfigure committed and projected")
+	}
+
+	got, ok := am.GetAgentConfig(cfg.ID)
+	if !ok {
+		t.Fatal("reconfigured agent config missing")
+	}
+	if got.ConversationMode != sessions.RuntimeModeTask.String() || len(got.Tools) != 1 || got.Tools[0] != "tool-b" {
+		t.Fatalf("final config = mode:%q tools:%v, want task + tool-b", got.ConversationMode, got.Tools)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != initialGeneration+2 {
+		t.Fatalf("final generation = %d, want %d", got, initialGeneration+2)
+	}
+	if current, ok := registry.Snapshot(cfg.ID); ok {
+		t.Fatalf("current session survived task transition: %#v", current)
+	}
+	history := registry.History(cfg.ID)
+	if len(history) != 1 || history[0].SessionID != lease.SessionID || history[0].Status != "terminated" || history[0].SuccessorSessionID != "" {
+		t.Fatalf("session history = %#v, want exact terminated predecessor without successor", history)
 	}
 }
 
