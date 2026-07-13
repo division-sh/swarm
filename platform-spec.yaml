@@ -22004,8 +22004,14 @@ api_specification:
         node-state aliases and structured types such as string, int, float,
         jsonb, object, and list forms. The same owner validates mailbox.decide
         values and proves decision.<field> compatibility with authored outcome
-        event fields; parse, verify/emission, and runtime API validation MUST NOT
-        maintain separate type subsets.
+        event fields. Programmatic semantic plans and persisted snapshots MUST
+        contain the exact canonical spelling before immutable card/schema hashes
+        are computed; normalization after hashing is forbidden. Literal outcome
+        emit values are validated at boot against the exact resolved target
+        event-field schema, including enum, format, pattern, length, and range
+        refinements, before any operator can settle a card. Parse,
+        verify/emission, hashing, and runtime API validation MUST NOT maintain
+        separate type or refinement subsets.
       decision_event_payload_contract:
         terminal_event_name: mailbox.card_decided
         deferred_event_name: mailbox.card_deferred

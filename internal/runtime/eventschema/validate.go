@@ -19,6 +19,16 @@ func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any)
 	return validateSchemaObject("$", schema, payload)
 }
 
+// ValidateValueAgainstSchema validates one value against an already-resolved
+// JSON schema. Contract admission uses this for literal fields before a full
+// event payload exists; runtime publication uses ValidatePayloadAgainstSchema.
+func ValidateValueAgainstSchema(schema map[string]any, value any) error {
+	if schema == nil {
+		return nil
+	}
+	return validateValue("$", schema, value)
+}
+
 func validateSchemaObject(path string, schema map[string]any, payload map[string]any) error {
 	if schemaType := strings.TrimSpace(asString(schema["type"])); schemaType != "" && schemaType != "object" {
 		return nil

@@ -28,6 +28,20 @@ func NormalizeWorkflowGateInputType(raw string) (string, error) {
 	return "", fmt.Errorf("unsupported stage gate input type %q; use text, integer, numeric, boolean, timestamp, or uuid", strings.TrimSpace(raw))
 }
 
+// ValidateCanonicalWorkflowGateInputType rejects programmatic and persisted
+// spellings that would otherwise hash differently from the authored canonical
+// value. YAML decoding normalizes before the semantic plan is constructed.
+func ValidateCanonicalWorkflowGateInputType(raw string) (string, error) {
+	canonical, err := NormalizeWorkflowGateInputType(raw)
+	if err != nil {
+		return "", err
+	}
+	if raw != canonical {
+		return "", fmt.Errorf("stage gate input type %q is not canonical; use %q", raw, canonical)
+	}
+	return canonical, nil
+}
+
 func WorkflowGateInputValueMatches(kind string, value any) bool {
 	kind, err := NormalizeWorkflowGateInputType(kind)
 	if err != nil {
