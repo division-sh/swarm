@@ -356,6 +356,9 @@ type WorkflowGateOutcomePlan struct {
 	Input      map[string]WorkflowGateInputField
 	AdvancesTo string
 	Emit       EmitSpec
+	// EmitSchema is the resolved event payload schema frozen into a decision
+	// card. It is runtime-owned evidence and is never an authoring surface.
+	EmitSchema map[string]any `yaml:"-" json:"EmitSchema,omitempty"`
 }
 
 type WorkflowGateInputField struct {

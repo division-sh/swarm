@@ -87,36 +87,32 @@ func WorkflowGateInputValueMatches(kind string, value any) bool {
 	return false
 }
 
-// WorkflowGateInputTypeCompatible compares a canonical gate input with an
-// event-field scalar. Event aliases are read-only migration vocabulary; gate
-// authoring always stores the canonical type returned above.
-func WorkflowGateInputTypeCompatible(inputType, eventType string) bool {
+// WorkflowGateInputTypeCompatibleWithResolvedSchema compares a gate input to
+// the exact resolved event-field schema. This preserves timestamp/UUID format
+// identity and supports named scalar/enum fields after catalog lowering.
+func WorkflowGateInputTypeCompatibleWithResolvedSchema(inputType string, schema map[string]any) bool {
 	inputType, err := NormalizeWorkflowGateInputType(inputType)
-	if err != nil {
+	if err != nil || schema == nil {
 		return false
 	}
-	return inputType == workflowGateEventTypeFamily(eventType)
-}
-
-func workflowGateEventTypeFamily(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(strings.Split(strings.TrimSpace(raw), " ")[0]))
-	switch raw {
-	case "text", "string":
-		return "text"
-	case "integer", "int", "bigint":
-		return "integer"
-	case "numeric", "number", "float", "double", "real":
-		return "numeric"
-	case "boolean", "bool":
-		return "boolean"
-	case "timestamp", "timestamptz":
-		return "timestamp"
+	schemaType, _ := schema["type"].(string)
+	format, _ := schema["format"].(string)
+	schemaType = strings.ToLower(strings.TrimSpace(schemaType))
+	format = strings.ToLower(strings.TrimSpace(format))
+	switch inputType {
+	case "text":
+		return schemaType == "string" && format == ""
+	case "integer":
+		return schemaType == "integer"
+	case "numeric":
+		return schemaType == "number"
+	case "boolean":
+		return schemaType == "boolean"
+	case "timestamp":
+		return schemaType == "string" && format == "date-time"
 	case "uuid":
-		return "uuid"
+		return schemaType == "string" && format == "uuid"
 	default:
-		if strings.HasPrefix(raw, "numeric(") && strings.HasSuffix(raw, ")") {
-			return "numeric"
-		}
-		return ""
+		return false
 	}
 }

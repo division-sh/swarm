@@ -914,6 +914,9 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		RootSchema: nil,
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"launch.approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", Version: "1", InitialStage: "awaiting_review",
 			Gates: []runtimecontracts.WorkflowGatePlan{{

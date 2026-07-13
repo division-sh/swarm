@@ -22006,12 +22006,20 @@ api_specification:
         values and proves decision.<field> compatibility with authored outcome
         event fields. Programmatic semantic plans and persisted snapshots MUST
         contain the exact canonical spelling before immutable card/schema hashes
-        are computed; normalization after hashing is forbidden. Literal outcome
-        emit values are validated at boot against the exact resolved target
-        event-field schema, including enum, format, pattern, length, and range
-        refinements, before any operator can settle a card. Parse,
-        verify/emission, hashing, and runtime API validation MUST NOT maintain
-        separate type or refinement subsets.
+        are computed; normalization after hashing is forbidden. The same
+        pre-hash identity rule applies to context, verdict, input-field, and
+        emit-field map keys: raw keys that differ from their trimmed canonical
+        identity and normalized duplicates fail closed. Each card freezes the
+        exact resolved outcome event schema inside its content hash. A decision
+        input referenced by an emit is required; optional omission/null
+        propagation is not supported. Literal outcome emit values and complete
+        statically known payloads are validated at boot against that schema.
+        mailbox.decide assembles the complete frozen payload and validates it
+        before the verdict CAS, including enum, format, pattern, length, range,
+        required-presence, nullability, and same-object equal_to refinements.
+        Parse, verify/emission, hashing, runtime API validation, and route-time
+        payload construction MUST NOT maintain separate identity, type, or
+        refinement subsets.
       decision_event_payload_contract:
         terminal_event_name: mailbox.card_decided
         deferred_event_name: mailbox.card_deferred

@@ -204,8 +204,20 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	}
 	frozenOutcomes := make(map[string]runtimecontracts.WorkflowGateOutcomePlan, len(plan.Outcomes))
 	for verdict, outcome := range plan.Outcomes {
-		if eventName := strings.TrimSpace(outcome.Emit.Event); eventName != "" && pc.SemanticSource() != nil {
-			outcome.Emit.Event = pc.SemanticSource().ResolveFlowEventReference(plan.FlowID, eventName)
+		if eventName := strings.TrimSpace(outcome.Emit.Event); eventName != "" {
+			source := pc.SemanticSource()
+			if source == nil {
+				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: semantic source is unavailable", plan.Decision, verdict)
+			}
+			resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventName)
+			if !resolution.HasSchema {
+				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: event %s has no resolvable payload schema", plan.Decision, verdict, eventName)
+			}
+			if err := resolution.UnresolvedTypeError(); err != nil {
+				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: %w", plan.Decision, verdict, err)
+			}
+			outcome.Emit.Event = source.ResolveFlowEventReference(plan.FlowID, eventName)
+			outcome.EmitSchema = cloneWorkflowGateSchema(resolution.Schema.Schema)
 		}
 		frozenOutcomes[verdict] = outcome
 	}
@@ -220,6 +232,29 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 		CreatedAt:        activation.OpenedAt,
 	}
 	return decisioncard.New(card)
+}
+
+func cloneWorkflowGateSchema(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		switch typed := value.(type) {
+		case map[string]any:
+			out[key] = cloneWorkflowGateSchema(typed)
+		case []any:
+			items := make([]any, len(typed))
+			for i, item := range typed {
+				if nested, ok := item.(map[string]any); ok {
+					items[i] = cloneWorkflowGateSchema(nested)
+				} else {
+					items[i] = item
+				}
+			}
+			out[key] = items
+		default:
+			out[key] = typed
+		}
+	}
+	return out
 }
 
 func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, instance WorkflowInstance, source semanticview.Source, flowID string) (any, error) {

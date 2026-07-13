@@ -28,6 +28,9 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		stage := strings.TrimSpace(plan.Stage)
 		decision := strings.TrimSpace(plan.Decision)
 		location := stageGateLocation(flowID, stage, decision)
+		if err := runtimecontracts.ValidateCanonicalWorkflowGatePlanIdentity(plan); err != nil {
+			findings = append(findings, stageGateFinding(location, err.Error()))
+		}
 		key := flowID + "\x00" + decision
 		if previous, ok := seen[key]; ok {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("decision id %s is also declared at %s; decision ids are stable and unique within a flow", decision, previous)))
@@ -109,22 +112,28 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 	findings := make([]Finding, 0)
 	resolution := semanticview.ResolveEventSchema(c.source, plan.FlowID, eventType)
 	resolvedFields := map[string]map[string]any{}
+	resolvedSchema := map[string]any{}
 	var literalSchemaErr error
 	if !resolution.HasSchema {
 		literalSchemaErr = fmt.Errorf("event %s has no resolvable payload schema", eventType)
 	} else if err := resolution.UnresolvedTypeError(); err != nil {
 		literalSchemaErr = err
 	} else {
-		resolvedFields = runtimesharedjson.SchemaProperties(resolution.Schema.Schema["properties"])
+		resolvedSchema = resolution.Schema.Schema
+		resolvedFields = runtimesharedjson.SchemaProperties(resolvedSchema["properties"])
 	}
-	for field, expression := range outcome.Emit.Fields {
-		field = strings.TrimSpace(field)
-		fieldSpec, declared := entry.Payload.Properties[field]
+	literalPayload := make(map[string]any, len(outcome.Emit.Fields))
+	allLiteral := true
+	for rawField, expression := range outcome.Emit.Fields {
+		field := strings.TrimSpace(rawField)
+		_, declared := entry.Payload.Properties[field]
 		if !declared {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s is not declared by event %s", verdict, field, eventType)))
+			allLiteral = false
 			continue
 		}
 		if expression.HasLiteralValue() {
+			literalPayload[rawField] = expression.Literal
 			if literalSchemaErr != nil {
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s cannot be validated: %v", verdict, field, literalSchemaErr)))
 				continue
@@ -139,6 +148,7 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 			}
 			continue
 		}
+		allLiteral = false
 		text := stageGateExpressionText(expression)
 		matches := stageGateDecisionRefPattern.FindAllStringSubmatch(text, -1)
 		if len(matches) > 0 {
@@ -152,8 +162,20 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s reads undeclared decision.%s", verdict, field, inputName)))
 				continue
 			}
-			if !stageGateTypesCompatible(input.Type, fieldSpec.Type) {
-				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s decision.%s type %s is incompatible with event %s field %s type %s", verdict, inputName, input.Type, eventType, field, fieldSpec.Type)))
+			if !input.Required {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s reads optional decision.%s; emitted decision fields must be required so settlement cannot commit an absent or null payload value", verdict, field, inputName)))
+			}
+			if literalSchemaErr != nil {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s decision.%s cannot be validated against event %s field %s: %v", verdict, inputName, eventType, field, literalSchemaErr)))
+				continue
+			}
+			fieldSchema, ok := resolvedFields[field]
+			if !ok {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s has no resolved schema for event %s", verdict, field, eventType)))
+				continue
+			}
+			if !runtimecontracts.WorkflowGateInputTypeCompatibleWithResolvedSchema(input.Type, fieldSchema) {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s decision.%s type %s is incompatible with event %s field %s resolved schema", verdict, inputName, input.Type, eventType, field)))
 			}
 			continue
 		}
@@ -166,6 +188,11 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 		}
 		if _, ok := outcome.Emit.Fields[required]; !ok {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s event %s is missing required emit field %s", verdict, eventType, required)))
+		}
+	}
+	if allLiteral && literalSchemaErr == nil {
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(resolvedSchema, literalPayload); err != nil {
+			findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s assembled literal payload is incompatible with event %s schema: %v", verdict, eventType, err)))
 		}
 	}
 	return findings
@@ -183,10 +210,6 @@ func stageGateExpressionText(expression runtimecontracts.ExpressionValue) string
 		}
 	}
 	return ""
-}
-
-func stageGateTypesCompatible(inputType, eventType string) bool {
-	return runtimecontracts.WorkflowGateInputTypeCompatible(inputType, eventType)
 }
 
 func normalizedGateSet(values []string) map[string]struct{} {

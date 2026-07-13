@@ -9,30 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestStageGateEmitCompatibilityConsumesCanonicalInputTypeOwner(t *testing.T) {
-	for _, tc := range []struct {
-		input string
-		event string
-	}{
-		{input: "text", event: "text"},
-		{input: "text", event: "string"},
-		{input: "integer", event: "integer"},
-		{input: "numeric", event: "numeric(12,2)"},
-		{input: "boolean", event: "boolean"},
-		{input: "timestamp", event: "timestamp"},
-		{input: "uuid", event: "uuid"},
-	} {
-		if !stageGateTypesCompatible(tc.input, tc.event) {
-			t.Fatalf("gate input %s is incompatible with event type %s", tc.input, tc.event)
-		}
-	}
-	for _, input := range []string{"string", "int", "float", "jsonb", "text[]"} {
-		if stageGateTypesCompatible(input, input) {
-			t.Fatalf("non-canonical gate input %s was compatible", input)
-		}
-	}
-}
-
 func TestStageGateVerificationRejectsProgrammaticNonCanonicalInputType(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "building"}},
@@ -79,6 +55,88 @@ func TestStageGateVerificationRejectsProgrammaticNonExactCanonicalInputType(t *t
 		}
 	}
 	t.Fatalf("stage gate verification findings = %#v, want exact canonical-spelling blocker", report.Errors())
+}
+
+func TestStageGateVerificationRejectsProgrammaticNonCanonicalMapIdentities(t *testing.T) {
+	tests := []struct {
+		name string
+		plan runtimecontracts.WorkflowGatePlan
+	}{
+		{
+			name: "verdict",
+			plan: runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				" approve ": {AdvancesTo: "complete"},
+			}},
+		},
+		{
+			name: "input",
+			plan: runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				"approve": {AdvancesTo: "complete", Input: map[string]runtimecontracts.WorkflowGateInputField{" note ": {Type: "text"}}},
+			}},
+		},
+		{
+			name: "emit",
+			plan: runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				"approve": {AdvancesTo: "complete", Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+					" note ": runtimecontracts.LiteralExpression("ready"),
+				}}},
+			}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := stageGateValidationBundle(tc.plan, map[string]runtimecontracts.EventFieldSpec{"note": {Type: "text"}}, []string{"note"})
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			for _, finding := range report.Errors() {
+				if finding.CheckID == stageGateValidationCheckID && strings.Contains(finding.Message, "is not canonical") {
+					return
+				}
+			}
+			t.Fatalf("stage gate findings = %#v, want canonical map-identity blocker", report.Errors())
+		})
+	}
+}
+
+func TestStageGateVerificationRejectsOptionalDecisionFieldUsedByEmit(t *testing.T) {
+	plan := runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			AdvancesTo: "complete",
+			Input:      map[string]runtimecontracts.WorkflowGateInputField{"note": {Type: "text", Required: false}},
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"note": runtimecontracts.CELExpression("decision.note"),
+			}},
+		},
+	}}
+	report := Run(context.Background(), semanticview.Wrap(stageGateValidationBundle(plan, map[string]runtimecontracts.EventFieldSpec{"note": {Type: "text"}}, []string{"note"})), Options{})
+	for _, finding := range report.Errors() {
+		if finding.CheckID == stageGateValidationCheckID && strings.Contains(finding.Message, "reads optional decision.note") {
+			return
+		}
+	}
+	t.Fatalf("stage gate findings = %#v, want optional decision reference blocker", report.Errors())
+}
+
+func TestStageGateVerificationValidatesAssembledLiteralPayloadRelations(t *testing.T) {
+	plan := runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			AdvancesTo: "complete",
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"component": runtimecontracts.LiteralExpression("api"),
+				"owner":     runtimecontracts.LiteralExpression("worker"),
+			}},
+		},
+	}}
+	fields := map[string]runtimecontracts.EventFieldSpec{
+		"component": {Type: "text"},
+		"owner":     {Type: "text", Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"}},
+	}
+	report := Run(context.Background(), semanticview.Wrap(stageGateValidationBundle(plan, fields, []string{"component", "owner"})), Options{})
+	for _, finding := range report.Errors() {
+		if finding.CheckID == stageGateValidationCheckID && strings.Contains(finding.Message, "assembled literal payload") && strings.Contains(finding.Message, "must equal") {
+			return
+		}
+	}
+	t.Fatalf("stage gate findings = %#v, want assembled relational-payload blocker", report.Errors())
 }
 
 func TestStageGateLiteralEmitConsumesExactResolvedEventFieldSchema(t *testing.T) {
@@ -158,6 +216,18 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 		},
 	}
 	return Run(context.Background(), semanticview.Wrap(bundle), Options{})
+}
+
+func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields map[string]runtimecontracts.EventFieldSpec, required []string) *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"review.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: fields}, Required: required},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
+			Gates: []runtimecontracts.WorkflowGatePlan{plan},
+		},
+	}
 }
 
 func stageGateLiteralFinding(report Report) string {
