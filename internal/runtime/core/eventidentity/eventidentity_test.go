@@ -2,6 +2,19 @@ package eventidentity
 
 import "testing"
 
+func TestIsValidNameUsesCanonicalEventGrammar(t *testing.T) {
+	for _, name := range []string{"inbound.telegram.text_message", "flow/step.completed", "flow-instance/step.completed"} {
+		if !IsValidName(name) {
+			t.Fatalf("IsValidName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"", "inbound.telegram.", "Inbound.telegram.event", "inbound.telegram.text-message", "flow//event", "flow/*"} {
+		if IsValidName(name) {
+			t.Fatalf("IsValidName(%q) = true, want false", name)
+		}
+	}
+}
+
 func TestLeafName_LocalizesScopedEvent(t *testing.T) {
 	if got := LeafName("scoring/vertical.shortlisted"); got != "vertical.shortlisted" {
 		t.Fatalf("LeafName = %q, want %q", got, "vertical.shortlisted")

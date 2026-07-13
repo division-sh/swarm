@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
@@ -57,7 +58,7 @@ func (m Manifest) OutputManifest() []OutputManifest {
 	for _, item := range m.NormalizedEvents {
 		fields := make(map[string]runtimecontracts.FieldProjection, len(item.Fields))
 		for name, field := range item.Fields {
-			fields[name] = field.Normalized()
+			fields[strings.TrimSpace(name)] = field.Normalized()
 		}
 		out = append(out, OutputManifest{
 			Kind: OutputKindNormalized, Event: strings.TrimSpace(item.Event),
@@ -70,9 +71,6 @@ func (m Manifest) OutputManifest() []OutputManifest {
 func (m Manifest) validateNormalizedEvents() error {
 	provider := NormalizeProviderName(m.Provider)
 	seen := map[string]struct{}{}
-	if literal := strings.TrimSpace(m.EventName.Literal); literal != "" {
-		seen[literal] = struct{}{}
-	}
 	branches := make([]OutputManifest, 0, len(m.NormalizedEvents))
 	for index, item := range m.NormalizedEvents {
 		eventName := strings.TrimSpace(item.Event)
@@ -82,6 +80,12 @@ func (m Manifest) validateNormalizedEvents() error {
 		if !strings.HasPrefix(eventName, "inbound."+provider+".") {
 			return fmt.Errorf("%s normalized event %q must use inbound.%s.* namespace", provider, eventName, provider)
 		}
+		if !eventidentity.IsValidName(eventName) {
+			return fmt.Errorf("%s normalized event %q is not a valid canonical event name", provider, eventName)
+		}
+		if m.EventName.Accepts(eventName) {
+			return fmt.Errorf("%s normalized event %q collides with the raw event-name policy", provider, eventName)
+		}
 		if _, exists := seen[eventName]; exists {
 			return fmt.Errorf("%s normalized event %q duplicates another declared output", provider, eventName)
 		}
@@ -90,8 +94,14 @@ func (m Manifest) validateNormalizedEvents() error {
 			return fmt.Errorf("%s normalized event %q requires fields", provider, eventName)
 		}
 		fields := make(map[string]runtimecontracts.FieldProjection, len(item.Fields))
-		for name, field := range item.Fields {
-			name = strings.TrimSpace(name)
+		for declaredName, field := range item.Fields {
+			name := strings.TrimSpace(declaredName)
+			if declaredName != name {
+				return fmt.Errorf("%s normalized event %q field name %q is not canonical; remove surrounding whitespace", provider, eventName, declaredName)
+			}
+			if _, duplicate := fields[name]; duplicate {
+				return fmt.Errorf("%s normalized event %q field name %q duplicates another field after normalization", provider, eventName, declaredName)
+			}
 			field = field.Normalized()
 			if !normalizedFieldNamePattern.MatchString(name) {
 				return fmt.Errorf("%s normalized event %q has invalid field name %q", provider, eventName, name)
@@ -99,7 +109,7 @@ func (m Manifest) validateNormalizedEvents() error {
 			if _, err := runtimepaths.ParseStrictRelative(field.From); err != nil {
 				return fmt.Errorf("%s normalized event %q field %q: %w", provider, eventName, name, err)
 			}
-			if err := runtimecontracts.ValidateWave1TypeReference(field.Type, "normalized event "+eventName+" field "+name); err != nil {
+			if err := runtimecontracts.ValidateStandaloneWave1TypeReference(field.Type, "normalized event "+eventName+" field "+name); err != nil {
 				return err
 			}
 			switch field.Convert {
@@ -278,8 +288,8 @@ func normalizeProjectedValue(value any, field runtimecontracts.FieldProjection) 
 	if field.Convert == runtimecontracts.FieldProjectionConvertNumberToText {
 		return exactNumberText(value)
 	}
-	if !projectedValueMatchesType(value, field.Type) {
-		return nil, fmt.Errorf("value type %T is incompatible with declared type %s and implicit conversion is forbidden", value, field.Type)
+	if err := runtimecontracts.ValidateStandaloneWave1Value(field.Type, value); err != nil {
+		return nil, fmt.Errorf("%v and implicit conversion is forbidden", err)
 	}
 	return value, nil
 }
@@ -308,40 +318,6 @@ func exactNumberText(value any) (string, error) {
 	}
 }
 
-func projectedValueMatchesType(value any, typeRef string) bool {
-	switch strings.TrimSpace(typeRef) {
-	case "text", "string", "uuid", "timestamp", "timestamptz":
-		_, ok := value.(string)
-		return ok
-	case "integer", "int", "bigint":
-		switch typed := value.(type) {
-		case json.Number:
-			_, err := strconv.ParseInt(typed.String(), 10, 64)
-			return err == nil
-		case int, int32, int64:
-			return true
-		case float64:
-			return math.Trunc(typed) == typed && math.Abs(typed) <= 1<<53
-		default:
-			return false
-		}
-	case "float", "double", "real", "numeric":
-		switch value.(type) {
-		case json.Number, int, int32, int64, float64:
-			return true
-		default:
-			return false
-		}
-	case "boolean", "bool":
-		_, ok := value.(bool)
-		return ok
-	case "json", "jsonb":
-		return true
-	default:
-		return true
-	}
-}
-
 func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalogEntry {
 	out := map[string]runtimecontracts.EventCatalogEntry{}
 	if literal := strings.TrimSpace(m.EventName.Literal); literal != "" {
@@ -354,7 +330,8 @@ func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalog
 		}
 		for name, projection := range normalized.Fields {
 			projection = projection.Normalized()
-			entry.Payload.Properties[strings.TrimSpace(name)] = runtimecontracts.EventFieldSpec{Type: projection.Type}
+			name = strings.TrimSpace(name)
+			entry.Payload.Properties[name] = runtimecontracts.EventFieldSpec{Type: projection.Type}
 			if !projection.Optional {
 				entry.Required = append(entry.Required, strings.TrimSpace(name))
 			}

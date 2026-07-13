@@ -18,6 +18,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1871,9 +1872,16 @@ func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) 
 					EntityID:        entityID,
 					Provider:        "proof-provider",
 				},
-				Events: []events.Event{
-					eventtest.RootIngress(rawID, events.EventType("inbound.proof"), "inbound-gateway", "", []byte(`{"raw":true}`), 0, eventBusTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
-					eventtest.RootIngress(normalizedID, events.EventType("inbound.proof.normalized"), "inbound-gateway", "", []byte(`{"normalized":true}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
+				Events: []runtimebus.InboundDeliveryEvent{
+					{Event: eventtest.RootIngress(rawID, events.EventType("inbound.proof"), "inbound-gateway", "", []byte(`{"raw":true}`), 0, eventBusTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()), Kind: runtimeprovideroutput.KindRaw},
+					{
+						Event: eventtest.RootIngress(normalizedID, events.EventType("inbound.proof.normalized"), "inbound-gateway", "", []byte(`{"normalized":true}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
+						Kind:  runtimeprovideroutput.KindNormalized,
+						Authorization: runtimeprovideroutput.Authorization{
+							Provider: "proof-provider", Event: "inbound.proof.normalized", PackID: "provider.proof",
+							PackVersion: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
+						},
+					},
 				},
 			}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -65,11 +66,13 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
 	}
-	authorized, ok := wrapped.(interface{ ProviderTriggerTargetFreeEvents() []string })
+	authorized, ok := wrapped.(interface {
+		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
+	})
 	if !ok {
 		t.Fatal("provider trigger source does not expose its target-free event authority")
 	}
-	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, authorized.ProviderTriggerTargetFreeEvents())
+	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, authorized.ProviderTriggerTargetFreeAuthorizations())
 	if len(issues) != 0 {
 		t.Fatalf("target-free route plan issues = %#v", issues)
 	}
@@ -81,7 +84,10 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 		t.Fatalf("target-free normalized route plan = %#v", plan)
 	}
 
-	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []string{"inbound.telegram"})
+	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{{
+		Provider: "telegram", Event: "inbound.telegram", PackID: "provider.telegram", PackVersion: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: catalog.GenerationID(),
+	}})
 	if len(rawIssues) != 0 || len(rawPlans) != 0 {
 		t.Fatalf("raw standing event acquired target-free route plans=%#v issues=%#v", rawPlans, rawIssues)
 	}

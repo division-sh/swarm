@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -49,8 +50,10 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
-	if targetFree, ok := source.(interface{ ProviderTriggerTargetFreeEvents() []string }); ok {
-		directPlans, directIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, targetFree.ProviderTriggerTargetFreeEvents())
+	if targetFree, ok := source.(interface {
+		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
+	}); ok {
+		directPlans, directIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, targetFree.ProviderTriggerTargetFreeAuthorizations())
 		plans = append(plans, directPlans...)
 		issues = append(issues, directIssues...)
 	}
@@ -70,7 +73,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		return connectRoutePlanDispatch{}, nil
 	}
 	for _, issue := range r.issues {
-		if r.connectIssueMatchesEvent(issue, evt) {
+		if r.connectIssueMatchesEvent(ctx, issue, evt) {
 			return connectRoutePlanDispatch{
 				Matched: true,
 				Failure: connectRoutePlanTargetFailure(issue.Failure),
@@ -82,7 +85,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		}
 	}
 
-	matched := r.matchedPlans(evt)
+	matched := r.matchedPlans(ctx, evt)
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{}, nil
 	}
@@ -354,13 +357,13 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(decisi
 	}, nil
 }
 
-func (r connectRoutePlanResolver) matchedPlans(evt events.Event) []runtimepinrouting.ConnectRoutePlan {
+func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.Event) []runtimepinrouting.ConnectRoutePlan {
 	if len(r.plans) == 0 {
 		return nil
 	}
 	out := make([]runtimepinrouting.ConnectRoutePlan, 0, len(r.plans))
 	for _, plan := range r.plans {
-		if connectEndpointMatchesEvent(plan.Source, evt) {
+		if connectRoutePlanMatchesEvent(ctx, plan, evt) {
 			out = append(out, plan)
 		}
 	}
@@ -443,7 +446,7 @@ func connectSubscriberMatchesPlanTarget(plan runtimepinrouting.ConnectRoutePlan,
 	return targetPath == receiverPath || strings.HasPrefix(targetPath, receiverPath+"/")
 }
 
-func (r connectRoutePlanResolver) connectIssueMatchesEvent(issue runtimepinrouting.ConnectRoutePlanIssue, evt events.Event) bool {
+func (r connectRoutePlanResolver) connectIssueMatchesEvent(ctx context.Context, issue runtimepinrouting.ConnectRoutePlanIssue, evt events.Event) bool {
 	if r.source == nil || issue.Failure == "" {
 		return false
 	}
@@ -463,7 +466,14 @@ func (r connectRoutePlanResolver) connectIssueMatchesEvent(issue runtimepinrouti
 		Event:         strings.TrimSpace(outputPin.EventType()),
 		ResolvedEvent: strings.TrimSpace(r.source.ResolveFlowEventReference(from.FlowID, outputPin.EventType())),
 	}
-	return connectEndpointMatchesEvent(endpoint, evt)
+	if !connectEndpointMatchesEvent(endpoint, evt) {
+		return false
+	}
+	return providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization)
+}
+
+func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
+	return connectEndpointMatchesEvent(plan.Source, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization)
 }
 
 func connectEndpointMatchesEvent(endpoint runtimepinrouting.ConnectRoutePlanEndpoint, evt events.Event) bool {

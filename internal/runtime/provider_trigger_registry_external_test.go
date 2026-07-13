@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
 type boundedProviderCredentialStore struct{}
@@ -106,16 +107,19 @@ func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGate
 		return
 	}
 	_ = store
-	batchEvents := make([]events.Event, 0, len(delivery.Events))
+	batchEvents := make([]runtimebus.InboundDeliveryEvent, 0, len(delivery.Events))
 	for _, output := range delivery.Events {
 		envelope := events.EventEnvelope{}
 		if output.Kind == providertriggers.OutputKindRaw {
 			envelope = events.EventEnvelope{EntityID: entityID}
 		}
-		batchEvents = append(batchEvents, eventtest.RootIngress(
+		event := eventtest.RootIngress(
 			"", output.Name, "bounded-provider-integration", "",
 			mustBoundedJSON(t, output.Payload), 0, runID, "", envelope, time.Now().UTC(),
-		))
+		)
+		batchEvents = append(batchEvents, runtimebus.InboundDeliveryEvent{
+			Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization,
+		})
 	}
 	result, err := bus.PublishInboundDelivery(r.Context(), runtimebus.InboundDeliveryBatch{
 		Claim: runtimebus.InboundDeliveryClaim{

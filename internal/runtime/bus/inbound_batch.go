@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
 type InboundDeliveryClaim struct {
@@ -16,8 +17,14 @@ type InboundDeliveryClaim struct {
 
 type InboundDeliveryBatch struct {
 	Claim                     InboundDeliveryClaim
-	Events                    []events.Event
+	Events                    []InboundDeliveryEvent
 	AcknowledgeBeforeDispatch bool
+}
+
+type InboundDeliveryEvent struct {
+	Event         events.Event
+	Kind          runtimeprovideroutput.Kind
+	Authorization runtimeprovideroutput.Authorization
 }
 
 type InboundDeliveryBatchResult struct {
@@ -70,7 +77,26 @@ func (eb *EventBus) PublishInboundDelivery(ctx context.Context, batch InboundDel
 			result.Duplicate = true
 			return nil
 		}
-		for _, event := range batch.Events {
+		for _, item := range batch.Events {
+			event := item.Event
+			authorization := item.Authorization.Normalized()
+			switch item.Kind {
+			case runtimeprovideroutput.KindRaw:
+				if !authorization.Empty() {
+					return fmt.Errorf("raw provider output must not carry normalized-output authorization")
+				}
+				txctx = withoutProviderOutputAuthorization(txctx)
+			case runtimeprovideroutput.KindNormalized:
+				if !authorization.Valid() {
+					return fmt.Errorf("normalized provider output requires complete verified-pack authorization")
+				}
+				if authorization.Provider != strings.TrimSpace(batch.Claim.Provider) || authorization.Event != strings.TrimSpace(string(event.Type())) {
+					return fmt.Errorf("normalized provider output authorization does not match delivery claim/event")
+				}
+				txctx = withProviderOutputAuthorization(txctx, authorization)
+			default:
+				return fmt.Errorf("inbound delivery event requires raw or normalized output kind")
+			}
 			if err := eb.PublishInMutation(txctx, event); err != nil {
 				return err
 			}
@@ -78,4 +104,22 @@ func (eb *EventBus) PublishInboundDelivery(ctx context.Context, batch InboundDel
 		return nil
 	})
 	return result, err
+}
+
+type providerOutputAuthorizationContextKey struct{}
+
+func withProviderOutputAuthorization(ctx context.Context, authorization runtimeprovideroutput.Authorization) context.Context {
+	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, authorization.Normalized())
+}
+
+func withoutProviderOutputAuthorization(ctx context.Context) context.Context {
+	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, runtimeprovideroutput.Authorization{})
+}
+
+func providerOutputAuthorizationMatches(ctx context.Context, expected *runtimeprovideroutput.Authorization) bool {
+	if expected == nil {
+		return true
+	}
+	actual, _ := ctx.Value(providerOutputAuthorizationContextKey{}).(runtimeprovideroutput.Authorization)
+	return expected.Matches(actual)
 }

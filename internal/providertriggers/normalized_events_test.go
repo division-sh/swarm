@@ -48,6 +48,48 @@ func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
 	}
 }
 
+func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	identity := PackIdentity{
+		ID: "provider.telegram", Version: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
+	}
+	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: identity, Source: "test"})
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram",
+		Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatalf("CompileAdmission: %v", err)
+	}
+	delivery, err := plan.Accept(Request{
+		Target: Target{EntityID: "entity-1"},
+		Payload: map[string]any{
+			"update_id": json.Number("123"),
+			"message": map[string]any{
+				"message_id": json.Number("7"),
+				"chat":       map[string]any{"id": json.Number("42")},
+				"text":       "hello",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if len(delivery.Events) != 2 || !delivery.Events[0].Authorization.Empty() {
+		t.Fatalf("raw output authorization = %#v, want empty", delivery.Events)
+	}
+	got := delivery.Events[1].Authorization
+	if !got.Valid() || got.Provider != "telegram" || got.Event != "inbound.telegram.text_message" ||
+		got.PackID != identity.ID || got.PackVersion != identity.Version ||
+		got.ManifestHash != identity.ManifestHash || got.GenerationID != catalog.GenerationID() {
+		t.Fatalf("normalized output authorization = %#v, want compiled pack identity/generation", got)
+	}
+}
+
 func TestNormalizedEventManifestUnmatchedPayloadPublishesRawOnly(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	delivery, err := manifest.Accept(Request{
@@ -91,6 +133,121 @@ func TestNormalizedEventManifestRejectsHostileProjectionSyntax(t *testing.T) {
 				t.Fatalf("Validate accepted hostile path %q", path)
 			}
 		})
+	}
+}
+
+func TestNormalizedEventManifestRejectsMalformedEventNamesAtLoad(t *testing.T) {
+	for _, eventName := range []string{
+		"inbound.telegram.",
+		"inbound.telegram.TextMessage",
+		"inbound.telegram.text-message",
+		"inbound.telegram..text_message",
+		"inbound.telegram.text message",
+	} {
+		t.Run(eventName, func(t *testing.T) {
+			manifest := normalizedEventTestManifest()
+			manifest.NormalizedEvents[0].Event = eventName
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "valid canonical event name") {
+				t.Fatalf("Validate(%q) error = %v, want canonical event-name rejection", eventName, err)
+			}
+		})
+	}
+}
+
+func TestNormalizedEventManifestRejectsRawTemplateCollision(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.Provider = "github"
+	manifest.EventName = EventNameManifest{Template: "inbound.github.{event_type}"}
+	manifest.NormalizedEvents[0].Event = "inbound.github.push"
+	err := manifest.Validate()
+	if err == nil || !strings.Contains(err.Error(), "collides with the raw event-name policy") {
+		t.Fatalf("Validate error = %v, want raw-template collision rejection", err)
+	}
+}
+
+func TestNormalizedEventManifestRejectsNonCanonicalFieldNames(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.NormalizedEvents[0].Fields[" text "] = manifest.NormalizedEvents[0].Fields["text"]
+	delete(manifest.NormalizedEvents[0].Fields, "text")
+	err := manifest.Validate()
+	if err == nil || !strings.Contains(err.Error(), "field name") || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("Validate error = %v, want non-canonical field-name rejection", err)
+	}
+}
+
+func TestNormalizedEventPlanRejectsCompositeTypeMismatchesWithPackProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		typeRef  string
+		value    any
+		wantPart string
+	}{
+		{name: "list", typeRef: "[text]", value: []any{"ok", json.Number("2")}, wantPart: "list item 1"},
+		{name: "map", typeRef: "map[text]integer", value: map[string]any{"key": "not-an-integer"}, wantPart: "map value at \"key\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := normalizedEventTestManifest()
+			field := manifest.NormalizedEvents[0].Fields["raw"]
+			field.Type = tc.typeRef
+			field.From = "message.raw"
+			field.Optional = false
+			manifest.NormalizedEvents[0].Fields["raw"] = field
+			entry := CatalogEntry{
+				Manifest: manifest,
+				Identity: PackIdentity{
+					ID: "provider.telegram", Version: "1.0.0",
+					ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "platform",
+				},
+				Source: "test",
+			}
+			catalog, err := NewCatalogSnapshot(entry)
+			if err != nil {
+				t.Fatalf("NewCatalogSnapshot: %v", err)
+			}
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
+				Alias: "chat", Provider: "telegram",
+				Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
+			})
+			if err != nil {
+				t.Fatalf("CompileAdmission: %v", err)
+			}
+			_, err = plan.Accept(Request{
+				Target: Target{EntityID: "entity-1"},
+				Payload: map[string]any{
+					"update_id": json.Number("123"),
+					"message": map[string]any{
+						"message_id": json.Number("7"),
+						"chat":       map[string]any{"id": json.Number("42")},
+						"text":       "hello", "raw": tc.value,
+					},
+				},
+			})
+			for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "inbound.telegram.text_message", "path \"message.raw\"", tc.wantPart} {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("Accept error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizedEventManifestRejectsUnresolvableNamedTypeWithPackProvenance(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	field := manifest.NormalizedEvents[0].Fields["text"]
+	field.Type = "MessageText"
+	manifest.NormalizedEvents[0].Fields["text"] = field
+	_, err := NewCatalogSnapshot(CatalogEntry{
+		Manifest: manifest,
+		Identity: PackIdentity{
+			ID: "provider.telegram", Version: "1.0.0",
+			ManifestHash: "sha256:" + strings.Repeat("b", 64), Provenance: "platform",
+		},
+		Source: "test",
+	})
+	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "MessageText", "not standalone-resolvable"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("NewCatalogSnapshot error = %v, want %q", err, want)
+		}
 	}
 }
 

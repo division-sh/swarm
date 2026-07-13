@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -185,7 +186,7 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: failure}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
 	if err := o.activate(ctx, req); err != nil {
-		if templateInstanceLifecycleCanReuseAfterActivationError(plan, onMissing, onConflict) {
+		if templateInstanceLifecycleCanReuseAfterActivationError(plan, onMissing, onConflict, err) {
 			refreshed, refreshErr := o.reloadDescriptors(ctx)
 			if refreshErr != nil {
 				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, refreshErr
@@ -344,11 +345,15 @@ func templateInstanceLifecycleExistingAction(onMissing, onConflict string) strin
 	return templateInstanceLifecycleActionSelectedExisting
 }
 
-func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinrouting.ConnectRoutePlan, onMissing, onConflict string) bool {
+func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinrouting.ConnectRoutePlan, onMissing, onConflict string, activationErr error) bool {
 	if plan.InstanceKey == nil || strings.TrimSpace(plan.InstanceKey.Mode) != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		return false
 	}
-	return strings.TrimSpace(onMissing) == "create" && strings.TrimSpace(onConflict) == "reuse"
+	if strings.TrimSpace(onMissing) != "create" || strings.TrimSpace(onConflict) != "reuse" {
+		return false
+	}
+	failure, ok := runtimefailures.As(activationErr)
+	return ok && failure.Failure.Class == runtimefailures.ClassConflictingDuplicate
 }
 
 func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {

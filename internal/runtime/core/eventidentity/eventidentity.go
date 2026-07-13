@@ -2,8 +2,12 @@ package eventidentity
 
 import (
 	"path"
+	"regexp"
 	"strings"
 )
+
+var eventTypeTokenPattern = regexp.MustCompile("^[a-z0-9_]+$")
+var eventPathSegmentPattern = regexp.MustCompile("^[a-z0-9_-]+$")
 
 type Scope struct {
 	Path         string
@@ -19,6 +23,32 @@ type DescendantScope struct {
 
 func Normalize(raw string) string {
 	return strings.Trim(strings.TrimSpace(raw), "/")
+}
+
+func IsValidName(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	for _, segment := range strings.Split(raw, "/") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" || segment == "*" {
+			return false
+		}
+		if strings.Contains(segment, ".") {
+			for _, part := range strings.Split(segment, ".") {
+				part = strings.TrimSpace(part)
+				if part == "" || !eventTypeTokenPattern.MatchString(part) {
+					return false
+				}
+			}
+			continue
+		}
+		if !eventPathSegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+	return true
 }
 
 func LeafName(raw string) string {
