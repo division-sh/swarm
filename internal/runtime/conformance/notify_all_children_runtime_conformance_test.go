@@ -188,7 +188,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			deleteNotifyAllChildrenReceipts(t, ctx, backend, db, originalA)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
-			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-24*time.Hour), 20)
+			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, fixedEngineNow.Add(-24*time.Hour), 20)
 			if err != nil {
 				t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
 			}
