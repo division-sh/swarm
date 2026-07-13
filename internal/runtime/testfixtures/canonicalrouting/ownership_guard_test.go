@@ -1,11 +1,13 @@
 package canonicalrouting
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +23,15 @@ import (
 
 type artifactRegistry struct {
 	Artifacts []artifactRegistryEntry `yaml:"artifacts"`
+	Groups    []artifactRegistryGroup `yaml:"groups"`
+}
+
+type artifactRegistryGroup struct {
+	Roots       []string `yaml:"roots"`
+	Disposition string   `yaml:"disposition"`
+	Owner       string   `yaml:"owner"`
+	Proof       string   `yaml:"proof"`
+	Issue       int      `yaml:"issue"`
 }
 
 type artifactRegistryEntry struct {
@@ -98,22 +109,35 @@ func TestCheckedYAMLRoutingArtifactRegistryEqualsLiveCensus(t *testing.T) {
 }
 
 func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
-	repo := t.TempDir()
-	root := filepath.Join(repo, "cmd", "hidden", "testdata", "flow-style")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
+	// routing-example-census: different-concept issue=none owner=canonicalrouting.structural_yaml_census proof=TestCheckedYAMLRoutingCensusIsRepoWideAndStructural
+	cases := map[string]string{
+		"flow-style-external": `{pins: {inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}}`,
+		"broadcast":           "emit:\n  event: result.ready\n  broadcast: true\n",
+		"node-subscription":   "worker:\n  subscribes_to: [work.requested]\n",
+		"agent-subscription":  "worker:\n  subscriptions: [work.requested]\n",
+		"producer":            "worker:\n  produces: [work.ready]\n",
+		"handler-derived":     "worker:\n  event_handlers:\n    work.requested: {}\n",
+		"second-document":     "name: inert\n---\nworker:\n  subscribes_to: [work.requested]\n",
 	}
-	if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	routing := "{pins: {inputs: {events: [{name: ingress, event: ingress.received, " + "source" + ": external}]}}}\n"
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(routing), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	live := liveCheckedYAMLRoutingRoots(t, repo)
-	const want = "cmd/hidden/testdata/flow-style"
-	if _, ok := live[want]; !ok {
-		t.Fatalf("repo-wide structural census missed %s: %#v", want, live)
+	for name, routing := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			root := filepath.Join(repo, "cmd", "hidden", "testdata", name)
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "routing.yaml"), []byte(routing), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			live := liveCheckedYAMLRoutingRoots(t, repo)
+			want := "cmd/hidden/testdata/" + name
+			if _, ok := live[want]; !ok {
+				t.Fatalf("repo-wide structural census missed %s: %#v", want, live)
+			}
+		})
 	}
 }
 
@@ -201,6 +225,24 @@ func replaceCanonicalRoute(t T) string {
 	fn := file.Decls[1].(*ast.FuncDecl)
 	if got := unownedRoutingLiteralCount(fn) + unownedRoutingArtifactReplacementCount(fn); got == 0 {
 		t.Fatal("route-bearing ReplaceFile must not be treated as a non-replacing canonical mutation")
+	}
+}
+
+func TestCanonicalRoutingGoProvenanceRejectsRouteBearingGenericMerge(t *testing.T) {
+	const source = `package fixture
+import "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+func mergeIndependentRoute(t T) string {
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	canonicalrouting.MergeMappingFile(t, root, "nodes.yaml", "bypass:\n  source: external\n  subscribes_to: [bypassed]\n  event_handlers:\n    bypassed: {}\n")
+	return root
+}`
+	file, err := parser.ParseFile(token.NewFileSet(), "adversarial.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := file.Decls[1].(*ast.FuncDecl)
+	if got := unownedRoutingLiteralCount(fn); got == 0 {
+		t.Fatal("route-bearing MergeMappingFile must not establish canonical provenance")
 	}
 }
 
@@ -370,6 +412,17 @@ func loadArtifactRegistry(t testing.TB, repo string) artifactRegistry {
 	if err := yaml.Unmarshal(raw, &registry); err != nil {
 		t.Fatalf("parse artifact registry: %v", err)
 	}
+	for _, group := range registry.Groups {
+		for _, root := range group.Roots {
+			registry.Artifacts = append(registry.Artifacts, artifactRegistryEntry{
+				Root:        root,
+				Disposition: group.Disposition,
+				Owner:       group.Owner,
+				Proof:       group.Proof,
+				Issue:       group.Issue,
+			})
+		}
+	}
 	return registry
 }
 
@@ -471,7 +524,8 @@ func canonicalMutationOwnsExpression(expr ast.Expr, parents map[ast.Node]ast.Nod
 		}
 		switch selector.Sel.Name {
 		case "MergeMappingFile":
-			return true
+			value, ok := constantString(expr)
+			return ok && !yamlTextContainsAuthoredRouting(value)
 		default:
 			continue
 		}
@@ -535,7 +589,13 @@ func canonicalNonReplacingMutation(call *ast.CallExpr) bool {
 		return false
 	}
 	switch selector.Sel.Name {
-	case "MergeMappingFile", "AppendRootExternalInputs":
+	case "MergeMappingFile":
+		for _, arg := range call.Args {
+			value, ok := constantString(arg)
+			if ok && yamlTextContainsAuthoredRouting(value) {
+				return false
+			}
+		}
 		return true
 	default:
 		return false
@@ -696,46 +756,36 @@ func fileContainsAuthoredRouting(t testing.TB, path string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse routing census candidate %s: %v", path, err)
-	}
-	for _, node := range doc.Content {
-		if yamlNodeContainsAuthoredRouting(node) {
-			return true
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	for {
+		var doc yaml.Node
+		if err := decoder.Decode(&doc); err != nil {
+			if err == io.EOF {
+				return false
+			}
+			t.Fatalf("parse routing census candidate %s: %v", path, err)
+		}
+		for _, node := range doc.Content {
+			if yamlNodeContainsAuthoredRouting(node) {
+				return true
+			}
 		}
 	}
-	return false
 }
 
-func yamlNodeContainsAuthoredRouting(node *yaml.Node) bool {
-	if node == nil {
-		return false
-	}
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			value := node.Content[i+1]
-			switch key {
-			case "connect", "resolution", "delivery", "on_missing", "on_conflict":
-				return true
-			case "source":
-				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
-					return true
-				}
-			}
-			if yamlNodeContainsAuthoredRouting(value) {
+func yamlTextContainsAuthoredRouting(text string) bool {
+	decoder := yaml.NewDecoder(strings.NewReader(text))
+	for {
+		var doc yaml.Node
+		if err := decoder.Decode(&doc); err != nil {
+			return false
+		}
+		for _, node := range doc.Content {
+			if yamlNodeContainsAuthoredRouting(node) {
 				return true
 			}
 		}
-		return false
 	}
-	for _, child := range node.Content {
-		if yamlNodeContainsAuthoredRouting(child) {
-			return true
-		}
-	}
-	return false
 }
 
 func difference[A any, B any](left map[string]A, right map[string]B) []string {

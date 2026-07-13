@@ -1,6 +1,8 @@
 package canonicalrouting
 
 import (
+	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -85,73 +87,33 @@ func WriteFile(t testing.TB, root, relativePath, contents string) {
 	}
 }
 
-// RootExternalInput is an additional root-ingress interface declaration.
-// Extensions use this typed operation so they cannot replace the canonical pin set.
-type RootExternalInput struct {
-	Name  string
-	Event string
-}
-
-// AppendRootExternalInputs extends a copied root-ingress owner without replacing
-// its existing interface declarations.
-func AppendRootExternalInputs(t testing.TB, root string, inputs ...RootExternalInput) {
-	t.Helper()
-	path := filepath.Join(root, "schema.yaml")
-	doc := readYAMLDocument(t, path)
-	flow := requireYAMLMapping(t, path, doc.Content[0])
-	pins := requireYAMLMappingValue(t, path, flow, "pins")
-	inputGroup := requireYAMLMappingValue(t, path, pins, "inputs")
-	events := requireYAMLSequenceValue(t, path, inputGroup, "events")
-
-	existingNames := map[string]struct{}{}
-	existingEvents := map[string]struct{}{}
-	for _, item := range events.Content {
-		mapping := requireYAMLMapping(t, path, item)
-		existingNames[yamlScalar(mapping["name"])] = struct{}{}
-		existingEvents[yamlScalar(mapping["event"])] = struct{}{}
-	}
-	for _, input := range inputs {
-		name := strings.TrimSpace(input.Name)
-		event := strings.TrimSpace(input.Event)
-		if name == "" || event == "" {
-			t.Fatalf("root external input name and event are required: %#v", input)
-		}
-		if _, exists := existingNames[name]; exists {
-			t.Fatalf("root external input name %q already exists in %s", name, path)
-		}
-		if _, exists := existingEvents[event]; exists {
-			t.Fatalf("root external input event %q already exists in %s", event, path)
-		}
-		events.Content = append(events.Content, &yaml.Node{
-			Kind: yaml.MappingNode,
-			Content: []*yaml.Node{
-				{Kind: yaml.ScalarNode, Value: "name"}, {Kind: yaml.ScalarNode, Value: name},
-				{Kind: yaml.ScalarNode, Value: "event"}, {Kind: yaml.ScalarNode, Value: event},
-				{Kind: yaml.ScalarNode, Value: "source"}, {Kind: yaml.ScalarNode, Value: "external"},
-			},
-		})
-		existingNames[name] = struct{}{}
-		existingEvents[event] = struct{}{}
-	}
-	writeYAMLDocument(t, path, doc)
-}
-
 // MergeMappingFile appends non-conflicting top-level entries to a copied
-// canonical artifact. Existing entries cannot be replaced through this API.
+// canonical artifact. Existing entries and routing declarations are rejected.
 func MergeMappingFile(t testing.TB, root, relativePath, additions string) {
 	t.Helper()
 	path := filepath.Join(root, relativePath)
 	doc := readYAMLDocument(t, path)
 	existing := requireYAMLMapping(t, path, doc.Content[0])
 
+	decoder := yaml.NewDecoder(bytes.NewBufferString(strings.TrimLeft(additions, "\n")))
 	var additionDoc yaml.Node
-	if err := yaml.Unmarshal([]byte(strings.TrimLeft(additions, "\n")), &additionDoc); err != nil {
+	if err := decoder.Decode(&additionDoc); err != nil {
 		t.Fatalf("parse mapping additions for %s: %v", path, err)
 	}
 	if len(additionDoc.Content) != 1 {
 		t.Fatalf("mapping additions for %s must contain one YAML document", path)
 	}
+	var extraDoc yaml.Node
+	if err := decoder.Decode(&extraDoc); err != io.EOF {
+		if err != nil {
+			t.Fatalf("parse mapping additions for %s: %v", path, err)
+		}
+		t.Fatalf("mapping additions for %s must contain one YAML document", path)
+	}
 	additionRoot := additionDoc.Content[0]
+	if yamlNodeContainsAuthoredRouting(additionRoot) {
+		t.Fatalf("mapping additions for %s contain routing declarations; consume a canonical route or use an explicitly classified negative mutation", path)
+	}
 	additionsByKey := requireYAMLMapping(t, path, additionRoot)
 	for key := range additionsByKey {
 		if _, exists := existing[key]; exists {
@@ -208,29 +170,48 @@ func requireYAMLMapping(t testing.TB, path string, node *yaml.Node) map[string]*
 	return result
 }
 
-func requireYAMLMappingValue(t testing.TB, path string, mapping map[string]*yaml.Node, key string) map[string]*yaml.Node {
-	t.Helper()
-	node := mapping[key]
-	if node == nil {
-		t.Fatalf("%s missing mapping key %q", path, key)
-	}
-	return requireYAMLMapping(t, path, node)
-}
-
-func requireYAMLSequenceValue(t testing.TB, path string, mapping map[string]*yaml.Node, key string) *yaml.Node {
-	t.Helper()
-	node := mapping[key]
-	if node == nil || node.Kind != yaml.SequenceNode {
-		t.Fatalf("%s key %q must be a sequence", path, key)
-	}
-	return node
-}
-
 func yamlScalar(node *yaml.Node) string {
 	if node == nil || node.Kind != yaml.ScalarNode {
 		return ""
 	}
 	return strings.TrimSpace(node.Value)
+}
+
+func yamlNodeContainsAuthoredRouting(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			value := node.Content[i+1]
+			switch key {
+			case "source":
+				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
+					return true
+				}
+			case "broadcast":
+				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "true") {
+					return true
+				}
+			case "pins", "connect", "resolution", "instance", "delivery", "address", "target",
+				"on_missing", "on_conflict", "select_entity", "select_or_create_entity", "create_flow_instance",
+				"subscriptions", "subscriptions_bootstrap", "subscribes_to", "produces", "emit_events",
+				"event_handlers", "emit", "fan_out", "auto_emit_on_create", "replies_to", "carries":
+				return true
+			}
+			if yamlNodeContainsAuthoredRouting(value) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, child := range node.Content {
+		if yamlNodeContainsAuthoredRouting(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func RepoRoot(t testing.TB) string {

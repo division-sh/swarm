@@ -49,20 +49,20 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			publishCalls++
 			switch publishCalls {
 			case 1:
-				if req.Params["event_name"] != "thing.created" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
+				if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
 					t.Fatalf("event.publish initial params = %#v", req.Params)
 				}
 				payload, ok := req.Params["payload"].(map[string]any)
-				if !ok || payload["who"] != "operator" || !numberEquals(payload["amount"], 7) {
+				if !ok || payload["item_id"] != "initial" {
 					t.Fatalf("event.publish initial payload = %#v", req.Params["payload"])
 				}
 				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 			case 2:
-				if req.Params["event_name"] != "thing.reviewed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != "run-1" || req.Params["source_event_id"] != "event-1" {
+				if req.Params["event_name"] != "item.processed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != "run-1" || req.Params["source_event_id"] != "event-1" {
 					t.Fatalf("event.publish follow-up params = %#v", req.Params)
 				}
 				payload, ok := req.Params["payload"].(map[string]any)
-				if !ok || payload["note"] != "approved" {
+				if !ok || payload["item_id"] != "review" {
 					t.Fatalf("event.publish follow-up payload = %#v", req.Params["payload"])
 				}
 				result := eventPublishTestResult(false)
@@ -76,15 +76,15 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "run.trace":
 			row := validRunCommandTraceRow("event-1")
-			row["event_name"] = "thing.created"
+			row["event_name"] = "item.received"
 			followUp := validRunCommandTraceRow("event-2")
-			followUp["event_name"] = "thing.reviewed"
+			followUp["event_name"] = "item.processed"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{row, followUp}})
 		case eventObservationMethodList:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"events": []any{}})
 		case entityListMethod:
 			entity := validEntitySummary("entity-1")
-			entity["entity_type"] = "widget"
+			entity["entity_type"] = "default"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
@@ -93,7 +93,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
-			entity["entity_type"] = "widget"
+			entity["entity_type"] = "default"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
@@ -1049,10 +1049,9 @@ func TestSwarmTestRejectsInvalidFixtureSchemaBeforePublish(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-type.yaml"), `
 name: invalid type fixture
 steps:
-  - publish: thing.created
+  - publish: item.received
     payload:
-      amount: not-an-integer
-      who: operator
+      item_id: [not, text]
 `)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1074,8 +1073,8 @@ steps:
 	if called {
 		t.Fatal("event.publish API was called for schema-invalid fixture")
 	}
-	if !strings.Contains(stderr.String(), "amount must be integer") {
-		t.Fatalf("stderr = %q, want integer schema failure", stderr.String())
+	if !strings.Contains(stderr.String(), "item_id") {
+		t.Fatalf("stderr = %q, want item_id schema failure", stderr.String())
 	}
 }
 
@@ -1758,41 +1757,37 @@ func writeScenarioRunnerFixture(t *testing.T) string {
 	if err := os.RemoveAll(filepath.Join(contractsPath, "tests")); err != nil {
 		t.Fatalf("remove inherited canonical scenarios: %v", err)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "fixtures", "thing-created.yaml"), `
-amount: 7
-who: fixture
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "fixtures", "item-received.yaml"), `
+item_id: fixture
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "empire-routing.yaml"), `
 name: empire-style deterministic routing
-vars:
-  who: operator
 steps:
-  - publish: thing.created
+  - publish: item.received
     idempotency_key: ${scenario.sha40("empire-cost-router")}
     payload:
-      from: fixtures/thing-created.yaml
+      from: fixtures/item-received.yaml
       set:
-        who: ${vars.who}
-        amount: 7
-  - publish: thing.reviewed
+        item_id: initial
+  - publish: item.processed
     payload:
-      note: approved
+      item_id: review
 invalid:
   base:
-    publish: thing.created
+    publish: item.received
     payload:
-      from: fixtures/thing-created.yaml
+      from: fixtures/item-received.yaml
   cases:
-    - name: invalid-amount
+    - name: invalid-item-id
       set:
-        payload.amount: not-an-integer
+        payload.item_id: [not, text]
       expect: reject
 expect:
   events:
-    include: [thing.created, thing.reviewed]
+    include: [item.received, item.processed]
   no_dead_letters: true
   entities:
-    - type: widget
+    - type: default
       current_state: done
 `)
 	return contractsPath
