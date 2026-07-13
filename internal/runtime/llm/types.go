@@ -81,16 +81,6 @@ type UsageTokens struct {
 	Model        string
 }
 
-type BudgetGuard interface {
-	LockExecutionScope(scope string) func()
-	IsEntityEmergency(entityID string) bool
-	IsEntityThrottle(entityID string) bool
-	IsEmergency(entityID string) bool
-	IsThrottle(entityID string) bool
-	RecordEntityLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
-	RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
-}
-
 type Runtime interface {
 	StartSession(ctx context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error)
 	ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error)

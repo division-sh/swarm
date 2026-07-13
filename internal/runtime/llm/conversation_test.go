@@ -104,14 +104,21 @@ func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, _ string,
 }
 
 func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _ Message) (*Response, error) {
-	handle, err := runtimeeffects.Begin(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), nil)
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), nil)
 	if err != nil {
 		return nil, err
 	}
 	if err := handle.MarkLaunched(ctx); err != nil {
 		return nil, err
 	}
-	if err := handle.Succeed(ctx, map[string]any{"turn": r.calls + 1}); err != nil {
+	input, output := int64(1), int64(1)
+	target := handle.Attempt().Authority.Target
+	if err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"turn": r.calls + 1}},
+		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
+		AgentTurn:  &runtimeeffects.CompletionAgentTurn{TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID, RuntimeMode: target.RuntimeMode},
+		Spend:      runtimeeffects.CompletionSpend{FlowInstance: "global", AgentID: target.AgentID, Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http", ResolvedModel: "test-model", InvocationType: "task"},
+	}); err != nil {
 		return nil, err
 	}
 	r.calls++
@@ -403,7 +410,7 @@ func TestConversationStep_SeparatesManagedProviderRoundsAndToolCalls(t *testing.
 	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, SessionScoped, 10, runtime)
 	conversation.SetToolExecutor(tools)
 
-	ctx := models.WithActor(harness.Context("inbound-event-1"), models.AgentConfig{ID: "effect-test-agent", Role: "analysis"})
+	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{ID: "effect-test-agent", Role: "analysis"})
 	response, err := conversation.Step(ctx, "start")
 	if err != nil {
 		t.Fatalf("Step: %v", err)

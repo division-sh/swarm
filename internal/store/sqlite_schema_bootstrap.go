@@ -36,6 +36,9 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
 		}
 	}()
+	if err := migrateSQLiteCompletionAuthoritySchema(ctx, conn, request.PlatformPlans); err != nil {
+		return err
+	}
 	report, err := inspectSQLiteCompatibility(ctx, conn, expected)
 	if err != nil {
 		return err

@@ -36,6 +36,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -155,7 +156,6 @@ type storeBundle struct {
 	AgentDeliveryLifecycleStore  apiv1.AgentDeliveryLifecycleReadStore
 	RuntimeIngressStore          runtimeingress.Store
 	IdempotencyStore             apiv1.APIIdempotencyStore
-	TurnStore                    runtimellm.TurnPersistence
 	StartupOwnership             runtimestartupownership.Store
 	RunQuiescenceStore           runtimerunquiescence.ServeAbandonStore
 	RunReadStore                 apiv1.RunReadStore
@@ -227,7 +227,6 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 					HumanTaskStore:      stores.HumanTaskStore,
 					SessionRegistry:     stores.SessionRegistry,
 					ConversationStore:   stores.ConversationStore,
-					TurnStore:           stores.TurnStore,
 					ScheduleStore:       stores.ScheduleStore,
 					MailboxStore:        stores.MailboxStore,
 					Workspace:           req.Workspaces,
@@ -319,7 +318,6 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		AgentDeliveryLifecycleStore: pg,
 		RuntimeIngressStore:         pg,
 		IdempotencyStore:            pg,
-		TurnStore:                   pg,
 		StartupOwnership:            pg,
 		RunQuiescenceStore:          pg,
 		RunReadStore:                pg,
@@ -799,17 +797,18 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
 	return runtimellm.RuntimeFactory{
-		Cfg:         cfg,
-		Sessions:    sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
-		LockOwner:   "forkchat-sandbox",
-		Workspaces:  workspaces,
-		ToolGateway: binding,
-		Credentials: providerCredentials,
+		Cfg:                  cfg,
+		Sessions:             sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
+		LockOwner:            "forkchat-sandbox",
+		Workspaces:           workspaces,
+		ToolGateway:          binding,
+		Credentials:          providerCredentials,
+		CompletionController: runtimeeffects.NewController(effectStore),
 	}.Build()
 }
 
@@ -1165,7 +1164,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore)
+	effectStore, ok := stores.ManagerStore.(runtimeeffects.Store)
+	if !ok || effectStore == nil {
+		presenter.fail(5, "forkchat_sandbox", fmt.Errorf("selected runtime store does not implement completion execution authority"))
+		return 1
+	}
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, effectStore)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
@@ -2020,7 +2024,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				HumanTaskStore:      stores.HumanTaskStore,
 				SessionRegistry:     stores.SessionRegistry,
 				ConversationStore:   stores.ConversationStore,
-				TurnStore:           stores.TurnStore,
 				ScheduleStore:       stores.ScheduleStore,
 				MailboxStore:        stores.MailboxStore,
 				Workspace:           workspaces,
@@ -2616,7 +2619,6 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			AgentDeliveryLifecycleStore: sqliteStore,
 			RuntimeIngressStore:         sqliteStore,
 			IdempotencyStore:            sqliteStore,
-			TurnStore:                   sqliteStore,
 			StartupOwnership:            sqliteStore,
 			RunQuiescenceStore:          sqliteStore,
 			RunReadStore:                sqliteStore,

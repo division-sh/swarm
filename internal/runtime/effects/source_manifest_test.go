@@ -209,13 +209,21 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 			t.Errorf("adapter contract %s -> %v does not name a live managed primitive", primitiveKey, adapters)
 			continue
 		}
-		if err := verifyManagedPrimitiveOrdering(root, primitiveKey); err != nil {
+		requiresCompletionHeartbeat := false
+		for _, adapter := range adapters {
+			registration, ok := RegistrationFor(adapter)
+			if ok && registration.Kind == KindProviderTurn {
+				requiresCompletionHeartbeat = true
+				break
+			}
+		}
+		if err := verifyManagedPrimitiveOrdering(root, primitiveKey, requiresCompletionHeartbeat); err != nil {
 			t.Errorf("managed primitive contract %s -> %v: %v", primitiveKey, adapters, err)
 		}
 	}
 }
 
-func verifyManagedPrimitiveOrdering(root, primitiveKey string) error {
+func verifyManagedPrimitiveOrdering(root, primitiveKey string, requiresCompletionHeartbeat bool) error {
 	parts := strings.Split(primitiveKey, ":")
 	if len(parts) != 4 {
 		return fmt.Errorf("invalid primitive key")
@@ -239,15 +247,19 @@ func verifyManagedPrimitiveOrdering(root, primitiveKey string) error {
 		matchedFunction = true
 		commandVars := commandVariables(fn.Body)
 		fileVars := fileVariables(fn.Body)
-		var beginPos, launchPos, primitivePos token.Pos
+		typedAttempt := hasRuntimeEffectsHandleParameter(fn)
+		var beginPos, heartbeatPos, launchPos, primitivePos token.Pos
 		primitiveCount := 0
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
-			if isEffectsCall(call, "Begin") && beginPos == token.NoPos {
+			if (isEffectsCall(call, "Begin") || isEffectsCall(call, "BeginCompletion")) && beginPos == token.NoPos {
 				beginPos = call.Pos()
+			}
+			if (isLocalCall(call, "startCompletionAttemptHeartbeat") || isLocalCall(call, "requireCompletionAttemptHeartbeat") || isMethodCall(call, "Heartbeat")) && heartbeatPos == token.NoPos {
+				heartbeatPos = call.Pos()
 			}
 			if isMethodCall(call, "MarkLaunched") && launchPos == token.NoPos {
 				launchPos = call.Pos()
@@ -260,12 +272,16 @@ func verifyManagedPrimitiveOrdering(root, primitiveKey string) error {
 			}
 			return true
 		})
-		if beginPos == token.NoPos || launchPos == token.NoPos || primitivePos == token.NoPos {
-			lastErr = fmt.Errorf("missing Begin/MarkLaunched/primitive binding")
+		if (!typedAttempt && beginPos == token.NoPos) || launchPos == token.NoPos || primitivePos == token.NoPos {
+			lastErr = fmt.Errorf("missing Begin or typed attempt/MarkLaunched/primitive binding")
 			continue
 		}
-		if !(beginPos < launchPos && launchPos < primitivePos) {
-			lastErr = fmt.Errorf("required order Begin < MarkLaunched < primitive is not satisfied")
+		if requiresCompletionHeartbeat && (heartbeatPos == token.NoPos || !(heartbeatPos < launchPos)) {
+			lastErr = fmt.Errorf("completion primitive requires heartbeat binding before MarkLaunched")
+			continue
+		}
+		if !(launchPos < primitivePos) || (!typedAttempt && !(beginPos < launchPos)) {
+			lastErr = fmt.Errorf("required order (Begin or typed attempt) < MarkLaunched < primitive is not satisfied")
 			continue
 		}
 		return nil
@@ -276,6 +292,23 @@ func verifyManagedPrimitiveOrdering(root, primitiveKey string) error {
 	return fmt.Errorf("function %s not found", parts[1])
 }
 
+func hasRuntimeEffectsHandleParameter(fn *ast.FuncDecl) bool {
+	if fn == nil || fn.Type == nil || fn.Type.Params == nil {
+		return false
+	}
+	for _, field := range fn.Type.Params.List {
+		pointer, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		selector, ok := pointer.X.(*ast.SelectorExpr)
+		if ok && selectorRoot(selector.X) == "runtimeeffects" && selector.Sel.Name == "Handle" {
+			return true
+		}
+	}
+	return false
+}
+
 func isEffectsCall(call *ast.CallExpr, name string) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	return ok && selectorRoot(selector.X) == "runtimeeffects" && selector.Sel.Name == name
@@ -284,6 +317,11 @@ func isEffectsCall(call *ast.CallExpr, name string) bool {
 func isMethodCall(call *ast.CallExpr, name string) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	return ok && selector.Sel.Name == name
+}
+
+func isLocalCall(call *ast.CallExpr, name string) bool {
+	identifier, ok := call.Fun.(*ast.Ident)
+	return ok && identifier.Name == name
 }
 
 func collectDirectPrimitives(root string) (map[string]struct{}, error) {

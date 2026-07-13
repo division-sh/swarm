@@ -83,7 +83,6 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 			HumanTaskStore:    h.pg,
 			SessionRegistry:   sessions.NewPostgresRegistry(h.db, cfg.LLM.Session.LockTTL),
 			ConversationStore: h.pg,
-			TurnStore:         h.pg,
 			ScheduleStore:     h.pg,
 			MailboxStore:      h.pg,
 			LLMRuntime:        h.llm,

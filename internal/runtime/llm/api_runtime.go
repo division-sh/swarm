@@ -23,33 +23,30 @@ import (
 
 // AnthropicAPIRuntime provides production API-backed LLM execution.
 type AnthropicAPIRuntime struct {
-	cfg               *config.Config
-	sessions          sessions.Registry
-	turns             TurnPersistence
-	conversations     ConversationPersistence
-	budget            BudgetGuard
-	lockOwner         string
-	httpClient        *http.Client
-	apiURL            string
-	apiKey            string
-	events            EventPublisher
-	providerAdmission *ProviderAdmissionRegistry
-	credentials       ProviderCredentialResolver
+	cfg                  *config.Config
+	sessions             sessions.Registry
+	conversations        ConversationPersistence
+	lockOwner            string
+	httpClient           *http.Client
+	apiURL               string
+	apiKey               string
+	events               EventPublisher
+	providerAdmission    *ProviderAdmissionRegistry
+	credentials          ProviderCredentialResolver
+	completionController *runtimeeffects.Controller
 }
 
-func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
-	return NewAnthropicAPIRuntimeWithProviderCredentials(cfg, sessions, lockOwner, turns, conversations, budget, publisher, NewProviderCredentialResolver(nil))
+func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher) *AnthropicAPIRuntime {
+	return NewAnthropicAPIRuntimeWithProviderCredentials(cfg, sessions, lockOwner, conversations, publisher, NewProviderCredentialResolver(nil))
 }
 
-func NewAnthropicAPIRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher, credentials ProviderCredentialResolver) *AnthropicAPIRuntime {
+func NewAnthropicAPIRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher, credentials ProviderCredentialResolver) *AnthropicAPIRuntime {
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	_ = profile
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
-		turns:         turns,
 		conversations: conversations,
-		budget:        budget,
 		lockOwner:     lockOwner,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
@@ -201,18 +198,6 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
-	scopeKey := budgetExecutionScopeKey(actor)
-
-	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
-	// LLM execution for the affected scope(s). This is treated as transient so
-	// deliveries can be retried after budget resumes.
-	if r.budget != nil {
-		unlockScope := r.budget.LockExecutionScope(scopeKey)
-		defer unlockScope()
-		if r.budget.IsEntityEmergency(entityID) {
-			return nil, budgetEmergencyFailure(entityID)
-		}
-	}
 
 	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
 	if err != nil {
@@ -266,13 +251,17 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
+	if err != nil {
+		return nil, err
+	}
 
 	start := time.Now()
-	rawResp, parsed, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
+	rawResp, parsed, dispatch, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 	latency := time.Since(start)
 
 	if lastErr != nil {
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
@@ -282,7 +271,12 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			Latency:        latency,
 			RetryCount:     0,
 			Failure:        agentTurnFailure(lastErr, "anthropic_turn"),
-		}, nil))
+		}, nil)
+		if dispatch != nil {
+			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+				return nil, errors.Join(lastErr, settleErr)
+			}
+		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
 		if projectionErr == nil {
 			s.ParseFailures++
@@ -300,27 +294,26 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	resp := convertAnthropicResponse(parsed)
 	resp.Raw = rawResp
-	var usage UsageTokens
-	if r.budget != nil {
-		var ok bool
-		usage, ok = extractUsageTokensFromJSON(rawResp)
-		if !ok {
-			usageErr := fmt.Errorf("anthropic response missing usage")
-			r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-				AgentID: s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
-				RequestPayload: reqJSON, ResponseRaw: rawResp, ParseOK: false, Latency: latency,
-				Failure: agentTurnFailure(usageErr, "anthropic_usage"),
-			}, nil))
-			if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
-				return nil, projectionErr
-			}
-			s.ParseFailures++
-			return nil, usageErr
+	usage, ok := extractUsageTokensFromJSON(rawResp)
+	if !ok {
+		usageErr := fmt.Errorf("anthropic response missing usage")
+		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
+			AgentID: s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
+			RequestPayload: reqJSON, ResponseRaw: rawResp, ParseOK: false, Latency: latency,
+			Failure: agentTurnFailure(usageErr, "anthropic_usage"),
+		}, nil)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
+			return nil, errors.Join(usageErr, settleErr)
 		}
-		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
+			return nil, projectionErr
+		}
+		s.ParseFailures++
+		return nil, usageErr
 	}
+	usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
 
-	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
 		RuntimeMode:    resolved.RuntimeMode.String(),
 		SessionID:      s.ID,
@@ -329,17 +322,9 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		ParseOK:        true,
 		Latency:        latency,
 		RetryCount:     0,
-	}, &resp))
-
-	// Spend ledger: exact usage for API runtime when usage fields are present.
-	if r.budget != nil {
-		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
-		meta := usageMetadataForContext(ctx, profile, usage.Model)
-		meta["session_id"] = s.ID
-		meta["usage_accounting"] = string(BudgetUsageExact)
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, true, meta); err != nil {
-			logPublisherRuntime(ctx, r.events, "warn", "record_api_llm_usage_failed", "Recording API LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
-		}
+	}, &resp)
+	if err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"}); err != nil {
+		return nil, err
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
@@ -364,10 +349,10 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	return &resp, nil
 }
 
-func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, anthropicResponse, error) {
+func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, anthropicResponse, *completionDispatch, error) {
 	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
 	if err != nil {
-		return nil, anthropicResponse{}, err
+		return nil, anthropicResponse{}, nil, err
 	}
 	defer release()
 	return r.sendRequest(ctx, payload)
@@ -405,16 +390,6 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 			"mode":      mode.String(),
 			"scope_key": strings.TrimSpace(s.ScopeKey),
 		}, err)
-	}
-}
-
-func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {
-	if r.turns == nil {
-		return
-	}
-	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
-		// Turn telemetry should not break runtime path.
-		logPublisherRuntime(ctx, r.events, "error", "persist_api_turn_failed", "Persisting the API agent turn failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}
 }
 
@@ -484,48 +459,63 @@ func toAnthropicMessage(m Message) (anthropicMessage, bool) {
 	}
 }
 
-func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, anthropicResponse, error) {
+func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, anthropicResponse, *completionDispatch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.apiURL, bytes.NewReader(payload))
 	if err != nil {
-		return nil, anthropicResponse{}, fmt.Errorf("build anthropic request: %w", err)
+		return nil, anthropicResponse{}, nil, fmt.Errorf("build anthropic request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	attempt, err := runtimeeffects.Begin(ctx, "anthropic_api", payload, nil)
+	attempt, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
 	if err != nil {
-		return nil, anthropicResponse{}, err
+		return nil, anthropicResponse{}, nil, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
-		return nil, anthropicResponse{}, err
+	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateOutcomeUncertain}
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
+	if err != nil {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		return nil, anthropicResponse{}, dispatch, err
+	}
+	req = req.WithContext(heartbeatCtx)
+	if err := attempt.MarkLaunched(heartbeatCtx); err != nil {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		return nil, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"stage": "transport"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"stage": "transport"}, err)
+		return nil, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
+		return nil, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
+	dispatch.evidence = map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}
+	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); err != nil {
+		return body, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
 	var parsed anthropicResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, anthropicResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
+		return body, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
 	if httpResp.StatusCode >= 300 {
-		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("anthropic", httpResp.StatusCode))
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("anthropic", httpResp.StatusCode))
+		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "anthropic-adapter", "decode_response", nil, nil)
+		err = runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "anthropic-adapter", "decode_response", nil)
+		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
-	if err := attempt.Succeed(ctx, map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}); err != nil {
-		return body, parsed, err
-	}
-	return body, parsed, nil
+	dispatch.state = runtimeeffects.StateSettled
+	return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil)
 }
 
 func convertAnthropicResponse(parsed anthropicResponse) Response {

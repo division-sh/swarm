@@ -30,6 +30,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -67,7 +68,6 @@ type Stores struct {
 	BudgetSpendStore    budgetspend.Store
 	InboundStore        InboundPersistence
 	RuntimeIngressStore runtimeingress.Store
-	TurnStore           llm.TurnPersistence
 }
 
 type eventReceiptSchemaCapabilityProvider interface {
@@ -719,17 +719,20 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	modelRuntime := opts.LLMRuntime
 	if modelRuntime == nil {
+		effectStore, ok := stores.ManagerStore.(runtimeeffects.Store)
+		if !ok || effectStore == nil {
+			return nil, fmt.Errorf("selected runtime store does not implement completion execution authority")
+		}
 		modelRuntime, err = llm.RuntimeFactory{
-			Cfg:           cfg,
-			Sessions:      stores.SessionRegistry,
-			Turns:         stores.TurnStore,
-			Conversations: stores.ConversationStore,
-			Budget:        rt.Budget,
-			Workspaces:    rt.Workspace,
-			Events:        rt.Bus,
-			MCPTurns:      rt.MCPTurns,
-			ToolGateway:   opts.ToolGatewayBinding,
-			Credentials:   boot.ProviderCredentialResolver.Store,
+			Cfg:                  cfg,
+			Sessions:             stores.SessionRegistry,
+			Conversations:        stores.ConversationStore,
+			Workspaces:           rt.Workspace,
+			Events:               rt.Bus,
+			MCPTurns:             rt.MCPTurns,
+			ToolGateway:          opts.ToolGatewayBinding,
+			Credentials:          boot.ProviderCredentialResolver.Store,
+			CompletionController: runtimeeffects.NewController(effectStore),
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)

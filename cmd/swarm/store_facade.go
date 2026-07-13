@@ -119,7 +119,6 @@ func (f selectedRuntimeStoreFacade) runtimeStores() runtime.Stores {
 		BudgetSpendStore:    s.BudgetSpendStore,
 		InboundStore:        s.InboundStore,
 		RuntimeIngressStore: s.RuntimeIngressStore,
-		TurnStore:           s.TurnStore,
 	}
 }
 

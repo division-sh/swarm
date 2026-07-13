@@ -14,6 +14,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -258,11 +260,13 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 			},
 		},
 	}
-	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	harness := effecttest.New()
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(harness.Context("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -299,18 +303,20 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	defer server.Close()
 	cfg.LLM.OpenAICompatible.BaseURL = server.URL
 
-	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	harness := effecttest.New()
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.apiKey = "test-key"
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
+		_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-compatible-admission-first"), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
+	_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-compatible-admission-second"), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -345,18 +351,20 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	defer server.Close()
 	cfg.LLM.OpenAIResponses.BaseURL = server.URL
 
-	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	harness := effecttest.New()
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.apiKey = "test-key"
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAIResponses)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
+		_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-responses-admission-first"), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, err := runtime.sendAdmittedRequest(unmanagedLLMTestContext(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
+	_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-responses-admission-second"), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -384,7 +392,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 			},
 		},
 	}
-	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
@@ -401,7 +409,9 @@ printf '%s\n' '{"result":"done"}'
 	}
 	defer release()
 
-	_, err = runtime.runWithInput(ctx, nil, target, "hello", MonitorTurnMeta{})
+	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
+	_, err = runtime.runWithPreparedInput(completionCtx, nil, target, "hello", MonitorTurnMeta{}, attempt)
+	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
 	requireProviderAdmissionRateLimited(t, err)
 	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 0 {
 		t.Fatalf("fake docker invocations = %d, want admission rejection before subprocess dispatch", got)
@@ -424,7 +434,7 @@ func TestClaudeCLIUnstructuredPromptTransportFailureDoesNotRetry(t *testing.T) {
 			},
 		},
 	}
-	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
@@ -437,7 +447,9 @@ printf '%s\n' '{"result":"done"}'
 	cfg.Workspace.DockerBin = scriptPath
 	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
 
-	_, fallback, err := runtime.runWithPromptTransportFallback(ctx, []string{"--print"}, target, "hello", MonitorTurnMeta{})
+	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
+	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, attempt)
+	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("failure = %#v, want generic connector failure", failure)

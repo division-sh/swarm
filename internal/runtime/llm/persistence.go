@@ -38,10 +38,6 @@ type AgentTurnRecord struct {
 	Failure          *runtimefailures.Envelope
 }
 
-type TurnPersistence interface {
-	AppendAgentTurn(ctx context.Context, rec AgentTurnRecord) error
-}
-
 func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp *Response) AgentTurnRecord {
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	if s != nil {

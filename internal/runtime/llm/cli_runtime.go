@@ -17,24 +17,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 type ClaudeCLIRuntime struct {
-	cfg                 *config.Config
-	sessions            sessions.Registry
-	turns               TurnPersistence
-	conversations       ConversationPersistence
-	budget              BudgetGuard
-	lockOwner           string
-	workspaces          workspace.Resolver
-	monitor             MonitorSink
-	events              EventPublisher
-	mcpTurns            MCPTurnContextStore
-	toolGateway         toolgateway.Binding
-	providerCredentials ProviderCredentialResolver
-	execWorkspaceFn     func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
-	providerAdmission   *ProviderAdmissionRegistry
+	cfg                  *config.Config
+	sessions             sessions.Registry
+	conversations        ConversationPersistence
+	lockOwner            string
+	workspaces           workspace.Resolver
+	monitor              MonitorSink
+	events               EventPublisher
+	mcpTurns             MCPTurnContextStore
+	toolGateway          toolgateway.Binding
+	providerCredentials  ProviderCredentialResolver
+	execWorkspaceFn      func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
+	providerAdmission    *ProviderAdmissionRegistry
+	completionController *runtimeeffects.Controller
 }
 
 var ErrClaudeWorkspaceRequired = errors.New("claude workspace target required")
@@ -46,31 +44,28 @@ type promptTransportFallback struct {
 }
 
 type ClaudeCLIRuntimeOptions struct {
-	MonitorSink         MonitorSink
-	MCPTurnContextStore MCPTurnContextStore
-	ToolGateway         toolgateway.Binding
-	ProviderCredentials ProviderCredentialResolver
+	MonitorSink          MonitorSink
+	MCPTurnContextStore  MCPTurnContextStore
+	ToolGateway          toolgateway.Binding
+	ProviderCredentials  ProviderCredentialResolver
+	CompletionController *runtimeeffects.Controller
 }
 
 func NewClaudeCLIRuntime(
 	cfg *config.Config,
 	sessions sessions.Registry,
 	lockOwner string,
-	turns TurnPersistence,
-	budget BudgetGuard,
 	workspaces workspace.Resolver,
 	conversations ConversationPersistence,
 	publisher EventPublisher,
 ) *ClaudeCLIRuntime {
-	return NewClaudeCLIRuntimeWithOptions(cfg, sessions, lockOwner, turns, budget, workspaces, conversations, publisher, ClaudeCLIRuntimeOptions{})
+	return NewClaudeCLIRuntimeWithOptions(cfg, sessions, lockOwner, workspaces, conversations, publisher, ClaudeCLIRuntimeOptions{})
 }
 
 func NewClaudeCLIRuntimeWithOptions(
 	cfg *config.Config,
 	sessions sessions.Registry,
 	lockOwner string,
-	turns TurnPersistence,
-	budget BudgetGuard,
 	workspaces workspace.Resolver,
 	conversations ConversationPersistence,
 	publisher EventPublisher,
@@ -85,19 +80,18 @@ func NewClaudeCLIRuntimeWithOptions(
 		providerCredentials = NewProviderCredentialResolver(providerCredentials.Store)
 	}
 	return &ClaudeCLIRuntime{
-		cfg:                 cfg,
-		sessions:            sessions,
-		turns:               turns,
-		conversations:       conversations,
-		budget:              budget,
-		lockOwner:           lockOwner,
-		workspaces:          workspaces,
-		monitor:             monitor,
-		events:              publisher,
-		mcpTurns:            opts.MCPTurnContextStore,
-		toolGateway:         opts.ToolGateway,
-		providerCredentials: providerCredentials,
-		providerAdmission:   NewProviderAdmissionRegistry(cfg),
+		cfg:                  cfg,
+		sessions:             sessions,
+		conversations:        conversations,
+		lockOwner:            lockOwner,
+		workspaces:           workspaces,
+		monitor:              monitor,
+		events:               publisher,
+		mcpTurns:             opts.MCPTurnContextStore,
+		toolGateway:          opts.ToolGateway,
+		providerCredentials:  providerCredentials,
+		providerAdmission:    NewProviderAdmissionRegistry(cfg),
+		completionController: opts.CompletionController,
 	}
 }
 
@@ -145,7 +139,7 @@ func ClaudeCLIProviderContract() ProviderContract {
 			PersistsTaskModeAudit:         true,
 		},
 		Budget: ProviderBudgetContract{
-			UsageAccounting: BudgetUsageEstimated,
+			UsageAccounting: BudgetUsageExact,
 		},
 	}
 }
@@ -248,20 +242,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
-	scopeKey := budgetExecutionScopeKey(actor)
 	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor, s.Tools)
 	allowedToolsArg := claudeAllowedToolsArgForActor(actor, s.Tools)
-
-	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
-	// LLM execution for the affected scope(s). Treated as transient so deliveries
-	// can be retried after budget resumes.
-	if r.budget != nil {
-		unlockScope := r.budget.LockExecutionScope(scopeKey)
-		defer unlockScope()
-		if r.budget.IsEntityEmergency(entityID) {
-			return nil, budgetEmergencyFailure(entityID)
-		}
-	}
 
 	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
 	if err != nil {
@@ -305,15 +287,6 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if strings.TrimSpace(prompt) == "" {
 		err := runtimefailures.New(runtimefailures.ClassSchemaInvalid, "empty_agent_prompt", "llm-runtime", "claude_cli_turn", nil)
 		s.ParseFailures++
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode.String(),
-			SessionID:      s.ID,
-			RequestPayload: jsonBytes(map[string]any{"message": message}),
-			ParseOK:        false,
-			Latency:        0,
-			Failure:        agentTurnFailure(err, "claude_cli_turn"),
-		}, nil))
 		return nil, err
 	}
 
@@ -341,18 +314,25 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,
 	})
-	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", requestFingerprintInput, nil)
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
 	if err != nil {
 		return nil, err
 	}
-	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
-	_, differentOwner := runtimeeffects.DifferentOwnerFromContext(ctx)
-	if childSessionID == "" && differentOwner {
-		childSessionID = uuid.NewString()
+	attempt, err := runtimeeffects.BeginCompletion(ctx, claudeCLICompletionAdapter, requestFingerprintInput, nil)
+	if err != nil {
+		return nil, err
 	}
+	dispatch := &completionDispatch{handle: attempt}
+	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
 	}
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	completionModel := strings.TrimSpace(actor.ResolvedModel)
+	if completionModel == "" {
+		completionModel, _ = llmselection.ResolveModelName(profile, llmselection.ModelResolution{Model: actor.Model})
+	}
+	completionModel = coalesce(completionModel, "unknown")
 
 	var args []string
 	if s.TurnCount == 0 {
@@ -420,22 +400,19 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	latency := time.Since(start)
+	requestPayload := jsonBytes(map[string]any{
+		"args":                          args,
+		"message":                       message,
+		"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
+		"prompt_arg_fallback_attempted": transportFallback.Attempted,
+		"prompt_arg_fallback_used":      transportFallback.Used,
+	})
 	if err != nil {
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-			AgentID:     s.AgentID,
-			RuntimeMode: resolved.RuntimeMode.String(),
-			SessionID:   s.ID,
-			RequestPayload: jsonBytes(map[string]any{
-				"args":                          args,
-				"message":                       message,
-				"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
-				"prompt_arg_fallback_attempted": transportFallback.Attempted,
-				"prompt_arg_fallback_used":      transportFallback.Used,
-			}),
-			ParseOK: false,
-			Latency: latency,
-			Failure: agentTurnFailure(err, "claude_cli_turn"),
-		}, nil))
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, resolved.RuntimeMode.String(), requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
+		state := claudeCompletionFailureState(err)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(completionModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
+		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
 		if projectionErr == nil {
 			s.ParseFailures++
@@ -450,24 +427,15 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
+	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, completionModel)
+	if usageErr != nil {
+		usage = unavailableCompletionUsage(completionModel)
+	}
 	if err := validateCLIResponseToolCallsForTurn(actor, s.Tools, resp); err != nil {
-		err = settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "validate_tool_calls", map[string]any{"provider_session_id": strings.TrimSpace(resp.SessionID)})
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-			AgentID:     s.AgentID,
-			RuntimeMode: resolved.RuntimeMode.String(),
-			SessionID:   s.ID,
-			RequestPayload: jsonBytes(map[string]any{
-				"args":                          args,
-				"message":                       message,
-				"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
-				"prompt_arg_fallback_attempted": transportFallback.Attempted,
-				"prompt_arg_fallback_used":      transportFallback.Used,
-			}),
-			ResponseRaw: resp.Raw,
-			ParseOK:     true,
-			Latency:     latency,
-			Failure:     agentTurnFailure(err, "claude_cli_tool_validation"),
-		}, resp))
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, resolved.RuntimeMode.String(), requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_tool_validation")), resp)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
+		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
 			return nil, errors.Join(err, projectionErr)
 		}
@@ -475,64 +443,39 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 	if returnedSessionID := strings.TrimSpace(resp.SessionID); returnedSessionID != childSessionID {
 		err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_provider_child_identity_mismatch", "claude-cli-adapter", "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
-		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
-	}
-
-	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
-		AgentID:     s.AgentID,
-		RuntimeMode: resolved.RuntimeMode.String(),
-		SessionID:   s.ID,
-		RequestPayload: jsonBytes(map[string]any{
-			"args":                          args,
-			"message":                       message,
-			"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
-			"prompt_arg_fallback_attempted": transportFallback.Attempted,
-			"prompt_arg_fallback_used":      transportFallback.Used,
-		}),
-		ResponseRaw: resp.Raw,
-		ParseOK:     true,
-		Latency:     latency,
-	}, resp))
-
-	// Spend is immutable evidence of the launched provider attempt and remains
-	// attributable even when this generation was superseded before projection.
-	if r.budget != nil {
-		usage := estimateCLIUsageTokens(message, resp, actor)
-		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-		meta := usageMetadataForContext(ctx, profile, usage.Model)
-		meta["session_id"] = s.ID
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, false, meta); err != nil {
-			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", "Recording CLI LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, resolved.RuntimeMode.String(), requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_identity_validation")), resp)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_response", "expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
 		}
+		return nil, err
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
-		return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "project_provider_turn", map[string]any{"provider_session_id": childSessionID})
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, resolved.RuntimeMode.String(), requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_projection")), resp)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "project_provider_turn", "provider_session_id": childSessionID}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
+		}
+		return nil, err
 	}
 	settlementEvidence := map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw), "provider_session_id": childSessionID}
+	if usageErr != nil {
+		settlementEvidence["usage_exactness"] = string(runtimeeffects.CompletionUsageUnavailable)
+	}
+	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, resolved.RuntimeMode.String(), requestPayload, resp.Raw, true, latency, nil), resp)
 	if resolved.Stateless {
-		if err := attempt.Succeed(ctx, settlementEvidence); err != nil {
-			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_turn", settlementEvidence)
-		}
-	} else if differentOwner {
-		if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, resolved.Scope, lease.LockOwner, childSessionID, resolved.ScopeKey); err != nil {
-			return nil, err
-		}
-		if err := attempt.Succeed(ctx, settlementEvidence); err != nil {
+		if err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence); err != nil {
 			return nil, err
 		}
 	} else {
 		if lease == nil {
-			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
-			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_head", settlementEvidence)
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
 		}
-		if err := attempt.SucceedAndPromoteProviderHead(ctx, runtimeeffects.ProviderHeadSettlement{
-			Settlement: runtimeeffects.Settlement{Evidence: settlementEvidence},
-			AgentID:    s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
+		if err := settleCompletionTurnWithProviderHead(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence, &runtimeeffects.CompletionProviderHead{
+			AgentID: s.AgentID, RuntimeMode: resolved.RuntimeMode.String(), SessionID: s.ID,
 			ScopeKey: resolved.ScopeKey, LockOwner: lease.LockOwner,
 			ExpectedProviderHead: confirmedHead, NewProviderHead: childSessionID,
 		}); err != nil {
-			return nil, settleClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "settle_provider_head", settlementEvidence)
+			return nil, err
 		}
 	}
 	s.Messages = append(s.Messages, message, resp.Message)

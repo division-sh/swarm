@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -64,18 +66,17 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	}))
 	defer server.Close()
 
-	turns := &turnCapture{}
 	conversations := &captureConversationStore{}
-	budget := &budgetCapture{}
+	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
 	cfg := openAICompatibleTestConfig(server.URL)
 	runtime, err := RuntimeFactory{
-		Cfg:           cfg,
-		Sessions:      sessions.NewInMemoryRegistry(time.Second),
-		Turns:         turns,
-		Conversations: conversations,
-		Budget:        budget,
-		LockOwner:     "worker-1",
-		Credentials:   testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key").Store,
+		Cfg:                  cfg,
+		Sessions:             sessions.NewInMemoryRegistry(time.Second),
+		Conversations:        conversations,
+		LockOwner:            "worker-1",
+		Credentials:          testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key").Store,
+		CompletionController: runtimeeffects.NewController(harness),
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -84,7 +85,7 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(harness.Context("openai-compatible-tool-loop"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "cheap",
 		EntityID: "entity-1",
@@ -114,23 +115,18 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(requests))
 	}
-	if len(turns.records) != 2 {
-		t.Fatalf("turn records = %d, want 2", len(turns.records))
+	settlements := harness.CompletionSettlementsForAdapter("openai_compatible")
+	if len(settlements) != 2 {
+		t.Fatalf("completion settlements = %d, want 2", len(settlements))
 	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeSession.String() || !turns.records[0].ParseOK {
-		t.Fatalf("first turn record = %#v", turns.records[0])
-	}
-	if len(turns.records[0].ToolCalls) != 1 || turns.records[0].ToolCalls[0].ID != "call_1" {
-		t.Fatalf("first turn tool calls = %#v, want call_1", turns.records[0].ToolCalls)
+	if settlements[0].AgentTurn == nil || settlements[0].AgentTurn.RuntimeMode != sessions.RuntimeModeSession.String() || !settlements[0].AgentTurn.ParseOK || !strings.Contains(string(settlements[0].AgentTurn.ToolCalls), `"call_1"`) {
+		t.Fatalf("first completion turn = %#v, want session-mode call_1", settlements[0].AgentTurn)
 	}
 	if conversations.record.SessionID == "" || conversations.record.Mode != sessions.RuntimeModeSession.String() {
 		t.Fatalf("conversation record = %#v, want session snapshot", conversations.record)
 	}
-	if budget.runtimeMode != "openai_compatible" || !budget.exact {
-		t.Fatalf("budget runtime=%q exact=%v, want openai_compatible exact", budget.runtimeMode, budget.exact)
-	}
-	if budget.usage.InputTokens != 13 || budget.usage.OutputTokens != 5 || budget.usage.Model != "gpt-compatible-mini" {
-		t.Fatalf("budget usage = %#v, want final response usage", budget.usage)
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-compatible-mini" {
+		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
 }
 
@@ -142,10 +138,12 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	turns := &turnCapture{}
-	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
+	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
+	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(harness.Context("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -155,8 +153,11 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
-	if len(turns.records) != 1 || turns.records[0].ParseOK {
-		t.Fatalf("turn records = %#v, want parse failure", turns.records)
+	settlements := harness.CompletionSettlementsForAdapter("openai_compatible")
+	if len(settlements) != 1 || settlements[0].AgentTurn == nil || settlements[0].AgentTurn.ParseOK || settlements[0].Usage.Exactness != runtimeeffects.CompletionUsageUnavailable {
+		state, _ := harness.StateForAdapter("openai_compatible")
+		failure, _ := runtimefailures.As(err)
+		t.Fatalf("error=%v detail=%#v state=%s settlements=%#v, want one unavailable completion failure", err, failure.Failure.Detail, state, settlements)
 	}
 }
 
@@ -167,13 +168,14 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	}))
 	defer server.Close()
 
-	turns := &turnCapture{}
-	budget := &budgetCapture{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, budget, nil)
+	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(harness.Context("anthropic-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -183,11 +185,11 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
-	if len(turns.records) != 1 || turns.records[0].ParseOK || turns.records[0].Failure == nil {
-		t.Fatalf("turn records = %#v, want one immutable missing-usage failure turn", turns.records)
-	}
-	if budget.usage.InputTokens != 0 || budget.usage.OutputTokens != 0 {
-		t.Fatalf("budget usage = %#v, want no recorded usage", budget.usage)
+	settlements := harness.CompletionSettlementsForAdapter("anthropic_api")
+	if len(settlements) != 1 || settlements[0].AgentTurn == nil || settlements[0].AgentTurn.ParseOK || settlements[0].AgentTurn.Failure == nil {
+		state, _ := harness.StateForAdapter("anthropic_api")
+		failure, _ := runtimefailures.As(err)
+		t.Fatalf("error=%v detail=%#v state=%s settlements=%#v, want one immutable missing-usage failure completion", err, failure.Failure.Detail, state, settlements)
 	}
 }
 
@@ -219,7 +221,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -321,29 +323,4 @@ func (openAIToolExecutor) ToolCapabilitiesForActor(runtimeactors.AgentConfig, []
 		Visible:  true,
 		Callable: true,
 	}})
-}
-
-type budgetCapture struct {
-	runtimeMode string
-	usage       UsageTokens
-	exact       bool
-	meta        map[string]any
-}
-
-func (b *budgetCapture) LockExecutionScope(string) func() { return func() {} }
-func (b *budgetCapture) IsEntityEmergency(string) bool    { return false }
-func (b *budgetCapture) IsEntityThrottle(string) bool     { return false }
-func (b *budgetCapture) IsEmergency(string) bool          { return false }
-func (b *budgetCapture) IsThrottle(string) bool           { return false }
-func (b *budgetCapture) RecordEntityLLMUsage(_ context.Context, _ string, _ string, runtimeMode string, usage UsageTokens, exact bool, meta any) error {
-	b.runtimeMode = runtimeMode
-	b.usage = usage
-	b.exact = exact
-	if m, ok := meta.(map[string]any); ok {
-		b.meta = m
-	}
-	return nil
-}
-func (b *budgetCapture) RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error {
-	return b.RecordEntityLLMUsage(ctx, entityID, agentID, runtimeMode, usage, exact, meta)
 }

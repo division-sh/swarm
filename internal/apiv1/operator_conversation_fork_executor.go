@@ -39,7 +39,15 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", prepared.Fork.ForkID)
-	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerOperatorInfrastructure)
+	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, prepared.RequestOccurrenceID)
+	ctx = runtimeeffects.WithAuthority(ctx, runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
+		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
+		ForkChat: runtimeeffects.ConversationForkChatAuthority{
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
+		},
+	})
 	resp, err := conv.Step(ctx, message)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
@@ -53,6 +61,8 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 		ToolCalls:        toolExec.toolCalls(),
 		ToolResults:      toolExec.toolResults(),
 		AvailableTools:   toolNamesFromDefinitions(tools),
+		ExecutionOwner:   prepared.ExecutionOwner,
+		FenceGeneration:  prepared.FenceGeneration,
 	}, nil
 }
 

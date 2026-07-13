@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -243,19 +245,24 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("CreateOperatorConversationFork: %v", err)
 	}
 	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
-		ForkID: fork.ForkID,
-		Now:    now.Add(time.Second),
+		ForkID: fork.ForkID, Message: "inspect the fork", Method: "conversation.fork_chat",
+		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("inspect the fork")),
+		Now: now.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
 	}
+	settleForkChatCompletionForTest(t, ctx, s, prepared, 1, now.Add(1500*time.Millisecond))
 	result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
 		ForkID:       fork.ForkID,
 		Message:      "inspect the fork",
 		ActorTokenID: "actor-token",
+		Prepared:     prepared,
 		Execution: ConversationForkChatExecution{
 			AssistantMessage: "snapshot says Before; requested writes were stubbed",
 			AvailableTools:   prepared.AvailableTools,
+			ExecutionOwner:   prepared.ExecutionOwner,
+			FenceGeneration:  prepared.FenceGeneration,
 			ToolCalls: []OperatorConversationToolCall{
 				{
 					ToolUseID: "tool-1",
@@ -391,8 +398,9 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("DeleteOperatorConversationFork: %v", err)
 	}
 	_, err = s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
-		ForkID: fork.ForkID,
-		Now:    now.Add(3 * time.Second),
+		ForkID: fork.ForkID, Message: "after delete", Method: "conversation.fork_chat",
+		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("after delete")),
+		Now: now.Add(3 * time.Second),
 	})
 	var paramErr *EntityReadParamError
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
@@ -415,11 +423,6 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateOperatorConversationFork: %v", err)
 	}
-	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{ForkID: fork.ForkID, Now: now.Add(time.Second)})
-	if err != nil {
-		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
-	}
-
 	const count = 4
 	indexes := make(chan int, count)
 	errs := make(chan error, count)
@@ -428,13 +431,26 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			message := fmt.Sprintf("concurrent fork chat %d", i)
+			prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+				ForkID: fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+				RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(i+1) * time.Second),
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			settleForkChatCompletionForTest(t, ctx, s, prepared, 1, now.Add(time.Duration(i+2)*time.Second))
 			result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
 				ForkID:       fork.ForkID,
-				Message:      "concurrent fork chat",
+				Message:      message,
 				ActorTokenID: "actor-token",
+				Prepared:     prepared,
 				Execution: ConversationForkChatExecution{
 					AssistantMessage: "concurrent result",
 					AvailableTools:   prepared.AvailableTools,
+					ExecutionOwner:   prepared.ExecutionOwner,
+					FenceGeneration:  prepared.FenceGeneration,
 				},
 				Now: now.Add(time.Duration(i+2) * time.Second),
 			})
@@ -460,6 +476,53 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 		if want := i + 1; index != want {
 			t.Fatalf("turn indexes = %v, want adjacent 1..%d", got, count)
 		}
+	}
+}
+
+type forkChatCompletionTestStore interface {
+	runtimeeffects.Store
+	runtimeeffects.CompletionStore
+}
+
+func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkChatCompletionTestStore, prepared ConversationForkChatPrepared, ordinal int, now time.Time) {
+	t.Helper()
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
+		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
+		ForkChat: runtimeeffects.ConversationForkChatAuthority{
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
+		},
+		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
+	}
+	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(s))
+	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, fmt.Sprintf("forkchat-test:%s:%d", prepared.RequestOccurrenceID, ordinal))
+	handle, err := runtimeeffects.BeginCompletion(completionCtx, "anthropic_api", []byte(prepared.RequestHash), nil)
+	if err != nil {
+		t.Fatalf("authorize forkchat completion: %v", err)
+	}
+	if err := handle.MarkLaunched(completionCtx); err != nil {
+		t.Fatalf("launch forkchat completion: %v", err)
+	}
+	if err := handle.MarkResponseObserved(completionCtx, map[string]any{"test": true}); err != nil {
+		t.Fatalf("observe forkchat completion: %v", err)
+	}
+	input, output := int64(2), int64(1)
+	err = handle.SettleCompletion(completionCtx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"test": true}},
+		Usage: runtimeeffects.CompletionUsage{
+			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
+			InputTokens: &input, OutputTokens: &output,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: prepared.Fork.ForkID, AgentID: prepared.Fork.SourceAgentID, Model: "test-model",
+			ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http",
+			ResolvedModel: "test-model", InvocationType: "forkchat",
+		},
+		Now: now.UTC(),
+	})
+	if err != nil {
+		t.Fatalf("settle forkchat completion: %v", err)
 	}
 }
 

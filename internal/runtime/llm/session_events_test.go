@@ -17,6 +17,8 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"time"
@@ -89,17 +91,9 @@ func (s *captureConversationStore) UpdateLiveSessionWatchdog(_ context.Context, 
 	return nil
 }
 
-type failingTurnStore struct {
-	err error
-}
-
-func (s *failingTurnStore) AppendAgentTurn(context.Context, AgentTurnRecord) error {
-	return s.err
-}
-
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "regular",
@@ -146,7 +140,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
 		ID:    "agent-2",
 		Model: "cheap",
@@ -185,7 +179,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 }
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
@@ -219,7 +213,7 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 }
 
 func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurface(t *testing.T) {
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil)
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil)
 	ctx := runtimeactors.WithActor(
 		sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"),
 		runtimeactors.AgentConfig{
@@ -567,79 +561,29 @@ func TestClaudeCLIRuntimePrompt_IncludesWritableEntityPathSummary(t *testing.T) 
 	}
 }
 
-func TestAnthropicAPIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
-	turns := &turnCapture{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil)
-
-	runtime.persistTurn(unmanagedLLMTestContext(), AgentTurnRecord{
-		AgentID:     "agent-1",
+func TestEnrichTurnRecordIncludesSessionIdentity(t *testing.T) {
+	record := enrichTurnRecord(unmanagedLLMTestContext(), &Session{
+		ID:          "session-1",
 		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
-	})
+	}, AgentTurnRecord{AgentID: "agent-1"}, nil)
 
-	if len(turns.records) != 1 {
-		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
-	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask.String() {
-		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	if record.SessionID != "session-1" {
+		t.Fatalf("session_id = %q, want session-1", record.SessionID)
 	}
 }
 
-func TestAnthropicAPIRuntime_PersistTurnDefersTurnBlockCanonicalizationToStore(t *testing.T) {
-	turns := &turnCapture{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil)
-
-	runtime.persistTurn(unmanagedLLMTestContext(), AgentTurnRecord{
+func TestEnrichTurnRecordDefersTurnBlockCanonicalizationToStore(t *testing.T) {
+	record := enrichTurnRecord(unmanagedLLMTestContext(), &Session{
+		ID:          "session-1",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+	}, AgentTurnRecord{
 		AgentID:        "agent-1",
-		RuntimeMode:    sessions.RuntimeModeTask.String(),
-		SessionID:      "session-1",
 		ResponseRaw:    []byte(`{"result":"done"}`),
 		TriggerEventID: "evt-1",
-	})
+	}, nil)
 
-	if len(turns.records) != 1 {
-		t.Fatalf("persisted turn count = %d, want 1", len(turns.records))
-	}
-	if len(turns.records[0].TurnBlocks) != 0 {
-		t.Fatalf("persisted turn blocks = %#v, want store-side canonicalization", turns.records[0].TurnBlocks)
-	}
-}
-
-func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
-	turns := &turnCapture{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil, nil)
-
-	runtime.persistTurn(unmanagedLLMTestContext(), AgentTurnRecord{
-		AgentID:     "agent-2",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-2",
-	})
-
-	if len(turns.records) != 1 {
-		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
-	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask.String() {
-		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
-	}
-}
-
-func TestClaudeCLIRuntime_PersistTurnDefersTurnBlockCanonicalizationToStore(t *testing.T) {
-	turns := &turnCapture{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil, nil)
-
-	runtime.persistTurn(unmanagedLLMTestContext(), AgentTurnRecord{
-		AgentID:        "agent-2",
-		RuntimeMode:    sessions.RuntimeModeTask.String(),
-		SessionID:      "session-2",
-		ResponseRaw:    []byte(`{"result":"done"}`),
-		TriggerEventID: "evt-2",
-	})
-
-	if len(turns.records) != 1 {
-		t.Fatalf("persisted turn count = %d, want 1", len(turns.records))
-	}
-	if len(turns.records[0].TurnBlocks) != 0 {
-		t.Fatalf("persisted turn blocks = %#v, want store-side canonicalization", turns.records[0].TurnBlocks)
+	if len(record.TurnBlocks) != 0 {
+		t.Fatalf("persisted turn blocks = %#v, want store-side canonicalization", record.TurnBlocks)
 	}
 }
 
@@ -672,27 +616,9 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 	}
 }
 
-func TestClaudeCLIRuntime_PersistTurnFailureLogsRuntime(t *testing.T) {
-	publisher := &eventPublisherStub{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", &failingTurnStore{err: errors.New("turn boom")}, nil, nil, nil, publisher)
-
-	runtime.persistTurn(unmanagedLLMTestContext(), AgentTurnRecord{
-		AgentID:   "agent-2",
-		SessionID: "session-2",
-		EntityID:  "entity-2",
-	})
-
-	if len(publisher.runtimeLogs) != 1 {
-		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
-	}
-	if publisher.runtimeLogs[0].Action != "persist_cli_turn_failed" {
-		t.Fatalf("action = %q", publisher.runtimeLogs[0].Action)
-	}
-}
-
 func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T) {
 	publisher := &eventPublisherStub{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, &failingConversationStore{err: errors.New("conversation boom")}, nil, publisher)
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", &failingConversationStore{err: errors.New("conversation boom")}, publisher)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:               "session-3",
@@ -711,7 +637,7 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 
 func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
 	store := &captureConversationStore{}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil, nil)
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", store, nil)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:               "session-3",
@@ -728,7 +654,7 @@ func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.
 
 func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
 	store := &captureConversationStore{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:               "session-4",
@@ -746,7 +672,7 @@ func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) 
 func TestClaudeCLIRuntime_PersistConversationSuccessDoesNotLogFailure(t *testing.T) {
 	store := &captureConversationStore{}
 	publisher := &eventPublisherStub{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, publisher)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, publisher)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:               "session-task",
@@ -776,7 +702,7 @@ func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 		},
 		loadOK: true,
 	}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil)
 	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global")
 
 	s, err := runtime.StartSession(ctx, "agent-4", "system", nil)
@@ -806,20 +732,24 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	defer server.Close()
 
 	publisher := &eventPublisherStub{}
+	effects := effecttest.New()
+	effects.Token.AgentID = "agent-1"
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{
 			ClaudeAPI: config.ClaudeAPIConfig{
 				DefaultModel: "claude-test",
 			},
 		},
-	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
+
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.httpClient = server.Client()
+	runtime.completionController = runtimeeffects.NewController(effects)
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			sessions.WithScope(effects.Context("anthropic-reused-session"), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -857,7 +787,8 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 				DefaultModel: "claude-test",
 			},
 		},
-	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
+
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
 			sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -891,7 +822,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 
 func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *testing.T) {
 	publisher := &eventPublisherStub{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
 			sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),

@@ -39,7 +39,8 @@ func TestDeliveredToolDescription_DoesNotDuplicateUsageBlock(t *testing.T) {
 func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{},
-	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil)
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil)
+
 	session := &Session{
 		ID: "session-1",
 		Messages: []Message{{

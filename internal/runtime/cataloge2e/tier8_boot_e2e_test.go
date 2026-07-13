@@ -15,6 +15,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -185,6 +186,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	return runtime.NewRuntime(context.Background(), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
 		SelfCheck:           false,
 		WorkflowModule:      module,
+		LLMRuntime:          runtimellm.NoopRuntime{},
 		ProviderCredentials: tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key"),
 	}})
 

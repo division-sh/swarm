@@ -19,15 +19,6 @@ const (
 	mcpContextTokenHeader = "X-SWARM-Context-Token"
 )
 
-func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return nil, errors.New("prompt argument fallback requires non-empty prompt")
-	}
-	runArgs := append(append([]string{}, args...), "--", prompt)
-	return r.runWithInput(ctx, runArgs, target, "", meta)
-}
-
 type MCPHTTPBinding struct {
 	URL          string
 	Headers      map[string]string
@@ -169,11 +160,6 @@ func shouldUseMCPBridge() bool {
 		return false
 	}
 	return v == "1" || v == "true" || v == "yes"
-}
-
-func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
-	resp, err := r.runWithInput(ctx, args, target, prompt, meta)
-	return resp, promptTransportFallback{}, err
 }
 
 func (r *ClaudeCLIRuntime) runWithPreparedPrompt(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle) (*Response, promptTransportFallback, error) {

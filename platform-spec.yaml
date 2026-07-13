@@ -10598,6 +10598,7 @@ platform_tables:
         - event_deliveries
         - agent_conversation_audits
         - conversation_fork_snapshots
+        - conversation_fork_turn_completions
         - conversation_fork_turns
         - conversation_forks
         - timers
@@ -10611,8 +10612,11 @@ platform_tables:
         - agent_lifecycle_operations
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
-        - agent_external_effect_operations
-        - agent_external_effect_attempts
+        - runtime_external_effect_operations
+        - runtime_external_effect_attempts
+        - run_fork_selected_contract_runtime_executions
+        - budget_admission_scopes
+        - runtime_effect_budget_reservations
         - flow_instances
         - routing_rules
       request_scoped_bundle_catalog:
@@ -10751,38 +10755,54 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
         );
-    agent_external_effect_operations:
+    runtime_external_effect_operations:
       description: >-
-        Generic durable logical operation owner for every managed external provider,
-        HTTP tool, credential, web-search, MCP, native command/write, and relay effect.
+        Provider-neutral durable logical operation owner for every managed external provider,
+        HTTP tool, credential, web-search, MCP, native command/write, and relay effect. Authority
+        kind and authority_id are closed execution coordinates; selected-fork and forkchat work
+        never require a synthetic agents row.
       ddl: |
-        CREATE TABLE agent_external_effect_operations (
+        CREATE TABLE runtime_external_effect_operations (
             operation_id       UUID PRIMARY KEY,
             effect_kind        TEXT NOT NULL,
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
-            agent_id           TEXT NOT NULL REFERENCES agents(agent_id),
-            runtime_epoch      BIGINT NOT NULL,
-            generation         BIGINT NOT NULL,
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat')),
+            authority_id       TEXT NOT NULL,
+            agent_id           TEXT REFERENCES agents(agent_id),
+            runtime_epoch      BIGINT,
+            generation         BIGINT,
+            selected_execution_id UUID REFERENCES run_fork_selected_contract_runtime_executions(execution_id),
+            fork_turn_id       UUID REFERENCES conversation_fork_turns(fork_turn_id),
+            authority_evidence JSONB NOT NULL DEFAULT '{}',
             lineage            JSONB NOT NULL DEFAULT '{}',
             request_fingerprint TEXT NOT NULL,
             state              TEXT NOT NULL CHECK (state IN ('prepared', 'authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            INDEX idx_agent_external_effect_operations_agent (agent_id, created_at),
-            INDEX idx_agent_external_effect_operations_recovery (state, updated_at)
+            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL)),
+            UNIQUE (authority_kind, authority_id, operation_id),
+            INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
+            INDEX idx_runtime_external_effect_operations_authority (authority_kind, authority_id, created_at),
+            INDEX idx_runtime_external_effect_operations_recovery (state, updated_at)
         );
-    agent_external_effect_attempts:
+    runtime_external_effect_attempts:
       description: One actual transport/process/write attempt under a durable external-effect operation.
       ddl: |
-        CREATE TABLE agent_external_effect_attempts (
+        CREATE TABLE runtime_external_effect_attempts (
             attempt_id         UUID PRIMARY KEY,
-            operation_id       UUID NOT NULL,
+            operation_id       UUID NOT NULL REFERENCES runtime_external_effect_operations(operation_id),
             attempt_ordinal    INTEGER NOT NULL CHECK (attempt_ordinal > 0),
             adapter            TEXT NOT NULL,
             transport          TEXT NOT NULL,
-            runtime_epoch      BIGINT NOT NULL,
-            generation         BIGINT NOT NULL,
+            runtime_epoch      BIGINT,
+            generation         BIGINT NOT NULL CHECK (generation > 0),
+            execution_owner    TEXT NOT NULL,
+            lease_expires_at   TIMESTAMPTZ NOT NULL,
+            fence_generation   BIGINT NOT NULL CHECK (fence_generation > 0),
+            usage_target_kind  TEXT CHECK (usage_target_kind IN ('agent_turn', 'conversation_fork_turn_completion')),
+            usage_target_id    UUID,
+            target_ordinal     INTEGER CHECK (target_ordinal IS NULL OR target_ordinal > 0),
             state              TEXT NOT NULL CHECK (state IN ('authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
             evidence           JSONB NOT NULL DEFAULT '{}',
             failure            JSONB,
@@ -10792,7 +10812,9 @@ platform_tables:
             completed_at       TIMESTAMPTZ,
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (operation_id, attempt_ordinal),
-            INDEX idx_agent_external_effect_attempts_recovery (state, updated_at)
+            CHECK ((usage_target_kind IS NULL AND usage_target_id IS NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'agent_turn' AND usage_target_id IS NOT NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'conversation_fork_turn_completion' AND usage_target_id IS NOT NULL AND target_ordinal > 0)),
+            INDEX idx_runtime_external_effect_attempts_recovery (state, lease_expires_at, updated_at),
+            INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL
         );
     reply_contexts:
       description: >-
@@ -10848,6 +10870,42 @@ platform_tables:
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
         contract-swap mutation.
       ddl: "CREATE TABLE run_fork_selected_contract_bindings (\n    binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id      UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id    UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id    UUID NOT NULL REFERENCES events(event_id),\n    mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),\n    contracts_root   TEXT,\n    bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    workflow_name    TEXT NOT NULL,\n    workflow_version TEXT NOT NULL,\n    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((mode = 'selected_contracts' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(bundle_hash, '')), '') IS NULL) OR (mode = 'bundle_hash' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NULL AND bundle_hash IS NOT NULL)),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_event_id)\n);"
+    run_fork_selected_contract_runtime_executions:
+      description: >-
+        Durable selected-fork runtime-container authority. One non-closed current generation may
+        exist for a fork. Exact non-mutating admission and container/actor/config fingerprints are
+        validated transactionally before issuance. Immutable completion evidence keeps this row and
+        its retained runs parent readable after mutable fork projections are discarded.
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_runtime_executions (
+            execution_id                   UUID PRIMARY KEY,
+            fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
+            source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
+            binding_id                     UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
+            fork_event_id                  UUID NOT NULL REFERENCES events(event_id),
+            generation                     BIGINT NOT NULL CHECK (generation > 0),
+            executable_coordinate_fingerprint TEXT NOT NULL,
+            admission_fingerprint          TEXT NOT NULL,
+            container_plan_fingerprint     TEXT NOT NULL,
+            actor_census_fingerprint       TEXT NOT NULL,
+            effective_config_fingerprint   TEXT NOT NULL,
+            state                          TEXT NOT NULL CHECK (state IN ('prepared', 'running', 'quiesced', 'failed', 'closed')),
+            execution_owner                TEXT,
+            lease_expires_at               TIMESTAMPTZ,
+            fence_generation               BIGINT NOT NULL DEFAULT 1 CHECK (fence_generation > 0),
+            failure                         JSONB,
+            evidence                        JSONB NOT NULL DEFAULT '{}',
+            created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            terminal_at                     TIMESTAMPTZ,
+            CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
+            UNIQUE (fork_run_id, generation),
+            UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
+            INDEX idx_run_fork_selected_contract_runtime_executions_recovery (state, lease_expires_at, updated_at)
+        );
+        CREATE UNIQUE INDEX idx_run_fork_selected_contract_runtime_executions_current
+            ON run_fork_selected_contract_runtime_executions (fork_run_id)
+            WHERE state <> 'closed';
     run_fork_selected_contract_executions:
       description: Source-to-fork lineage table for mutating selected-contract timestamp-fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
@@ -11012,19 +11070,57 @@ platform_tables:
         consumers; readers MUST NOT reconstruct those fields from raw transcript payloads. Used by all conversation modes.
         For task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this
         complements the live session with a queryable historical record.'
-      ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
-        \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
-        \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
-        \    scope_key          TEXT,\n    entity_id          UUID,\n    trigger_event_id\
-        \   UUID,\n    trigger_event_type TEXT,\n    task_id            TEXT,\n    available_tools    JSONB NOT NULL DEFAULT\
-        \ '[]',\n    tool_calls         JSONB NOT NULL DEFAULT '[]',\n    emitted_events     JSONB NOT NULL DEFAULT '[]',\n\
-        \    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible\
-        \  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload   JSONB,\n    turn_blocks      JSONB NOT NULL DEFAULT '[]',\n    parse_ok      \
-        \     BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT 0,\n    retry_count       \
-        \ INTEGER NOT NULL DEFAULT 0,\n    failure            JSONB,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
-        \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
-        \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_event\
-        \ (trigger_event_id) WHERE trigger_event_id IS NOT NULL\n);"
+      ddl: |
+        CREATE TABLE agent_turns (
+            turn_id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            run_id                          UUID REFERENCES runs(run_id),
+            agent_id                        TEXT NOT NULL,
+            session_id                      UUID NOT NULL,
+            runtime_mode                    TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),
+            scope_key                       TEXT,
+            entity_id                       UUID,
+            trigger_event_id                UUID,
+            trigger_event_type              TEXT,
+            task_id                         TEXT,
+            available_tools                 JSONB NOT NULL DEFAULT '[]',
+            tool_calls                      JSONB NOT NULL DEFAULT '[]',
+            emitted_events                  JSONB NOT NULL DEFAULT '[]',
+            mcp_servers                     JSONB NOT NULL DEFAULT '{}',
+            mcp_tools_listed                JSONB NOT NULL DEFAULT '[]',
+            mcp_tools_visible               JSONB NOT NULL DEFAULT '[]',
+            request_payload                 JSONB,
+            response_payload                JSONB,
+            turn_blocks                     JSONB NOT NULL DEFAULT '[]',
+            parse_ok                        BOOLEAN NOT NULL DEFAULT FALSE,
+            latency_ms                      INTEGER NOT NULL DEFAULT 0,
+            retry_count                     INTEGER NOT NULL DEFAULT 0,
+            completion_attempt_id           UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            resolved_model                  TEXT,
+            usage_exactness                 TEXT CHECK (usage_exactness IS NULL OR usage_exactness IN ('exact', 'estimated', 'unavailable')),
+            input_tokens                    BIGINT,
+            output_tokens                   BIGINT,
+            cache_read_input_tokens         BIGINT,
+            cache_creation_input_tokens     BIGINT,
+            cache_creation_5m_input_tokens  BIGINT,
+            cache_creation_1h_input_tokens  BIGINT,
+            provider_reported_cost_usd      NUMERIC(18,9),
+            failure                         JSONB,
+            created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (usage_exactness IS NULL OR (usage_exactness IN ('exact', 'estimated') AND input_tokens >= 0 AND output_tokens >= 0) OR (usage_exactness = 'unavailable' AND input_tokens IS NULL AND output_tokens IS NULL)),
+            CHECK ((input_tokens IS NULL) = (output_tokens IS NULL)),
+            CHECK (cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
+            CHECK (cache_creation_input_tokens IS NULL OR cache_creation_input_tokens >= 0),
+            CHECK (cache_creation_5m_input_tokens IS NULL OR cache_creation_5m_input_tokens >= 0),
+            CHECK (cache_creation_1h_input_tokens IS NULL OR cache_creation_1h_input_tokens >= 0),
+            CHECK ((cache_creation_5m_input_tokens IS NULL AND cache_creation_1h_input_tokens IS NULL) OR (cache_creation_input_tokens IS NOT NULL AND COALESCE(cache_creation_5m_input_tokens, 0) + COALESCE(cache_creation_1h_input_tokens, 0) <= cache_creation_input_tokens)),
+            CHECK (input_tokens IS NULL OR COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0) <= input_tokens),
+            CHECK (provider_reported_cost_usd IS NULL OR provider_reported_cost_usd >= 0),
+            INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,
+            INDEX idx_agent_turns_session (session_id, created_at),
+            INDEX idx_agent_turns_agent (agent_id, created_at),
+            INDEX idx_agent_turns_event (trigger_event_id) WHERE trigger_event_id IS NOT NULL,
+            INDEX idx_agent_turns_completion_attempt (completion_attempt_id) WHERE completion_attempt_id IS NOT NULL
+        );
     agent_conversation_audits:
       description: 'Write-only audit table for task-mode conversation snapshots. One row per task-mode
         agent invocation. The conversation transcript is persisted here after each invocation for debugging
@@ -11261,25 +11357,78 @@ platform_tables:
             INDEX idx_conversation_fork_snapshots_source_run (source_run_id) WHERE source_run_id IS NOT NULL
         );
     conversation_fork_turns:
-      description: 'Fork-local transcript owner for conversation.fork_chat. Rows are intentionally separate from agent_turns,
-        events, runtime logs, and dashboard conversation readers. Side-effecting tools are recorded under sandbox_policy/tool_calls
-        as stubbed fork-local facts and must not mutate live state.'
+      description: >-
+        Preallocated forkchat request-occurrence and terminal transcript owner. The row exists before
+        provider authorization, binds actor/request/idempotency identity and a fenced execution lease,
+        and owns abandonment/no-repeat recovery. Per-provider-call usage remains in ordered
+        conversation_fork_turn_completions children.
       ddl: |
         CREATE TABLE conversation_fork_turns (
             fork_turn_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_id            UUID NOT NULL REFERENCES conversation_forks(fork_id) ON DELETE CASCADE,
             turn_index         INTEGER NOT NULL CHECK (turn_index >= 1),
             actor_token_id     TEXT NOT NULL,
+            request_occurrence_id UUID NOT NULL,
+            request_hash       TEXT NOT NULL,
+            idempotency_key    TEXT,
             message            TEXT NOT NULL,
-            assistant_message  TEXT NOT NULL,
-            request_payload    JSONB NOT NULL,
-            response_payload   JSONB NOT NULL,
+            state              TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'succeeded', 'failed', 'outcome_uncertain', 'abandoned')),
+            execution_owner    TEXT,
+            lease_expires_at   TIMESTAMPTZ,
+            fence_generation   BIGINT NOT NULL DEFAULT 1 CHECK (fence_generation > 0),
+            assistant_message  TEXT,
+            request_payload    JSONB,
+            response_payload   JSONB,
             tool_calls         JSONB NOT NULL DEFAULT '[]',
-            sandbox_policy     JSONB NOT NULL,
-            snapshot_owner     TEXT NOT NULL CHECK (snapshot_owner = 'conversation.fork_chat.snapshot.v1'),
+            sandbox_policy     JSONB,
+            snapshot_owner     TEXT CHECK (snapshot_owner IS NULL OR snapshot_owner = 'conversation.fork_chat.snapshot.v1'),
+            failure            JSONB,
+            evidence           JSONB NOT NULL DEFAULT '{}',
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            terminal_at        TIMESTAMPTZ,
+            CHECK ((state IN ('prepared', 'executing') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND assistant_message IS NULL AND response_payload IS NULL AND terminal_at IS NULL) OR (state = 'succeeded' AND NULLIF(TRIM(COALESCE(assistant_message, '')), '') IS NOT NULL AND request_payload IS NOT NULL AND response_payload IS NOT NULL AND sandbox_policy IS NOT NULL AND snapshot_owner IS NOT NULL AND failure IS NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'outcome_uncertain', 'abandoned') AND failure IS NOT NULL AND terminal_at IS NOT NULL)),
             UNIQUE (fork_id, turn_index),
-            INDEX idx_conversation_fork_turns_fork (fork_id, turn_index)
+            UNIQUE (actor_token_id, request_occurrence_id),
+            INDEX idx_conversation_fork_turns_fork (fork_id, turn_index),
+            INDEX idx_conversation_fork_turns_recovery (state, lease_expires_at, updated_at)
+        );
+        CREATE UNIQUE INDEX idx_conversation_fork_turns_idempotency
+            ON conversation_fork_turns (actor_token_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL;
+    conversation_fork_turn_completions:
+      description: Immutable ordered provider-call usage and outcome facts beneath one forkchat request occurrence.
+      ddl: |
+        CREATE TABLE conversation_fork_turn_completions (
+            completion_id                  UUID PRIMARY KEY,
+            fork_turn_id                   UUID NOT NULL REFERENCES conversation_fork_turns(fork_turn_id) ON DELETE CASCADE,
+            ordinal                        INTEGER NOT NULL CHECK (ordinal > 0),
+            attempt_id                     UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            resolved_model                 TEXT NOT NULL,
+            usage_exactness                TEXT NOT NULL CHECK (usage_exactness IN ('exact', 'estimated', 'unavailable')),
+            input_tokens                   BIGINT,
+            output_tokens                  BIGINT,
+            cache_read_input_tokens        BIGINT,
+            cache_creation_input_tokens    BIGINT,
+            cache_creation_5m_input_tokens BIGINT,
+            cache_creation_1h_input_tokens BIGINT,
+            provider_reported_cost_usd     NUMERIC(18,9),
+            state                          TEXT NOT NULL CHECK (state IN ('succeeded', 'failed', 'outcome_uncertain')),
+            failure                        JSONB,
+            evidence                       JSONB NOT NULL DEFAULT '{}',
+            created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((usage_exactness IN ('exact', 'estimated') AND input_tokens >= 0 AND output_tokens >= 0) OR (usage_exactness = 'unavailable' AND input_tokens IS NULL AND output_tokens IS NULL)),
+            CHECK ((input_tokens IS NULL) = (output_tokens IS NULL)),
+            CHECK (cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
+            CHECK (cache_creation_input_tokens IS NULL OR cache_creation_input_tokens >= 0),
+            CHECK (cache_creation_5m_input_tokens IS NULL OR cache_creation_5m_input_tokens >= 0),
+            CHECK (cache_creation_1h_input_tokens IS NULL OR cache_creation_1h_input_tokens >= 0),
+            CHECK ((cache_creation_5m_input_tokens IS NULL AND cache_creation_1h_input_tokens IS NULL) OR (cache_creation_input_tokens IS NOT NULL AND COALESCE(cache_creation_5m_input_tokens, 0) + COALESCE(cache_creation_1h_input_tokens, 0) <= cache_creation_input_tokens)),
+            CHECK (input_tokens IS NULL OR COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0) <= input_tokens),
+            CHECK (provider_reported_cost_usd IS NULL OR provider_reported_cost_usd >= 0),
+            CHECK ((state = 'succeeded' AND failure IS NULL) OR (state IN ('failed', 'outcome_uncertain') AND failure IS NOT NULL)),
+            UNIQUE (fork_turn_id, ordinal),
+            INDEX idx_conversation_fork_turn_completions_turn (fork_turn_id, ordinal)
         );
     runtime_ingress_state:
       description: 'Durable singleton runtime ingress state owned by the canonical runtime ingress controller. It records whether
@@ -11303,17 +11452,65 @@ platform_tables:
         \      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_control_state_status (control_status, updated_at)\n\
         );"
     spend_ledger:
-      description: LLM token and API cost tracking. One row per agent invocation. usage_accounting is the canonical exact-vs-estimated usage owner for public read surfaces; existing rows without prior accounting evidence migrate conservatively to estimated.
-      ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
-        \         UUID,\n    flow_instance     TEXT NOT NULL,\n    agent_id          TEXT NOT NULL,\n    model           \
-        \  TEXT NOT NULL,\n    model_alias      TEXT NOT NULL DEFAULT 'unknown',\n    backend_profile  TEXT NOT NULL DEFAULT\
-        \ 'unknown',\n    provider         TEXT NOT NULL DEFAULT 'unknown',\n    transport        TEXT NOT NULL DEFAULT\
-        \ 'unknown',\n    resolved_model   TEXT NOT NULL DEFAULT 'unknown',\n    input_tokens      INTEGER NOT NULL DEFAULT\
-        \ 0,\n    output_tokens     INTEGER NOT NULL DEFAULT 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT\
-        \ 0,\n    invocation_type   TEXT NOT NULL,\n    usage_accounting TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting\
-        \ IN ('exact', 'estimated')),\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_spend_flow (flow_instance, created_at),\n    INDEX idx_spend_agent\
-        \ (agent_id, created_at)\n);"
+      description: >-
+        LLM token and API cost tracking. external_effect_attempt_id is the exactly-once charge key
+        for new completion work. accounting_basis distinguishes ordinary accounting from the one
+        pessimistic unavailable-usage exhaustion row without adding a third usage_accounting value.
+      ddl: |
+        CREATE TABLE spend_ledger (
+            ledger_id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            external_effect_attempt_id UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            entity_id                  UUID,
+            flow_instance              TEXT NOT NULL,
+            agent_id                   TEXT NOT NULL,
+            model                      TEXT NOT NULL,
+            model_alias                TEXT NOT NULL DEFAULT 'unknown',
+            backend_profile            TEXT NOT NULL DEFAULT 'unknown',
+            provider                   TEXT NOT NULL DEFAULT 'unknown',
+            transport                  TEXT NOT NULL DEFAULT 'unknown',
+            resolved_model             TEXT NOT NULL DEFAULT 'unknown',
+            input_tokens               INTEGER NOT NULL DEFAULT 0,
+            output_tokens              INTEGER NOT NULL DEFAULT 0,
+            cost_usd                   NUMERIC(10,6) NOT NULL DEFAULT 0,
+            invocation_type            TEXT NOT NULL,
+            usage_accounting            TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting IN ('exact', 'estimated')),
+            accounting_basis            TEXT CHECK (accounting_basis IS NULL OR accounting_basis = 'accounting_unavailable_exhaustion'),
+            created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (external_effect_attempt_id IS NOT NULL OR accounting_basis IS NULL),
+            INDEX idx_spend_flow (flow_instance, created_at),
+            INDEX idx_spend_agent (agent_id, created_at),
+            INDEX idx_spend_effect_attempt (external_effect_attempt_id) WHERE external_effect_attempt_id IS NOT NULL
+        );
+    budget_admission_scopes:
+      description: Durable monthly budget-scope lock rows used for cross-process completion admission.
+      ddl: |
+        CREATE TABLE budget_admission_scopes (
+            period_start_utc TIMESTAMPTZ NOT NULL,
+            scope_kind       TEXT NOT NULL CHECK (scope_kind IN ('system', 'global', 'entity')),
+            scope_key        TEXT NOT NULL,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((scope_kind IN ('system', 'global') AND scope_key = '') OR (scope_kind = 'entity' AND NULLIF(TRIM(scope_key), '') IS NOT NULL)),
+            PRIMARY KEY (period_start_utc, scope_kind, scope_key)
+        );
+    runtime_effect_budget_reservations:
+      description: >-
+        Active per-attempt positive-cap capacity claims. Reservations are deleted in the same
+        transaction as terminal effect/usage/spend settlement and are never public spend.
+      ddl: |
+        CREATE TABLE runtime_effect_budget_reservations (
+            attempt_id       UUID NOT NULL REFERENCES runtime_external_effect_attempts(attempt_id),
+            period_start_utc TIMESTAMPTZ NOT NULL,
+            scope_kind       TEXT NOT NULL CHECK (scope_kind IN ('system', 'global', 'entity')),
+            scope_key        TEXT NOT NULL,
+            cap_usd          NUMERIC(18,9) NOT NULL CHECK (cap_usd > 0),
+            amount_usd       NUMERIC(18,9) NOT NULL CHECK (amount_usd > 0),
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((scope_kind IN ('system', 'global') AND scope_key = '') OR (scope_kind = 'entity' AND NULLIF(TRIM(scope_key), '') IS NOT NULL)),
+            PRIMARY KEY (attempt_id, period_start_utc, scope_kind, scope_key),
+            FOREIGN KEY (period_start_utc, scope_kind, scope_key) REFERENCES budget_admission_scopes(period_start_utc, scope_kind, scope_key),
+            INDEX idx_runtime_effect_budget_reservations_scope (period_start_utc, scope_kind, scope_key)
+        );
     flow_instances:
       description: Registry of all flow instances (static and dynamic). One row per instance.
       ddl: "CREATE TABLE flow_instances (\n    instance_id       TEXT PRIMARY KEY,\n    flow_template     TEXT NOT NULL,\n\
@@ -28510,7 +28707,7 @@ agent_lifecycle_authority:
     - tolerant dual lifecycle readers or compatibility aliases
 
 managed_external_effect_authority:
-  owner: agent_external_effect_operations and agent_external_effect_attempts in the selected store
+  owner: runtime_external_effect_operations and runtime_external_effect_attempts in the selected store
   registration:
     required_fields: [effect_kind, effect_class, adapter, transport, launch_site, primitive_keys, launch_observed, prelaunch_failure, postlaunch_failure, outcome_mapping, canonical_evidence, settlement_recovery, proof]
     rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof.
@@ -28566,3 +28763,56 @@ managed_external_effect_authority:
     - MCP logical child identity derived from replaceable JSON-RPC correlation ID
     - MCP logical child identity derived from request content or progress correlation instead of the provider-owned call-occurrence coordinate
     - managed Claude CLI MCP tools/call execution without a non-empty params._meta["claudecode/toolUseId"] coordinate
+
+llm_completion_execution_authority:
+  owner: mandatory LLMExecutionAuthority over runtime_external_effect_operations and runtime_external_effect_attempts in the selected store
+  scope:
+    completion_surfaces: [ordinary_runtime, served_selected_contract_fork, standalone_selected_contract_fork, conversation_fork_chat]
+    provider_adapters: [anthropic_api, claude_cli, openai_responses, openai_compatible]
+    rule: Every Runtime.ContinueSession provider call is one runtime effect attempt and one typed usage fact. Every production RuntimeFactory receives a non-nil selected-store authority and one closed execution variant.
+  execution_variants:
+    normal_agent: Current persisted lifecycle token, controller, logical provider-turn identity, and preallocated agent_turns.turn_id.
+    selected_contract_fork: Exact non-mutating RunForkSelectedContractExecutionAdmission plus a claimed current run_fork_selected_contract_runtime_executions generation, exact fingerprints, owner, fence, and preallocated fork-local agent_turns.turn_id.
+    conversation_fork_chat: Active preallocated conversation_fork_turns group, actor, request occurrence/hash/idempotency identity, owner/fence, and ordered conversation_fork_turn_completions child target.
+  protocol:
+    authorize: Authorization validates the closed execution authority, authorizes the existing effect operation/attempt, and atomically reserves the full positive remaining capacity in every applicable monthly budget scope. No positive cap creates no reservation.
+    launch: MarkLaunched revalidates authority, owner, lease, and fence and commits before HTTP dispatch or process start.
+    heartbeat: Before launch and for the full lifetime of the HTTP request or provider process, the adapter renews the exact attempt lease through the selected-store authority. Renewal revalidates the authority, operation, attempt, execution owner, fence, and live attempt state; extends the lease monotonically without holding a transaction across provider work; and cancels the primitive plus forces outcome_uncertain settlement if renewal is lost. A completion controller without this capability fails before authorization.
+    response_observed: Terminal provider bytes or a terminal process ResultMessage are durably marked response_observed before parsing or conversion.
+    terminal: One selected-store transaction locks the attempt/fence, budget scopes, target, and optional Claude provider head; writes exactly one target usage fact and at most one spend row keyed by attempt_id; settles the effect; releases all reservations; and commits required transcript/audit mutation.
+    recovery: Expired authorized attempts become terminal_failure without dispatch. Expired launched/response_observed attempts become outcome_uncertain, persist unavailable target evidence, create at most one pessimistic accounting row when positive reservations existed, release reservations, and never redispatch.
+  usage:
+    fields: [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, provider_reported_cost_usd, exactness, resolved_model]
+    exactness: [exact, estimated, unavailable]
+    constraints: Exact or estimated usage requires non-negative input/output together. Unavailable usage requires both absent. Partial pairs, negative cache/cost values, and inconsistent cache subtotals fail closed at typed and database boundaries.
+    claude: Direct JSON and stream-json consume terminal ResultMessage usage. Byte-count token estimation is forbidden.
+  budget_admission:
+    scope_order: [system, global, entity]
+    applicability: A positive system cap always applies. A positive entity cap applies when an entity exists. A positive global cap applies only when no entity exists.
+    remaining: configured cap minus retained spend visible to the exact scope minus active reservations for that scope and UTC month.
+    reservation: Each applicable scope reserves the full positive remaining amount. Non-positive remaining capacity rejects before a launchable attempt exists.
+    unavailable_accounting: One synthetic spend row uses MAX reservation amount, usage_accounting estimated, and accounting_basis accounting_unavailable_exhaustion; reservations are deleted in the same transaction.
+  selected_fork:
+    issuer: run_fork_selected_contract_runtime_executions is the sole container-generation issuer. The non-mutating admission is prerequisite evidence, never the execution grant.
+    lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed.
+    uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
+    cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.
+    backend: Authority schema/issuance/fencing/settlement/recovery are parity obligations on SQLite and PostgreSQL. Full served/standalone selected-fork runtime and process-competition proof are PostgreSQL-only until separately gated.
+  forkchat:
+    group_owner: conversation_fork_turns is preallocated before provider authorization and owns request occurrence, actor/hash/idempotency binding, group fence, terminal transcript, abandonment, and no-repeat recovery.
+    child_owner: conversation_fork_turn_completions stores one immutable ordered result per provider attempt and remains valid across later tool rounds or failures.
+    heartbeat: The API execution loop renews the exact prepared/executing group lease while the provider/tool loop is live. Each child authorization transaction renews without shortening the current lease and copies the durable current expiry into the attempt; heartbeat loss cancels execution and terminalizes outcome_uncertain rather than permitting stale settlement.
+    lifecycle: prepared -> executing -> succeeded; prepared -> failed or abandoned; executing -> failed, outcome_uncertain, or succeeded.
+    replay: Same-key replay validates request hash, never launches a second provider call, and returns live conflict or stable terminal/recovery-required truth. Public response reconstruction remains separately owned.
+  migration:
+    old_tables: [agent_external_effect_operations, agent_external_effect_attempts]
+    new_tables: [runtime_external_effect_operations, runtime_external_effect_attempts]
+    rule: Existing rows migrate transactionally as normal_agent authority. All readers/writers/recovery/capability catalogs move in the same version. Compatibility views, dual writes, tolerant fallback readers, and legacy table ownership are forbidden.
+  forbidden:
+    - nil completion authority in a production RuntimeFactory
+    - DifferentOwner for provider completion execution
+    - adapter-owned turn or spend append after provider completion
+    - settling a successful provider attempt before usage/target/spend/head settlement
+    - process-local locking as budget admission authority
+    - fake ordinary-agent lifecycle rows for selected-fork or forkchat execution
+    - provider redispatch during recovery or replay

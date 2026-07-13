@@ -321,9 +321,27 @@ func canonicalBooleanExpression(value string) string {
 		return "and(" + strings.Join(canonical, ",") + ")"
 	}
 	value = trimBalancedOuterParens(value)
+	value = trimRedundantComparisonOperandParens(value)
 	value = strings.ReplaceAll(value, "trim(both from ", "trim(")
 	if matches := singleValueInPattern.FindStringSubmatch(value); len(matches) == 3 {
 		return strings.TrimSpace(matches[1]) + " = " + strings.TrimSpace(matches[2])
+	}
+	return value
+}
+
+func trimRedundantComparisonOperandParens(value string) string {
+	if !strings.HasPrefix(value, "(") {
+		return value
+	}
+	end, err := findMatchingParen(value, 0)
+	if err != nil || end <= 0 || end >= len(value)-1 {
+		return value
+	}
+	remainder := strings.TrimSpace(value[end+1:])
+	for _, operator := range []string{"<=", ">=", "=", "<", ">"} {
+		if strings.HasPrefix(remainder, operator) {
+			return strings.TrimSpace(value[1:end]) + " " + remainder
+		}
 	}
 	return value
 }

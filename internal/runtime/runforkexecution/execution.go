@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -176,6 +177,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		Store:             req.Store,
+		Admission:         admission,
 		LoadedSource:      loadedSource,
 		RecipientPlanning: *model.RecipientPlanning,
 		AgentRuntime:      agentRuntime,
@@ -197,6 +199,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	containerProof := container.Proof()
 	published, err := container.Publish(ctx)
 	if err != nil {
+		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+			err = errors.Join(err, authorityErr)
+		} else {
+			err = cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		}
 		return SelectedContractExecutionResult{
 			Owner:                              store.RunForkSelectedContractExecutionOwner,
 			Materialization:                    materialization,
@@ -205,13 +212,24 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			ForkLocalRuntimeContainer:          &containerProof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
-		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		}, err
+	}
+	if err := container.Quiesce(ctx); err != nil {
+		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+			return SelectedContractExecutionResult{}, errors.Join(err, authorityErr)
+		}
+		return SelectedContractExecutionResult{}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
 	}
 	activation, err := req.Store.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialization.ForkRunID,
 		AllowedSourceEventIDs: sourceEventIDs,
 	})
 	if err != nil {
+		if closeErr := container.Close(ctx); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		} else {
+			err = cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		}
 		return SelectedContractExecutionResult{
 			Owner:                              store.RunForkSelectedContractExecutionOwner,
 			Materialization:                    materialization,
@@ -221,7 +239,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			ForkLocalRuntimeContainer:          &containerProof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
-		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		}, err
+	}
+	if err := container.Close(ctx); err != nil {
+		return SelectedContractExecutionResult{}, err
 	}
 	result := SelectedContractExecutionResult{
 		Owner:                              store.RunForkSelectedContractExecutionOwner,
@@ -267,6 +288,7 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store *store.P
 
 type publishSelectedContractForkEventsRequest struct {
 	Store             *store.PostgresStore
+	Admission         store.RunForkSelectedContractExecutionAdmission
 	LoadedSource      LoadedSelectedContractSource
 	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
 	AgentRuntime      selectedContractAgentRuntimePlan

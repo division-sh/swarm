@@ -37,13 +37,6 @@ func claudeCLIProcessFailure(stderrText, stdoutText, detailCode, operation strin
 	return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, detailCode, "claude-cli-adapter", operation, nil, cause)
 }
 
-func budgetEmergencyFailure(entityID string) error {
-	return runtimefailures.New(runtimefailures.ClassBudgetExhausted, "spend_budget_emergency", "llm-runtime", "budget_admission", map[string]any{
-		"budget_kind": "spend",
-		"entity_id":   strings.TrimSpace(entityID),
-	})
-}
-
 func sessionAcquireFailure(err error, agentID string) error {
 	if err == nil {
 		return nil

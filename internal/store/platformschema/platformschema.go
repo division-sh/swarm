@@ -152,6 +152,8 @@ func platformTableOrder(name string) int {
 		return 13
 	case "run_fork_selected_contract_bindings":
 		return 15
+	case "run_fork_selected_contract_runtime_executions":
+		return 17
 	case "run_fork_selected_contract_executions":
 		return 18
 	case "run_fork_selected_contract_branch_divergences":
@@ -166,15 +168,21 @@ func platformTableOrder(name string) int {
 		return 40
 	case "entity_state":
 		return 50
+	case "conversation_forks":
+		return 55
+	case "conversation_fork_snapshots":
+		return 56
+	case "conversation_fork_turns":
+		return 57
 	case "agent_sessions":
 		return 60
+	case "runtime_external_effect_operations":
+		return 61
+	case "runtime_external_effect_attempts":
+		return 62
 	case "agent_turns":
 		return 65
-	case "conversation_forks":
-		return 66
-	case "conversation_fork_snapshots":
-		return 67
-	case "conversation_fork_turns":
+	case "conversation_fork_turn_completions":
 		return 68
 	case "routing_rules":
 		return 70
@@ -206,6 +214,10 @@ func platformTableOrder(name string) int {
 		return 109
 	case "spend_ledger":
 		return 110
+	case "budget_admission_scopes":
+		return 111
+	case "runtime_effect_budget_reservations":
+		return 112
 	case "timers":
 		return 120
 	default:

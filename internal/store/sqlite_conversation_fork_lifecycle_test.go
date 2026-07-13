@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -75,7 +77,11 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		t.Fatalf("page 2 = %#v", page2)
 	}
 
-	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{ForkID: turnFork.ForkID, Now: now.Add(4 * time.Second)})
+	firstMessage := "inspect fork 0"
+	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+		ForkID: turnFork.ForkID, Message: firstMessage, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+		RequestHash: runtimeeffects.Fingerprint([]byte(firstMessage)), Now: now.Add(4 * time.Second),
+	})
 	if err != nil {
 		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
 	}
@@ -91,13 +97,30 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			message := "inspect fork " + strconv.Itoa(i)
+			turnPrepared := prepared
+			if i > 0 {
+				var err error
+				turnPrepared, err = s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+					ForkID: turnFork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+					RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(4+i) * time.Second),
+				})
+				if err != nil {
+					errs <- err
+					return
+				}
+			}
+			settleForkChatCompletionForTest(t, ctx, s, turnPrepared, 1, now.Add(time.Duration(5+i)*time.Second))
 			result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
 				ForkID:       turnFork.ForkID,
-				Message:      "inspect fork",
+				Message:      message,
 				ActorTokenID: "actor-token",
+				Prepared:     turnPrepared,
 				Execution: ConversationForkChatExecution{
 					AssistantMessage: "sandbox result",
-					AvailableTools:   prepared.AvailableTools,
+					AvailableTools:   turnPrepared.AvailableTools,
+					ExecutionOwner:   turnPrepared.ExecutionOwner,
+					FenceGeneration:  turnPrepared.FenceGeneration,
 					ToolCalls: []OperatorConversationToolCall{{
 						ToolUseID: "tool-" + uuid.NewString(),
 						Name:      "emit_event",

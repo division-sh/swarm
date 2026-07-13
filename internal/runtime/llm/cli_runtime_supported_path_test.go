@@ -20,6 +20,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -86,19 +88,20 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	cfg.LLM.ClaudeCLI.Command = "claude"
 
 	var allowedTools []string
-	turns := &turnCapture{}
+	effects := effecttest.New()
+	effects.Token.AgentID = "market-research-agent"
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
 		sessions.NewInMemoryRegistry(0),
 		"worker-1",
-		turns,
-		nil,
+
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
-			ToolGateway:         testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
-			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
+			CompletionController: runtimeeffects.NewController(effects),
+			ToolGateway:          testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
+			ProviderCredentials:  testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register: func(_ context.Context, _ time.Duration, got []string) string {
 					allowedTools = append([]string(nil), got...)
@@ -106,8 +109,8 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 				},
 				unregister: func(string) {},
 			},
-		},
-	)
+		})
+
 	relayWrites := 0
 	runtime.execWorkspaceFn = func(context.Context, *workspace.Target, string, ...string) ([]byte, []byte, int, error) {
 		relayWrites++
@@ -138,7 +141,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(
 		sessions.WithScope(
-			runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+			runtimeactors.WithActor(effects.Context("claude-supported-read-file"), runtimeactors.AgentConfig{
 				ID:       "market-research-agent",
 				FlowPath: "market/inst-1",
 				NativeTools: runtimeactors.NativeToolConfig{
@@ -166,15 +169,24 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	if !slices.Equal(allowedTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("allowed tools = %#v", allowedTools)
 	}
-	if len(turns.records) == 0 {
-		t.Fatal("expected persisted turn records")
+	settlements := effects.CompletionSettlementsForAdapter("claude_cli")
+	if len(settlements) != 2 || settlements[0].AgentTurn == nil || settlements[1].AgentTurn == nil {
+		t.Fatalf("completion settlements = %#v, want two atomic agent turns", settlements)
 	}
-	first := turns.records[0]
-	if !slices.Equal(first.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
-		t.Fatalf("first turn available_tools = %#v", first.AvailableTools)
+	first := settlements[0].AgentTurn
+	var firstAvailableTools []string
+	if err := json.Unmarshal(first.AvailableTools, &firstAvailableTools); err != nil {
+		t.Fatalf("decode first turn available_tools: %v", err)
 	}
-	if !slices.Equal(first.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
-		t.Fatalf("first turn mcp_tools_listed = %#v", first.MCPToolsListed)
+	if !slices.Equal(firstAvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
+		t.Fatalf("first turn available_tools = %#v", firstAvailableTools)
+	}
+	var firstMCPToolsListed []string
+	if err := json.Unmarshal(first.MCPToolsListed, &firstMCPToolsListed); err != nil {
+		t.Fatalf("decode first turn mcp_tools_listed: %v", err)
+	}
+	if !slices.Equal(firstMCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
+		t.Fatalf("first turn mcp_tools_listed = %#v", firstMCPToolsListed)
 	}
 	if !slices.Equal(exec.calls, []string{"read_file"}) {
 		t.Fatalf("tool exec calls = %#v", exec.calls)

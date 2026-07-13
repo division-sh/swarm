@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 const conversationForkIdempotencyTTL = 24 * time.Hour
+const conversationForkChatHeartbeatInterval = 30 * time.Second
 
 type ConversationForkReadStore interface {
 	ListOperatorConversationForks(context.Context, store.ConversationForkListOptions) (store.ConversationForkListResult, error)
@@ -21,7 +23,9 @@ type ConversationForkReadStore interface {
 type ConversationForkLifecycleStore interface {
 	CreateOperatorConversationFork(context.Context, store.ConversationForkCreateRequest) (store.OperatorConversationForkSession, error)
 	PrepareOperatorConversationForkChat(context.Context, store.ConversationForkChatPrepareRequest) (store.ConversationForkChatPrepared, error)
+	HeartbeatOperatorConversationForkChat(context.Context, store.ConversationForkChatPrepared, time.Time) error
 	RecordOperatorConversationForkChat(context.Context, store.ConversationForkChatRecordRequest) (store.ConversationForkChatResult, error)
+	FailOperatorConversationForkChat(context.Context, store.ConversationForkChatFailureRequest) error
 	DeleteOperatorConversationFork(context.Context, string, time.Time) (store.ConversationForkDeleteResult, error)
 }
 
@@ -187,20 +191,28 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Operator
 			return store.APIIdempotencyCompletion{}, fmt.Errorf("conversation fork chat executor is required")
 		}
 		prepared, err := opts.ConversationForkLifecycle.PrepareOperatorConversationForkChat(ctx, store.ConversationForkChatPrepareRequest{
-			ForkID: forkID,
-			Now:    now,
+			ForkID: forkID, Message: message, Method: req.Method, ActorTokenID: req.ActorTokenID,
+			RequestHash: req.RequestHash, IdempotencyKey: idempotencyKey, Now: now,
 		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
 		}
-		execution, err := opts.ForkChatExecutor.ExecuteForkChat(ctx, prepared, message)
+		execution, err := executeConversationForkChatWithHeartbeat(ctx, opts.ConversationForkLifecycle, opts.ForkChatExecutor, prepared, message)
 		if err != nil {
+			failure := runtimefailures.FromError(err, "conversation-fork-chat", "execute")
+			failErr := opts.ConversationForkLifecycle.FailOperatorConversationForkChat(context.WithoutCancel(ctx), store.ConversationForkChatFailureRequest{
+				Prepared: prepared, Cause: err, OutcomeUncertain: failure.Failure.Class == runtimefailures.ClassOutcomeUncertain, Now: now,
+			})
+			if failErr != nil {
+				return store.APIIdempotencyCompletion{}, errors.Join(err, failErr)
+			}
 			return store.APIIdempotencyCompletion{}, err
 		}
 		result, err := opts.ConversationForkLifecycle.RecordOperatorConversationForkChat(ctx, store.ConversationForkChatRecordRequest{
 			ForkID:       forkID,
 			Message:      message,
 			ActorTokenID: req.ActorTokenID,
+			Prepared:     prepared,
 			Execution:    execution,
 			Now:          now,
 		})
@@ -226,6 +238,55 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Operator
 	}
 	result.IdempotencyReplayed = replay
 	return result, nil
+}
+
+func executeConversationForkChatWithHeartbeat(
+	ctx context.Context,
+	lifecycle ConversationForkLifecycleStore,
+	executor ForkChatExecutor,
+	prepared store.ConversationForkChatPrepared,
+	message string,
+) (store.ConversationForkChatExecution, error) {
+	if err := lifecycle.HeartbeatOperatorConversationForkChat(ctx, prepared, time.Now().UTC()); err != nil {
+		return store.ConversationForkChatExecution{}, err
+	}
+	executionCtx, cancel := context.WithCancel(ctx)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	heartbeatErr := make(chan error, 1)
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(conversationForkChatHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-executionCtx.Done():
+				return
+			case <-ticker.C:
+				if err := lifecycle.HeartbeatOperatorConversationForkChat(context.WithoutCancel(executionCtx), prepared, time.Now().UTC()); err != nil {
+					heartbeatErr <- err
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	execution, executionErr := executor.ExecuteForkChat(executionCtx, prepared, message)
+	close(stop)
+	cancel()
+	<-done
+	select {
+	case err := <-heartbeatErr:
+		heartbeatFailure := runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "conversation_fork_chat_heartbeat_failed", "conversation-fork-chat", "execute", nil, err)
+		if executionErr != nil {
+			return store.ConversationForkChatExecution{}, errors.Join(executionErr, heartbeatFailure)
+		}
+		return store.ConversationForkChatExecution{}, heartbeatFailure
+	default:
+		return execution, executionErr
+	}
 }
 
 func executeConversationForkDelete(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {

@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -40,7 +41,6 @@ type SelectedContractAgentRuntimeOptions struct {
 	HumanTaskStore      runtimetools.HumanTaskPersistence
 	SessionRegistry     runtimesessions.Registry
 	ConversationStore   runtimellm.ConversationPersistence
-	TurnStore           runtimellm.TurnPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
 	Workspace           workspace.Lifecycle
@@ -283,15 +283,15 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}
 	if modelRuntime == nil {
 		modelRuntime, err = runtimellm.RuntimeFactory{
-			Cfg:           options.Config,
-			Sessions:      options.SessionRegistry,
-			Turns:         options.TurnStore,
-			Conversations: options.ConversationStore,
-			Workspaces:    options.Workspace,
-			Events:        bus,
-			MCPTurns:      mcpTurns,
-			ToolGateway:   binding,
-			Credentials:   options.ProviderCredentials,
+			Cfg:                  options.Config,
+			Sessions:             options.SessionRegistry,
+			Conversations:        options.ConversationStore,
+			Workspaces:           options.Workspace,
+			Events:               bus,
+			MCPTurns:             mcpTurns,
+			ToolGateway:          binding,
+			Credentials:          options.ProviderCredentials,
+			CompletionController: runtimeeffects.NewController(req.Store),
 		}.Build()
 		if err != nil {
 			if cleanup != nil {

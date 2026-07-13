@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -39,30 +40,30 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 	tests := []struct {
 		name    string
 		adapter string
-		send    func(context.Context, *http.Client) error
+		send    func(context.Context, *http.Client) (*completionDispatch, error)
 	}{
 		{
 			name: "anthropic_api", adapter: "anthropic_api",
-			send: func(ctx context.Context, client *http.Client) error {
+			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", apiKey: "test"}
-				_, _, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
-				return err
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				return dispatch, err
 			},
 		},
 		{
 			name: "openai_compatible", adapter: "openai_compatible",
-			send: func(ctx context.Context, client *http.Client) error {
+			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
-				_, _, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
-				return err
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				return dispatch, err
 			},
 		},
 		{
 			name: "openai_responses", adapter: "openai_responses",
-			send: func(ctx context.Context, client *http.Client) error {
+			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
-				_, _, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
-				return err
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				return dispatch, err
 			},
 		},
 	}
@@ -70,9 +71,15 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			harness := effecttest.New()
 			client := &http.Client{Transport: effectRoundTripper{t: t, harness: harness, adapter: tt.adapter}}
-			if err := tt.send(harness.Context("provider-"+tt.name), client); err == nil {
+			ctx := harness.CompletionContext("provider-" + tt.name)
+			dispatch, err := tt.send(ctx, client)
+			if err == nil {
 				t.Fatal("provider transport failure returned nil")
 			}
+			if got := harness.HeartbeatsForAdapter(tt.adapter); got == 0 {
+				t.Fatalf("provider adapter %s did not heartbeat its completion attempt", tt.adapter)
+			}
+			settleEffectTestCompletionFailure(t, ctx, dispatch, err, runtimeeffects.StateOutcomeUncertain)
 			if err := harness.RequireState(tt.adapter, runtimeeffects.StateOutcomeUncertain); err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +87,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 			stale := effecttest.New()
 			stale.AuthorizeErr = errors.New("superseded generation")
 			staleClient := &http.Client{Transport: effectRoundTripper{t: t, harness: stale, adapter: tt.adapter}}
-			if err := tt.send(stale.Context("provider-stale-"+tt.name), staleClient); err == nil {
+			if _, err := tt.send(stale.CompletionContext("provider-stale-"+tt.name), staleClient); err == nil {
 				t.Fatal("stale provider effect was admitted")
 			}
 			if _, launched := stale.StateForAdapter(tt.adapter); launched {
@@ -92,11 +99,31 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
+	ctx := harness.CompletionContext("claude-cli-start")
+	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
+	if err != nil {
+		t.Fatalf("authorize claude attempt: %v", err)
+	}
 	runtime := &ClaudeCLIRuntime{}
 	cmd := exec.Command("/definitely/missing/swarm-claude-cli")
-	if _, err := runtime.runStreaming(harness.Context("claude-cli-start"), cmd, nil, time.Second, "request", MonitorTurnMeta{}); err == nil {
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
+	if err != nil {
+		t.Fatalf("start claude attempt heartbeat: %v", err)
+	}
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{}, attempt)
+	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
+		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
+	}
+	if runErr == nil {
 		t.Fatal("missing CLI process returned nil")
 	}
+	if got := harness.HeartbeatsForAdapter("claude_cli"); got == 0 {
+		t.Fatal("claude CLI did not heartbeat its completion attempt")
+	}
+	if err := harness.RequireState("claude_cli", runtimeeffects.StateLaunched); err != nil {
+		t.Fatalf("low-level completion primitive settled independently: %v", err)
+	}
+	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, runErr, claudeCompletionFailureState(runErr))
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateTerminalFailure); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +131,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	stale := effecttest.New()
 	stale.AuthorizeErr = errors.New("superseded generation")
 	marker := t.TempDir() + "/started"
-	if _, err := runtime.runStreaming(stale.Context("claude-cli-stale"), exec.Command("sh", "-lc", "touch "+marker), nil, time.Second, "request", MonitorTurnMeta{}); err == nil {
+	if _, err := runtimeeffects.BeginCompletion(stale.CompletionContext("claude-cli-stale"), "claude_cli", []byte("request"), nil); err == nil {
 		t.Fatal("stale CLI process was admitted")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -114,18 +141,56 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	harness := effecttest.New()
-	ctx := harness.Context("claude-cli-monitor-prelaunch")
-	attempt, err := runtimeeffects.Begin(ctx, "claude_cli", []byte("request"), nil)
+	ctx := harness.CompletionContext("claude-cli-monitor-prelaunch")
+	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
 	}
 	runtime := &ClaudeCLIRuntime{monitor: failingMonitorSink{err: errors.New("injected monitor open failure")}}
 	cmd := exec.Command("sh", "-lc", "true")
-	if _, err := runtime.runStreamingPrepared(ctx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, attempt); err == nil {
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
+	if err != nil {
+		t.Fatalf("start claude attempt heartbeat: %v", err)
+	}
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, attempt)
+	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
+		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
+	}
+	if runErr == nil {
 		t.Fatal("monitor open failure returned nil")
 	}
+	if err := harness.RequireState("claude_cli", runtimeeffects.StateAuthorized); err != nil {
+		t.Fatalf("low-level completion primitive settled independently: %v", err)
+	}
+	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, runErr, runtimeeffects.StateTerminalFailure)
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateTerminalFailure); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispatch *completionDispatch, cause error, state runtimeeffects.State) {
+	t.Helper()
+	if dispatch == nil || dispatch.handle == nil {
+		t.Fatal("completion dispatch is missing")
+	}
+	failure := runtimefailures.FromError(cause, "effect-test", "settle_completion")
+	target := dispatch.handle.Attempt().Authority.Target
+	err := dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: state, Failure: &failure.Failure},
+		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
+			RuntimeMode: target.RuntimeMode, Failure: &failure.Failure,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: "global", AgentID: target.AgentID, Model: "test-model",
+			BackendProfile: "test", Provider: "test", Transport: "test",
+			ResolvedModel: "test-model", InvocationType: target.RuntimeMode,
+		},
+		Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("settle outer completion: %v", err)
 	}
 }
 

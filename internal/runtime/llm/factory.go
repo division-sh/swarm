@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -16,22 +17,24 @@ import (
 )
 
 type RuntimeFactory struct {
-	Cfg           *config.Config
-	Sessions      sessions.Registry
-	Turns         TurnPersistence
-	Conversations ConversationPersistence
-	Budget        BudgetGuard
-	LockOwner     string
-	Workspaces    workspace.Resolver
-	Events        EventPublisher
-	MCPTurns      MCPTurnContextStore
-	ToolGateway   toolgateway.Binding
-	Credentials   runtimecredentials.Store
+	Cfg                  *config.Config
+	Sessions             sessions.Registry
+	Conversations        ConversationPersistence
+	LockOwner            string
+	Workspaces           workspace.Resolver
+	Events               EventPublisher
+	MCPTurns             MCPTurnContextStore
+	ToolGateway          toolgateway.Binding
+	Credentials          runtimecredentials.Store
+	CompletionController *runtimeeffects.Controller
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
 	if f.Cfg == nil {
 		return nil, fmt.Errorf("llm runtime config is required")
+	}
+	if f.CompletionController == nil || !f.CompletionController.CompletionEnabled() {
+		return nil, fmt.Errorf("llm completion execution controller is required")
 	}
 	if f.Sessions == nil {
 		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
@@ -50,21 +53,25 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	var runtime Runtime
 	switch profile.ID {
 	case llmselection.BackendAnthropic:
-		runtime = NewAnthropicAPIRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
+		runtime = NewAnthropicAPIRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*AnthropicAPIRuntime).providerAdmission = providerAdmission
+		runtime.(*AnthropicAPIRuntime).completionController = f.CompletionController
 	case llmselection.BackendClaudeCLI:
-		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
-			MCPTurnContextStore: f.MCPTurns,
-			ToolGateway:         f.ToolGateway,
-			ProviderCredentials: providerCredentials,
+		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
+			MCPTurnContextStore:  f.MCPTurns,
+			ToolGateway:          f.ToolGateway,
+			ProviderCredentials:  providerCredentials,
+			CompletionController: f.CompletionController,
 		})
 		runtime.(*ClaudeCLIRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendOpenAICompatible:
-		runtime = NewOpenAICompatibleRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
+		runtime = NewOpenAICompatibleRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*OpenAICompatibleRuntime).providerAdmission = providerAdmission
+		runtime.(*OpenAICompatibleRuntime).completionController = f.CompletionController
 	case llmselection.BackendOpenAIResponses:
-		runtime = NewOpenAIResponsesRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
+		runtime = NewOpenAIResponsesRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*OpenAIResponsesRuntime).providerAdmission = providerAdmission
+		runtime.(*OpenAIResponsesRuntime).completionController = f.CompletionController
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

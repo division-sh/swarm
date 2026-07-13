@@ -11,6 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -71,18 +73,17 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 	}))
 	defer server.Close()
 
-	turns := &turnCapture{}
 	conversations := &captureConversationStore{}
-	budget := &budgetCapture{}
+	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
 	cfg := openAIResponsesTestConfig(server.URL)
 	runtime, err := RuntimeFactory{
-		Cfg:           cfg,
-		Sessions:      sessions.NewInMemoryRegistry(time.Second),
-		Turns:         turns,
-		Conversations: conversations,
-		Budget:        budget,
-		LockOwner:     "worker-1",
-		Credentials:   testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,
+		Cfg:                  cfg,
+		Sessions:             sessions.NewInMemoryRegistry(time.Second),
+		Conversations:        conversations,
+		LockOwner:            "worker-1",
+		Credentials:          testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,
+		CompletionController: runtimeeffects.NewController(harness),
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -91,7 +92,7 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(harness.Context("openai-responses-tool-loop"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "cheap",
 		EntityID: "entity-1",
@@ -121,29 +122,24 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(requests))
 	}
-	if len(turns.records) != 2 {
-		t.Fatalf("turn records = %d, want 2", len(turns.records))
+	settlements := harness.CompletionSettlementsForAdapter("openai_responses")
+	if len(settlements) != 2 {
+		t.Fatalf("completion settlements = %d, want 2", len(settlements))
 	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeSession.String() || !turns.records[0].ParseOK {
-		t.Fatalf("first turn record = %#v", turns.records[0])
+	if settlements[0].AgentTurn == nil || settlements[0].AgentTurn.RuntimeMode != sessions.RuntimeModeSession.String() || !settlements[0].AgentTurn.ParseOK || !strings.Contains(string(settlements[0].AgentTurn.ToolCalls), `"call_1"`) {
+		t.Fatalf("first completion turn = %#v, want session-mode call_1", settlements[0].AgentTurn)
 	}
-	if len(turns.records[0].ToolCalls) != 1 || turns.records[0].ToolCalls[0].ID != "call_1" {
-		t.Fatalf("first turn tool calls = %#v, want call_1", turns.records[0].ToolCalls)
-	}
-	if !strings.Contains(string(turns.records[0].ResponseRaw), `"resp_1"`) {
-		t.Fatalf("first turn raw response = %s, want raw Responses payload", string(turns.records[0].ResponseRaw))
+	if settlements[0].AgentTurn == nil || !strings.Contains(string(settlements[0].AgentTurn.ResponsePayload), `"resp_1"`) {
+		t.Fatalf("first completion raw response = %s, want raw Responses payload", string(settlements[0].AgentTurn.ResponsePayload))
 	}
 	if conversations.record.SessionID == "" || conversations.record.Mode != sessions.RuntimeModeSession.String() {
 		t.Fatalf("conversation record = %#v, want session snapshot", conversations.record)
 	}
-	if budget.runtimeMode != "openai_responses" || !budget.exact {
-		t.Fatalf("budget runtime=%q exact=%v, want openai_responses exact", budget.runtimeMode, budget.exact)
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-5.4-nano" {
+		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
-	if budget.usage.InputTokens != 13 || budget.usage.OutputTokens != 5 || budget.usage.Model != "gpt-5.4-nano" {
-		t.Fatalf("budget usage = %#v, want final response usage", budget.usage)
-	}
-	if budget.meta["backend_profile"] != "openai_responses" || budget.meta["provider"] != "openai" || budget.meta["transport"] != "api" || budget.meta["resolved_model"] != "gpt-5.4-nano" {
-		t.Fatalf("budget meta = %#v, want backend/provider/transport/model facts", budget.meta)
+	if settlements[1].Spend.BackendProfile != "openai_responses" || settlements[1].Spend.Provider != "openai" || settlements[1].Spend.Transport != "api" || settlements[1].Spend.ResolvedModel != "gpt-5.4-nano" {
+		t.Fatalf("completion spend = %#v, want backend/provider/transport/model facts", settlements[1].Spend)
 	}
 }
 
@@ -155,10 +151,12 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	turns := &turnCapture{}
-	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
+	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
+	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	runtime.completionController = runtimeeffects.NewController(harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(harness.Context("openai-responses-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -168,8 +166,11 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
-	if len(turns.records) != 1 || turns.records[0].ParseOK {
-		t.Fatalf("turn records = %#v, want parse failure", turns.records)
+	settlements := harness.CompletionSettlementsForAdapter("openai_responses")
+	if len(settlements) != 1 || settlements[0].AgentTurn == nil || settlements[0].AgentTurn.ParseOK || settlements[0].Usage.Exactness != runtimeeffects.CompletionUsageUnavailable {
+		state, _ := harness.StateForAdapter("openai_responses")
+		failure, _ := runtimefailures.As(err)
+		t.Fatalf("error=%v detail=%#v state=%s settlements=%#v, want one unavailable completion failure", err, failure.Failure.Detail, state, settlements)
 	}
 }
 
@@ -181,7 +182,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {

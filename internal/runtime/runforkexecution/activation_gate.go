@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -224,6 +225,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 			Store:             pgStore,
+			Admission:         admission,
 			LoadedSource:      loadedSource,
 			RecipientPlanning: *model.RecipientPlanning,
 			SourceRunID:       binding.SourceRunID,
@@ -242,6 +244,17 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		result.ExecutedEventCount = len(published)
 		result.ForkEvents = published
 		if err != nil {
+			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+				err = errors.Join(err, authorityErr)
+			} else {
+				err = cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+			}
+			return result, err
+		}
+		if err := container.Quiesce(ctx); err != nil {
+			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+				return result, errors.Join(err, authorityErr)
+			}
 			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
 		}
 		activation, err := pgStore.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
@@ -250,7 +263,13 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		})
 		result.RunForkActivation = activation
 		if err != nil {
+			if closeErr := container.Close(ctx); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+		}
+		if err := container.Close(ctx); err != nil {
+			return result, err
 		}
 		return result, nil
 	}

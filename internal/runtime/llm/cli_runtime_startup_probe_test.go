@@ -55,8 +55,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		cfg,
 		sessions.NewInMemoryRegistry(0),
 		"worker-1",
-		nil,
-		nil,
+
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
 		nil,
 		nil,
@@ -67,8 +66,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-startup" },
 				unregister: func(string) {},
 			},
-		},
-	)
+		})
 
 	actor := runtimeactors.AgentConfig{
 		ID: "market-research-agent",
@@ -138,8 +136,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		cfg,
 		sessions.NewInMemoryRegistry(0),
 		"worker-1",
-		nil,
-		nil,
+
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
 		nil,
 		nil,
@@ -149,8 +146,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-startup" },
 				unregister: func(string) {},
 			},
-		},
-	)
+		})
 
 	actor := runtimeactors.AgentConfig{
 		ID: "market-research-agent",
@@ -205,8 +201,7 @@ exit 127
 		cfg,
 		sessions.NewInMemoryRegistry(0),
 		"worker-1",
-		nil,
-		nil,
+
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
 		nil,
 		nil,
@@ -217,8 +212,7 @@ exit 127
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-missing-cli" },
 				unregister: func(string) {},
 			},
-		},
-	)
+		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
 	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
@@ -255,8 +249,7 @@ exit 1
 		cfg,
 		sessions.NewInMemoryRegistry(0),
 		"worker-1",
-		nil,
-		nil,
+
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
 		nil,
 		nil,
@@ -267,8 +260,7 @@ exit 1
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-auth" },
 				unregister: func(string) {},
 			},
-		},
-	)
+		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
 	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})

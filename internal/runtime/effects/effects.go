@@ -232,6 +232,7 @@ type Attempt struct {
 	OperationID  string
 	AttemptID    string
 	Token        LifecycleToken
+	Authority    Authority
 	Kind         Kind
 	Class        EffectClass
 	Adapter      string
@@ -243,29 +244,27 @@ type Attempt struct {
 type Settlement struct {
 	OperationID string
 	AttemptID   string
+	Authority   Authority
 	State       State
 	Failure     *runtimefailures.Envelope
 	Evidence    map[string]any
 	Now         time.Time
 }
 
-type ProviderHeadSettlement struct {
-	Settlement
-	Token                LifecycleToken
-	AgentID              string
-	RuntimeMode          string
-	SessionID            string
-	ScopeKey             string
-	LockOwner            string
-	ExpectedProviderHead string
-	NewProviderHead      string
+type Store interface {
+	IsExternalEffectAuthorityCurrent(context.Context, Authority) (bool, error)
+	AuthorizeExternalAttempt(context.Context, Authority, AuthorizeRequest) (Attempt, error)
+	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error
+	MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error
+	SettleExternalAttempt(context.Context, Settlement) error
 }
 
-type Store interface {
-	IsLifecycleTokenCurrent(context.Context, LifecycleToken) (bool, error)
-	AuthorizeExternalAttempt(context.Context, LifecycleToken, AuthorizeRequest) (Attempt, error)
-	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error
-	SettleExternalAttempt(context.Context, Settlement) error
+type CompletionStore interface {
+	SettleCompletion(context.Context, Attempt, CompletionSettlement) error
+}
+
+type CompletionHeartbeatStore interface {
+	HeartbeatCompletionAttempt(context.Context, Attempt, time.Time, time.Duration) error
 }
 
 type RecoverySummary struct {
@@ -275,10 +274,6 @@ type RecoverySummary struct {
 
 type RecoveryStore interface {
 	ReconcileExternalEffectAttempts(context.Context, time.Time) (RecoverySummary, error)
-}
-
-type ProviderHeadStore interface {
-	SettleExternalAttemptAndPromoteProviderHead(context.Context, ProviderHeadSettlement) error
 }
 
 type Controller struct {
@@ -308,16 +303,33 @@ func ControllerFromContext(ctx context.Context) (*Controller, bool) {
 
 func (c *Controller) Enabled() bool { return c != nil && c.store != nil }
 
+func (c *Controller) CompletionEnabled() bool {
+	if !c.Enabled() {
+		return false
+	}
+	_, canHeartbeat := c.store.(CompletionHeartbeatStore)
+	_, canSettle := c.store.(CompletionStore)
+	return canHeartbeat && canSettle
+}
+
 func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool, error) {
 	if c == nil || c.store == nil {
 		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "check_generation", nil)
 	}
-	return c.store.IsLifecycleTokenCurrent(ctx, token)
+	authority := NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation), time.Now().UTC().Add(5*time.Minute))
+	return c.store.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
 // ProjectionCurrent authorizes successor-facing mutable projections after an
 // effect response. Immutable attempt, turn, and spend evidence does not use it.
 func ProjectionCurrent(ctx context.Context) (bool, error) {
+	if authority, ok := AuthorityFromContext(ctx); ok {
+		controller, hasController := ControllerFromContext(ctx)
+		if !hasController {
+			return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "check_generation", map[string]any{"authority_kind": authority.Kind, "authority_id": authority.ID})
+		}
+		return controller.store.IsExternalEffectAuthorityCurrent(context.WithoutCancel(ctx), authority)
+	}
 	token, hasToken := LifecycleTokenFromContext(ctx)
 	if !hasToken {
 		if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
@@ -359,8 +371,10 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 	if !hasController {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
+	authority := NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation), time.Now().UTC().Add(5*time.Minute))
+	ctx = WithAuthority(ctx, authority)
 	fingerprint := Fingerprint(request)
-	operationID, err := canonicalOperationID(ctx, token, strings.TrimSpace(adapter), lineage)
+	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
 	if err != nil {
 		return nil, err
 	}
@@ -373,17 +387,49 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 	return &Handle{controller: controller, attempt: attempt}, nil
 }
 
-func canonicalOperationID(ctx context.Context, token LifecycleToken, adapter string, lineage map[string]string) (string, error) {
+func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
+	if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	controller, ok := ControllerFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	if _, ok := controller.store.(CompletionHeartbeatStore); !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_heartbeat_store_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	authority, ok := completionAuthorityFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	if err := authority.ValidateCompletionAdapter(adapter); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)}, err)
+	}
+	ctx = WithAuthority(ctx, authority)
+	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
+	if err != nil {
+		return nil, err
+	}
+	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+func canonicalOperationID(ctx context.Context, authority Authority, adapter string, lineage map[string]string) (string, error) {
 	identity := logicalOperationIdentity(ctx)
 	if identity == "" {
-		return "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_logical_identity_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter, "agent_id": token.AgentID})
+		return "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_logical_identity_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter, "authority_kind": authority.Kind, "authority_id": authority.ID})
 	}
 	lineageJSON, err := json.Marshal(lineage)
 	if err != nil {
 		return "", fmt.Errorf("marshal external effect lineage identity: %w", err)
 	}
 	seed := strings.Join([]string{
-		"managed-agent-effect-v1", token.AgentID, identity, adapter, string(lineageJSON),
+		"runtime-effect-v2", string(authority.Kind), authority.ID, identity, adapter, string(lineageJSON),
 	}, "\x00")
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String(), nil
 }
@@ -423,6 +469,30 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 	return h.controller.MarkLaunched(ctx, h.attempt)
 }
 
+func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
+	if h == nil || h.controller == nil || h.controller.store == nil || h.attempt.AttemptID == "" {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	if lease <= 0 {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_lease_invalid", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
+	store, ok := h.controller.store.(CompletionHeartbeatStore)
+	if !ok {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_heartbeat_store_missing", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
+	return store.HeartbeatCompletionAttempt(ctx, h.attempt, time.Now().UTC(), lease)
+}
+
+func (h *Handle) MarkResponseObserved(ctx context.Context, evidence map[string]any) error {
+	if h == nil || h.controller == nil || h.controller.store == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "observe_response", nil)
+	}
+	if h.differentOwner != "" {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_missing", "external-effects", "observe_response", nil)
+	}
+	return h.controller.MarkResponseObserved(ctx, h.attempt, evidence)
+}
+
 func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailures.Envelope, evidence map[string]any) error {
 	if h == nil {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_attempt", nil)
@@ -432,7 +502,8 @@ func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailur
 	}
 	return h.controller.Settle(ctx, Settlement{
 		OperationID: h.attempt.OperationID, AttemptID: h.attempt.AttemptID,
-		State: state, Failure: failure, Evidence: evidence,
+		Authority: h.attempt.Authority,
+		State:     state, Failure: failure, Evidence: evidence,
 	})
 }
 
@@ -440,22 +511,25 @@ func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
 	return h.Settle(ctx, StateSettled, nil, evidence)
 }
 
-func (h *Handle) SucceedAndPromoteProviderHead(ctx context.Context, settlement ProviderHeadSettlement) error {
+func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSettlement) error {
 	if h == nil || h.controller == nil || h.controller.store == nil {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "settle_provider_head", nil)
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
-	store, ok := h.controller.store.(ProviderHeadStore)
+	store, ok := h.controller.store.(CompletionStore)
 	if !ok {
-		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "provider_head_settlement_store_missing", "external-effects", "settle_provider_head", nil)
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
 	}
-	settlement.OperationID = h.attempt.OperationID
-	settlement.AttemptID = h.attempt.AttemptID
-	settlement.Token = h.attempt.Token
-	settlement.State = StateSettled
+	settlement.Settlement.OperationID = h.attempt.OperationID
+	settlement.Settlement.AttemptID = h.attempt.AttemptID
+	settlement.Settlement.Authority = h.attempt.Authority
 	if settlement.Now.IsZero() {
 		settlement.Now = time.Now().UTC()
 	}
-	return store.SettleExternalAttemptAndPromoteProviderHead(context.WithoutCancel(ctx), settlement)
+	settlement.Settlement.Now = settlement.Now
+	if err := settlement.Validate(h.attempt); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
+	}
+	return store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {
@@ -505,9 +579,18 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if strings.TrimSpace(req.RequestFingerprint) == "" {
 		return Attempt{}, fmt.Errorf("external effect request fingerprint is required")
 	}
-	token, ok := LifecycleTokenFromContext(ctx)
+	authority, ok := completionAuthorityFromContext(ctx)
 	if !ok {
-		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_token_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+	}
+	if registration.Kind == KindProviderTurn {
+		if err := authority.ValidateCompletionAdapter(req.Adapter); err != nil {
+			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
+		}
+	} else if authority.Kind != AuthorityNormalAgent {
+		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_kind_rejected", "external-effects", "authorize_attempt", map[string]any{
+			"adapter": req.Adapter, "authority_kind": authority.Kind,
+		})
 	}
 	if req.OperationID == "" {
 		return Attempt{}, fmt.Errorf("external effect logical operation id is required")
@@ -522,7 +605,7 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
-	return c.store.AuthorizeExternalAttempt(ctx, token, req)
+	return c.store.AuthorizeExternalAttempt(ctx, authority, req)
 }
 
 func AttemptID(operationID string, ordinal int) (string, error) {
@@ -541,6 +624,13 @@ func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) error {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
 	}
 	return c.store.MarkExternalAttemptLaunched(context.WithoutCancel(ctx), attempt, time.Now().UTC())
+}
+
+func (c *Controller) MarkResponseObserved(ctx context.Context, attempt Attempt, evidence map[string]any) error {
+	if c == nil || c.store == nil || attempt.AttemptID == "" {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "observe_response", nil)
+	}
+	return c.store.MarkExternalAttemptResponseObserved(context.WithoutCancel(ctx), attempt, evidence, time.Now().UTC())
 }
 
 func (c *Controller) Settle(ctx context.Context, settlement Settlement) error {

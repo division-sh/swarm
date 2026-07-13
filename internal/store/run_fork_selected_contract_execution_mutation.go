@@ -493,13 +493,19 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if status != RunForkMaterializedStatus {
 		return fmt.Errorf("selected-contract fork discard requires materialized fork status %q; got %q", RunForkMaterializedStatus, status)
 	}
+	var preserveCompletionEvidence bool
+	if catalog.hasColumns("run_fork_selected_contract_runtime_executions", "fork_run_id") {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
+			return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
+		}
+	}
 
-	if catalog.hasColumns("agent_turns", "run_id") {
+	if !preserveCompletionEvidence && catalog.hasColumns("agent_turns", "run_id") {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_turns WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork turns: %w", err)
 		}
 	}
-	if catalog.hasColumns("agent_conversation_audits", "run_id") {
+	if !preserveCompletionEvidence && catalog.hasColumns("agent_conversation_audits", "run_id") {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_conversation_audits WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork conversation audits: %w", err)
 		}
@@ -572,11 +578,17 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork entity state: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-contract fork binding: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id = $1::uuid AND status = $2`, forkRunID, RunForkMaterializedStatus); err != nil {
-		return fmt.Errorf("delete selected-contract fork run: %w", err)
+	if preserveCompletionEvidence {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='cancelled', ended_at=NOW() WHERE run_id=$1::uuid AND status=$2`, forkRunID, RunForkMaterializedStatus); err != nil {
+			return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork binding: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id = $1::uuid AND status = $2`, forkRunID, RunForkMaterializedStatus); err != nil {
+			return fmt.Errorf("delete selected-contract fork run: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)

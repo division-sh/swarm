@@ -13,6 +13,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/google/uuid"
 )
 
 type fakeConversationForkLifecycleStore struct {
@@ -26,21 +27,25 @@ type fakeConversationForkLifecycleStore struct {
 	prepareErr    error
 	recordResult  store.ConversationForkChatResult
 	recordErr     error
+	heartbeatErr  error
 	deleteResult  store.ConversationForkDeleteResult
 	deleteErr     error
 
-	createCalls  int
-	listCalls    int
-	viewCalls    int
-	prepareCalls int
-	recordCalls  int
-	deleteCalls  int
+	createCalls    int
+	listCalls      int
+	viewCalls      int
+	prepareCalls   int
+	recordCalls    int
+	heartbeatCalls int
+	failCalls      int
+	deleteCalls    int
 
 	lastCreate  store.ConversationForkCreateRequest
 	lastList    store.ConversationForkListOptions
 	lastViewID  string
 	lastPrepare store.ConversationForkChatPrepareRequest
 	lastRecord  store.ConversationForkChatRecordRequest
+	lastFailure store.ConversationForkChatFailureRequest
 	lastDelete  string
 	lastNow     time.Time
 
@@ -90,6 +95,17 @@ func (s *fakeConversationForkLifecycleStore) RecordOperatorConversationForkChat(
 		s.recordEffect()
 	}
 	return s.recordResult, nil
+}
+
+func (s *fakeConversationForkLifecycleStore) HeartbeatOperatorConversationForkChat(_ context.Context, _ store.ConversationForkChatPrepared, _ time.Time) error {
+	s.heartbeatCalls++
+	return s.heartbeatErr
+}
+
+func (s *fakeConversationForkLifecycleStore) FailOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatFailureRequest) error {
+	s.failCalls++
+	s.lastFailure = req
+	return nil
 }
 
 func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ context.Context, forkID string, now time.Time) (store.ConversationForkDeleteResult, error) {
@@ -337,6 +353,9 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	if forks.recordCalls != 1 || forks.lastRecord.ForkID != forkID || forks.lastRecord.Message != "inspect" || !forks.lastRecord.Now.Equal(now) {
 		t.Fatalf("chat record owner call = calls %d req %#v", forks.recordCalls, forks.lastRecord)
 	}
+	if forks.heartbeatCalls != 1 {
+		t.Fatalf("chat heartbeat owner calls = %d, want 1", forks.heartbeatCalls)
+	}
 	if got := forks.lastRecord.Execution.ToolCalls; len(got) != 1 || got[0].Name != "fork_snapshot_read_entities" {
 		t.Fatalf("chat record execution tool calls = %#v", got)
 	}
@@ -477,10 +496,42 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 	}
 }
 
+func TestOperatorConversationForkChatHeartbeatFailurePreventsExecution(t *testing.T) {
+	now := time.Now().UTC()
+	forkID := uuid.NewString()
+	prepared := store.ConversationForkChatPrepared{
+		Fork: store.OperatorConversationForkSession{ForkID: forkID}, ForkTurnID: uuid.NewString(),
+		RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash", ActorTokenID: testToken,
+		ExecutionOwner: "forkchat-owner", LeaseExpiresAt: now.Add(time.Minute), FenceGeneration: 1,
+	}
+	forks := &fakeConversationForkLifecycleStore{prepareResult: prepared, heartbeatErr: errors.New("stale forkchat authority")}
+	executor := &fakeForkChatExecutor{result: store.ConversationForkChatExecution{AssistantMessage: "must not run"}}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now: func() time.Time { return now }, ConversationForkLifecycle: forks,
+			ForkChatExecutor: executor, Idempotency: newMutatingProbeIdempotencyStore(),
+		}),
+	})
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"heartbeat","method":"conversation.fork_chat","params":{"fork_id":"`+forkID+`","message":"inspect"}}`)
+	if resp.Error == nil {
+		t.Fatal("forkchat heartbeat failure returned success")
+	}
+	if forks.heartbeatCalls != 1 || executor.calls != 0 || forks.recordCalls != 0 || forks.failCalls != 1 {
+		t.Fatalf("heartbeat failure calls heartbeat=%d execute=%d record=%d fail=%d", forks.heartbeatCalls, executor.calls, forks.recordCalls, forks.failCalls)
+	}
+	if forks.lastFailure.Prepared.ForkTurnID != prepared.ForkTurnID || forks.lastFailure.Cause == nil {
+		t.Fatalf("heartbeat failure terminalization=%#v", forks.lastFailure)
+	}
+}
+
 func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
+	forkID := uuid.NewString()
+	forkTurnID := uuid.NewString()
+	requestOccurrenceID := uuid.NewString()
 	prepared := store.ConversationForkChatPrepared{
 		Fork: store.OperatorConversationForkSession{
-			ForkID:        "fork-1",
+			ForkID:        forkID,
 			SourceRunID:   "run-1",
 			SourceAgentID: "agent-source",
 		},
@@ -499,6 +550,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			StubbedTools: []string{"save_entity_field", "emit_event", "run.start", "run.stop"},
 		},
 		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start", "run_stop"},
+		ForkTurnID:     forkTurnID, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
+		ActorTokenID: "actor-token", ExecutionOwner: "forkchat-test-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 	}
 	rt := &forkChatScriptedRuntime{
 		responses: []*runtimellm.Response{
@@ -521,8 +574,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if rt.startAgentID != "agent-source" {
 		t.Fatalf("StartSession agentID = %q, want source agent", rt.startAgentID)
 	}
-	if rt.actorModel != llmselection.ModelAliasRegular || rt.effectOwner != runtimeeffects.OwnerOperatorInfrastructure {
-		t.Fatalf("forkchat runtime authority = model:%q owner:%q", rt.actorModel, rt.effectOwner)
+	if rt.actorModel != llmselection.ModelAliasRegular || rt.authority.Kind != runtimeeffects.AuthorityConversationForkChat || rt.authority.ID != forkTurnID {
+		t.Fatalf("forkchat runtime authority = model:%q authority:%#v", rt.actorModel, rt.authority)
 	}
 	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
 		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
@@ -567,7 +620,7 @@ type forkChatScriptedRuntime struct {
 	tools        []runtimellm.ToolDefinition
 	messages     []runtimellm.Message
 	actorModel   string
-	effectOwner  runtimeeffects.DifferentOwner
+	authority    runtimeeffects.Authority
 }
 
 func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
@@ -576,7 +629,7 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	r.tools = append([]runtimellm.ToolDefinition(nil), tools...)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	r.actorModel = actor.Model
-	r.effectOwner, _ = runtimeeffects.DifferentOwnerFromContext(ctx)
+	r.authority, _ = runtimeeffects.CompletionAuthorityFromContext(ctx)
 	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID, RuntimeMode: "task"}, nil
 }
 

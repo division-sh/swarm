@@ -199,7 +199,6 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		HumanTaskStore:      pg,
 		RuntimeIngressStore: pg,
 		ConversationStore:   nil,
-		TurnStore:           nil,
 	}, Options: runtime.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,

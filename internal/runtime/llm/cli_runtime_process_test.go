@@ -11,6 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -21,6 +23,32 @@ type workspaceResolverStub struct {
 	err    error
 }
 
+func beginClaudeTestCompletion(t *testing.T, parent context.Context, request string) (*effecttest.Harness, context.Context, *runtimeeffects.Handle) {
+	t.Helper()
+	harness := effecttest.New()
+	ctx := harness.CompletionContext(t.Name())
+	if actor, ok := runtimeactors.ActorFromContext(parent); ok {
+		ctx = runtimeactors.WithActor(ctx, actor)
+	}
+	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte(request), nil)
+	if err != nil {
+		t.Fatalf("authorize claude completion: %v", err)
+	}
+	return harness, ctx, attempt
+}
+
+func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness, ctx context.Context, attempt *runtimeeffects.Handle, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("claude completion unexpectedly succeeded")
+	}
+	state, ok := harness.StateForAdapter("claude_cli")
+	if !ok || state == runtimeeffects.StateSettled || state == runtimeeffects.StateTerminalFailure || state == runtimeeffects.StateOutcomeUncertain {
+		t.Fatalf("low-level completion primitive settled independently: state=%q present=%t", state, ok)
+	}
+	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, err, claudeCompletionFailureState(err))
+}
+
 func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -29,7 +57,7 @@ func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.A
 }
 
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID: "campaign-coordinator",
 	})
@@ -41,7 +69,7 @@ func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 }
 
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresContainerTarget(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, workspaceResolverStub{}, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", workspaceResolverStub{}, nil, nil)
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ID: "campaign-coordinator",
 	})
@@ -53,13 +81,15 @@ func TestClaudeCLIRuntimeResolveWorkspace_RequiresContainerTarget(t *testing.T) 
 }
 
 func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	session := &Session{
 		ID:      "sess-1",
 		AgentID: "campaign-coordinator",
 	}
 
-	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, nil, "hello", MonitorTurnMeta{})
+	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	_, err := runtime.runWithPreparedInput(ctx, nil, nil, "hello", MonitorTurnMeta{}, attempt)
+	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("expected ErrClaudeWorkspaceRequired, got %v", err)
 	}
@@ -68,13 +98,15 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 }
 
 func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	target := &workspace.Target{
 		Workdir: t.TempDir(),
 		Backend: workspace.BackendHost,
 	}
 
-	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, target, "hello", MonitorTurnMeta{})
+	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	_, err := runtime.runWithPreparedInput(ctx, nil, target, "hello", MonitorTurnMeta{}, attempt)
+	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceRequired", err)
 	}
@@ -84,7 +116,7 @@ func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
 }
 
 func TestClaudeCLIRuntimeWorkspaceCommandRejectsHostWorkspaceBackend(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	target := &workspace.Target{
 		Workdir: t.TempDir(),
 		Backend: workspace.BackendHost,
@@ -107,7 +139,7 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "stale-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	runtime.cfg.LLM.ClaudeCLI.Command = "claude"
 	runtime.toolGateway = testToolGatewayBinding("http://127.0.0.1:8082", "http://host.docker.internal:8082", "gateway-token")
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "stored-oauth-token")
@@ -158,10 +190,12 @@ exit 127
 	cfg.Workspace.Image = "swarm-workspace:test"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = "json"
-	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-	_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt)
+	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("runWithInput failure = %#v, want generic connector failure", failure)
@@ -210,10 +244,12 @@ exit 1
 			cfg.Workspace.DockerBin = scriptPath
 			cfg.LLM.ClaudeCLI.Command = "claude"
 			cfg.LLM.ClaudeCLI.OutputFormat = tt.outputFormat
-			runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+			runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 			runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-			_, err := runtime.runWithInput(unmanagedLLMTestContext(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+			harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt)
+			settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 			assertClaudeAuthenticationFailure(t, err)
 		})
 	}
@@ -240,9 +276,10 @@ func assertClaudeAuthenticationFailure(t *testing.T, err error) {
 }
 
 func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleFile(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, workspaceResolverStub{
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", workspaceResolverStub{
 		target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"},
 	}, nil, nil)
+
 	var gotTarget *workspace.Target
 	var gotStdin string
 	var gotArgs []string
@@ -276,9 +313,10 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleF
 }
 
 func TestClaudeCLIRuntimePersistOversizedToolResultRelay_PropagatesWorkspaceWriteFailure(t *testing.T) {
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, workspaceResolverStub{
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", workspaceResolverStub{
 		target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"},
 	}, nil, nil)
+
 	runtime.execWorkspaceFn = func(context.Context, *workspace.Target, string, ...string) ([]byte, []byte, int, error) {
 		return nil, []byte("permission denied"), 1, errors.New("exit 1")
 	}
