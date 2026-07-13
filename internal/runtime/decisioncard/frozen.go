@@ -180,6 +180,9 @@ func snapshotFromSemanticValue(value semanticvalue.Value) (Snapshot, error) {
 	if !ok {
 		return Snapshot{}, fmt.Errorf("decision card snapshot must be an object")
 	}
+	if err := requireExactSemanticFields(root, "decision card snapshot", "decision", "title", "context", "outcomes"); err != nil {
+		return Snapshot{}, err
+	}
 	decision, err := requiredSemanticString(root, "decision")
 	if err != nil {
 		return Snapshot{}, err
@@ -208,13 +211,24 @@ func snapshotFromSemanticValue(value semanticvalue.Value) (Snapshot, error) {
 		}
 		outcomes[verdict] = outcome
 	}
-	return Snapshot{Decision: decision, Title: title, Context: contextValue, Outcomes: outcomes}, nil
+	snapshot := Snapshot{Decision: decision, Title: title, Context: contextValue, Outcomes: outcomes}
+	projected, err := snapshot.SemanticValue()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("re-encode decoded decision card snapshot: %w", err)
+	}
+	if !projected.Equal(value) {
+		return Snapshot{}, fmt.Errorf("decision card snapshot typed projection does not preserve its exact semantic value")
+	}
+	return snapshot, nil
 }
 
 func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, error) {
 	root, ok := value.ObjectMap()
 	if !ok {
 		return FrozenOutcome{}, fmt.Errorf("outcome must be an object")
+	}
+	if err := requireExactSemanticFields(root, "outcome", "Verdict", "Label", "Input", "AdvancesTo", "Emit", "EmitSchema"); err != nil {
+		return FrozenOutcome{}, err
 	}
 	verdict, err := requiredSemanticString(root, "Verdict")
 	if err != nil {
@@ -242,6 +256,9 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		if !ok {
 			return FrozenOutcome{}, fmt.Errorf("input %s must be an object", name)
 		}
+		if err := requireExactSemanticFields(fields, "input "+name, "type", "label", "required"); err != nil {
+			return FrozenOutcome{}, err
+		}
 		kind, err := requiredSemanticString(fields, "type")
 		if err != nil {
 			return FrozenOutcome{}, fmt.Errorf("input %s: %w", name, err)
@@ -264,6 +281,9 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 	if !ok {
 		return FrozenOutcome{}, fmt.Errorf("outcome emit must be an object")
 	}
+	if err := requireExactSemanticFields(emitFields, "outcome emit", "Event", "Fields"); err != nil {
+		return FrozenOutcome{}, err
+	}
 	event, err := requiredSemanticString(emitFields, "Event")
 	if err != nil {
 		return FrozenOutcome{}, err
@@ -281,6 +301,9 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		fields, ok := encoded.ObjectMap()
 		if !ok {
 			return FrozenOutcome{}, fmt.Errorf("emit field %s must be an object", name)
+		}
+		if err := requireExactSemanticFields(fields, "emit field "+name, "Kind", "Ref", "CEL", "Literal"); err != nil {
+			return FrozenOutcome{}, err
 		}
 		kind, err := requiredSemanticString(fields, "Kind")
 		if err != nil {
@@ -304,17 +327,30 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		}
 		expressions[name] = expression
 	}
-	schema := semanticvalue.EmptyObject()
-	if encoded, ok := root["EmitSchema"]; ok {
-		if encoded.Kind() != semanticvalue.KindObject {
-			return FrozenOutcome{}, fmt.Errorf("outcome emit schema must be an object")
-		}
-		schema = encoded
+	schema := root["EmitSchema"]
+	if schema.Kind() != semanticvalue.KindObject {
+		return FrozenOutcome{}, fmt.Errorf("outcome emit schema must be an object")
 	}
 	return FrozenOutcome{
 		Verdict: verdict, Label: label, Input: inputs, AdvancesTo: advancesTo,
 		Emit: FrozenEmit{Event: event, Fields: expressions}, EmitSchema: schema,
 	}, nil
+}
+
+func requireExactSemanticFields(values map[string]semanticvalue.Value, label string, expected ...string) error {
+	allowed := make(map[string]struct{}, len(expected))
+	for _, name := range expected {
+		allowed[name] = struct{}{}
+		if _, ok := values[name]; !ok {
+			return fmt.Errorf("%s has non-canonical semantic structure: missing field %q", label, name)
+		}
+	}
+	for name := range values {
+		if _, ok := allowed[name]; !ok {
+			return fmt.Errorf("%s has non-canonical semantic structure: unexpected field %q", label, name)
+		}
+	}
+	return nil
 }
 
 func requiredSemanticString(values map[string]semanticvalue.Value, name string) (string, error) {

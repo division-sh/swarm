@@ -357,6 +357,35 @@ func TestSnapshotDecodePreservesSafeNumericHashIdentity(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotRejectsStructuralSemanticDriftAtEveryTypedLevel(t *testing.T) {
+	snapshot, err := FreezeSnapshot("launch_review", "", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"revise": {
+			Verdict: "revise", AdvancesTo: "building",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"feedback": runtimecontracts.CELExpression("decision.feedback"),
+			}},
+			EmitSchema: textEventSchema(map[string]map[string]any{"feedback": {"type": "string"}}, []string{"feedback"}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := SnapshotJSON(Card{Snapshot: snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range decisionSnapshotStructuralDriftCases() {
+		t.Run(test.name, func(t *testing.T) {
+			corrupted := mutateDecisionSnapshotJSON(t, raw, test.mutate)
+			if _, err := DecodeSnapshot(corrupted); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DecodeSnapshot error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func assertSafeSnapshotNumbers(t *testing.T, snapshot Snapshot, want float64) {
 	t.Helper()
 	assertNumber := func(name string, value any) {
@@ -566,4 +595,78 @@ func textEventSchema(properties map[string]map[string]any, required []string) ma
 		rawProperties[name] = schema
 	}
 	return map[string]any{"type": "object", "properties": rawProperties, "required": required, "additionalProperties": false}
+}
+
+type decisionSnapshotStructuralDriftCase struct {
+	name   string
+	want   string
+	mutate func(*testing.T, map[string]any)
+}
+
+func decisionSnapshotStructuralDriftCases() []decisionSnapshotStructuralDriftCase {
+	unexpected := "non-canonical semantic structure"
+	return []decisionSnapshotStructuralDriftCase{
+		{name: "root_shadow", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { root["shadow_semantics"] = true }},
+		{name: "root_missing", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { delete(root, "title") }},
+		{name: "outcome_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			decisionSnapshotNestedObject(t, root, "outcomes", "revise")["shadow_semantics"] = true
+		}},
+		{name: "outcome_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise"), "Label")
+		}},
+		{name: "input_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback")["shadow_semantics"] = true
+		}},
+		{name: "input_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback"), "label")
+		}},
+		{name: "emit_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit")["shadow_semantics"] = true
+		}},
+		{name: "emit_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit"), "Event")
+		}},
+		{name: "expression_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["shadow_semantics"] = true
+		}},
+		{name: "expression_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Ref")
+		}},
+		{name: "missing_emit_schema", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise"), "EmitSchema")
+		}},
+		{name: "missing_literal", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Literal")
+		}},
+		{name: "ignored_nonliteral_value", want: "does not preserve its exact semantic value", mutate: func(t *testing.T, root map[string]any) {
+			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["Literal"] = "shadow"
+		}},
+	}
+}
+
+func mutateDecisionSnapshotJSON(t *testing.T, raw []byte, mutate func(*testing.T, map[string]any)) []byte {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	mutate(t, root)
+	corrupted, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return corrupted
+}
+
+func decisionSnapshotNestedObject(t *testing.T, root map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := root
+	for _, name := range path {
+		next, ok := current[name].(map[string]any)
+		if !ok {
+			t.Fatalf("snapshot path %s is %#v, want object", strings.Join(path, "."), current[name])
+		}
+		current = next
+	}
+	return current
 }

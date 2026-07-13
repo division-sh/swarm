@@ -177,6 +177,63 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	}
 }
 
+func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			card, err := decisioncard.New(decisioncard.Card{
+				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
+				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"revise": {
+						Verdict: "revise", AdvancesTo: "building",
+						Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+						Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+							"feedback": runtimecontracts.CELExpression("decision.feedback"),
+						}},
+						EmitSchema: map[string]any{
+							"type": "object", "properties": map[string]any{"feedback": map[string]any{"type": "string"}},
+							"required": []string{"feedback"}, "additionalProperties": false,
+						},
+					},
+				}),
+				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+				CreatedAt:        time.Date(2026, 7, 13, 11, 30, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := decisioncard.SnapshotJSON(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			query := `UPDATE decision_cards SET snapshot = ? WHERE card_id = ?`
+			if postgres {
+				query = `UPDATE decision_cards SET snapshot = $1::jsonb WHERE card_id = $2::uuid`
+			}
+
+			for _, test := range storeDecisionSnapshotStructuralDriftCases() {
+				t.Run(test.name, func(t *testing.T) {
+					corrupted := mutateStoreDecisionSnapshotJSON(t, raw, test.mutate)
+					if _, err := db.ExecContext(ctx, query, string(corrupted), card.CardID); err != nil {
+						t.Fatalf("corrupt persisted snapshot: %v", err)
+					}
+					if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), test.want) {
+						t.Fatalf("GetDecisionCard error = %v, want %q", err, test.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
 	const outcomeEvent = "review.completed"
@@ -778,6 +835,80 @@ func admitDecisionCardTestObject(t *testing.T, object map[string]any) semanticva
 		t.Fatalf("admit semantic object: %v", err)
 	}
 	return value
+}
+
+type storeDecisionSnapshotStructuralDriftCase struct {
+	name   string
+	want   string
+	mutate func(*testing.T, map[string]any)
+}
+
+func storeDecisionSnapshotStructuralDriftCases() []storeDecisionSnapshotStructuralDriftCase {
+	unexpected := "non-canonical semantic structure"
+	return []storeDecisionSnapshotStructuralDriftCase{
+		{name: "root_shadow", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { root["shadow_semantics"] = true }},
+		{name: "root_missing", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { delete(root, "title") }},
+		{name: "outcome_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise")["shadow_semantics"] = true
+		}},
+		{name: "outcome_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise"), "Label")
+		}},
+		{name: "input_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback")["shadow_semantics"] = true
+		}},
+		{name: "input_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback"), "label")
+		}},
+		{name: "emit_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit")["shadow_semantics"] = true
+		}},
+		{name: "emit_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit"), "Event")
+		}},
+		{name: "expression_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["shadow_semantics"] = true
+		}},
+		{name: "expression_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Ref")
+		}},
+		{name: "missing_emit_schema", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise"), "EmitSchema")
+		}},
+		{name: "missing_literal", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
+			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Literal")
+		}},
+		{name: "ignored_nonliteral_value", want: "does not preserve its exact semantic value", mutate: func(t *testing.T, root map[string]any) {
+			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["Literal"] = "shadow"
+		}},
+	}
+}
+
+func mutateStoreDecisionSnapshotJSON(t *testing.T, raw []byte, mutate func(*testing.T, map[string]any)) []byte {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	mutate(t, root)
+	corrupted, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return corrupted
+}
+
+func storeDecisionSnapshotNestedObject(t *testing.T, root map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := root
+	for _, name := range path {
+		next, ok := current[name].(map[string]any)
+		if !ok {
+			t.Fatalf("snapshot path %s is %#v, want object", strings.Join(path, "."), current[name])
+		}
+		current = next
+	}
+	return current
 }
 
 func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, string) {
