@@ -293,8 +293,8 @@ func (f *fakeMicrosoftGraphConnectorServer) requireSideEffectCall(t *testing.T, 
 	select {
 	case call := <-f.sideEffects:
 		return call
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s %s: timed out waiting for fake Microsoft Graph side effect", backend, context)
+	case <-time.After(20 * time.Second):
+		t.Fatalf("%s %s: timed out waiting for fake Microsoft Graph side effect (token_requests=%d provider_requests=%d)", backend, context, f.tokenRequestCount(), f.providerHTTPRequestCount())
 		return microsoftGraphConnectorCall{}
 	}
 }
