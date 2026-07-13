@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -19,16 +20,86 @@ type advisoryLockLease interface {
 }
 
 type sqlAdvisoryLockLease struct {
-	conn     *sql.Conn
-	lockKey  string
-	ownsConn bool
+	conn        *sql.Conn
+	lockKey     string
+	lifetime    *sharedSQLConnLifetime
+	releaseConn func() error
+}
+
+type sharedSQLConnLifetimeContextKey struct{}
+
+type sharedSQLConnLifetime struct {
+	mu     sync.Mutex
+	conn   *sql.Conn
+	refs   int
+	closed bool
+}
+
+func newSharedSQLConnLifetime(conn *sql.Conn) *sharedSQLConnLifetime {
+	return &sharedSQLConnLifetime{conn: conn, refs: 1}
+}
+
+func withSharedSQLConnLifetime(ctx context.Context, lifetime *sharedSQLConnLifetime) context.Context {
+	if lifetime == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, sharedSQLConnLifetimeContextKey{}, lifetime)
+}
+
+func sharedSQLConnLifetimeFromContext(ctx context.Context) (*sharedSQLConnLifetime, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	lifetime, ok := ctx.Value(sharedSQLConnLifetimeContextKey{}).(*sharedSQLConnLifetime)
+	return lifetime, ok && lifetime != nil
+}
+
+func (l *sharedSQLConnLifetime) retain() (func() error, bool) {
+	if l == nil {
+		return nil, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || l.conn == nil {
+		return nil, false
+	}
+	l.refs++
+	return l.release, true
+}
+
+func (l *sharedSQLConnLifetime) release() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	if l.closed || l.refs <= 0 {
+		l.mu.Unlock()
+		return nil
+	}
+	l.refs--
+	if l.refs > 0 {
+		l.mu.Unlock()
+		return nil
+	}
+	l.closed = true
+	conn := l.conn
+	l.conn = nil
+	l.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.Close()
 }
 
 func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context {
 	if l == nil || l.conn == nil {
 		return ctx
 	}
-	return runtimepipeline.WithPipelineSQLConnContext(ctx, l.conn)
+	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, l.conn)
+	if l.lifetime != nil {
+		ctx = withSharedSQLConnLifetime(ctx, l.lifetime)
+	}
+	return ctx
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
@@ -38,20 +109,19 @@ func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, err := l.conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey); err != nil {
-		if l.ownsConn {
-			_ = l.conn.Close()
-		}
-		l.conn = nil
-		return fmt.Errorf("release advisory lock: %w", err)
-	}
-	if l.ownsConn {
-		if err := l.conn.Close(); err != nil {
-			l.conn = nil
-			return fmt.Errorf("close advisory lock connection: %w", err)
-		}
+	_, unlockErr := l.conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey)
+	releaseErr := error(nil)
+	if l.releaseConn != nil {
+		releaseErr = l.releaseConn()
 	}
 	l.conn = nil
+	l.releaseConn = nil
+	if unlockErr != nil {
+		return fmt.Errorf("release advisory lock: %w", unlockErr)
+	}
+	if releaseErr != nil {
+		return fmt.Errorf("close advisory lock connection: %w", releaseErr)
+	}
 	return nil
 }
 
@@ -64,11 +134,22 @@ func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (
 		return nil, false, fmt.Errorf("advisory lock key is required")
 	}
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	var lifetime *sharedSQLConnLifetime
+	var releaseConn func() error
 	if !borrowed {
 		var err error
 		conn, err = db.Conn(ctx)
 		if err != nil {
 			return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
+		}
+		lifetime = newSharedSQLConnLifetime(conn)
+		releaseConn = lifetime.release
+	} else if borrowedLifetime, ok := sharedSQLConnLifetimeFromContext(ctx); ok {
+		lifetime = borrowedLifetime
+		var retained bool
+		releaseConn, retained = lifetime.retain()
+		if !retained {
+			return nil, false, fmt.Errorf("acquire advisory lock connection: shared connection lifetime is closed")
 		}
 	}
 	var acquired bool
@@ -77,18 +158,18 @@ func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (
 		query = tx.QueryRowContext
 	}
 	if err := query(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
-		if !borrowed {
-			_ = conn.Close()
+		if releaseConn != nil {
+			_ = releaseConn()
 		}
 		return nil, false, fmt.Errorf("acquire advisory lock: %w", err)
 	}
 	if !acquired {
-		if !borrowed {
-			_ = conn.Close()
+		if releaseConn != nil {
+			_ = releaseConn()
 		}
 		return nil, false, nil
 	}
-	return &sqlAdvisoryLockLease{conn: conn, lockKey: lockKey, ownsConn: !borrowed}, true, nil
+	return &sqlAdvisoryLockLease{conn: conn, lockKey: lockKey, lifetime: lifetime, releaseConn: releaseConn}, true, nil
 }
 
 func replayClaimLockKey(eventID string) string {

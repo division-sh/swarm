@@ -49,13 +49,16 @@ func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context
 		ctx = context.Background()
 	}
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	var connLifetime *sharedSQLConnLifetime
 	if !borrowed {
 		var err error
 		conn, err = s.DB.Conn(ctx)
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		connLifetime = newSharedSQLConnLifetime(conn)
+		ctx = withSharedSQLConnLifetime(ctx, connLifetime)
+		defer connLifetime.release()
 	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
