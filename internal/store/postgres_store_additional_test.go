@@ -313,7 +313,7 @@ func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t 
 	}
 }
 
-func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(t *testing.T) {
+func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -341,8 +341,8 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 		time.Now().UTC(),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	if err := pg.AppendEvent(ctx, evt); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+		t.Fatalf("AppendEvent error = %v, want inactive-run rejection", err)
 	}
 
 	var (
@@ -358,17 +358,17 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
-	if status != "running" {
-		t.Fatalf("run status = %q, want running", status)
+	if status != "completed" {
+		t.Fatalf("run status = %q, want completed", status)
 	}
-	if eventCount != 1 {
-		t.Fatalf("event_count = %d, want 1", eventCount)
+	if eventCount != 0 {
+		t.Fatalf("event_count = %d, want 0", eventCount)
 	}
-	if entityCount != 1 {
-		t.Fatalf("entity_count = %d, want 1", entityCount)
+	if entityCount != 0 {
+		t.Fatalf("entity_count = %d, want unchanged 0", entityCount)
 	}
-	if endedAt.Valid {
-		t.Fatalf("ended_at valid = %v, want cleared after reopening", endedAt.Time)
+	if !endedAt.Valid {
+		t.Fatal("ended_at was cleared by rejected append")
 	}
 }
 
@@ -381,6 +381,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	completedAt := time.Now().UTC().Add(-time.Minute).Round(time.Second)
+	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count)
 		VALUES ($1::uuid, 'completed', $2, 1, 1)
@@ -391,9 +392,9 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'scan.completed', $3::uuid, 'entity', '{}'::jsonb, 'agent-1', 'agent', now()
+			$1::uuid, $2::uuid, 'scan.completed', $3::uuid, 'entity', '{}'::jsonb, 'agent-1', 'agent', $4
 		)
-	`, eventID, runID, entityID); err != nil {
+	`, eventID, runID, entityID, createdAt); err != nil {
 		t.Fatalf("seed duplicate event: %v", err)
 	}
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
@@ -408,7 +409,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Now().UTC(),
+		createdAt,
 	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
@@ -1522,8 +1523,8 @@ func TestPostgresStore_InboundEvidenceOwnerRejectsPayloadValidatorFailureBeforeP
 	publicationEventID := uuid.NewString()
 
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
-		events.EventType("platform.inbound_recorded"),
+	evt := eventtest.DiagnosticDirect(eventID,
+		events.EventTypePlatformInboundRecord,
 		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
 		[]byte(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
 		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
@@ -1554,8 +1555,8 @@ func TestPostgresStore_InboundEvidenceOwnerPlatformCatalogSchemaMatchesPayload(t
 	publicationEventID := uuid.NewString()
 
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
-		events.EventType("platform.inbound_recorded"),
+	evt := eventtest.DiagnosticDirect(eventID,
+		events.EventTypePlatformInboundRecord,
 		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
 		[]byte(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
 		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())

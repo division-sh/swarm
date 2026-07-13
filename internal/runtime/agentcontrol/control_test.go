@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -36,6 +37,9 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	}
 	if payload["operation_id"] != "00000000-0000-0000-0000-000000000702" {
 		t.Fatalf("operation_id = %#v", payload["operation_id"])
+	}
+	if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect {
+		t.Fatalf("admission class = %q, want %q", evt.AdmissionClass(), events.EventAdmissionDiagnosticDirect)
 	}
 	if _, ok := payload["kill_previous"]; ok {
 		t.Fatalf("payload = %#v, want no kill_previous field", payload)

@@ -31,6 +31,7 @@ import (
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -49,6 +50,184 @@ func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 		t.Fatalf("seed event bus test run: %v", err)
 	}
 	return ctx
+}
+
+func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
+		t.Fatalf("mark run completed: %v", err)
+	}
+	assertEventBusTerminalRunRefusal(t, pg, runID, pg.RunEventMutation, func(eventID string) (string, int, int, error) {
+		var status string
+		var eventCount, deliveryCount int
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+			return "", 0, 0, err
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&eventCount); err != nil {
+			return "", 0, 0, err
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&deliveryCount); err != nil {
+			return "", 0, 0, err
+		}
+		return status, eventCount, deliveryCount, nil
+	})
+}
+
+func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := sqliteStore.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
+		t.Fatalf("mark run completed: %v", err)
+	}
+	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, sqliteStore.RunEventMutation, func(eventID string) (string, int, int, error) {
+		var status string
+		var eventCount, deliveryCount int
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
+			return "", 0, 0, err
+		}
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
+			return "", 0, 0, err
+		}
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
+			return "", 0, 0, err
+		}
+		return status, eventCount, deliveryCount, nil
+	})
+}
+
+func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	assertEventBusDiagnosticDirectRefusal(t, pg, pg.RunEventMutation, func(eventID string) (int, error) {
+		var count int
+		err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count)
+		return count, err
+	})
+}
+
+func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	assertEventBusDiagnosticDirectRefusal(t, sqliteStore, sqliteStore.RunEventMutation, func(eventID string) (int, error) {
+		var count int
+		err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
+		return count, err
+	})
+}
+
+func assertEventBusDiagnosticDirectRefusal(
+	t *testing.T,
+	eventStore runtimebus.EventStore,
+	runMutation func(context.Context, func(runtimebus.EventMutation) error) error,
+	loadEventCount func(string) (int, error),
+) {
+	t.Helper()
+	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	writers := map[string]func(context.Context, events.Event) error{
+		"publish":              eb.Publish,
+		"publish_acknowledged": eb.PublishAcknowledged,
+		"publish_direct": func(ctx context.Context, evt events.Event) error {
+			return eb.PublishDirect(ctx, evt, []string{"agent-1"})
+		},
+		"publish_in_mutation": func(ctx context.Context, evt events.Event) error {
+			return runMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				return eb.PublishInMutation(mutation.Context(), evt)
+			})
+		},
+	}
+	for _, eventType := range events.DiagnosticDirectEventTypes() {
+		eventType := eventType
+		t.Run(string(eventType), func(t *testing.T) {
+			for name, publish := range writers {
+				name, publish := name, publish
+				t.Run(name, func(t *testing.T) {
+					eventID := uuid.NewString()
+					evt := eventtest.DiagnosticDirect(
+						eventID, eventType, "runtime", "", []byte(`{"evidence":"typed-owner-only"}`),
+						0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+					)
+					err := publish(context.Background(), evt)
+					if err == nil || !strings.Contains(err.Error(), "diagnostic-direct event") {
+						t.Fatalf("publish error = %v, want diagnostic-direct refusal", err)
+					}
+					count, err := loadEventCount(eventID)
+					if err != nil {
+						t.Fatalf("load event count: %v", err)
+					}
+					if count != 0 {
+						t.Fatalf("persisted diagnostic-direct events = %d, want 0", count)
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertEventBusTerminalRunRefusal(
+	t *testing.T,
+	eventStore runtimebus.EventStore,
+	runID string,
+	runMutation func(context.Context, func(runtimebus.EventMutation) error) error,
+	loadState func(string) (string, int, int, error),
+) {
+	t.Helper()
+	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	writers := map[string]func(context.Context, events.Event) error{
+		"publish":              eb.Publish,
+		"publish_acknowledged": eb.PublishAcknowledged,
+		"publish_direct": func(ctx context.Context, evt events.Event) error {
+			return eb.PublishDirect(ctx, evt, []string{"agent-1"})
+		},
+		"publish_in_mutation": func(ctx context.Context, evt events.Event) error {
+			return runMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				return eb.PublishInMutation(mutation.Context(), evt)
+			})
+		},
+	}
+	for name, publish := range writers {
+		name, publish := name, publish
+		t.Run(name, func(t *testing.T) {
+			eventID := uuid.NewString()
+			evt := eventtest.RootIngress(
+				eventID,
+				events.EventType("custom.terminal_refusal"),
+				"api.v1",
+				"",
+				[]byte(`{"attempt":"terminal"}`),
+				0,
+				runID,
+				"",
+				events.EventEnvelope{},
+				time.Now().UTC(),
+			)
+			if err := publish(ctx, evt); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+				t.Fatalf("publish error = %v, want inactive-run rejection", err)
+			}
+			status, eventCount, deliveryCount, err := loadState(eventID)
+			if err != nil {
+				t.Fatalf("load state: %v", err)
+			}
+			if status != "completed" || eventCount != 0 || deliveryCount != 0 {
+				t.Fatalf("state after refusal = status=%s events=%d deliveries=%d", status, eventCount, deliveryCount)
+			}
+		})
+	}
 }
 
 type fixtureWorkflowModule struct {
@@ -2656,7 +2835,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	ch := eb.Subscribe(agentID, eventType)
 	defer eb.Unsubscribe(agentID)
 
-	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -2687,7 +2866,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})

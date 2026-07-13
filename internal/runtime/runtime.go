@@ -400,6 +400,8 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 
 const runtimeQuiescenceStableChecks = 3
 
+const bootstrapSelfCheckSubscriberID = "bootstrap-self-check"
+
 func (rt *Runtime) WaitForQuiescence(ctx context.Context) error {
 	if rt == nil {
 		return nil
@@ -1352,7 +1354,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	var bootCheck <-chan events.Event
 	if rt.Options.SelfCheck && rt.Bus != nil {
-		bootCheck = rt.Bus.SubscribeInternal("bootstrap-self-check", events.EventType("platform.boot"))
+		bootCheck = rt.Bus.SubscribeInternal(bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
+		defer rt.Bus.Unsubscribe(bootstrapSelfCheckSubscriberID)
 		rt.emitBootProgress(18, "boot_self_check_optional", "ok", "platform.boot self-check subscribed")
 	} else {
 		rt.emitBootProgress(18, "boot_self_check_optional", "skipped", "self-check disabled or event bus unavailable")

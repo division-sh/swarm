@@ -866,14 +866,15 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 			return true
 		}
 		switch site.Function {
-		case "sqliteLockAgentDeliveryTx", "sqliteEnsureRunRow", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
+		case "sqliteLockAgentDeliveryTx", "sqliteEnsureActiveRunRow", "sqliteEnsureRunRow", "sqliteRequireRunRowPresent", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
+			"appendSQLiteMailboxV1DecisionEventTx", "normalizeSQLiteMailboxV1DecisionReplayResult",
 			"loadSQLiteMailboxV1RowTx", "sqliteMarkRunTerminalTx", "sqliteNormalRunCompletionRunReadyTx",
 			"sqliteNormalRunCompletionSessionLeasesSettledTx", "ensureSQLiteTaskConversationAuditRowTx":
 			return true
 		}
 	}
 	switch site.Function {
-	case "sqliteEnsureRunRow", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
+	case "sqliteEnsureActiveRunRow", "sqliteEnsureRunRow", "sqliteRequireRunRowPresent", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
 		"sqliteSyncRunCounts", "sqlitePauseRunControl", "sqliteContinueRunControl", "sqliteStopRunControl",
 		"insertSQLiteEntityStateDiff":
 		return true

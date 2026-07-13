@@ -190,10 +190,16 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	return s.PersistEventWithDeliveriesAndScope(ctx, evt, agentIDs, runtimereplayclaim.CommittedReplayScopeSubscribed)
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "sqlite event/delivery", func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
 			return err
@@ -206,6 +212,9 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Cont
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "sqlite event/routes", func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
 			return err
@@ -218,6 +227,9 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "sqlite event/route-set", func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
 			return err

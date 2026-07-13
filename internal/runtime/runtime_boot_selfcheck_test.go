@@ -123,6 +123,11 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	if got := store.persistedDeliveries(); len(got) != 0 {
 		t.Fatalf("persisted deliveries = %#v, want none for bootstrap self-check", got)
 	}
+	for _, subscriberID := range rt.Bus.ResolveSubscribedRecipients("platform.boot") {
+		if subscriberID == bootstrapSelfCheckSubscriberID {
+			t.Fatalf("bootstrap self-check subscriber remains after startup: %#v", rt.Bus.ResolveSubscribedRecipients("platform.boot"))
+		}
+	}
 }
 
 func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T) {

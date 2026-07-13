@@ -123,12 +123,28 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 1)
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, request.PublicationID, 2)
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE run_id = `, standing.RunID, 3)
+	assertInboundEvidenceProducedByPlatform(t, db, sqlite, request.MarkerEventID)
 
 	runInboundPublicationRawOnlyProof(t, db, sqlite, store, candidate, standing.RunID, sequence)
 	runInboundPublicationOrdinalRollbackProof(t, db, sqlite, store, candidate, standing.RunID, sequence)
 	runInboundPublicationConcurrentRetryProof(t, db, sqlite, store, candidate, standing.RunID, sequence)
 	runInboundPublicationStandingGenerationRebindProof(t, db, sqlite, store, workflowStore)
 	runInboundPublicationCorruptionProof(t, db, sqlite, store, candidate, standing.RunID, sequence)
+}
+
+func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bool, eventID string) {
+	t.Helper()
+	query := `SELECT COALESCE(produced_by_type, '') FROM events WHERE event_id = $1::uuid`
+	if sqlite {
+		query = `SELECT COALESCE(produced_by_type, '') FROM events WHERE event_id = ?`
+	}
+	var producedByType string
+	if err := db.QueryRow(query, eventID).Scan(&producedByType); err != nil {
+		t.Fatalf("load inbound evidence producer classification: %v", err)
+	}
+	if producedByType != "platform" {
+		t.Fatalf("inbound evidence produced_by_type = %q, want platform", producedByType)
+	}
 }
 
 func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.WorkflowInstanceStore) {

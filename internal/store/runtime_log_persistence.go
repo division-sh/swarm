@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -86,33 +85,10 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(record.RunID) != "" {
-		if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-			return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
-		}
-		return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
-	}
-	if err := validateDiagnosticDirectOwner(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt); err != nil {
-		return err
-	}
-	execer := execQueryer(s.DB)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		execer = tx
+		return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
 	}
-	_, err = execer.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES (
-			$1::uuid, 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
-			0, 'runtime', 'platform', NULLIF($3,'')::uuid, $4
-		)
-	`, evt.ID(), string(evt.Payload()), strings.TrimSpace(evt.ParentEventID()), evt.CreatedAt())
-	if err != nil {
-		return fmt.Errorf("persist postgres runtime log: %w", err)
-	}
-	return nil
+	return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
 }
 
 func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -170,25 +146,8 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(record.RunID) != "" {
-		return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
 	}
-	return s.runRuntimeMutation(ctx, "sqlite runtime log", func(txctx context.Context, tx *sql.Tx) error {
-		txctx = withDiagnosticDirectOwner(txctx, diagnosticDirectRuntimeLog)
-		if err := validateDiagnosticDirectOwner(txctx, evt); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(txctx, `
-			INSERT OR IGNORE INTO events (
-				event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
-				scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
-			)
-			VALUES (?, NULL, 'platform.runtime_log', NULL, NULL, '{}', '{}', '[]',
-				'global', ?, 0, 'runtime', 'platform', ?, ?)
-		`, evt.ID(), string(evt.Payload()), sqliteNullUUID(evt.ParentEventID()), evt.CreatedAt())
-		if err != nil {
-			return fmt.Errorf("persist sqlite runtime log: %w", err)
-		}
-		return nil
-	})
+	return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
 }

@@ -762,6 +762,28 @@ contract_formats:
         schema fallbacks only; they MUST NOT silently invent event_id, run_id,
         created_at, source_event_id, target, target_set, or other class-required
         facts after admission.
+      terminal_run_admission:
+        owner: internal/store/runlifecycle plus the selected-store event mutation boundary
+        rule: >
+          A new event carrying an existing run_id may persist only while the locked run is running or paused.
+          Completed, cancelled, failed, and forked runs reject ordinary event persistence before any event, delivery,
+          receipt, replay-scope, outbox, state, or counter mutation. Event persistence never changes run lifecycle
+          status or clears terminal evidence, and a missing run may be created as running only through the canonical
+          run-creation owner.
+        duplicate_order: >
+          Admission validates event shape and lineage, then checks event_id before run status. An exact persisted
+          duplicate is idempotent even after the run becomes terminal and creates no rows or lifecycle transition. A
+          duplicate event_id with different persisted event facts fails closed. Only a genuinely new event proceeds to
+          the locked running-or-paused check.
+        terminal_evidence: >
+          Executable terminal outcome events persist before the terminal transition in the same owner transaction.
+          There is no generic post-terminal event bypass. Only typed platform.runtime_log evidence may persist after
+          terminalization through its closed subtype owner. platform.inbound_recorded and platform.agent_directive still
+          require running or paused subtype-owned runs. Event labels, produced_by_type, or payload values do not grant
+          post-terminal authority, and diagnostic persistence never reopens the run.
+        backend_atomicity:
+          postgres: The event mutation transaction locks or creates the run before inserting a new event or recipient manifest.
+          sqlite: The serialized runtime mutation transaction reads and validates run status before inserting a new event or recipient manifest.
       constructor_classes:
         root_ingress:
           rule: External/operator/root run ingress events carry their final
@@ -781,19 +803,44 @@ contract_formats:
             parent, and the typed execution lineage row MUST be committed after
             the fork event row exists and before selected-contract activation.
         runtime_control:
-          rule: Platform control and directive events use runtime-control
-            constructors so diagnostics/control traffic is not confused with
-            producer-authored domain emits.
+          rule: Platform control events that enter generic runtime dispatch use
+            runtime-control constructors so control traffic is not confused with
+            producer-authored domain emits. platform.agent_directive is not a
+            generic runtime-control event; its durable operation owner uses the
+            closed diagnostic-direct constructor and persistence path.
         runtime_diagnostic:
           rule: Runtime diagnostic/dead-letter/status events use diagnostic
             constructors and remain separate from route or delivery authority.
         diagnostic_direct:
-          rule: Diagnostic-direct persisted platform events such as
-            platform.runtime_log and platform.inbound_recorded are admitted as
-            non-routed/non-executable evidence markers before direct persistence.
-            Their event_id and created_at facts are explicit admission output,
-            not database defaults; optional run_id remains empty only when the
-            diagnostic-direct class is global/no-run by design.
+          rule: Diagnostic-direct persisted platform events are admitted as
+            non-routed/non-executable evidence before direct persistence. Their
+            event_id and created_at facts are explicit admission output, not
+            database defaults; optional run_id remains empty only when the exact
+            subtype is global/no-run by design.
+          closed_catalog:
+          - platform.runtime_log
+          - platform.inbound_recorded
+          - platform.agent_directive
+          generic_admission: >
+            Generic AppendEvent and EventBus publication reject every closed-catalog type, including a correctly typed
+            diagnostic-direct event. Each type must consume its exact selected-store subtype owner. A catalog label built
+            with another constructor is rejected, and a diagnostic-direct constructor carrying an unregistered type is
+            rejected. Adding a type requires an authoritative spec change plus exhaustive owner, reader, and proof updates.
+          producer_classification: >
+            All three event rows persist produced_by_type=platform. Runtime logs persist produced_by=runtime. Provider and
+            directive identity remain explicit in subtype payload and operation state rather than reclassifying evidence as
+            executable external or agent work.
+          subtype_admission:
+            platform.runtime_log: >
+              RuntimeLogPersistence may append one event row globally without a run, or against an existing run in running,
+              paused, completed, cancelled, failed, or forked status. A run-scoped log locks and requires that row; it never
+              creates or reopens a run. It creates no delivery, receipt, replay-scope, outbox, or execution authority.
+            platform.inbound_recorded: >
+              The selected-store inbound publication ledger may append this evidence row only while its locked target run is
+              running or paused and only in the atomic parent/ordered-child publication transaction.
+            platform.agent_directive: >
+              The #1932 directive operation owner may append this evidence row only while its locked resolved run is running
+              or paused and only atomically with committed direct replay scope and the prepared directive operation.
         route_probe:
           rule: Route-query and sentinel probes may use dedicated probe
             constructors only when the event is not a persisted runtime emit and

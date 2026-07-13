@@ -35,7 +35,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 
 	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
-		if err := s.ensureRunRow(ctx, caps, tx, identity.RunID, "", "", true); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, identity.RunID, "", ""); err != nil {
 			return err
 		}
 		if plan.Enabled {
@@ -155,6 +155,9 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	}
 	return s.runAuthorActivityMutation(ctx, "postgres upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
+		if err := s.ensureRunRow(ctx, caps, tx, identity.RunID, "", ""); err != nil {
+			return err
+		}
 		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
 			return err
 		}
