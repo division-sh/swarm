@@ -15,6 +15,7 @@ import (
 )
 
 func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -158,6 +159,7 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 }
 
 func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -433,6 +435,7 @@ func TestLowerCompositionConnectRoutePlansUsesSelectOrCreateInputResolution(t *t
 }
 
 func TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -512,6 +515,7 @@ func TestLowerCompositionConnectRoutePlansRejectsSelectOrCreateCarryTypeMismatch
 }
 
 func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter"), canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeInstanceKeyAdapterConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -590,6 +594,7 @@ func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testi
 }
 
 func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -616,6 +621,7 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKe
 }
 
 func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeAddressedTemplateConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)

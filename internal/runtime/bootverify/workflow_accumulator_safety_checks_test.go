@@ -9,9 +9,11 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorAgentsFile"))
 	root := writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
 		eventSource: "external",
 		completion:  "all",
@@ -139,6 +141,7 @@ func TestRun_FailsClosedForAccumulatorInputWithoutProducerPath(t *testing.T) {
 }
 
 func TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorAgentsFile"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorCrossFlowFixture"))
 	cases := []struct {
 		name string
 		root func(*testing.T) string

@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -57,6 +58,7 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 }
 
 func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contracts_tree_test.go:currentWorkflowContractsDirForTest"))
 	t.Parallel()
 
 	repoRoot := repoRootForContractsTest(t)

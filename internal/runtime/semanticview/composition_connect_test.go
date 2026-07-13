@@ -10,6 +10,7 @@ import (
 )
 
 func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/composition_connect_test.go:writeCompositionConnectSemanticFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -69,6 +70,7 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 }
 
 func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/composition_connect_test.go:writeRootCompositionConnectSemanticFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)

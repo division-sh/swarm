@@ -8,9 +8,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRunAcceptsGeneratedActivityResultsWithoutAuthoredSchemas(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_generated_activity_topology_test.go:runGeneratedActivityFixture"))
 	report := runGeneratedActivityFixture(t, false)
 	for _, checkID := range []string{"event_chain_integrity", "event_consumer_exists", "transition_reference_validation"} {
 		if reportContains(report.Findings, checkID, "send") {
@@ -29,6 +31,7 @@ func TestRunAcceptsSubscriptionsToGeneratedActivityResultSchemas(t *testing.T) {
 }
 
 func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_generated_activity_topology_test.go:loadNestedGeneratedActivityFixture"))
 	source := loadNestedGeneratedActivityFixture(t)
 	report := Run(context.Background(), source, Options{})
 	for _, checkID := range []string{"event_chain_integrity", "event_consumer_exists", "event_producer_exists", "transition_reference_validation", "condition_payload_alignment"} {

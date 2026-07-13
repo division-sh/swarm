@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestCLIOutputModesForLocalConsumers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/cli_output_test.go:outputModeVerifyFixture"))
 	t.Setenv("SWARM_API_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer

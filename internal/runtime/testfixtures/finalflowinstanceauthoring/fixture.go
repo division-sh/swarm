@@ -1,7 +1,6 @@
 package finalflowinstanceauthoring
 
 import (
-	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -70,8 +69,7 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectOrCreate)
-	addTemplateStateOverlay(t, root)
+	root := canonicalrouting.CopyTemplateSelectOrCreateFinalAuthoring(t)
 	if opts.StaticCreateEntity || opts.StaticSelectEntity || opts.StaticSelectOrCreate || opts.StaticMissingAcquisition {
 		addLegacyStaticOverlay(t, root, opts)
 	}
@@ -81,43 +79,6 @@ func Write(t testing.TB, opts Options) string {
 	applyRoutingMutation(t, root, opts)
 	addTemplateLifecycleOverlay(t, root)
 	return root
-}
-
-func addTemplateStateOverlay(t testing.TB, root string) {
-	t.Helper()
-	producerEvents := filepath.Join(root, "flows", ProducerFlowID, "events.yaml")
-	for _, event := range []string{ProducerInput, ProducerOutput} {
-		canonicalrouting.ApplyOverlayMutation(t, producerEvents,
-			event+":\n  account_id: text\n",
-			event+":\n  account_id: text\n  score: text\n  decision: text\n")
-	}
-	producerNodes := filepath.Join(root, "flows", ProducerFlowID, "nodes.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, producerNodes,
-		"          account_id: payload.account_id\n",
-		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
-
-	templateEvents := filepath.Join(root, "flows", TemplateFlowID, "events.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, templateEvents,
-		"  account_id: text\n",
-		"  account_id: text\n  score: text\n  decision: text\n")
-	templateEntities := filepath.Join(root, "flows", TemplateFlowID, "entities.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, templateEntities,
-		"    _unused_reason: receiver instance identity\n",
-		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
-	templateNodes := filepath.Join(root, "flows", TemplateFlowID, "nodes.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, templateNodes,
-		"    account.ready: {}\n",
-		`    account.ready:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: score
-            target_field: score
-          - source_field: decision
-            target_field: decision
-      advances_to: reviewed
-`)
 }
 
 func addTemplateLifecycleOverlay(t testing.TB, root string) {

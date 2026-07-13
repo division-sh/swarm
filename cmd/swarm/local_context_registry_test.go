@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type fakeRuntimeIdentityCaller struct {
@@ -102,6 +103,7 @@ func TestLocalContextDescriptorRejectsInlineTokenAndCorruptJSON(t *testing.T) {
 }
 
 func TestLocalContextValidationTaxonomy(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/local_context_registry.go:isConnectionRefusedError"))
 	tests := []struct {
 		name       string
 		desc       localContextDescriptor

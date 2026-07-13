@@ -9,10 +9,13 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 )
 
 func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:file-scope"))
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingVerifyBundle(t, "emit:\n        event: result.ready\n")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
@@ -22,6 +25,8 @@ func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *te
 
 func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
 	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitBroadcastOptOut
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitBroadcastOptOut"))
+
 	bundle := loadPinRoutingVerifyBundle(t, "emit:\n        event: result.ready\n        broadcast: true\n")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "pin_target_resolution", "") {
@@ -30,6 +35,7 @@ func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -49,6 +55,8 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath(t *testing.T) {
 	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath"))
+
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -136,6 +144,7 @@ func TestPinTargetResolution_FanOutEmitRejectsProducerTargetAndBroadcastCommonPa
 }
 
 func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadSelectEntityDemotionBundle"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:writeSelectEntityDemotionConsumerFlow"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:writeSelectEntityDemotionProducerFlow"))
 	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
 		consumerMode: "static",
 		acquisition:  "select_entity",
@@ -201,6 +210,7 @@ func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *t
 }
 
 func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
 		consumerMode: "template",
 		withProducer: true,
@@ -269,6 +279,7 @@ func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherRecei
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingProducerRouteAdaptedConnect"))
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
         event: shared.ready
@@ -288,6 +299,8 @@ func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPat
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
 	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath"))
+
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
         event: shared.ready
@@ -303,6 +316,7 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommon
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -321,6 +335,7 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParen
 }
 
 func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -339,6 +354,7 @@ func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithPare
 }
 
 func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingProducerRouteConnect"))
 	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready", pinRoutingProducerRouteConnect())
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -370,6 +386,7 @@ func TestPinTargetResolution_FailsClosedForFlowScopedAgentEmitEventsWithoutRoute
 }
 
 func TestPinTargetResolution_ChecksProjectScopeAgentUnderOwningFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		extrasAgents: `
 extras-agent:
@@ -388,6 +405,7 @@ extras-agent:
 }
 
 func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	for _, tt := range []struct {
 		name      string
 		emitBlock string
@@ -412,6 +430,7 @@ func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
 }
 
 func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposition(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -431,6 +450,8 @@ func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposi
 
 func TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
 	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_event_identity proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents"))
+
 	for _, tt := range []struct {
 		name string
 		body string
@@ -480,6 +501,7 @@ func TestPinTargetResolution_FailsClosedForRootPinOutputWithoutTargetMechanism(t
 }
 
 func TestPinTargetResolution_FailsClosedForNestedRootPinOutputWithoutTargetMechanism(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingVerifyRuleNodeYAML"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyRuleNodeYAML("root-node", "root.start", "root.ready", false),
 	})
@@ -490,6 +512,7 @@ func TestPinTargetResolution_FailsClosedForNestedRootPinOutputWithoutTargetMecha
 }
 
 func TestPinTargetResolution_FailsClosedForRootGuardEscalationPinOutput(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyGuardNodeYAML("root-node", "root.start", "root.ready"),
 	})
@@ -500,6 +523,7 @@ func TestPinTargetResolution_FailsClosedForRootGuardEscalationPinOutput(t *testi
 }
 
 func TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingVerifyNodeYAML"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyNodeYAML("root-node", "root.start", "root.ready", true),
 	})
@@ -510,6 +534,7 @@ func TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut(t *testing.T) {
 }
 
 func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingRootConnectBundle"))
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready
@@ -524,6 +549,8 @@ func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T)
 
 func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *testing.T) {
 	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath"))
+
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready
@@ -538,6 +565,7 @@ func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *te
 }
 
 func TestPinTargetResolution_FailsClosedForRootProducerTargetCommonPath(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready

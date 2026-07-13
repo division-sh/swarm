@@ -27,6 +27,11 @@ const (
 // accepts only IDs declared in artifact_registry.yaml.
 type ArtifactID string
 
+// SourceID identifies one explicitly classified raw fixture source. Unlike an
+// ArtifactID, it cannot materialize a bundle; it only binds a source owner to
+// the exact executable test that proves its distinct semantics.
+type SourceID string
+
 // RetiredStaticMutation identifies one deliberately invalid legacy routing
 // shape. The closed set prevents negative tests from becoming an arbitrary
 // positive bundle-construction API.
@@ -93,6 +98,21 @@ func Prove(t testing.TB, ids ...ArtifactID) {
 		root := checkedArtifactRoot(t, id)
 		if _, err := os.Stat(filepath.Join(root, "package.yaml")); err != nil {
 			t.Fatalf("routing artifact %q: %v", id, err)
+		}
+	}
+}
+
+// ProveSource declares direct execution evidence for classified raw fixture
+// sources. The ownership guard accepts this call only as a top-level statement
+// in the exact registered TestXxx body.
+func ProveSource(t testing.TB, ids ...SourceID) {
+	t.Helper()
+	if len(ids) == 0 {
+		t.Fatal("canonical routing source proof must name at least one source")
+	}
+	for _, id := range ids {
+		if strings.TrimSpace(string(id)) == "" {
+			t.Fatal("canonical routing source proof must not contain an empty source ID")
 		}
 	}
 }
@@ -319,68 +339,6 @@ func SetOverlayFile(t testing.TB, root, relativePath, source string) {
 	}
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(source, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-func ApplyOverlayMutation(t testing.TB, path, old, replacement string) {
-	t.Helper()
-	rejectRoutingOverlayFragment(t, path+" old fragment", old)
-	rejectRoutingOverlayFragment(t, path+" replacement fragment", replacement)
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	if !strings.Contains(string(contents), old) {
-		t.Fatalf("overlay mutation target missing in %s", path)
-	}
-	updated := strings.Replace(string(contents), old, replacement, 1)
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-func rejectRoutingOverlayFragment(t testing.TB, path, source string) {
-	t.Helper()
-	lines := strings.Split(strings.Trim(source, "\n"), "\n")
-	minimumIndent := -1
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		if minimumIndent < 0 || indent < minimumIndent {
-			minimumIndent = indent
-		}
-	}
-	if minimumIndent < 0 {
-		return
-	}
-	shift := 2 - minimumIndent
-	for index, line := range lines {
-		if shift >= 0 {
-			lines[index] = strings.Repeat(" ", shift) + line
-			continue
-		}
-		remove := -shift
-		if len(line) >= remove {
-			lines[index] = line[remove:]
-		}
-	}
-	firstIndent := len(lines[0]) - len(strings.TrimLeft(lines[0], " "))
-	wrapped := "overlay:\n"
-	if firstIndent > 2 {
-		wrapped += "  inherited_context:\n"
-	}
-	wrapped += strings.Join(lines, "\n") + "\n"
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(wrapped), &doc); err != nil {
-		t.Fatalf("overlay for %s: parse YAML fragment: %v", path, err)
-	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode || len(doc.Content[0].Content) != 2 {
-		t.Fatalf("overlay for %s: fragment must decode as one mapping value", path)
-	}
-	if yamlNodeContainsAuthoredRouting(doc.Content[0].Content[1]) {
-		t.Fatalf("overlay for %s: contains routing declarations; consume a canonical route or use an explicit negative mutation", path)
 	}
 }
 

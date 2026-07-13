@@ -4,11 +4,14 @@ import (
 	"strings"
 	"testing"
 
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
 func TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields(t *testing.T) {
 	// routing-example-census: parser-only issue=none owner=contracts.project_package_decoder proof=internal/runtime/contracts/workflow_contract_connect_source_test.go:TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_connect_source_test.go:TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields"))
+
 	var document ProjectPackageDocument
 	if err := yaml.Unmarshal([]byte("name: test\nversion: 1.0.0\nconnect:\n  - from: producer.done\n    to: consumer.done\n"), &document); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)

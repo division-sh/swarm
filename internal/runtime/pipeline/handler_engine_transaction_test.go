@@ -23,6 +23,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -2138,6 +2139,7 @@ node-a:
 }
 
 func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/handler_engine_transaction_test.go:TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `
 name: runtime-test

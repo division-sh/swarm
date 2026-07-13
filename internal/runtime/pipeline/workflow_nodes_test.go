@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
@@ -218,6 +219,7 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 }
 
 func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/workflow_nodes_test.go:writePipelineImportBoundaryAliasFixture"))
 	source := loadPipelineImportBoundaryAliasSource(t)
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {

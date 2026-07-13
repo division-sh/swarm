@@ -7,10 +7,13 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=contracts.payload_named_field proof=internal/runtime/bootverify/workflow_payload_named_field_test.go:TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_payload_named_field_test.go:TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField"))
+
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: payload-normalizer

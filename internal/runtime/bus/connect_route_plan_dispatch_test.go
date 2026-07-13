@@ -802,6 +802,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines"))
 	source := connectRoutePlanInstanceKeySource(t)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1126,6 +1127,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy"))
 	source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1595,6 +1597,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 }
 
 func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy"))
 	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1634,6 +1637,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForL
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommittedReplay(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:connectRoutePlanInstanceKeySourceWithPolicy"))
 	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1720,6 +1724,7 @@ func TestEventBusPublish_ConnectRoutePlanDefaultedPoliciesMatchCreateReject(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy"))
 	source := connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -2043,6 +2048,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 }
 
 func TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:connectRoutePlanInstanceKeySourceWithPolicy"))
 	source := connectRoutePlanInstanceKeyBroadcastSource(t)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),

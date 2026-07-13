@@ -63,7 +63,10 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 }
 
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
+	ProveSource(
+		// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
+		t, SourceID("internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract"))
+
 	artifactIDs := canonicalExampleNames()
 	want := make([]string, 0, len(artifactIDs))
 	for _, id := range artifactIDs {

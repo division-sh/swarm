@@ -30,6 +30,7 @@ func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
 }
 
 func TestRun_AllowsRootProducerCompositionConnectAsRouteProof(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeRootCompositionConnectBootverifyFixture"))
 	root := writeRootCompositionConnectBootverifyFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -44,6 +45,7 @@ func TestRun_AllowsRootProducerCompositionConnectAsRouteProof(t *testing.T) {
 }
 
 func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectBootverifyFixture"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectConsumerFlow"))
 	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
 		consumerMode:             "template",
 		consumerScalarInput:      true,
@@ -143,6 +145,7 @@ func TestRunRejectsProviderOnlyProjectionOptionsOnFlowInputCarries(t *testing.T)
 }
 
 func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeSelectResolutionCompositionConnectFixture"))
 	tests := []struct {
 		name string
 		opts selectResolutionCompositionFixtureOptions
@@ -207,6 +210,7 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 }
 
 func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCreateResolutionCompositionConnectFixture"))
 	tests := []struct {
 		name string
 		opts createResolutionCompositionFixtureOptions
@@ -345,6 +349,7 @@ func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(
 }
 
 func TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectAdapterBootverifyFixture"))
 	tests := []struct {
 		name string
 		opts compositionConnectAdapterFixtureOptions
@@ -745,6 +750,7 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 }
 
 func TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeRootAutoEmitOutputPinKeyCarriesFixture"))
 	root := writeRootAutoEmitOutputPinKeyCarriesFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -756,6 +762,7 @@ func TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence(t *testing.T)
 }
 
 func TestOutputPinKeyCarriesPinsForEventIgnoresPublicPinName(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:producerAutoEmitOnCreateBlock"))
 	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	source := semanticview.Wrap(bundle)
@@ -804,6 +811,7 @@ func TestRun_AllowsOutputBoundaryAliasAsConnectEventAdapter(t *testing.T) {
 }
 
 func TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectAmbiguityFixture"))
 	root := writeCompositionConnectAmbiguityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -818,6 +826,7 @@ func TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof(t *testing.
 }
 
 func TestRun_TreatsParentCompositionConnectAsEventTopologyProof(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:producerAutoEmitOnCreateBlock"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectRootPackage"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_composition_connect_checks_test.go:writeCompositionConnectTopologyFixture"))
 	root := writeCompositionConnectTopologyFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 

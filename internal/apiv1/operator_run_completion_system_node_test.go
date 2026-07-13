@@ -13,11 +13,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/apiv1/operator_run_completion_system_node_test.go:runCompletionSystemNodeBundle"))
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 

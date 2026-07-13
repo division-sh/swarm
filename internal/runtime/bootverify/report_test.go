@@ -608,6 +608,8 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 
 func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=bootverify.active_role_carrier proof=internal/runtime/bootverify/report_test.go:TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier"))
+
 	t.Parallel()
 
 	cases := []struct {
@@ -851,6 +853,7 @@ pins:
 }
 
 func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name: "dead-event-schema-coincidental-name",
 		flows: map[string]deadEventSchemaFlowFiles{
@@ -884,6 +887,7 @@ beta-node:
 }
 
 func TestRun_DoesNotUseRootLocalReferenceAsProofForChildFlowDeadEventSchema(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name: "dead-event-schema-root-local-child-flow",
 		rootNodes: `
@@ -911,6 +915,7 @@ root-node:
 }
 
 func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name:       "dead-event-schema-platform-overlap",
 		rootEvents: "platform.runtime_log: {}\n",
@@ -2594,6 +2599,7 @@ func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
 }
 
 func TestRun_ErrorsWhenDeclaredStageIsUnreachable(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	root := writeStagedReachabilityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -2646,6 +2652,7 @@ stages:
 }
 
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeStateReachabilityFixtureWithClosedHandler"))
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       on_complete:
         - condition: "true"
@@ -2816,6 +2823,7 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 }
 
 func TestRun_RejectsRootAgentFlowSessionScope(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSessionScopeValidationFixture(t, `
 root-flow:
   id: root-flow
@@ -2833,6 +2841,7 @@ root-flow:
 }
 
 func TestRun_DefaultsOmittedAgentModeButKeepsModelExplicit(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSessionScopeValidationFixture(t, `
 root-defaulted:
   id: root-defaulted
@@ -2862,6 +2871,7 @@ root-missing-model:
 }
 
 func TestRun_RejectsEntitySessionScopeInStatelessFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSessionScopeValidationFixture(t, "{}\n", `
 name: support
 `, `
@@ -2881,6 +2891,7 @@ entity-agent:
 }
 
 func TestRun_AcceptsExplicitSessionScopeDeclarations(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSessionScopeValidationFixture(t, "{}\n", `
 name: support
 initial_state: waiting
@@ -2912,6 +2923,7 @@ entity-agent:
 }
 
 func TestRun_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSessionScopeValidationFixture(t, `
 root-global:
   id: root-global
@@ -2930,6 +2942,7 @@ root-global:
 }
 
 func TestRun_AcceptsPackageBackedFlowSessionScopeDeclarations(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writePackageBackedSessionScopeValidationFixture(t, `
 name: support
 initial_state: waiting
@@ -2962,6 +2975,7 @@ entity-agent:
 }
 
 func TestRun_RejectsPackageBackedEntitySessionScopeInStatelessFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writePackageBackedSessionScopeValidationFixture(t, `
 name: support
 `, `
@@ -3342,6 +3356,7 @@ func TestRun_RejectsDisallowedRefNamespaceInEmitFieldExpressions(t *testing.T) {
 }
 
 func TestRun_RejectsYAMLScalarEmitFieldsAsExpressions(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 emit:
@@ -3370,6 +3385,7 @@ emit:
 }
 
 func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
@@ -3413,6 +3429,7 @@ fan_out:
 }
 
 func TestRun_RejectsBareItemInHandlerEmitFields(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 emit:
@@ -4328,6 +4345,7 @@ func TestRun_DoesNotErrorForHarnessInjectedInputPinWithoutEmitter(t *testing.T) 
 }
 
 func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeInputPinExternalScopeFixture"))
 	root := writeInputPinExternalScopeFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -4539,6 +4557,7 @@ func TestRun_DoesNotWarnForImportedWildcardConsumer(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/requiredagentsparentconnect/fixture.go:Write"))
 	bundle := requiredagentsparentconnect.LoadBundle(t)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4700,6 +4719,7 @@ func TestRun_RejectsFilterReferenceToSparseFieldEvenWhenSameHandlerComputesField
 }
 
 func TestRun_AttributesReaderCoverageToResolvedRootContractOwner(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	bundle := loadWave1RootReaderCoverageFixtureBundle(t)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4993,6 +5013,7 @@ types:
 }
 
 func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writePromptWriterCoverageFixture(t, `
 writer:
   id: writer
@@ -5037,6 +5058,7 @@ pins:
 }
 
 func TestRun_PromptEntityWritesPrefersFlowScopedAuthorization(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writePromptWriterCoverageFixture(t, `
 writer:
   id: writer
@@ -5072,6 +5094,7 @@ case:
 }
 
 func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplicateIDs(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: duplicate-agent-writer-coverage
@@ -5486,6 +5509,7 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWrite
 }
 
 func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleComputeWritesIt(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
@@ -5750,6 +5774,7 @@ func TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers(t *testi
 }
 
 func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,
 		Nodes: `
@@ -5775,6 +5800,7 @@ root-writer:
 }
 
 func TestRun_RejectsImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -5798,6 +5824,7 @@ treasury-node:
 }
 
 func TestRun_AllowsRootNormalInputPinMaterializationWithoutEntityID(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeRootDefaultStaticInputPinFixture(t, `
 root-writer:
   id: root-writer
@@ -5823,6 +5850,7 @@ root-writer:
 }
 
 func TestRun_AllowsNonMaterializingRootDefaultStaticInputPinHandlers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"), canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeRootDefaultStaticInputPinFixtureWithOptions"))
 	root := writeRootDefaultStaticInputPinFixture(t, `
 root-observer:
   id: root-observer
@@ -5848,6 +5876,7 @@ root-observer:
 }
 
 func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithOptionalEntityID(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,
 		Nodes: `
@@ -5874,6 +5903,7 @@ root-writer:
 }
 
 func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithRequiredEntityID(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,
 		RequireEntityID: true,
@@ -5901,6 +5931,7 @@ root-writer:
 }
 
 func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -5926,6 +5957,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -5951,6 +5983,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -5972,6 +6005,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -5993,6 +6027,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6078,6 +6113,7 @@ func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 }
 
 func TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6099,6 +6135,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectEntityWithUndeclaredPayloadRef(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6120,6 +6157,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectEntityWithCreateEntity(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6142,6 +6180,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectOrCreateEntityWithCreateEntity(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6164,6 +6203,7 @@ treasury-node:
 }
 
 func TestRun_RejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -6241,6 +6281,7 @@ func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testin
 }
 
 func TestRun_AllowsCrossFlowPinAmbiguityWithScopedEscapeHatch(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	root := writeCrossFlowPinAmbiguityFixture(t, true)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -6530,6 +6571,7 @@ func TestRun_AllowsTimerFireEventWithHandlerConsumer(t *testing.T) {
 }
 
 func TestRun_AllowsTimerFireEventWithAgentConsumer(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:TestRun_AcceptsExplicitSessionScopeDeclarations"))
 	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
 		startOn:           "event:ticket.opened",
 		owner:             "support-node",
@@ -6720,6 +6762,7 @@ func TestRun_ReportsErrorForUnknownTimerCancelEvent(t *testing.T) {
 }
 
 func TestRun_AllowsBootTimerWithoutCancelOn(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:timerValidationEventEntry"), canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	root := writeTimerValidationFixture(t, "boot", "")
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -6799,6 +6842,7 @@ func TestRun_ReportsErrorForTimerCancelStateGloballyUnreachableFromStartContext(
 }
 
 func TestRun_AllowsTimerCancelStateReachableFromEventStartContext(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeTimerStateCancelReachabilityFixture"))
 	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
 		startOn:          "event:ticket.opened",
 		cancelOn:         "state:done",

@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/bundle_catalog_read_surface_test.go:TestBundleCatalogReadSurfaceListGetAgentsAndCursor"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()

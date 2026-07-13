@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -120,6 +121,8 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 
 func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=pipeline.query_entities_flow_scope proof=internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID"))
+
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -2721,6 +2724,7 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 }
 
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: action-emit-required\nversion: 1.0.0\ndescription: Action emit required-field proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
@@ -2776,6 +2780,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 }
 
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: template-output-required\nversion: 1.0.0\ndescription: Template output required-field proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: template\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n",
@@ -2832,6 +2837,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 }
 
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: action-emit-envelope-required\nversion: 1.0.0\ndescription: Action emit envelope-required proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
@@ -2885,6 +2891,7 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 }
 
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: action-emit-enum\nversion: 1.0.0\ndescription: Action emit enum proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
@@ -2910,6 +2917,7 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 }
 
 func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/engine_adapter_test.go:TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface"))
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: child-output-named-type\nversion: 1.0.0\ndescription: child output named type proof\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",

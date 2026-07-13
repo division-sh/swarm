@@ -10,9 +10,12 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestStaticMultiEntityRetirementConformance(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:file-scope"))
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:TestRootDefaultStaticMultiEntityRetirementConformance"), canonicalrouting.SourceID("internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:loadStaticMultiEntityRetirementSource"))
 	tests := []struct {
 		name            string
 		handlerBody     string
@@ -94,6 +97,7 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 }
 
 func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:TestRootDefaultStaticMultiEntityRetirementConformance"), canonicalrouting.SourceID("internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:loadRootDefaultStaticMultiEntityRetirementSource"))
 	tests := []struct {
 		name            string
 		handlerBody     string

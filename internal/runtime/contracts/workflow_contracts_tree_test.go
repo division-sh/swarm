@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -281,6 +282,8 @@ func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
 
 func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=contracts.cross_flow_event_localization proof=internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler"))
+
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -381,6 +384,8 @@ validation-orchestrator:
 
 func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=contracts.cross_flow_event_localization proof=internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules"))
+
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 

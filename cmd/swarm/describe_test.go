@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
 
@@ -160,6 +161,8 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 
 func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=cmd/swarm/describe_test.go:TestDescribeRoutesHumanAndJSONAreDeterministic
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe.go:writeDescribeText"), canonicalrouting.SourceID("cmd/swarm/describe.go:writeRoutingTopologyText"), canonicalrouting.SourceID("cmd/swarm/describe_test.go:TestDescribeRoutesHumanAndJSONAreDeterministic"))
+
 	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var firstJSON, firstHuman string
 	for i := 0; i < 5; i++ {
@@ -291,6 +294,7 @@ func TestDescribeRoutesRendersFindingLinkedLegacyQualifiedSubscriptions(t *testi
 }
 
 func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	contractsRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
 
 	var stdout, stderr bytes.Buffer
@@ -366,6 +370,8 @@ func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
 }
 
 func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:file-scope"))
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:TestDescribeCommandRendersDefaultedTemplateInstancePolicies"), canonicalrouting.SourceID("cmd/swarm/describe_test.go:writeDescribeDefaultedTemplatePolicyContracts"))
 	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
@@ -413,6 +419,7 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 }
 
 func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/describe_test.go:writeDescribeStageGraphContracts"))
 	contractsRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{

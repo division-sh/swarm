@@ -1,7 +1,6 @@
 package templateflowpilot
 
 import (
-	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -39,46 +38,10 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectOrCreate)
-	addDataAccumulationOverlay(t, root)
+	root := canonicalrouting.CopyTemplateSelectOrCreatePilot(t)
 	applyNegativeMutation(t, root, opts)
 	addLifecycleOverlay(t, root)
 	return root
-}
-
-func addDataAccumulationOverlay(t testing.TB, root string) {
-	t.Helper()
-	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, producerEvents,
-		"account.requested:\n  account_id: text\n",
-		"account.requested:\n  account_id: text\n  score: text\n  decision: text\n")
-	canonicalrouting.ApplyOverlayMutation(t, producerEvents,
-		"account.ready:\n  account_id: text\n",
-		"account.ready:\n  account_id: text\n  score: text\n  decision: text\n")
-	canonicalrouting.ApplyOverlayMutation(t, filepath.Join(root, "flows", "account", "events.yaml"),
-		"  account_id: text\n", "  account_id: text\n  score: text\n  decision: text\n")
-	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, producerNodes,
-		"          account_id: payload.account_id\n",
-		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
-	accountEntities := filepath.Join(root, "flows", "account", "entities.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, accountEntities,
-		"    _unused_reason: receiver instance identity\n",
-		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
-	accountNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
-	canonicalrouting.ApplyOverlayMutation(t, accountNodes,
-		"    account.ready: {}\n",
-		`    account.ready:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: account_id
-          - source_field: score
-            target_field: score
-          - source_field: decision
-            target_field: decision
-      advances_to: done
-`)
 }
 
 func addLifecycleOverlay(t testing.TB, root string) {

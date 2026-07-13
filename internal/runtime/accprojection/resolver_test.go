@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func projectionResolverBundle() *runtimecontracts.WorkflowContractBundle {
@@ -94,6 +95,7 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 }
 
 func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/accprojection/resolver_test.go:loadProjectionFlowBundle"))
 	source := semanticview.Wrap(loadProjectionFlowBundle(t))
 
 	result := ForHandlerWithAccumulator(source, "scoring", "scoring-node", "scoring/score.dimension_complete", "dimensions_received")
@@ -123,6 +125,7 @@ func TestActiveHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *test
 }
 
 func TestActiveHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/accprojection/resolver_test.go:loadProjectionFlowBundle"))
 	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, "      observe:\n        - source: producer\n          events: [task.done]\n"))
 	active := activeHandlerResolution(source, "worker-listener", "producer/task.done")
 	if got := active.AccumulatorName; got != "tasks" {

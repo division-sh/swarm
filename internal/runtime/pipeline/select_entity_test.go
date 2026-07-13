@@ -14,12 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/select_entity_test.go:newSelectEntityTestCoordinator"))
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -474,6 +476,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreate
 }
 
 func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptIdempotent(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/select_entity_test.go:newSelectEntityTestCoordinator"))
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 

@@ -13,9 +13,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestImportBoundaryInputAliasRoutesParentEventToPackageInputPin(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/import_boundary_alias_routing_test.go:writeBusImportBoundaryAliasFixtureWithParentSubscription"))
 	source := loadBusImportBoundaryAliasSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
@@ -136,6 +138,7 @@ func TestImportBoundaryOutputAliasRoutesPackageOutputToWildcardParentSubscriber(
 }
 
 func TestImportBoundaryInputAliasMaterializesTemplateRoute(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/import_boundary_alias_routing_test.go:writeBusImportBoundaryAliasFixtureWithParentSubscription"))
 	source := loadBusImportBoundaryAliasTemplateSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {

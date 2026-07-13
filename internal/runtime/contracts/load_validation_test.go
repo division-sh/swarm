@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -355,6 +356,7 @@ func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 }
 
 func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	platformSpec := DefaultPlatformSpecFile(repoRoot)
 	tests := []struct {
@@ -394,6 +396,7 @@ worker:
 }
 
 func TestLoadWorkflowContractBundleAllowsPublicNodeStateTable(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", `
@@ -420,6 +423,7 @@ worker:
 }
 
 func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", `
@@ -454,6 +458,7 @@ flows: []
 }
 
 func TestAgentRegistryEntryRejectsRetiredModelTierField(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	var entry AgentRegistryEntry
 	err := yaml.Unmarshal([]byte(`
 role: researcher
@@ -469,6 +474,7 @@ subscriptions: [scan.requested]
 }
 
 func TestAgentRegistryEntryDerivesRuntimeScopeFromAuthoredMode(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	tests := []struct {
 		name      string
 		mode      string
@@ -499,6 +505,7 @@ subscriptions: [scan.requested]
 }
 
 func TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	var entry AgentRegistryEntry
 	err := yaml.Unmarshal([]byte(`
 role: researcher
@@ -532,6 +539,7 @@ subscriptions: [scan.requested]
 }
 
 func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	tests := []struct {
 		name     string
 		body     string
@@ -557,6 +565,7 @@ subscriptions: [scan.requested]
 }
 
 func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	tests := []struct {
 		name     string
 		body     string
@@ -587,6 +596,7 @@ subscriptions: [scan.requested]
 }
 
 func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	tests := []struct {
 		name     string
 		body     string
@@ -612,6 +622,7 @@ subscriptions: [scan.requested]
 }
 
 func TestLoadWorkflowContractBundleAllowsAgentPromptInputs(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", "{}\n")
@@ -753,6 +764,7 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 }
 
 func TestAgentAndEventCriteriaCitationYAMLDecode(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	var agent AgentRegistryEntry
 	if err := yaml.Unmarshal([]byte(`
 role: cto
@@ -871,6 +883,7 @@ func criteriaValidationTestSet() PolicyCriteriaSet {
 }
 
 func TestLoadWorkflowContractBundleRejectsLayer2AgentDefaultsBlock(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", "{}\n")
@@ -888,6 +901,7 @@ worker:
 }
 
 func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	tests := []struct {
 		name     string
 		body     string
@@ -985,6 +999,7 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 }
 
 func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/load_validation_test.go:TestAgentAndEventCriteriaCitationYAMLDecode"))
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `

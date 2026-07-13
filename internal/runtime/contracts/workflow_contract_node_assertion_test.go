@@ -3,10 +3,12 @@ package contracts
 import (
 	"testing"
 
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
 func TestSystemNodeContractTracksProducesDeclarationPresence(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_node_assertion_test.go:TestSystemNodeContractTracksProducesDeclarationPresence"))
 	for _, tc := range []struct {
 		name     string
 		yaml     string

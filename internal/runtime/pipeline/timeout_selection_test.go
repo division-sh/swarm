@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type recordingExecutionEngine struct {
@@ -180,6 +181,7 @@ func TestDeclarativeNodeHandleEvent_DeniesImportBoundaryWildcardRawFallback(t *t
 }
 
 func TestDeclarativeNodeHandleEvent_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/workflow_nodes_test.go:writePipelineImportBoundaryAliasFixture"))
 	source := loadPipelineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
 	entry := source.NodeEntries()["worker-listener"]
 	engine := &recordingExecutionEngine{}

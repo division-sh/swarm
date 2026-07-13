@@ -1,12 +1,14 @@
 package swarmflowtest
 
 import (
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestCatalogRunnerExpectedYAML_SingleTriggerWhitespaceAndNormalization(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_expected_yaml_test.go:TestCatalogRunnerExpectedYAML_SequenceUsesStringEntityFieldsBefore"), canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_expected_yaml_test.go:writeCatalogCaseFixture"))
 	dir := t.TempDir()
 	writeCatalogCaseFixture(t, dir,
 		`
@@ -71,6 +73,7 @@ expected:
 }
 
 func TestCatalogRunnerExpectedYAML_SequenceUsesStringEntityFieldsBefore(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_expected_yaml_test.go:TestCatalogRunnerExpectedYAML_SequenceUsesStringEntityFieldsBefore"))
 	dir := t.TempDir()
 	writeCatalogCaseFixture(t, dir,
 		`
