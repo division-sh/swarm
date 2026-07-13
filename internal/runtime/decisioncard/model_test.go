@@ -262,6 +262,71 @@ func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
 	}
 }
 
+func TestSnapshotDecodePreservesNumericHashIdentity(t *testing.T) {
+	const preciseInteger = int64(9007199254740993)
+	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"large_integer": runtimecontracts.LiteralExpression(preciseInteger),
+			}},
+			EmitSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"large_integer": map[string]any{"type": "integer", "minimum": preciseInteger},
+				},
+				"required": []string{"large_integer"}, "additionalProperties": false,
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	card.Snapshot.Context = map[string]any{"large_integer": preciseInteger}
+	card, err = New(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := SnapshotJSON(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeSnapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertExactSnapshotNumbers(t, decoded, "9007199254740993")
+
+	roundTripped := card
+	roundTripped.Snapshot = decoded
+	if err := roundTripped.Validate(); err != nil {
+		t.Fatalf("round-tripped card validation: %v", err)
+	}
+}
+
+func assertExactSnapshotNumbers(t *testing.T, snapshot Snapshot, want string) {
+	t.Helper()
+	assertNumber := func(name string, value any) {
+		t.Helper()
+		number, ok := value.(json.Number)
+		if !ok || number.String() != want {
+			t.Fatalf("%s = %#v, want json.Number(%s)", name, value, want)
+		}
+	}
+	assertNumber("context.large_integer", snapshot.Context["large_integer"])
+	outcome := snapshot.Outcomes["approve"]
+	assertNumber("outcome literal", outcome.Emit.Fields["large_integer"].Literal)
+	properties, ok := outcome.EmitSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("emit schema properties = %#v", outcome.EmitSchema["properties"])
+	}
+	property, ok := properties["large_integer"].(map[string]any)
+	if !ok {
+		t.Fatalf("large_integer schema = %#v", properties["large_integer"])
+	}
+	assertNumber("schema minimum", property["minimum"])
+}
+
 func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 	tests := []struct {
 		name     string

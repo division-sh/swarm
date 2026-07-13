@@ -366,6 +366,10 @@ contract_formats:
           create/read validation MUST use the same hash owner: validation
           recomputes both hashes from the decoded snapshot and requires exact
           equality before the card can be persisted, returned, or mutated.
+          JSON numeric tokens in context, outcome literals, and frozen schema
+          constraints MUST be decoded losslessly; persistence MUST NOT route
+          these semantic values through float64 or otherwise change their
+          canonical hash representation.
           Nonempty strings are not hash proof. There is no legacy schema-hash
           compatibility path. mailbox.get returns the frozen snapshot; live
           entity context is supplementary and never reconstructs what was shown.

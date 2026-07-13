@@ -20,16 +20,25 @@ func Bytes(value any) ([]byte, error) {
 	return Canonicalize(raw)
 }
 
-func Canonicalize(raw []byte) ([]byte, error) {
+// Decode preserves JSON number tokens in interface-valued fields. Semantic
+// values that cross persistence boundaries must not be routed through float64.
+func Decode(raw []byte, destination any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, err
+	if err := decoder.Decode(destination); err != nil {
+		return err
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("trailing JSON content")
+		return fmt.Errorf("trailing JSON content")
+	}
+	return nil
+}
+
+func Canonicalize(raw []byte) ([]byte, error) {
+	var value any
+	if err := Decode(raw, &value); err != nil {
+		return nil, err
 	}
 	return json.Marshal(value)
 }
