@@ -5,194 +5,424 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
+	"unicode/utf16"
+	"unicode/utf8"
+
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
-const MaxSafeInteger = 9007199254740991
+const MaxSafeInteger = semanticvalue.MaxSafeInteger
 
 var jsonNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
-// Bytes returns the canonical JSON encoding used for persisted semantic
-// identity. Values are admitted through the same I-JSON-safe semantic owner
-// used by transport and persistence decoding.
-func Bytes(value any) ([]byte, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return Canonicalize(raw)
+// AdmissionError identifies syntactically valid JSON that violates the
+// platform's semantic value contract.
+type AdmissionError struct {
+	err error
 }
 
-// Decode admits exactly one semantic JSON value, rejects duplicate keys and
-// unsupported numbers, and writes only normalized JSON values to destination.
-func Decode(raw []byte, destination any) error {
-	value, err := decodeValue(raw)
+func (e *AdmissionError) Error() string { return e.err.Error() }
+func (e *AdmissionError) Unwrap() error { return e.err }
+
+func IsAdmissionError(err error) bool {
+	var target *AdmissionError
+	return errors.As(err, &target)
+}
+
+func admissionErrorf(format string, args ...any) error {
+	return &AdmissionError{err: fmt.Errorf(format, args...)}
+}
+
+// Decode admits exactly one JSON value into the closed semantic value model.
+func Decode(raw []byte) (semanticvalue.Value, error) {
+	if !utf8.Valid(raw) {
+		return semanticvalue.Value{}, fmt.Errorf("semantic JSON is not valid UTF-8")
+	}
+	if err := validateStringLexemes(raw); err != nil {
+		return semanticvalue.Value{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	value, err := decodeTokenValue(decoder)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return semanticvalue.Value{}, fmt.Errorf("trailing JSON content")
+		}
+		return semanticvalue.Value{}, fmt.Errorf("trailing JSON content: %w", err)
+	}
+	return value, nil
+}
+
+// DecodeInto is a centralized typed adapter. The admitted Value remains the
+// semantic owner; destination is only a transport projection.
+func DecodeInto(raw []byte, destination any) error {
+	value, err := Decode(raw)
 	if err != nil {
 		return err
 	}
-	canonical, err := json.Marshal(value)
+	return ValueInto(value, destination)
+}
+
+func ValueInto(value semanticvalue.Value, destination any) error {
+	canonical, err := Encode(value)
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(canonical, destination)
 }
 
-func decodeValue(raw []byte) (any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	value, err := decodeTokenValue(decoder)
+// FromGo converts a typed programmatic value through its declared JSON DTO
+// projection and admits the result into the semantic model.
+func FromGo(value any) (semanticvalue.Value, error) {
+	if admitted, ok := value.(semanticvalue.Value); ok {
+		return admitted, nil
+	}
+	if err := validateGoStrings(reflect.ValueOf(value), map[visit]struct{}{}); err != nil {
+		return semanticvalue.Value{}, err
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	return Decode(raw)
+}
+
+type visit struct {
+	typeID reflect.Type
+	ptr    uintptr
+}
+
+func validateGoStrings(value reflect.Value, seen map[visit]struct{}) error {
+	if !value.IsValid() {
+		return nil
+	}
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return nil
+		}
+		value = value.Elem()
+	}
+	switch value.Kind() {
+	case reflect.String:
+		if !utf8.ValidString(value.String()) {
+			return fmt.Errorf("programmatic semantic string is not valid UTF-8")
+		}
+	case reflect.Pointer:
+		if value.IsNil() {
+			return nil
+		}
+		key := visit{typeID: value.Type(), ptr: value.Pointer()}
+		if _, ok := seen[key]; ok {
+			return nil
+		}
+		seen[key] = struct{}{}
+		return validateGoStrings(value.Elem(), seen)
+	case reflect.Map:
+		if value.IsNil() {
+			return nil
+		}
+		key := visit{typeID: value.Type(), ptr: value.Pointer()}
+		if _, ok := seen[key]; ok {
+			return nil
+		}
+		seen[key] = struct{}{}
+		iter := value.MapRange()
+		for iter.Next() {
+			if err := validateGoStrings(iter.Key(), seen); err != nil {
+				return err
+			}
+			if err := validateGoStrings(iter.Value(), seen); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		if value.IsNil() {
+			return nil
+		}
+		key := visit{typeID: value.Type(), ptr: value.Pointer()}
+		if value.Pointer() != 0 {
+			if _, ok := seen[key]; ok {
+				return nil
+			}
+			seen[key] = struct{}{}
+		}
+		for i := 0; i < value.Len(); i++ {
+			if err := validateGoStrings(value.Index(i), seen); err != nil {
+				return err
+			}
+		}
+	case reflect.Array:
+		for i := 0; i < value.Len(); i++ {
+			if err := validateGoStrings(value.Index(i), seen); err != nil {
+				return err
+			}
+		}
+	case reflect.Struct:
+		typeOf := value.Type()
+		for i := 0; i < value.NumField(); i++ {
+			if typeOf.Field(i).PkgPath != "" {
+				continue
+			}
+			if err := validateGoStrings(value.Field(i), seen); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Bytes converts a typed DTO or admitted Value to canonical semantic JSON.
+func Bytes(value any) ([]byte, error) {
+	admitted, err := FromGo(value)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := decoder.Token(); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("trailing JSON content")
+	return Encode(admitted)
+}
+
+func Encode(value semanticvalue.Value) ([]byte, error) {
+	return appendValue(nil, value)
+}
+
+func appendValue(dst []byte, value semanticvalue.Value) ([]byte, error) {
+	switch value.Kind() {
+	case semanticvalue.KindNull:
+		return append(dst, "null"...), nil
+	case semanticvalue.KindBool:
+		boolean, _ := value.Bool()
+		return strconv.AppendBool(dst, boolean), nil
+	case semanticvalue.KindNumber:
+		number, _ := value.Number()
+		raw, err := json.Marshal(number)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("trailing JSON content: %w", err)
+		return append(dst, raw...), nil
+	case semanticvalue.KindString:
+		text, _ := value.String()
+		raw, err := json.Marshal(text)
+		if err != nil {
+			return nil, err
+		}
+		return append(dst, raw...), nil
+	case semanticvalue.KindArray:
+		dst = append(dst, '[')
+		for i := 0; i < value.Len(); i++ {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			item, _ := value.At(i)
+			var err error
+			dst, err = appendValue(dst, item)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return append(dst, ']'), nil
+	case semanticvalue.KindObject:
+		dst = append(dst, '{')
+		for i, member := range value.Members() {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			raw, err := json.Marshal(member.Name)
+			if err != nil {
+				return nil, err
+			}
+			dst = append(dst, raw...)
+			dst = append(dst, ':')
+			dst, err = appendValue(dst, member.Value)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return append(dst, '}'), nil
+	default:
+		return nil, fmt.Errorf("unsupported semantic value kind %d", value.Kind())
+	}
+}
+
+func decodeTokenValue(decoder *json.Decoder) (semanticvalue.Value, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	switch typed := token.(type) {
+	case nil:
+		return semanticvalue.Null(), nil
+	case bool:
+		return semanticvalue.Bool(typed), nil
+	case string:
+		return semanticvalue.String(typed)
+	case json.Number:
+		return decodeNumber(typed.String())
+	case json.Delim:
+		switch typed {
+		case '{':
+			entries := []semanticvalue.ObjectEntry{}
+			seen := map[string]struct{}{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return semanticvalue.Value{}, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return semanticvalue.Value{}, fmt.Errorf("JSON object key is not a string")
+				}
+				if _, exists := seen[key]; exists {
+					return semanticvalue.Value{}, admissionErrorf("duplicate JSON object key %q", key)
+				}
+				seen[key] = struct{}{}
+				value, err := decodeTokenValue(decoder)
+				if err != nil {
+					return semanticvalue.Value{}, err
+				}
+				entries = append(entries, semanticvalue.ObjectEntry{Name: key, Value: value})
+			}
+			if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
+				return semanticvalue.Value{}, fmt.Errorf("unterminated JSON object")
+			}
+			return semanticvalue.Object(entries)
+		case '[':
+			values := []semanticvalue.Value{}
+			for decoder.More() {
+				value, err := decodeTokenValue(decoder)
+				if err != nil {
+					return semanticvalue.Value{}, err
+				}
+				values = append(values, value)
+			}
+			if end, err := decoder.Token(); err != nil || end != json.Delim(']') {
+				return semanticvalue.Value{}, fmt.Errorf("unterminated JSON array")
+			}
+			return semanticvalue.Array(values), nil
+		}
+	}
+	return semanticvalue.Value{}, fmt.Errorf("unsupported JSON token %v", token)
+}
+
+func decodeNumber(raw string) (semanticvalue.Value, error) {
+	if !jsonNumberPattern.MatchString(raw) {
+		return semanticvalue.Value{}, admissionErrorf("unsupported JSON number spelling %q", raw)
+	}
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if math.IsInf(parsed, 0) {
+		return semanticvalue.Value{}, admissionErrorf("JSON number %q overflows binary64", raw)
+	}
+	if parsed == 0 && !lexicallyZero(raw) {
+		return semanticvalue.Value{}, admissionErrorf("JSON number %q underflows binary64 to zero", raw)
+	}
+	if err != nil && parsed == 0 {
+		return semanticvalue.Value{}, admissionErrorf("unsupported JSON number %q: %v", raw, err)
+	}
+	value, valueErr := semanticvalue.Number(parsed)
+	if valueErr != nil {
+		return semanticvalue.Value{}, admissionErrorf("unsupported JSON number %q: %v", raw, valueErr)
 	}
 	return value, nil
 }
 
-func decodeTokenValue(decoder *json.Decoder) (any, error) {
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, err
-	}
-	switch typed := token.(type) {
-	case nil, bool, string:
-		return typed, nil
-	case json.Number:
-		return NormalizeNumber(typed)
-	case json.Delim:
-		switch typed {
-		case '{':
-			object := map[string]any{}
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return nil, err
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return nil, fmt.Errorf("JSON object key is not a string")
-				}
-				if _, exists := object[key]; exists {
-					return nil, fmt.Errorf("duplicate JSON object key %q", key)
-				}
-				value, err := decodeTokenValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				object[key] = value
+func lexicallyZero(raw string) bool {
+	for _, char := range raw {
+		if char == 'e' || char == 'E' {
+			break
+		}
+		switch char {
+		case '-', '+', '.':
+			continue
+		case '0':
+			continue
+		default:
+			if char >= '1' && char <= '9' {
+				return false
 			}
-			if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
-				return nil, fmt.Errorf("unterminated JSON object")
-			}
-			return object, nil
-		case '[':
-			array := []any{}
-			for decoder.More() {
-				value, err := decodeTokenValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				array = append(array, value)
-			}
-			if end, err := decoder.Token(); err != nil || end != json.Delim(']') {
-				return nil, fmt.Errorf("unterminated JSON array")
-			}
-			return array, nil
 		}
 	}
-	return nil, fmt.Errorf("unsupported JSON token %v", token)
+	return true
 }
 
-// NormalizeNumber applies the v1 semantic JSON numeric contract. Integers
-// outside the I-JSON safe range, non-finite values, negative zero, and
-// unsupported lexical spellings fail closed.
+// NormalizeNumber is a compatibility adapter for typed validation code in the
+// approved child. It returns the closed model's binary64 representation.
 func NormalizeNumber(value any) (float64, error) {
-	var number float64
+	var raw string
 	switch typed := value.(type) {
 	case int:
-		return normalizeInteger(int64(typed))
+		raw = strconv.FormatInt(int64(typed), 10)
 	case int8:
-		return normalizeInteger(int64(typed))
+		raw = strconv.FormatInt(int64(typed), 10)
 	case int16:
-		return normalizeInteger(int64(typed))
+		raw = strconv.FormatInt(int64(typed), 10)
 	case int32:
-		return normalizeInteger(int64(typed))
+		raw = strconv.FormatInt(int64(typed), 10)
 	case int64:
-		return normalizeInteger(typed)
+		raw = strconv.FormatInt(typed, 10)
 	case uint:
-		return normalizeUnsignedInteger(uint64(typed))
+		raw = strconv.FormatUint(uint64(typed), 10)
 	case uint8:
-		return normalizeUnsignedInteger(uint64(typed))
+		raw = strconv.FormatUint(uint64(typed), 10)
 	case uint16:
-		return normalizeUnsignedInteger(uint64(typed))
+		raw = strconv.FormatUint(uint64(typed), 10)
 	case uint32:
-		return normalizeUnsignedInteger(uint64(typed))
+		raw = strconv.FormatUint(uint64(typed), 10)
 	case uint64:
-		return normalizeUnsignedInteger(typed)
+		raw = strconv.FormatUint(typed, 10)
 	case float32:
-		parsed, err := strconv.ParseFloat(strconv.FormatFloat(float64(typed), 'g', -1, 32), 64)
-		if err != nil {
-			return 0, fmt.Errorf("unsupported JSON number %v: %w", typed, err)
-		}
-		number = parsed
+		raw = strconv.FormatFloat(float64(typed), 'g', -1, 32)
 	case float64:
-		number = typed
-	case json.Number:
-		if !jsonNumberPattern.MatchString(typed.String()) {
-			return 0, fmt.Errorf("unsupported JSON number spelling %q", typed)
-		}
-		parsed, err := strconv.ParseFloat(typed.String(), 64)
+		value, err := semanticvalue.Number(typed)
 		if err != nil {
-			return 0, fmt.Errorf("unsupported JSON number %q: %w", typed, err)
+			return 0, err
 		}
-		number = parsed
+		number, _ := value.Number()
+		return number, nil
+	case json.Number:
+		raw = typed.String()
+	case semanticvalue.Value:
+		number, ok := typed.Number()
+		if !ok {
+			return 0, fmt.Errorf("semantic value is not a number")
+		}
+		return number, nil
 	default:
-		return 0, fmt.Errorf("value %T is not a JSON number", value)
+		return 0, fmt.Errorf("value %T is not a semantic number", value)
 	}
-	if math.IsNaN(number) || math.IsInf(number, 0) {
-		return 0, fmt.Errorf("non-finite JSON number")
+	admitted, err := decodeNumber(raw)
+	if err != nil {
+		return 0, err
 	}
-	if number == 0 && math.Signbit(number) {
-		return 0, fmt.Errorf("negative zero is not supported")
-	}
-	if math.Trunc(number) == number && math.Abs(number) > MaxSafeInteger {
-		return 0, fmt.Errorf("integer-valued JSON number is outside I-JSON safe range")
-	}
+	number, _ := admitted.Number()
 	return number, nil
 }
 
-func normalizeInteger(value int64) (float64, error) {
-	if value < -MaxSafeInteger || value > MaxSafeInteger {
-		return 0, fmt.Errorf("integer JSON number is outside I-JSON safe range")
-	}
-	return float64(value), nil
-}
-
-func normalizeUnsignedInteger(value uint64) (float64, error) {
-	if value > MaxSafeInteger {
-		return 0, fmt.Errorf("integer JSON number is outside I-JSON safe range")
-	}
-	return float64(value), nil
-}
-
 func Canonicalize(raw []byte) ([]byte, error) {
-	var value any
-	if err := Decode(raw, &value); err != nil {
+	value, err := Decode(raw)
+	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(value)
+	return Encode(value)
 }
 
 func Hash(value any) (string, error) {
-	raw, err := Bytes(value)
+	admitted, err := FromGo(value)
+	if err != nil {
+		return "", err
+	}
+	return HashValue(admitted)
+}
+
+func HashValue(value semanticvalue.Value) (string, error) {
+	raw, err := Encode(value)
 	if err != nil {
 		return "", err
 	}
@@ -210,4 +440,61 @@ func HashRaw(raw []byte) (string, error) {
 func HashBytes(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func validateStringLexemes(raw []byte) error {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '"' {
+			continue
+		}
+		for i++; i < len(raw); i++ {
+			switch raw[i] {
+			case '"':
+				goto nextString
+			case '\\':
+				i++
+				if i >= len(raw) {
+					return fmt.Errorf("unterminated JSON string escape")
+				}
+				if raw[i] != 'u' {
+					continue
+				}
+				first, next, err := decodeUnicodeEscape(raw, i)
+				if err != nil {
+					return err
+				}
+				i = next - 1
+				if first >= 0xD800 && first <= 0xDBFF {
+					if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+						return fmt.Errorf("unpaired high surrogate in JSON string")
+					}
+					second, after, err := decodeUnicodeEscape(raw, i+2)
+					if err != nil || second < 0xDC00 || second > 0xDFFF || utf16.DecodeRune(rune(first), rune(second)) == utf8.RuneError {
+						return fmt.Errorf("invalid surrogate pair in JSON string")
+					}
+					i = after - 1
+				} else if first >= 0xDC00 && first <= 0xDFFF {
+					return fmt.Errorf("unpaired low surrogate in JSON string")
+				}
+			default:
+				if raw[i] < 0x20 {
+					return fmt.Errorf("unescaped control character in JSON string")
+				}
+			}
+		}
+		return fmt.Errorf("unterminated JSON string")
+	nextString:
+	}
+	return nil
+}
+
+func decodeUnicodeEscape(raw []byte, uIndex int) (uint16, int, error) {
+	if uIndex+5 > len(raw) {
+		return 0, 0, fmt.Errorf("short Unicode escape in JSON string")
+	}
+	value, err := strconv.ParseUint(string(raw[uIndex+1:uIndex+5]), 16, 16)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid Unicode escape in JSON string")
+	}
+	return uint16(value), uIndex + 5, nil
 }

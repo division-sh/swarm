@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
@@ -168,6 +169,9 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 		{name: "duplicate semantic key", body: `{"jsonrpc":"2.0","id":"duplicate-key","method":"run.list","params":{"limit":1,"limit":2}}`, wantCode: codeInvalidRequest},
 		{name: "unsafe integer param", body: `{"jsonrpc":"2.0","id":"unsafe-integer","method":"run.list","params":{"limit":9007199254740992}}`, wantCode: codeInvalidRequest},
 		{name: "negative zero param", body: `{"jsonrpc":"2.0","id":"negative-zero","method":"run.list","params":{"limit":-0}}`, wantCode: codeInvalidRequest},
+		{name: "positive underflow param", body: `{"jsonrpc":"2.0","id":"positive-underflow","method":"run.list","params":{"limit":1e-4000}}`, wantCode: codeInvalidRequest},
+		{name: "negative underflow param", body: `{"jsonrpc":"2.0","id":"negative-underflow","method":"run.list","params":{"limit":-1e-4000}}`, wantCode: codeInvalidRequest},
+		{name: "representable subnormal reaches schema validation", body: `{"jsonrpc":"2.0","id":"subnormal","method":"run.list","params":{"limit":5e-324}}`, wantCode: codeInvalidParams},
 		{name: "method not found", body: `{"jsonrpc":"2.0","id":"missing","method":"missing.method","params":{}}`, wantCode: codeMethodNotFound},
 		{name: "invalid params object", body: `{"jsonrpc":"2.0","id":"bad-params-object","method":"run.get","params":["run-1"]}`, wantCode: codeInvalidParams},
 		{name: "invalid params required", body: `{"jsonrpc":"2.0","id":"bad-params-required","method":"run.get","params":{}}`, wantCode: codeInvalidParams},
@@ -231,16 +235,122 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 }
 
 func TestRequestBodyHashUsesCanonicalSemanticNumbers(t *testing.T) {
-	lower := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": float64(9007199254740990)}})
-	upper := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": float64(9007199254740991)}})
+	lower := requestBodyHash("mailbox.decide", mustTestSemanticObject(map[string]any{"fields": map[string]any{"score": float64(9007199254740990)}}))
+	upper := requestBodyHash("mailbox.decide", mustTestSemanticObject(map[string]any{"fields": map[string]any{"score": float64(9007199254740991)}}))
 	if lower == upper {
 		t.Fatalf("distinct safe integers share request hash %q", lower)
 	}
-	integer := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": 1}})
-	decimal := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": 1.0}})
+	integer := requestBodyHash("mailbox.decide", mustTestSemanticObject(map[string]any{"fields": map[string]any{"score": 1}}))
+	decimal := requestBodyHash("mailbox.decide", mustTestSemanticObject(map[string]any{"fields": map[string]any{"score": 1.0}}))
 	if integer != decimal {
 		t.Fatalf("equivalent semantic numbers have different hashes: %q != %q", integer, decimal)
 	}
+}
+
+func TestJSONRPCOutputAdmissionFailsClosedBeforeHTTPAndWebSocketWrites(t *testing.T) {
+	const unsafeInteger = int64(9007199254740992)
+	const safeInteger = int64(9007199254740991)
+
+	t.Run("http response", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		writeRPC(recorder, rpcResponse{JSONRPC: jsonRPCVersion, ID: "unsafe-http", Result: map[string]any{"value": unsafeInteger}})
+		if _, err := canonicaljson.Decode(recorder.Body.Bytes()); err != nil {
+			t.Fatalf("HTTP fallback is not admitted semantic JSON: %v body=%s", err, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), "9007199254740992") {
+			t.Fatalf("HTTP response leaked unsafe result: %s", recorder.Body.String())
+		}
+		var failure rpcResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &failure); err != nil {
+			t.Fatal(err)
+		}
+		if failure.Error == nil || failure.Error.Code != codeInternalError || failure.ID != "unsafe-http" {
+			t.Fatalf("HTTP response = %#v, want correlated internal failure", failure)
+		}
+		requireRPCFailure(t, failure.Error, runtimefailures.ClassInternalFailure, "typed_read_result_marshal_failed")
+
+		safe := httptest.NewRecorder()
+		writeRPC(safe, rpcResponse{JSONRPC: jsonRPCVersion, ID: "safe-http", Result: map[string]any{"value": safeInteger}})
+		encoded, err := canonicaljson.Decode(safe.Body.Bytes())
+		if err != nil {
+			t.Fatalf("safe HTTP response rejected: %v body=%s", err, safe.Body.String())
+		}
+		result, _ := encoded.Lookup("result")
+		value, _ := result.Lookup("value")
+		number, ok := value.Number()
+		if !ok || number != float64(safeInteger) {
+			t.Fatalf("safe HTTP response value = %#v, want %d", value.Interface(), safeInteger)
+		}
+	})
+
+	t.Run("websocket response remains usable", func(t *testing.T) {
+		handler := testHandler(t, Options{
+			AuthTokens: []string{testToken},
+			Handlers: map[string]MethodHandler{
+				"health.subscribe": func(context.Context, Request) (any, error) {
+					return map[string]any{"value": unsafeInteger}, nil
+				},
+			},
+		})
+		server := httptest.NewServer(handler)
+		defer server.Close()
+		conn := dialTestWS(t, server.URL)
+		defer conn.Close()
+
+		writeWSRequest(t, conn, map[string]any{"jsonrpc": jsonRPCVersion, "id": "unsafe-ws", "method": "health.subscribe", "params": map[string]any{}})
+		failure := readWSResponse(t, conn)
+		if failure.Error == nil || failure.Error.Code != codeInternalError || failure.ID != "unsafe-ws" {
+			t.Fatalf("WebSocket response = %#v, want correlated internal failure", failure)
+		}
+		requireRPCFailure(t, failure.Error, runtimefailures.ClassInternalFailure, "typed_read_result_marshal_failed")
+
+		writeWSRequest(t, conn, map[string]any{"jsonrpc": jsonRPCVersion, "id": "after-failure", "method": "rpc.unsubscribe", "params": map[string]any{"subscription_id": "sub-1"}})
+		after := readWSResponse(t, conn)
+		if after.Error != nil || asMap(t, after.Result)["ok"] != true {
+			t.Fatalf("WebSocket did not remain usable after response fallback: %#v", after)
+		}
+	})
+
+	t.Run("websocket notification closes after safe failure", func(t *testing.T) {
+		upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			ctx, cancel := context.WithCancel(r.Context())
+			session := &webSocketSession{conn: conn, ctx: ctx, cancel: cancel, out: make(chan outboundMessage, 1), subs: map[string]context.CancelFunc{}}
+			go session.writeLoop()
+			_ = session.notify("unsafe-subscription", map[string]any{"value": unsafeInteger})
+			<-ctx.Done()
+		}))
+		defer server.Close()
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+
+		raw := requireWSMessage(t, conn, "safe WebSocket notification failure")
+		if _, err := canonicaljson.Decode(raw); err != nil {
+			t.Fatalf("WebSocket notification fallback is not admitted semantic JSON: %v raw=%s", err, raw)
+		}
+		if strings.Contains(string(raw), "9007199254740992") {
+			t.Fatalf("WebSocket notification leaked unsafe result: %s", raw)
+		}
+		var failure rpcResponse
+		if err := json.Unmarshal(raw, &failure); err != nil {
+			t.Fatal(err)
+		}
+		if failure.Error == nil || failure.Error.Code != codeInternalError || failure.ID != nil {
+			t.Fatalf("WebSocket notification fallback = %#v", failure)
+		}
+		requireRPCFailure(t, failure.Error, runtimefailures.ClassInternalFailure, "typed_read_result_marshal_failed")
+		if _, _, err := conn.ReadMessage(); err == nil {
+			t.Fatal("WebSocket notification admission failure left the connection open")
+		}
+	})
 }
 
 func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
@@ -363,6 +473,17 @@ func TestHandlerWebSocketAuthAndFrameValidation(t *testing.T) {
 	}
 	if invalid.Error == nil || invalid.Error.Code != codeParseError {
 		t.Fatalf("invalid-frame error = %#v, want parse error", invalid.Error)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":"ws-unsafe","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1","unsafe":9007199254740992}}`)); err != nil {
+		t.Fatalf("write unsafe semantic frame: %v", err)
+	}
+	var unsafe rpcResponse
+	if err := conn.ReadJSON(&unsafe); err != nil {
+		t.Fatalf("read unsafe-frame response: %v", err)
+	}
+	if unsafe.Error == nil || unsafe.Error.Code != codeInvalidRequest {
+		t.Fatalf("unsafe-frame error = %#v, want invalid request", unsafe.Error)
 	}
 
 	if err := conn.WriteJSON(map[string]any{

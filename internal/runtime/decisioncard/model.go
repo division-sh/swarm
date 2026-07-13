@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
@@ -145,10 +146,18 @@ func (p CadencePolicy) Stamp(createdAt time.Time) Cadence {
 }
 
 type Snapshot struct {
-	Decision string                                              `json:"decision"`
-	Title    string                                              `json:"title"`
-	Context  map[string]any                                      `json:"context"`
-	Outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan `json:"outcomes"`
+	Decision string
+	Title    string
+	Context  semanticvalue.Value
+	Outcomes map[string]FrozenOutcome
+}
+
+func (s Snapshot) MarshalJSON() ([]byte, error) {
+	value, err := s.SemanticValue()
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.Encode(value)
 }
 
 type decisionSchemaProjection struct {
@@ -172,51 +181,71 @@ type decisionEmitSchemaProjection struct {
 }
 
 type Card struct {
-	CardID             string         `json:"card_id"`
-	RunID              string         `json:"run_id"`
-	FlowInstance       string         `json:"flow_instance"`
-	FlowID             string         `json:"flow_id,omitempty"`
-	EntityID           string         `json:"entity_id"`
-	Stage              string         `json:"stage"`
-	StageActivationID  string         `json:"stage_activation_id"`
-	DecisionID         string         `json:"decision_id"`
-	Status             string         `json:"status"`
-	Snapshot           Snapshot       `json:"snapshot"`
-	CardContentHash    string         `json:"card_content_hash"`
-	DecisionSchemaHash string         `json:"decision_schema_hash"`
-	BundleHash         string         `json:"bundle_hash"`
-	WorkflowVersion    string         `json:"workflow_version"`
-	EffectiveCadence   Cadence        `json:"effective_cadence"`
-	Provenance         map[string]any `json:"provenance"`
-	Verdict            string         `json:"verdict,omitempty"`
-	Fields             map[string]any `json:"fields,omitempty"`
-	DecidedBy          string         `json:"decided_by,omitempty"`
-	DecidedAt          time.Time      `json:"decided_at,omitempty"`
-	DeferredUntil      time.Time      `json:"deferred_until,omitempty"`
-	DecisionEventID    string         `json:"decision_event_id,omitempty"`
-	DeliveryReceiptID  string         `json:"delivery_receipt_id,omitempty"`
-	DeliveryRenderHash string         `json:"delivery_render_hash,omitempty"`
-	SupersededReason   string         `json:"superseded_reason,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
+	CardID             string              `json:"card_id"`
+	RunID              string              `json:"run_id"`
+	FlowInstance       string              `json:"flow_instance"`
+	FlowID             string              `json:"flow_id,omitempty"`
+	EntityID           string              `json:"entity_id"`
+	Stage              string              `json:"stage"`
+	StageActivationID  string              `json:"stage_activation_id"`
+	DecisionID         string              `json:"decision_id"`
+	Status             string              `json:"status"`
+	Snapshot           Snapshot            `json:"snapshot"`
+	CardContentHash    string              `json:"card_content_hash"`
+	DecisionSchemaHash string              `json:"decision_schema_hash"`
+	BundleHash         string              `json:"bundle_hash"`
+	WorkflowVersion    string              `json:"workflow_version"`
+	EffectiveCadence   Cadence             `json:"effective_cadence"`
+	Provenance         semanticvalue.Value `json:"-"`
+	Verdict            string              `json:"verdict,omitempty"`
+	Fields             semanticvalue.Value `json:"-"`
+	DecidedBy          string              `json:"decided_by,omitempty"`
+	DecidedAt          time.Time           `json:"decided_at,omitempty"`
+	DeferredUntil      time.Time           `json:"deferred_until,omitempty"`
+	DecisionEventID    string              `json:"decision_event_id,omitempty"`
+	DeliveryReceiptID  string              `json:"delivery_receipt_id,omitempty"`
+	DeliveryRenderHash string              `json:"delivery_render_hash,omitempty"`
+	SupersededReason   string              `json:"superseded_reason,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
 func (c Card) MarshalJSON() ([]byte, error) {
-	type cardAlias Card
-	var decidedAt, deferredUntil *time.Time
+	snapshot, err := SnapshotJSON(c)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{
+		"card_id": c.CardID, "run_id": c.RunID, "flow_instance": c.FlowInstance,
+		"entity_id": c.EntityID, "stage": c.Stage, "stage_activation_id": c.StageActivationID,
+		"decision_id": c.DecisionID, "status": c.Status, "snapshot": json.RawMessage(snapshot),
+		"card_content_hash": c.CardContentHash, "decision_schema_hash": c.DecisionSchemaHash,
+		"bundle_hash": c.BundleHash, "workflow_version": c.WorkflowVersion,
+		"effective_cadence": c.EffectiveCadence, "provenance": c.Provenance.Interface(),
+		"created_at": c.CreatedAt.UTC(), "updated_at": c.UpdatedAt.UTC(),
+	}
+	if c.FlowID != "" {
+		out["flow_id"] = c.FlowID
+	}
+	for name, value := range map[string]string{
+		"verdict": c.Verdict, "decided_by": c.DecidedBy, "decision_event_id": c.DecisionEventID,
+		"delivery_receipt_id": c.DeliveryReceiptID, "delivery_render_hash": c.DeliveryRenderHash,
+		"superseded_reason": c.SupersededReason,
+	} {
+		if value != "" {
+			out[name] = value
+		}
+	}
+	if c.Status == StatusDecided {
+		out["fields"] = c.Fields.Interface()
+	}
 	if !c.DecidedAt.IsZero() {
-		value := c.DecidedAt.UTC()
-		decidedAt = &value
+		out["decided_at"] = c.DecidedAt.UTC()
 	}
 	if !c.DeferredUntil.IsZero() {
-		value := c.DeferredUntil.UTC()
-		deferredUntil = &value
+		out["deferred_until"] = c.DeferredUntil.UTC()
 	}
-	return json.Marshal(struct {
-		cardAlias
-		DecidedAt     *time.Time `json:"decided_at,omitempty"`
-		DeferredUntil *time.Time `json:"deferred_until,omitempty"`
-	}{cardAlias: cardAlias(c), DecidedAt: decidedAt, DeferredUntil: deferredUntil})
+	return canonicaljson.Bytes(out)
 }
 
 type InputDraft struct {
@@ -276,7 +305,7 @@ func (i ListItem) MarshalJSON() ([]byte, error) {
 type DecideRequest struct {
 	CardID              string
 	Verdict             string
-	Fields              map[string]any
+	Fields              semanticvalue.Value
 	ActorTokenID        string
 	ObservedContentHash string
 	DeliveryReceiptID   string
@@ -321,12 +350,19 @@ type SubscriptionOptions struct {
 }
 
 type Change struct {
-	Sequence   int64          `json:"sequence"`
-	CardID     string         `json:"card_id"`
-	RunID      string         `json:"run_id"`
-	ChangeType string         `json:"change_type"`
-	Payload    map[string]any `json:"payload"`
-	CreatedAt  time.Time      `json:"created_at"`
+	Sequence   int64               `json:"sequence"`
+	CardID     string              `json:"card_id"`
+	RunID      string              `json:"run_id"`
+	ChangeType string              `json:"change_type"`
+	Payload    semanticvalue.Value `json:"-"`
+	CreatedAt  time.Time           `json:"created_at"`
+}
+
+func (c Change) MarshalJSON() ([]byte, error) {
+	return canonicaljson.Bytes(map[string]any{
+		"sequence": c.Sequence, "card_id": c.CardID, "run_id": c.RunID,
+		"change_type": c.ChangeType, "payload": c.Payload.Interface(), "created_at": c.CreatedAt.UTC(),
+	})
 }
 
 func (c Card) Validate() error {
@@ -352,6 +388,12 @@ func (c Card) Validate() error {
 	}
 	if c.Status == StatusSuperseded && strings.TrimSpace(c.SupersededReason) == "" {
 		return fmt.Errorf("superseded card is missing reason")
+	}
+	if c.Provenance.Kind() != semanticvalue.KindObject {
+		return fmt.Errorf("decision card provenance must be an object")
+	}
+	if c.Fields.Kind() != semanticvalue.KindObject {
+		return fmt.Errorf("decision card fields must be an object")
 	}
 	if c.DecisionID != strings.TrimSpace(c.DecisionID) {
 		return fmt.Errorf("decision card decision_id %q is not canonical", c.DecisionID)
@@ -401,14 +443,29 @@ func (c Card) Validate() error {
 }
 
 func validateSnapshotContract(snapshot Snapshot) error {
-	contextKeys := make([]string, 0, len(snapshot.Context))
-	for name := range snapshot.Context {
-		contextKeys = append(contextKeys, name)
+	contextValues, ok := snapshot.Context.ObjectMap()
+	if !ok {
+		return fmt.Errorf("decision card context must be an object")
 	}
-	if err := runtimecontracts.ValidateCanonicalWorkflowGateSnapshotIdentity(snapshot.Decision, contextKeys, snapshot.Outcomes); err != nil {
+	if err := validateCanonicalDecisionMapIdentity("context field", contextValues); err != nil {
+		return err
+	}
+	if snapshot.Decision == "" || snapshot.Decision != strings.TrimSpace(snapshot.Decision) {
+		return fmt.Errorf("stage gate decision id %q is not canonical", snapshot.Decision)
+	}
+	if err := validateCanonicalDecisionMapIdentity("verdict", snapshot.Outcomes); err != nil {
 		return err
 	}
 	for verdict, outcome := range snapshot.Outcomes {
+		if outcome.Verdict != "" && outcome.Verdict != verdict {
+			return fmt.Errorf("outcome %s carries mismatched verdict identity %q", verdict, outcome.Verdict)
+		}
+		if err := validateCanonicalDecisionMapIdentity("outcome "+verdict+" input field", outcome.Input); err != nil {
+			return err
+		}
+		if err := validateCanonicalDecisionMapIdentity("outcome "+verdict+" emit field", outcome.Emit.Fields); err != nil {
+			return err
+		}
 		for name, declaration := range outcome.Input {
 			if _, err := runtimecontracts.ValidateCanonicalWorkflowGateInputType(declaration.Type); err != nil {
 				return fmt.Errorf("decision card outcome %s input %s: %w", strings.TrimSpace(verdict), strings.TrimSpace(name), err)
@@ -421,17 +478,39 @@ func validateSnapshotContract(snapshot Snapshot) error {
 	return nil
 }
 
-func validateFrozenOutcomeContract(verdict string, outcome runtimecontracts.WorkflowGateOutcomePlan) error {
+func validateCanonicalDecisionMapIdentity[T any](label string, values map[string]T) error {
+	seen := map[string]string{}
+	for raw := range values {
+		canonical := strings.TrimSpace(raw)
+		if canonical == "" {
+			return fmt.Errorf("stage gate %s is empty", label)
+		}
+		if previous, exists := seen[canonical]; exists {
+			return fmt.Errorf("stage gate %s contains duplicate normalized key %q (from %q and %q)", label, canonical, previous, raw)
+		}
+		seen[canonical] = raw
+		if raw != canonical {
+			return fmt.Errorf("stage gate %s key %q is not canonical; use %q", label, raw, canonical)
+		}
+	}
+	return nil
+}
+
+func validateFrozenOutcomeContract(verdict string, outcome FrozenOutcome) error {
 	if outcome.Emit.Empty() {
-		if len(outcome.EmitSchema) != 0 {
+		if outcome.EmitSchema.Kind() != semanticvalue.KindObject || outcome.EmitSchema.Len() != 0 {
 			return fmt.Errorf("decision card outcome %s carries an event schema without an emit", verdict)
 		}
 		return nil
 	}
-	if len(outcome.EmitSchema) == 0 {
+	if outcome.EmitSchema.Kind() != semanticvalue.KindObject || outcome.EmitSchema.Len() == 0 {
 		return fmt.Errorf("decision card outcome %s emit is missing its frozen resolved event schema", verdict)
 	}
-	properties := runtimesharedjson.SchemaProperties(outcome.EmitSchema["properties"])
+	schema, err := semanticObjectProjection(outcome.EmitSchema, "decision card outcome schema")
+	if err != nil {
+		return err
+	}
+	properties := runtimesharedjson.SchemaProperties(schema["properties"])
 	literalPayload := make(map[string]any, len(outcome.Emit.Fields))
 	allLiteral := true
 	for field, expression := range outcome.Emit.Fields {
@@ -440,8 +519,8 @@ func validateFrozenOutcomeContract(verdict string, outcome runtimecontracts.Work
 			return fmt.Errorf("decision card outcome %s emit field %s is absent from its frozen event schema", verdict, field)
 		}
 		if expression.HasLiteralValue() {
-			literalPayload[field] = expression.Literal
-			if err := runtimeeventschema.ValidateValueAgainstSchema(fieldSchema, expression.Literal); err != nil {
+			literalPayload[field] = expression.Literal.Interface()
+			if err := runtimeeventschema.ValidateValueAgainstSchema(fieldSchema, expression.Literal.Interface()); err != nil {
 				return fmt.Errorf("decision card outcome %s literal emit field %s: %w", verdict, field, err)
 			}
 			continue
@@ -462,20 +541,20 @@ func validateFrozenOutcomeContract(verdict string, outcome runtimecontracts.Work
 			return fmt.Errorf("decision card outcome %s decision.%s type %s is incompatible with emit field %s frozen schema", verdict, inputName, input.Type, field)
 		}
 	}
-	for _, required := range runtimesharedjson.RequiredList(outcome.EmitSchema["required"]) {
+	for _, required := range runtimesharedjson.RequiredList(schema["required"]) {
 		if _, ok := outcome.Emit.Fields[required]; !ok {
 			return fmt.Errorf("decision card outcome %s emit is missing required field %s from its frozen event schema", verdict, required)
 		}
 	}
 	if allLiteral {
-		if err := runtimeeventschema.ValidatePayloadAgainstSchema(outcome.EmitSchema, literalPayload); err != nil {
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema, literalPayload); err != nil {
 			return fmt.Errorf("decision card outcome %s assembled literal payload: %w", verdict, err)
 		}
 	}
 	return nil
 }
 
-func outcomeDecisionField(expression runtimecontracts.ExpressionValue) (string, error) {
+func outcomeDecisionField(expression FrozenExpression) (string, error) {
 	raw := strings.TrimSpace(expression.Ref)
 	if raw == "" {
 		raw = strings.TrimSpace(expression.CEL)
@@ -506,11 +585,14 @@ func New(card Card) (Card, error) {
 	if strings.TrimSpace(card.Snapshot.Title) == "" {
 		card.Snapshot.Title = humanize(card.DecisionID)
 	}
-	if card.Snapshot.Context == nil {
-		card.Snapshot.Context = map[string]any{}
+	if card.Snapshot.Context.Kind() == semanticvalue.KindNull {
+		card.Snapshot.Context = semanticvalue.EmptyObject()
 	}
-	if card.Provenance == nil {
-		card.Provenance = map[string]any{}
+	if card.Provenance.Kind() == semanticvalue.KindNull {
+		card.Provenance = semanticvalue.EmptyObject()
+	}
+	if card.Fields.Kind() == semanticvalue.KindNull {
+		card.Fields = semanticvalue.EmptyObject()
 	}
 	if strings.TrimSpace(card.EffectiveCadence.InputDraftTTL) == "" {
 		card.EffectiveCadence.InputDraftTTL = DefaultInputDraftTTL.String()
@@ -544,18 +626,22 @@ func snapshotHashes(snapshot Snapshot) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	contentHash, err := canonicaljson.Hash(snapshot)
+	contentValue, err := snapshot.SemanticValue()
+	if err != nil {
+		return "", "", fmt.Errorf("encode decision card content: %w", err)
+	}
+	contentHash, err := canonicaljson.HashValue(contentValue)
 	if err != nil {
 		return "", "", fmt.Errorf("hash decision card content: %w", err)
 	}
-	schemaHash, err := canonicaljson.Hash(schema)
+	schemaHash, err := canonicaljson.HashValue(schema)
 	if err != nil {
 		return "", "", fmt.Errorf("hash decision card schema: %w", err)
 	}
 	return contentHash, schemaHash, nil
 }
 
-func projectDecisionSchema(snapshot Snapshot) (decisionSchemaProjection, error) {
+func projectDecisionSchema(snapshot Snapshot) (semanticvalue.Value, error) {
 	projection := decisionSchemaProjection{
 		Version:  "swarm.decision-schema/v1",
 		Outcomes: make(map[string]decisionOutcomeSchemaProjection, len(snapshot.Outcomes)),
@@ -568,18 +654,22 @@ func projectDecisionSchema(snapshot Snapshot) (decisionSchemaProjection, error) 
 			projected.Input[name] = decisionInputSchemaProjection{Type: input.Type, Required: input.Required}
 		}
 		if !outcome.Emit.Empty() {
+			schema, err := semanticObjectProjection(outcome.EmitSchema, "decision card outcome schema")
+			if err != nil {
+				return semanticvalue.Value{}, err
+			}
 			emit := &decisionEmitSchemaProjection{
 				Fields: make(map[string]map[string]any, len(outcome.Emit.Fields)),
-				Schema: runtimeeventschema.CanonicalAcceptanceSchema(outcome.EmitSchema),
+				Schema: runtimeeventschema.CanonicalAcceptanceSchema(schema),
 			}
 			for field, expression := range outcome.Emit.Fields {
 				if expression.HasLiteralValue() {
-					emit.Fields[field] = map[string]any{"kind": "literal", "value": expression.Literal}
+					emit.Fields[field] = map[string]any{"kind": "literal", "value": expression.Literal.Interface()}
 					continue
 				}
 				inputName, err := outcomeDecisionField(expression)
 				if err != nil {
-					return decisionSchemaProjection{}, fmt.Errorf("project decision schema outcome %s field %s: %w", verdict, field, err)
+					return semanticvalue.Value{}, fmt.Errorf("project decision schema outcome %s field %s: %w", verdict, field, err)
 				}
 				emit.Fields[field] = map[string]any{"kind": "decision", "field": inputName}
 			}
@@ -587,10 +677,14 @@ func projectDecisionSchema(snapshot Snapshot) (decisionSchemaProjection, error) 
 		}
 		projection.Outcomes[verdict] = projected
 	}
-	return projection, nil
+	value, err := canonicaljson.FromGo(projection)
+	if err != nil {
+		return semanticvalue.Value{}, fmt.Errorf("admit decision schema projection: %w", err)
+	}
+	return value, nil
 }
 
-func ValidateDecision(card Card, verdict string, fields map[string]any) error {
+func ValidateDecision(card Card, verdict string, fields semanticvalue.Value) error {
 	rawVerdict := verdict
 	verdict = strings.TrimSpace(verdict)
 	if rawVerdict != verdict {
@@ -600,11 +694,15 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrInvalidVerdict, verdict)
 	}
-	if fields == nil {
-		fields = map[string]any{}
+	if fields.Kind() == semanticvalue.KindNull {
+		fields = semanticvalue.EmptyObject()
+	}
+	fieldValues, ok := fields.ObjectMap()
+	if !ok {
+		return fmt.Errorf("%w: fields must be an object", ErrInvalidFields)
 	}
 	seenFields := map[string]string{}
-	for name := range fields {
+	for name := range fieldValues {
 		canonical := strings.TrimSpace(name)
 		if canonical == "" || canonical != name {
 			return fmt.Errorf("%w: field %q is not canonical", ErrInvalidFields, name)
@@ -618,14 +716,14 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 		}
 	}
 	for name, declaration := range outcome.Input {
-		value, present := fields[name]
-		if declaration.Required && (!present || value == nil || strings.TrimSpace(fmt.Sprint(value)) == "") {
+		value, present := fieldValues[name]
+		if declaration.Required && (!present || value.Kind() == semanticvalue.KindNull || (value.Kind() == semanticvalue.KindString && strings.TrimSpace(value.Interface().(string)) == "")) {
 			return fmt.Errorf("%w: required field %s is missing", ErrInvalidFields, name)
 		}
-		if !present || value == nil {
+		if !present || value.Kind() == semanticvalue.KindNull {
 			continue
 		}
-		if !runtimecontracts.WorkflowGateInputValueMatches(declaration.Type, value) {
+		if !runtimecontracts.WorkflowGateInputValueMatches(declaration.Type, value.Interface()) {
 			return fmt.Errorf("%w: field %s must be %s", ErrInvalidFields, name, declaration.Type)
 		}
 	}
@@ -634,7 +732,15 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalidFields, err)
 		}
-		if err := runtimeeventschema.ValidatePayloadAgainstSchema(outcome.EmitSchema, payload); err != nil {
+		schema, schemaErr := semanticObjectProjection(outcome.EmitSchema, "decision card outcome schema")
+		if schemaErr != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidFields, schemaErr)
+		}
+		payloadMap, payloadErr := semanticObjectProjection(payload, "decision card outcome payload")
+		if payloadErr != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidFields, payloadErr)
+		}
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema, payloadMap); err != nil {
 			return fmt.Errorf("%w: emitted payload does not satisfy the frozen event schema: %v", ErrInvalidFields, err)
 		}
 	}
@@ -643,8 +749,12 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 
 // BuildOutcomePayload resolves the frozen gate outcome using only authored
 // literals and exact decision fields. Settlement and routing share this owner.
-func BuildOutcomePayload(outcome runtimecontracts.WorkflowGateOutcomePlan, fields map[string]any) (map[string]any, error) {
-	payload := make(map[string]any, len(outcome.Emit.Fields))
+func BuildOutcomePayload(outcome FrozenOutcome, fields semanticvalue.Value) (semanticvalue.Value, error) {
+	fieldValues, ok := fields.ObjectMap()
+	if !ok {
+		return semanticvalue.Value{}, fmt.Errorf("decision fields must be an object")
+	}
+	payload := make(map[string]semanticvalue.Value, len(outcome.Emit.Fields))
 	for field, expression := range outcome.Emit.Fields {
 		if expression.HasLiteralValue() {
 			payload[field] = expression.Literal
@@ -652,27 +762,31 @@ func BuildOutcomePayload(outcome runtimecontracts.WorkflowGateOutcomePlan, field
 		}
 		inputName, err := outcomeDecisionField(expression)
 		if err != nil {
-			return nil, fmt.Errorf("gate outcome field %s: %w", field, err)
+			return semanticvalue.Value{}, fmt.Errorf("gate outcome field %s: %w", field, err)
 		}
-		value, ok := fields[inputName]
-		if !ok || value == nil {
-			return nil, fmt.Errorf("gate outcome field %s: decision field %s is absent", field, inputName)
+		value, ok := fieldValues[inputName]
+		if !ok || value.Kind() == semanticvalue.KindNull {
+			return semanticvalue.Value{}, fmt.Errorf("gate outcome field %s: decision field %s is absent", field, inputName)
 		}
 		payload[field] = value
 	}
-	return payload, nil
+	return semanticvalue.ObjectFromMap(payload)
 }
 
 func SnapshotJSON(card Card) ([]byte, error) {
-	return canonicaljson.Bytes(card.Snapshot)
+	value, err := card.Snapshot.SemanticValue()
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.Encode(value)
 }
 
 func DecodeSnapshot(raw []byte) (Snapshot, error) {
-	var snapshot Snapshot
-	if err := canonicaljson.Decode(raw, &snapshot); err != nil {
+	value, err := canonicaljson.Decode(raw)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshot, nil
+	return snapshotFromSemanticValue(value)
 }
 
 func humanize(value string) string {

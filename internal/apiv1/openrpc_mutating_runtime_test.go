@@ -18,6 +18,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -25,6 +26,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
@@ -1485,16 +1487,17 @@ type mutatingProbeDecisionCardStore struct {
 }
 
 func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutatingProbeDecisionCardStore {
+	snapshot := mustTestDecisionSnapshot("launch_review", "Launch review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {AdvancesTo: "operating"},
+		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+	})
 	return &mutatingProbeDecisionCardStore{state: state, card: decisioncard.Card{
 		CardID: "card-1", RunID: "00000000-0000-0000-0000-000000000101", FlowInstance: "review/primary", FlowID: "review",
 		EntityID: "entity-1", Stage: "awaiting_review", StageActivationID: "activation-1", DecisionID: "launch_review",
 		Status: decisioncard.StatusPending, CardContentHash: "content-1", DecisionSchemaHash: "schema-1", BundleHash: runStartTestBundleHash,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Snapshot: decisioncard.Snapshot{Decision: "launch_review", Title: "Launch review", Context: map[string]any{}, Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-			"approve": {AdvancesTo: "operating"},
-			"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
-		}},
-		CreatedAt: state.now, UpdatedAt: state.now,
+		Snapshot:         snapshot,
+		CreatedAt:        state.now, UpdatedAt: state.now,
 	}}
 }
 
@@ -1568,7 +1571,23 @@ func (s *mutatingProbeDecisionCardStore) CancelDecisionCardInput(_ context.Conte
 }
 
 func (s *mutatingProbeDecisionCardStore) ListDecisionCardChanges(context.Context, decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
-	return []decisioncard.Change{{Sequence: 1, CardID: s.card.CardID, RunID: s.card.RunID, ChangeType: decisioncard.ChangeCreated, Payload: map[string]any{}, CreatedAt: s.state.now}}, s.err
+	return []decisioncard.Change{{Sequence: 1, CardID: s.card.CardID, RunID: s.card.RunID, ChangeType: decisioncard.ChangeCreated, Payload: semanticvalue.EmptyObject(), CreatedAt: s.state.now}}, s.err
+}
+
+func mustTestDecisionSnapshot(decision, title string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) decisioncard.Snapshot {
+	snapshot, err := decisioncard.FreezeSnapshot(decision, title, context, outcomes)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
+func mustTestSemanticObject(value map[string]any) semanticvalue.Value {
+	admitted, err := canonicaljson.FromGo(value)
+	if err != nil {
+		panic(err)
+	}
+	return admitted
 }
 
 func (s *mutatingProbeDecisionCardStore) SupersedeDecisionCardsForStage(context.Context, string, string, string, string, time.Time) error {

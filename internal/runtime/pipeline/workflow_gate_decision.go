@@ -2,13 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -22,8 +21,19 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 	if pc == nil || pc.decisionCards == nil || pc.workflowStore == nil {
 		return nil, fmt.Errorf("gate decision runtime is not configured")
 	}
-	payload := parsePayloadMap(evt.Payload())
-	cardID := strings.TrimSpace(asString(payload["card_id"]))
+	payload, err := canonicaljson.Decode(evt.Payload())
+	if err != nil {
+		return nil, fmt.Errorf("decode mailbox.card_decided payload: %w", err)
+	}
+	cardIDValue, ok := payload.Lookup("card_id")
+	if !ok {
+		return nil, fmt.Errorf("mailbox.card_decided card_id is required")
+	}
+	cardID, ok := cardIDValue.String()
+	if !ok {
+		return nil, fmt.Errorf("mailbox.card_decided card_id must be a string")
+	}
+	cardID = strings.TrimSpace(cardID)
 	if cardID == "" {
 		return nil, fmt.Errorf("mailbox.card_decided card_id is required")
 	}
@@ -57,7 +67,7 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 	return nil, nil
 }
 
-func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan, emitted *events.Event) error {
+func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, outcome decisioncard.FrozenOutcome, emitted *events.Event) error {
 	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if err := pc.workflowStore.RequireGateRouteAdmitted(txctx, card.RunID); err != nil {
 			return err
@@ -128,7 +138,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	})
 }
 
-func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outcome runtimecontracts.WorkflowGateOutcomePlan) (*events.Event, error) {
+func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outcome decisioncard.FrozenOutcome) (*events.Event, error) {
 	if outcome.Emit.Empty() || strings.TrimSpace(outcome.Emit.Event) == "" {
 		return nil, nil
 	}
@@ -136,7 +146,7 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outco
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := canonicaljson.Encode(payload)
 	if err != nil {
 		return nil, err
 	}

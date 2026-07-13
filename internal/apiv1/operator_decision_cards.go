@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -88,7 +89,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			return map[string]any{"kind": decisioncard.KindNotice, "notice": detail}, nil
 		},
 		"mailbox.decide": func(ctx context.Context, req Request) (any, error) {
-			fields, err := optionalObject(req.Params, "fields")
+			fields, err := optionalSemanticObject(req.SemanticParams, "fields")
 			if err != nil {
 				return nil, err
 			}
@@ -124,11 +125,22 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if !ok || publisher == nil {
 					return nil, fmt.Errorf("event mutation publisher is required for mailbox.decide")
 				}
-				payload, err := json.Marshal(map[string]any{
+				payloadFields := map[string]semanticvalue.Value{"fields": fields}
+				for name, text := range map[string]string{
 					"card_id": card.CardID, "stage_activation_id": card.StageActivationID, "decision_id": card.DecisionID,
-					"verdict": verdict, "fields": fields, "card_content_hash": card.CardContentHash,
+					"verdict": verdict, "card_content_hash": card.CardContentHash,
 					"decision_schema_hash": card.DecisionSchemaHash, "bundle_hash": card.BundleHash,
-				})
+				} {
+					payloadFields[name], err = semanticvalue.String(text)
+					if err != nil {
+						return nil, fmt.Errorf("admit decision lifecycle %s: %w", name, err)
+					}
+				}
+				payloadValue, err := semanticvalue.ObjectFromMap(payloadFields)
+				if err != nil {
+					return nil, err
+				}
+				payload, err := canonicaljson.Encode(payloadValue)
 				if err != nil {
 					return nil, err
 				}
@@ -155,7 +167,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if !ok || publisher == nil {
 					return nil, fmt.Errorf("event mutation publisher is required for mailbox.defer")
 				}
-				payload, err := json.Marshal(map[string]any{"card_id": cardID, "until": until.UTC().Format(time.RFC3339Nano)})
+				payload, err := canonicaljson.Bytes(map[string]any{"card_id": cardID, "until": until.UTC().Format(time.RFC3339Nano)})
 				if err != nil {
 					return nil, err
 				}
@@ -331,7 +343,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		return nil, fmt.Errorf("decision card workflow mutation and idempotency owners are required")
 	}
 	idempotencyKey := strings.TrimSpace(stringParam(req.Params, "idempotency_key"))
-	var result any
+	result := semanticvalue.EmptyObject()
 	var replayed bool
 	now := time.Now().UTC()
 	if opts.Now != nil {
@@ -346,7 +358,11 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			if err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
-			raw, err := json.Marshal(value)
+			admitted, err := canonicaljson.FromGo(value)
+			if err != nil {
+				return store.APIIdempotencyCompletion{}, err
+			}
+			raw, err := canonicaljson.Encode(admitted)
 			if err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
@@ -356,13 +372,15 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			return err
 		}
 		replayed = wasReplay
-		return canonicaljson.Decode(completion.Response, &result)
+		result, err = canonicaljson.Decode(completion.Response)
+		return err
 	})
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, err)
 	}
-	if object, ok := result.(map[string]any); ok {
-		object["idempotency_replayed"] = replayed
+	result, err = result.With("idempotency_replayed", semanticvalue.Bool(replayed))
+	if err != nil {
+		return nil, decisionCardAPIError(cardID, fmt.Errorf("decision card mutation result is not an object: %w", err))
 	}
 	return result, nil
 }
@@ -392,13 +410,16 @@ func decisionCardAPIError(cardID string, err error) error {
 	return err
 }
 
-func optionalObject(params map[string]any, name string) (map[string]any, error) {
-	if params == nil || isEmptyParam(params[name]) {
-		return map[string]any{}, nil
+func optionalSemanticObject(params semanticvalue.Value, name string) (semanticvalue.Value, error) {
+	if params.Kind() != semanticvalue.KindObject {
+		return semanticvalue.Value{}, NewInvalidParamsError(map[string]any{"field": name, "reason": "params must be an object"})
 	}
-	value, ok := params[name].(map[string]any)
-	if !ok {
-		return nil, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be an object"})
+	value, ok := params.Lookup(name)
+	if !ok || value.Kind() == semanticvalue.KindNull {
+		return semanticvalue.EmptyObject(), nil
+	}
+	if value.Kind() != semanticvalue.KindObject {
+		return semanticvalue.Value{}, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be an object"})
 	}
 	return value, nil
 }

@@ -9,6 +9,7 @@ import (
 
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID, entityID string, bindings []runForkGateActivationBinding, now time.Time) error {
@@ -30,7 +31,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		forkCard.StageActivationID = binding.Fork.ActivationID
 		forkCard.Status = decisioncard.StatusPending
 		forkCard.Verdict = ""
-		forkCard.Fields = nil
+		forkCard.Fields = semanticvalue.EmptyObject()
 		forkCard.DecidedBy = ""
 		forkCard.DecidedAt = time.Time{}
 		forkCard.DeferredUntil = time.Time{}
@@ -40,9 +41,22 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		forkCard.SupersededReason = ""
 		forkCard.CreatedAt = now.UTC()
 		forkCard.UpdatedAt = now.UTC()
-		forkCard.Provenance = cloneDecisionCardMap(sourceCard.Provenance)
-		forkCard.Provenance["forked_from_card_id"] = sourceCard.CardID
-		forkCard.Provenance["forked_from_stage_activation_id"] = binding.Source.ActivationID
+		forkedFromCardID, err := semanticvalue.String(sourceCard.CardID)
+		if err != nil {
+			return fmt.Errorf("admit source decision card identity: %w", err)
+		}
+		forkCard.Provenance, err = sourceCard.Provenance.With("forked_from_card_id", forkedFromCardID)
+		if err != nil {
+			return fmt.Errorf("extend fork decision card provenance: %w", err)
+		}
+		forkedFromActivationID, err := semanticvalue.String(binding.Source.ActivationID)
+		if err != nil {
+			return fmt.Errorf("admit source gate activation identity: %w", err)
+		}
+		forkCard.Provenance, err = forkCard.Provenance.With("forked_from_stage_activation_id", forkedFromActivationID)
+		if err != nil {
+			return fmt.Errorf("extend fork decision card provenance: %w", err)
+		}
 		forkCard, err = decisioncard.New(forkCard)
 		if err != nil {
 			return fmt.Errorf("construct fork decision card: %w", err)
@@ -70,12 +84,4 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		}
 	}
 	return nil
-}
-
-func cloneDecisionCardMap(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input)+2)
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
 }

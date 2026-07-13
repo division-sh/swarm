@@ -573,7 +573,7 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 	session := &webSocketSession{
 		ctx:    ctx,
 		cancel: cancel,
-		out:    make(chan any, 4),
+		out:    make(chan outboundMessage, 4),
 		subs:   map[string]context.CancelFunc{},
 	}
 	observability := &fakeObservabilityReadStore{
@@ -616,12 +616,10 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 	if got := len(session.out); got != 2 {
 		t.Fatalf("runtime log notifications = %d, want 2 without replaying old log", got)
 	}
-	first := (<-session.out).(rpcSubscriptionNotification)
-	second := (<-session.out).(rpcSubscriptionNotification)
-	firstLog := first.Params.Result.(store.OperatorRuntimeLogEntry)
-	secondLog := second.Params.Result.(store.OperatorRuntimeLogEntry)
-	if firstLog.LogID != "log-1" || secondLog.LogID != "log-2" {
-		t.Fatalf("runtime log notifications = %q then %q, want log-1 then log-2", firstLog.LogID, secondLog.LogID)
+	firstID := outboundNotificationResultString(t, <-session.out, "log_id")
+	secondID := outboundNotificationResultString(t, <-session.out, "log_id")
+	if firstID != "log-1" || secondID != "log-2" {
+		t.Fatalf("runtime log notifications = %q then %q, want log-1 then log-2", firstID, secondID)
 	}
 }
 
@@ -679,7 +677,7 @@ func TestWebSocketSessionBackpressureAndUnsubscribeCancelState(t *testing.T) {
 	session := &webSocketSession{
 		ctx:    ctx,
 		cancel: cancel,
-		out:    make(chan any, 1),
+		out:    make(chan outboundMessage, 1),
 		subs:   map[string]context.CancelFunc{},
 	}
 	if !session.enqueue(rpcResponse{JSONRPC: jsonRPCVersion, ID: "first", Result: map[string]any{"ok": true}}) {
@@ -694,6 +692,27 @@ func TestWebSocketSessionBackpressureAndUnsubscribeCancelState(t *testing.T) {
 	session.registerSubscription("sub-1", subCancel)
 	session.cancelSubscription("sub-1")
 	requireContextCanceled(t, subCtx, "subscription context was not canceled by unsubscribe")
+}
+
+func outboundNotificationResultString(t *testing.T, message outboundMessage, field string) string {
+	t.Helper()
+	params, ok := message.value.Lookup("params")
+	if !ok {
+		t.Fatalf("outbound notification has no params: %#v", message.value.Interface())
+	}
+	result, ok := params.Lookup("result")
+	if !ok {
+		t.Fatalf("outbound notification has no result: %#v", message.value.Interface())
+	}
+	value, ok := result.Lookup(field)
+	if !ok {
+		t.Fatalf("outbound notification result has no %s: %#v", field, result.Interface())
+	}
+	text, ok := value.String()
+	if !ok {
+		t.Fatalf("outbound notification result %s is not a string: %#v", field, value.Interface())
+	}
+	return text
 }
 
 func dialTestWS(t *testing.T, serverURL string) *websocket.Conn {
