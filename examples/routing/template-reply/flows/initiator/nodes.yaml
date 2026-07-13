@@ -1,0 +1,16 @@
+initiator-node:
+  id: initiator-node
+  execution_type: system_node
+  subscribes_to: [requester.setup.requested, request.submitted]
+  produces: [requester.setup, requester.requested]
+  event_handlers:
+    requester.setup.requested:
+      emit:
+        event: requester.setup
+        fields:
+          account_id: payload.account_id
+    request.submitted:
+      emit:
+        event: requester.requested
+        fields:
+          account_id: payload.account_id

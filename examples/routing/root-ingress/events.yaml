@@ -1,0 +1,4 @@
+item.received:
+  item_id: text
+item.processed:
+  item_id: text

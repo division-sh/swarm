@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestEventMetadataAuthorityRejectsInternalSwarmRestatements(t *testing.T) {
@@ -171,6 +172,7 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityAcceptsExternalProof
 	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{
 		externalRequestedSwarm: `
     source: external webhook
@@ -283,60 +285,46 @@ func loadEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowA
 
 func writeEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowAuthorityFixtureOptions) string {
 	t.Helper()
-	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: event-metadata-flow-authority
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: template
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: event-metadata-flow-authority\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeEventMetadataFlowAuthorityFlow(t, root, "producer", `
-name: producer
-mode: template
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-auto_emit_on_create:
+	opts.flowStartedSwarm = canonicalParentConnectMetadataRole(opts.flowStartedSwarm)
+	opts.deployDoneSwarm = canonicalParentConnectMetadataRole(opts.deployDoneSwarm)
+	opts.deployCompletedSwarm = canonicalParentConnectMetadataRole(opts.deployCompletedSwarm)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), "pins:\n", `auto_emit_on_create:
   event: flow.started
 pins:
-  inputs:
-    events: []
-  outputs:
-    events:
+`)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `      - name: work_ready
+        event: work.ready
+`, `      - name: work_ready
+        event: work.ready
       - name: deploy_done
         event: deploy.done
-`, eventMetadataAuthorityEventEntry("flow.started", opts.flowStartedSwarm)+eventMetadataAuthorityEventEntry("deploy.done", opts.deployDoneSwarm))
-	writeEventMetadataFlowAuthorityFlow(t, root, "consumer", `
-name: consumer
-mode: template
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-pins:
-  inputs:
-    events:
+`)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `      - name: work_ready
+        event: work.ready
+`, `      - name: work_ready
+        event: work.ready
       - name: deploy_completed
         event: deploy.completed
-  outputs:
-    events: []
-`, eventMetadataAuthorityEventEntry("deploy.completed", opts.deployCompletedSwarm))
+        source: external
+`)
+	canonicalrouting.WriteFile(t, root, "flows/producer/events.yaml",
+		eventMetadataAuthorityEventEntry("flow.started", opts.flowStartedSwarm)+
+			eventMetadataAuthorityRoutedEventEntry("work.requested", "")+
+			eventMetadataAuthorityRoutedEventEntry("work.ready", opts.deployDoneSwarm)+
+			eventMetadataAuthorityRoutedEventEntry("deploy.done", ""))
+	canonicalrouting.WriteFile(t, root, "flows/consumer/events.yaml",
+		eventMetadataAuthorityRoutedEventEntry("work.ready", opts.deployCompletedSwarm)+
+			eventMetadataAuthorityRoutedEventEntry("deploy.completed", ""))
 	return root
+}
+
+func canonicalParentConnectMetadataRole(raw string) string {
+	replacer := strings.NewReplacer(
+		"producer.deploy_done", "producer.work_ready",
+		"consumer.deploy_completed", "consumer.work_ready",
+	)
+	return replacer.Replace(raw)
 }
 
 func writeEventMetadataFlowAuthorityFlow(t *testing.T, root, flowID, schema, events string) {
@@ -358,7 +346,16 @@ func eventMetadataAuthorityEventEntry(eventName, swarm string) string {
 	return eventName + ":\n  swarm:\n" + swarm + "\n"
 }
 
+func eventMetadataAuthorityRoutedEventEntry(eventName, swarm string) string {
+	entry := eventMetadataAuthorityEventEntry(eventName, swarm)
+	if strings.HasSuffix(entry, ": {}\n") {
+		return strings.TrimSuffix(entry, " {}\n") + "\n  work_id: text\n"
+	}
+	return entry + "  work_id: text\n"
+}
+
 func eventMetadataAuthorityEventsYAML(opts eventMetadataAuthorityFixtureOptions) string {
+	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityAcceptsExternalProof
 	externalSwarm := indentEventMetadataAuthoritySwarm(opts.externalRequestedSwarm)
 	if strings.TrimSpace(externalSwarm) == "" {
 		externalSwarm = "    source: external"

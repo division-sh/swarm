@@ -1,32 +1,31 @@
 package finalflowinstanceauthoring
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const (
-	PackageName = "final-flow-instance-authoring"
+	PackageName = "template-select-or-create"
 
-	ProducerFlowID    = "intake"
-	ProducerNodeID    = "intake-router"
-	ProducerInputPin  = "request_received"
+	ProducerFlowID    = "producer"
+	ProducerNodeID    = "producer-node"
+	ProducerInputPin  = "account_requested"
 	ProducerOutputPin = "account_ready"
-	ProducerInput     = "request.received"
+	ProducerInput     = "account.requested"
 	ProducerOutput    = "account.ready"
 
-	TemplateFlowID       = "account_case"
-	TemplateNodeID       = "account-case-worker"
-	TemplateEntityType   = "account_case_state"
+	TemplateFlowID       = "account"
+	TemplateNodeID       = "account-node"
+	TemplateEntityType   = "account_state"
 	TemplateInputPin     = "account_ready"
 	TemplateInstanceBy   = "account_id"
-	TemplatePayloadKey   = "source_account_id"
+	TemplatePayloadKey   = "account_id"
 	TemplateFlowInstance = TemplateFlowID
 
 	CoordinatorFlowID     = "coordinator"
@@ -38,10 +37,6 @@ const (
 	LegacyFlowID = "legacy_static"
 )
 
-// Options toggles final sealed authoring variants used by conformance,
-// EventBus, pipeline, and authoring-view tests. The positive fixture combines a
-// template flow-instance route and singleton/coordinator contained state in one
-// package; negative options only introduce declared fail-closed seams.
 type Options struct {
 	MissingOutputKey            bool
 	MissingOutputCarries        bool
@@ -77,7 +72,9 @@ func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBu
 func LoadBundleResult(t testing.TB, opts Options) (*runtimecontracts.WorkflowContractBundle, error) {
 	t.Helper()
 	root := Write(t, opts)
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRoot(t)))
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
 }
 
 func LoadSource(t testing.TB, opts Options) semanticview.Source {
@@ -87,202 +84,51 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	root := t.TempDir()
-	writeRoot(t, root, opts)
-	writeProducer(t, root, opts)
-	writeTemplate(t, root, opts)
-	writeCoordinator(t, root, opts)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectOrCreate)
+	addTemplateStateOverlay(t, root)
+	addCoordinatorOverlay(t, root, opts)
 	if opts.StaticCreateEntity || opts.StaticSelectEntity || opts.StaticSelectOrCreate || opts.StaticMissingAcquisition {
-		writeLegacyStatic(t, root, opts)
+		addLegacyStaticOverlay(t, root, opts)
 	}
+	if opts.RootDefaultEntityIDSource {
+		addRootDefaultStaticMaterializer(t, root)
+	}
+	applyRoutingMutation(t, root, opts)
 	return root
 }
 
-func writeRoot(t testing.TB, root string, opts Options) {
+func addTemplateStateOverlay(t testing.TB, root string) {
 	t.Helper()
-	legacyFlow := ""
-	if opts.StaticCreateEntity || opts.StaticSelectEntity || opts.StaticSelectOrCreate || opts.StaticMissingAcquisition {
-		legacyFlow = `  - id: legacy_static
-    flow: legacy_static
-    mode: static
-`
+	producerEvents := filepath.Join(root, "flows", ProducerFlowID, "events.yaml")
+	for _, event := range []string{ProducerInput, ProducerOutput} {
+		canonicalrouting.ReplaceFile(t, producerEvents,
+			event+":\n  account_id: text\n",
+			event+":\n  account_id: text\n  score: text\n  decision: text\n")
 	}
-	writeFile(t, filepath.Join(root, "package.yaml"), `
-name: final-flow-instance-authoring
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: intake
-    flow: intake
-    mode: static
-  - id: account_case
-    flow: account_case
-    mode: template
-  - id: coordinator
-    flow: coordinator
-    mode: singleton
-`+legacyFlow+`connect:
-  - from: intake.account_ready
-    to: account_case.account_ready
-    delivery: one
-`+connectAdapterYAML(opts))
-	if opts.RootDefaultEntityIDSource {
-		writeRootDefaultStaticMaterializer(t, root)
-		return
-	}
-	writeFile(t, filepath.Join(root, "schema.yaml"), "name: final-flow-instance-authoring\n")
-	writeFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-}
+	producerNodes := filepath.Join(root, "flows", ProducerFlowID, "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, producerNodes,
+		"          account_id: payload.account_id\n",
+		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
 
-func connectAdapterYAML(opts Options) string {
-	switch {
-	case opts.BadConnectMapping:
-		return `    using:
-      instance:
-        source: missing_source_account_id
-        target: account_id
-`
-	case opts.DuplicateConnectMapping:
-		return `    using:
-      instance:
-        source: [source_account_id, source_account_id]
-        target: [account_id, account_id]
-`
-	default:
-		return `    using:
-      instance:
-        source: source_account_id
-        target: account_id
-`
-	}
-}
-
-func writeProducer(t testing.TB, root string, opts Options) {
-	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "intake", "schema.yaml"), `
-name: intake
-mode: static
-pins:
-  inputs:
-    events:
-      - name: request_received
-        event: request.received
-        source: external
-  outputs:
-    events:
-      - name: account_ready
-        event: account.ready
-`+producerOutputEvidenceYAML(opts))
-	writeFile(t, filepath.Join(root, "flows", "intake", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "intake", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "intake", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "intake", "entities.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "intake", "events.yaml"), `
-request.received:
-  account_id: string
-  score: string
-  decision: string
-account.ready:
-  source_account_id: string
-  score: string
-  decision: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "intake", "nodes.yaml"), `
-intake-router:
-  id: intake-router
-  execution_type: system_node
-  subscribes_to: [request.received]
-  produces: [account.ready]
-  event_handlers:
-    request.received:
-      emit:
-        event: account.ready
-`+producerEmitRouteYAML(opts)+`        fields:
-          source_account_id: payload.account_id
-          score: payload.score
-          decision: payload.decision
-`)
-}
-
-func producerOutputEvidenceYAML(opts Options) string {
-	var b strings.Builder
-	if !opts.MissingOutputKey {
-		b.WriteString("        key: source_account_id\n")
-	}
-	if opts.MissingOutputCarries {
-		b.WriteString("        carries: [score, decision]\n")
-	} else {
-		b.WriteString("        carries: [source_account_id, score, decision]\n")
-	}
-	return b.String()
-}
-
-func producerEmitRouteYAML(opts Options) string {
-	if opts.ProducerTarget {
-		return `        target:
-          flow: account_case
-          match:
-            account_id: payload.account_id
-`
-	}
-	if opts.ProducerBroadcast {
-		return "        broadcast: true\n"
-	}
-	return ""
-}
-
-func writeTemplate(t testing.TB, root string, opts Options) {
-	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "account_case", "schema.yaml"), `
-name: account_case
-mode: template
-initial_state: pending
-states: [pending, reviewed]
-terminal_states: [reviewed]
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: account_ready
-        event: account.ready
-  outputs:
-    events: []
-`)
-	writeFile(t, filepath.Join(root, "flows", "account_case", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "account_case", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "account_case", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "account_case", "events.yaml"), `
-account.ready:
-  source_account_id: string
-  score: string
-  decision: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "account_case", "entities.yaml"), `
-account_case_state:
-  account_id:
-    type: string
-  score:
-    type: string
-  decision:
-    type: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "account_case", "nodes.yaml"), `
-account-case-worker:
-  id: account-case-worker
-  execution_type: system_node
-  subscribes_to: [account.ready]
-  event_handlers:
-    account.ready:
-`+receiverSelectorYAML(opts)+`      data_accumulation:
+	templateSchema := filepath.Join(root, "flows", TemplateFlowID, "schema.yaml")
+	canonicalrouting.ReplaceFile(t, templateSchema,
+		"mode: template\n",
+		"mode: template\ninitial_state: pending\nstates: [pending, reviewed]\nterminal_states: [reviewed]\n")
+	templateEvents := filepath.Join(root, "flows", TemplateFlowID, "events.yaml")
+	canonicalrouting.ReplaceFile(t, templateEvents,
+		"account_id: text\n",
+		"account_id: text\n  score: text\n  decision: text\n")
+	templateEntities := filepath.Join(root, "flows", TemplateFlowID, "entities.yaml")
+	canonicalrouting.ReplaceFile(t, templateEntities,
+		"    _unused_reason: receiver instance identity\n",
+		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
+	templateNodes := filepath.Join(root, "flows", TemplateFlowID, "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, templateNodes,
+		"    account.ready: {}\n",
+		`    account.ready:
+      data_accumulation:
         writes:
-          - source_field: source_account_id
+          - source_field: account_id
             target_field: account_id
           - source_field: score
             target_field: score
@@ -292,19 +138,45 @@ account-case-worker:
 `)
 }
 
-func receiverSelectorYAML(opts Options) string {
-	if !opts.UnsupportedReceiverSelector {
-		return ""
-	}
-	return `      select_entity:
-        by:
-          account_id: payload.source_account_id
-`
-}
-
-func writeCoordinator(t testing.TB, root string, opts Options) {
+func addCoordinatorOverlay(t testing.TB, root string, opts Options) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
+	packageFile := filepath.Join(root, "package.yaml")
+	canonicalrouting.ReplaceFile(t, packageFile,
+		"  - id: account\n    flow: account\n    mode: template\n",
+		"  - id: account\n    flow: account\n    mode: template\n  - id: coordinator\n    flow: coordinator\n    mode: singleton\n")
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/policy.yaml", "{}\n")
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/tools.yaml", "{}\n")
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/agents.yaml", "{}\n")
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/types.yaml", `
+types:
+  LeadScore:
+    status: text
+    score: integer
+    observations: "[Observation]"
+  Observation:
+    source: text
+    note: text
+  AuditEntry:
+    ref: text
+    action: text
+`)
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/entities.yaml", `
+coordinator_state:
+  coordinator_id: text
+  lead_index: map[text]LeadScore
+  audit_log: "[AuditEntry]"
+`)
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/events.yaml", `
+lead.observed:
+  coordinator_id: text
+  lead_id: text
+  observation: Observation
+  audit: AuditEntry
+  followup_audit: AuditEntry
+  corrected_audit: AuditEntry
+`)
+	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.contained_state_model proof=TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/schema.yaml", `
 name: coordinator
 mode: singleton
 initial_state: active
@@ -318,38 +190,7 @@ pins:
   outputs:
     events: []
 `)
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), `
-types:
-  LeadScore:
-    status: text
-    score: integer
-    observations: "[Observation]"
-  Observation:
-    source: text
-    note: text
-  AuditEntry:
-    ref: text
-    action: text
-`)
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "entities.yaml"), `
-coordinator_state:
-  coordinator_id: text
-  lead_index: map[text]LeadScore
-  audit_log: "[AuditEntry]"
-`)
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "events.yaml"), `
-lead.observed:
-  coordinator_id: text
-  lead_id: text
-  observation: Observation
-  audit: AuditEntry
-  followup_audit: AuditEntry
-  corrected_audit: AuditEntry
-`)
-	writeFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), `
+	canonicalrouting.WriteFile(t, root, "flows/coordinator/nodes.yaml", `
 coordinator-indexer:
   id: coordinator-indexer
   execution_type: system_node
@@ -364,65 +205,167 @@ coordinator-indexer:
 `+coordinatorWritesYAML(opts))
 }
 
+func applyRoutingMutation(t testing.TB, root string, opts Options) {
+	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix
+	t.Helper()
+	inputSchema := filepath.Join(root, "flows", TemplateFlowID, "schema.yaml")
+	if opts.MissingOutputKey {
+		canonicalrouting.ReplaceFile(t, inputSchema, "          instance_key: account_id\n", "")
+	}
+	if opts.MissingOutputCarries {
+		canonicalrouting.ReplaceFile(t, inputSchema,
+			"        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n", "")
+	}
+	packageFile := filepath.Join(root, "package.yaml")
+	if opts.BadConnectMapping || opts.DuplicateConnectMapping {
+		source := "missing_account_id"
+		target := "account_id"
+		if opts.DuplicateConnectMapping {
+			source = "[account_id, account_id]"
+			target = "[account_id, account_id]"
+		}
+		canonicalrouting.ReplaceFile(t, packageFile,
+			"  - from: producer.account_ready\n    to: account.account_ready\n",
+			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: "+source+"\n        target: "+target+"\n")
+	}
+	templateNodes := filepath.Join(root, "flows", TemplateFlowID, "nodes.yaml")
+	if opts.UnsupportedReceiverSelector {
+		canonicalrouting.ReplaceFile(t, templateNodes,
+			"    account.ready:\n      data_accumulation:\n",
+			"    account.ready:\n      select_entity:\n        by:\n          account_id: payload.account_id\n      data_accumulation:\n")
+	}
+	producerNodes := filepath.Join(root, "flows", ProducerFlowID, "nodes.yaml")
+	if opts.ProducerTarget {
+		canonicalrouting.ReplaceFile(t, producerNodes,
+			"        event: account.ready\n        fields:\n",
+			"        event: account.ready\n        target:\n          flow: account\n          match:\n            account_id: payload.account_id\n        fields:\n")
+	}
+	if opts.ProducerBroadcast {
+		canonicalrouting.ReplaceFile(t, producerNodes,
+			"        event: account.ready\n        fields:\n",
+			"        event: account.ready\n        broadcast: true\n        fields:\n")
+	}
+}
+
+func addLegacyStaticOverlay(t testing.TB, root string, opts Options) {
+	t.Helper()
+	packageFile := filepath.Join(root, "package.yaml")
+	canonicalrouting.ReplaceFile(t, packageFile,
+		"  - id: coordinator\n    flow: coordinator\n    mode: singleton\n",
+		"  - id: coordinator\n    flow: coordinator\n    mode: singleton\n  - id: legacy_static\n    flow: legacy_static\n    mode: static\n")
+	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
+		canonicalrouting.WriteFile(t, root, "flows/legacy_static/"+file, "{}\n")
+	}
+	canonicalrouting.WriteFile(t, root, "flows/legacy_static/schema.yaml", `
+name: legacy_static
+mode: static
+initial_state: active
+states: [active, archived]
+terminal_states: [archived]
+pins:
+  inputs:
+    events:
+      - name: legacy_seen
+        event: legacy.seen
+  outputs:
+    events: []
+`)
+	canonicalrouting.WriteFile(t, root, "flows/legacy_static/events.yaml", `
+legacy.seen:
+  legacy_id: text
+  amount: number
+`)
+	canonicalrouting.WriteFile(t, root, "flows/legacy_static/entities.yaml", `
+legacy_record:
+  legacy_id:
+    type: text
+    indexed: true
+  amount:
+    type: number
+    initial: 0
+`)
+	canonicalrouting.WriteFile(t, root, "flows/legacy_static/nodes.yaml", `
+legacy-writer:
+  id: legacy-writer
+  execution_type: system_node
+  subscribes_to: [legacy.seen]
+  event_handlers:
+    legacy.seen:
+`+legacyHandlerBody(opts))
+}
+
+func legacyHandlerBody(opts Options) string {
+	switch {
+	case opts.StaticCreateEntity:
+		return "      create_entity: true\n      data_accumulation:\n        writes:\n          - source_field: amount\n            target_field: amount\n"
+	case opts.StaticSelectEntity:
+		return "      select_entity:\n        by:\n          legacy_id: payload.legacy_id\n      data_accumulation:\n        writes:\n          - source_field: amount\n            target_field: amount\n"
+	case opts.StaticSelectOrCreate:
+		return "      select_or_create_entity:\n        by:\n          legacy_id: payload.legacy_id\n      data_accumulation:\n        writes:\n          - source_field: amount\n            target_field: amount\n"
+	default:
+		return "      data_accumulation:\n        writes:\n          - source_field: amount\n            target_field: amount\n"
+	}
+}
+
+func addRootDefaultStaticMaterializer(t testing.TB, root string) {
+	t.Helper()
+	canonicalrouting.WriteFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
+	canonicalrouting.WriteFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
+	canonicalrouting.WriteFile(t, root, "schema.yaml", `
+name: template-select-or-create
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: subject_created
+        event: subject.created
+  outputs:
+    events: []
+`)
+	canonicalrouting.WriteFile(t, root, "nodes.yaml", `
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`)
+}
+
 func coordinatorWritesYAML(opts Options) string {
 	if opts.DynamicBracketTarget {
-		return firstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key:\n              ref: payload.lead_id", `
-            value:
-              status: active
-              score: 0
-              observations: []
-`)
+		return firstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key:\n              ref: payload.lead_id", leadScoreValueYAML())
 	}
 	if opts.MissingMapKey {
-		return firstMapWriteYAML("set", "entity.lead_index", "", `
-            value:
-              status: active
-              score: 0
-              observations: []
-`)
+		return firstMapWriteYAML("set", "entity.lead_index", "", leadScoreValueYAML())
 	}
 	if opts.WrongMapValueShape {
-		return firstMapWriteYAML("set", "entity.lead_index", "key:\n              ref: payload.lead_id", `
-            value:
-              undeclared: true
-`)
+		return firstMapWriteYAML("set", "entity.lead_index", "key:\n              ref: payload.lead_id", "\n            value:\n              undeclared: true\n")
 	}
 	if opts.UndeclaredMapTarget {
-		return firstMapWriteYAML("set", "entity.missing_index", "key:\n              ref: payload.lead_id", `
-            value:
-              status: active
-              score: 0
-              observations: []
-`)
+		return firstMapWriteYAML("set", "entity.missing_index", "key:\n              ref: payload.lead_id", leadScoreValueYAML())
 	}
 	if opts.UnsupportedMapOp {
-		return firstMapWriteYAML("replace", "entity.lead_index", "key:\n              ref: payload.lead_id", `
-            value:
-              status: active
-              score: 0
-              observations: []
-`)
+		return firstMapWriteYAML("replace", "entity.lead_index", "key:\n              ref: payload.lead_id", leadScoreValueYAML())
 	}
+	index := 0
 	if opts.BadListIndex {
-		return directCoordinatorWriteYAML() + validCoordinatorWritesPrefixYAML() + `          - op: update
-            target: entity.audit_log
-            index: -1
-            value:
-              ref: payload.corrected_audit
-`
+		index = -1
 	}
-	return directCoordinatorWriteYAML() + validCoordinatorWritesPrefixYAML() + `          - op: update
-            target: entity.audit_log
-            index: 0
-            value:
-              ref: payload.corrected_audit
-`
+	return directCoordinatorWriteYAML() + validCoordinatorWritesPrefixYAML() + "          - op: update\n            target: entity.audit_log\n            index: " + stringIndex(index) + "\n            value:\n              ref: payload.corrected_audit\n"
+}
+
+func leadScoreValueYAML() string {
+	return "\n            value:\n              status: active\n              score: 0\n              observations: []\n"
 }
 
 func directCoordinatorWriteYAML() string {
-	return `          - source_field: coordinator_id
-            target_field: coordinator_id
-`
+	return "          - source_field: coordinator_id\n            target_field: coordinator_id\n"
 }
 
 func validCoordinatorWritesPrefixYAML() string {
@@ -458,156 +401,16 @@ func validCoordinatorWritesPrefixYAML() string {
 }
 
 func firstMapWriteYAML(op, target, keyBlock, valueBlock string) string {
-	out := directCoordinatorWriteYAML() + `          - op: ` + op + `
-            target: ` + target + `
-`
+	out := directCoordinatorWriteYAML() + "          - op: " + op + "\n            target: " + target + "\n"
 	if strings.TrimSpace(keyBlock) != "" {
 		out += "            " + strings.ReplaceAll(strings.TrimRight(keyBlock, "\n"), "\n", "\n            ") + "\n"
 	}
-	out += strings.TrimLeft(valueBlock, "\n")
-	return out
+	return out + strings.TrimLeft(valueBlock, "\n")
 }
 
-func writeLegacyStatic(t testing.TB, root string, opts Options) {
-	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "schema.yaml"), `
-name: legacy_static
-mode: static
-initial_state: active
-states: [active, archived]
-terminal_states: [archived]
-pins:
-  inputs:
-    events:
-      - name: legacy_seen
-        event: legacy.seen
-  outputs:
-    events: []
-`)
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "events.yaml"), `
-legacy.seen:
-  legacy_id: string
-  amount: number
-`)
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "entities.yaml"), `
-legacy_record:
-  legacy_id:
-    type: string
-    indexed: true
-  amount:
-    type: number
-    initial: 0
-`)
-	writeFile(t, filepath.Join(root, "flows", "legacy_static", "nodes.yaml"), `
-legacy-writer:
-  id: legacy-writer
-  execution_type: system_node
-  subscribes_to: [legacy.seen]
-  event_handlers:
-    legacy.seen:
-`+legacyHandlerBody(opts))
-}
-
-func legacyHandlerBody(opts Options) string {
-	switch {
-	case opts.StaticCreateEntity:
-		return `      create_entity: true
-      data_accumulation:
-        writes:
-          - source_field: amount
-            target_field: amount
-`
-	case opts.StaticSelectEntity:
-		return `      select_entity:
-        by:
-          legacy_id: payload.legacy_id
-      data_accumulation:
-        writes:
-          - source_field: amount
-            target_field: amount
-`
-	case opts.StaticSelectOrCreate:
-		return `      select_or_create_entity:
-        by:
-          legacy_id: payload.legacy_id
-      data_accumulation:
-        writes:
-          - source_field: amount
-            target_field: amount
-`
-	case opts.StaticMissingAcquisition:
-		return `      data_accumulation:
-        writes:
-          - source_field: amount
-            target_field: amount
-`
-	default:
-		return `      emit:
-        event: legacy.seen
-        fields:
-          legacy_id: payload.legacy_id
-`
+func stringIndex(index int) string {
+	if index < 0 {
+		return "-1"
 	}
-}
-
-func writeRootDefaultStaticMaterializer(t testing.TB, root string) {
-	t.Helper()
-	writeFile(t, filepath.Join(root, "schema.yaml"), `
-name: final-flow-instance-authoring
-initial_state: active
-states: [active]
-pins:
-  inputs:
-    events:
-      - name: subject_created
-        event: subject.created
-  outputs:
-    events: []
-`)
-	writeFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "events.yaml"), `
-subject.created:
-  entity_id: string
-  display_name: string
-`)
-	writeFile(t, filepath.Join(root, "entities.yaml"), `
-subject:
-  display_name: text
-`)
-	writeFile(t, filepath.Join(root, "nodes.yaml"), `
-root-node:
-  id: root-node
-  execution_type: system_node
-  subscribes_to: [subject.created]
-  event_handlers:
-    subject.created:
-      data_accumulation:
-        writes:
-          - source_field: display_name
-            target_field: display_name
-`)
-}
-
-func repoRoot(t testing.TB) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve repo root")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
-}
-
-func writeFile(t testing.TB, path, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	return "0"
 }

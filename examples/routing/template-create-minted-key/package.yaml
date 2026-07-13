@@ -1,0 +1,13 @@
+name: template-create-minted-key
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: validator
+    flow: validator
+    mode: template
+connect:
+  - from: producer.validation_requested
+    to: validator.validation_requested

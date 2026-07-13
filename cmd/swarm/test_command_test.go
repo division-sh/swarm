@@ -364,7 +364,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := filepath.Join(repoRoot(), "tests", "tier1-primitives", "test-emits-single")
+	contractsPath := filepath.Join(repoRoot(), "examples", "routing", "root-ingress")
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 
 	var calls []jsonRPCRequest
@@ -380,8 +380,8 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
 			payload, ok := req.Params["payload"].(map[string]any)
-			if !ok || len(payload) != 0 {
-				t.Fatalf("event.publish payload = %#v, want empty mapping", req.Params["payload"])
+			if !ok || payload["item_id"] != "smoke-item" || len(payload) != 1 {
+				t.Fatalf("event.publish payload = %#v, want canonical item_id", req.Params["payload"])
 			}
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
@@ -576,7 +576,6 @@ func TestSwarmTestRunsRemainingCurrentPublicOwnerCatalogCompanions(t *testing.T)
 		{tier: "tier6-event-loop", packageName: "test-dead-letter"},
 		{tier: "tier6-event-loop", packageName: "test-on-complete-atomicity-chain"},
 		{tier: "tier7-composition", packageName: "test-agent-emits-to-node"},
-		{tier: "tier7-composition", packageName: "test-cross-flow-subscription"},
 		{tier: "tier7-composition", packageName: "test-dual-delivery"},
 		{tier: "tier7-composition", packageName: "test-full-lifecycle"},
 		{tier: "tier7-composition", packageName: "test-multi-gate-pipeline"},
@@ -1606,6 +1605,9 @@ expect:
 func writeScenarioRunnerFixture(t *testing.T) string {
 	t.Helper()
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	if err := os.RemoveAll(filepath.Join(contractsPath, "tests")); err != nil {
+		t.Fatalf("remove inherited canonical scenarios: %v", err)
+	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "fixtures", "thing-created.yaml"), `
 amount: 7
 who: fixture
@@ -1647,6 +1649,7 @@ expect:
 }
 
 func writeScenarioSetupFixture(t *testing.T) string {
+	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1735,6 +1738,7 @@ expect:
 }
 
 func writeScenarioRootSetupFixture(t *testing.T) string {
+	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `

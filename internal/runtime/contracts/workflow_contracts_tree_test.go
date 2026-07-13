@@ -814,6 +814,7 @@ gate_state:
 }
 
 func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=contracts.event_catalog_decoder proof=TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle
 	var entry EventCatalogEntry
 	if err := loadYAMLBytes([]byte(`
 swarm:
@@ -899,6 +900,7 @@ entity_id: string
 }
 
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
+	// routing-example-census: parser-only issue=1738 owner=contracts.legacy_event_metadata_rejection proof=TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed
 	var entry EventCatalogEntry
 	err := loadYAMLBytes([]byte(`
 swarm:

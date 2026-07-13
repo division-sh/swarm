@@ -1,5 +1,0 @@
-analyzer:
-  model: regular
-  mode: task
-  subscriptions: [analysis.requested]
-  emit_events: [analysis.done]

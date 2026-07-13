@@ -119,10 +119,10 @@ func assertSealedFlowPackageWildcardScope(t *testing.T, source semanticview.Sour
 	if owners := source.RuntimeEventOwners("producer/audit.seen"); len(owners) != 0 {
 		t.Fatalf("RuntimeEventOwners(producer/audit.seen) = %#v, want no consumer wildcard sibling leakage", owners)
 	}
-	if _, ok := source.NodeEventHandler("consumer-handler", "producer/audit.seen"); ok {
+	if _, ok := source.NodeEventHandler("consumer-node", "producer/audit.seen"); ok {
 		t.Fatal("consumer handler matched producer/audit.seen through raw sibling wildcard fallback")
 	}
-	if _, ok := source.NodeEventHandler("consumer-handler", "consumer/audit.seen"); !ok {
+	if _, ok := source.NodeEventHandler("consumer-node", "consumer/audit.seen"); !ok {
 		t.Fatal("consumer handler did not match its own package-subtree wildcard event")
 	}
 }
@@ -138,17 +138,17 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one parent connect plan", plans)
 	}
 	plan := plans[0]
-	if got, want := plan.Source.ResolvedEvent, "producer/shared.done"; got != want {
+	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}
-	if got, want := plan.Receiver.ResolvedEvent, "consumer/shared.done"; got != want {
+	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
 	if got, want := plan.Delivery, runtimepinrouting.ConnectDeliveryOne; got != want {
 		t.Fatalf("delivery = %q, want %q", got, want)
 	}
-	if plan.Address == nil || plan.Address.By != "flow_instance" || plan.Address.Source != "payload.flow_instance" || plan.Address.Target != "instance.flow_instance" {
-		t.Fatalf("connect plan address = %#v, want flow_instance payload/instance mapping", plan.Address)
+	if plan.Address != nil {
+		t.Fatalf("connect plan address = %#v, want canonical static target", plan.Address)
 	}
 	if plan.Target.FlowInstance != "consumer" || plan.Target.EntityID != runtimeflowidentity.EntityID("consumer") {
 		t.Fatalf("connect plan target = %#v, want static consumer route", plan.Target)
@@ -166,13 +166,13 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if carriers := eb.RouteTable().Resolve("consumer/shared.done"); !sealedFlowPackageSubscriberListContains(carriers, "consumer-handler", "consumer", "receiver_carrier") {
-		t.Fatalf("receiver carrier route consumer/shared.done = %#v, want consumer-handler receiver_carrier", carriers)
+	if carriers := eb.RouteTable().Resolve("consumer/work.ready"); !sealedFlowPackageSubscriberListContains(carriers, "consumer-node", "consumer", "receiver_carrier") {
+		t.Fatalf("receiver carrier route consumer/work.ready = %#v, want consumer-node receiver_carrier", carriers)
 	}
 
 	wantRoute := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   "consumer-handler",
+		SubscriberID:   "consumer-node",
 		Target: events.RouteIdentity{
 			FlowID:       "consumer",
 			FlowInstance: "consumer",
@@ -181,10 +181,10 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	}
 	evt := eventtest.ChildWithLineage(
 		"evt-sealed-connect",
-		events.EventType("producer/shared.done"),
+		events.EventType("producer/work.ready"),
 		"producer",
 		"",
-		json.RawMessage(`{"flow_instance":"consumer"}`),
+		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
 		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
 		events.EventEnvelope{},

@@ -1,0 +1,12 @@
+name: producer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: work_requested
+        event: work.requested
+        source: external
+  outputs:
+    events:
+      - name: work_ready
+        event: work.ready

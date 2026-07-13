@@ -338,6 +338,7 @@ func countTestSetupEntityRows(t *testing.T, db *sql.DB) int {
 }
 
 func testSetupValidationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency
 	t.Helper()
 	root := t.TempDir()
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "package.yaml"), `

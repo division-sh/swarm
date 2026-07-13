@@ -159,6 +159,7 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 }
 
 func loadStaticMultiEntityRetirementSource(t *testing.T, handlerBody string) semanticview.Source {
+	// routing-example-census: different-concept issue=1738 owner=legacy_static_multi_entity_retirement proof=TestStaticMultiEntityRetirementConformance
 	t.Helper()
 	root := t.TempDir()
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `
@@ -227,6 +228,7 @@ treasury-node:
 }
 
 func loadRootDefaultStaticMultiEntityRetirementSource(t *testing.T, handlerBody string, declareEntityID bool, requireEntityID bool) semanticview.Source {
+	// routing-example-census: different-concept issue=1738 owner=legacy_static_multi_entity_retirement proof=TestRootDefaultStaticMultiEntityRetirementConformance
 	t.Helper()
 	root := t.TempDir()
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `

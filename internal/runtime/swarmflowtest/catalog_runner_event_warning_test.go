@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 )
 
 func TestCatalogCollectBootIssues_DoesNotReintroduceFlowLocalEventWarningDrift(t *testing.T) {
@@ -22,12 +24,11 @@ func TestCatalogCollectBootIssues_DoesNotReintroduceFlowLocalEventWarningDrift(t
 }
 
 func TestCatalogCollectBootIssues_DoesNotReintroduceFlowOutputConsumerWarningDrift(t *testing.T) {
-	repoRoot := repoRootForTest(t)
-	bundle := catalogLoadBootBundle(t, filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-required-agents-child"))
+	bundle := catalogLoadBootBundle(t, requiredagentsparentconnect.Write(t))
 
 	issues := catalogCollectBootIssues(bundle)
 	for _, issue := range issues {
-		if issue.Category == "EVENT-NO-CONSUMER" && strings.Contains(issue.Message, "analysis.done") {
+		if issue.Category == "EVENT-NO-CONSUMER" && strings.Contains(issue.Message, "work.ready") {
 			t.Fatalf("unexpected flow-owned output consumer warning drift: %#v", issues)
 		}
 	}

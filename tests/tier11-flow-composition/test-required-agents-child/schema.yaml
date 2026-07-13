@@ -1,8 +1,0 @@
-initial_state: idle
-terminal_states: []
-states: [idle]
-pins:
-  inputs:
-    events: [analyzer-flow/analysis.requested]
-  outputs:
-    events: []

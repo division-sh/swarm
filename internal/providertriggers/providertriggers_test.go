@@ -279,6 +279,7 @@ func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
 }
 
 func TestProviderTriggerCatalogLoadsExternalPackDirs(t *testing.T) {
+	// routing-example-census: provider-ingress issue=none owner=provider_trigger_pack proof=TestProviderTriggerCatalogLoadsExternalPackDirs
 	dir := copyBuiltinPackToTemp(t, "stripe")
 	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "provider: stripe", "provider: acme")
 	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "literal: inbound.stripe", "literal: inbound.acme")
@@ -316,6 +317,7 @@ func TestProviderTriggerCatalogLoadsExternalPackDirs(t *testing.T) {
 }
 
 func TestProviderTriggerCatalogRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
+	// routing-example-census: provider-ingress issue=none owner=provider_trigger_pack proof=TestProviderTriggerCatalogRejectsExternalShadowingAgainstPlatformPack
 	dir := copyBuiltinPackToTemp(t, "github")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.github", "id: provider.github.external")
@@ -364,6 +366,7 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 }
 
 func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
+	// routing-example-census: provider-ingress issue=none owner=provider_trigger_pack proof=TestExternalProviderTriggerPackUsesSameVerifier
 	dir := copyBuiltinPackToTemp(t, "stripe")
 	if _, err := LoadExternalPackDirs("0.7.0", dir); err == nil || !strings.Contains(err.Error(), `expected "external"`) {
 		t.Fatalf("LoadExternalPackDirs platform provenance error = %v, want external provenance rejection", err)
@@ -386,6 +389,7 @@ func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
 }
 
 func TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier(t *testing.T) {
+	// routing-example-census: provider-ingress issue=none owner=provider_trigger_pack proof=TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier
 	dir := copyBuiltinPackToTemp(t, "telegram")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
 

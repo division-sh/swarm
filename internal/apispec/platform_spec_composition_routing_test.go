@@ -157,6 +157,21 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "zero executable routes")
 }
 
+func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	reply := mustYAMLPath(t, root, "engine", "cross_flow_routing", "reply_resolution")
+	slice := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
+	sliceReply := mustYAMLPath(t, slice, "modes", "reply")
+
+	assertScalarValue(t, mustMappingValue(t, reply, "status"), "runnable_v1")
+	assertScalarValue(t, mustMappingValue(t, sliceReply, "status"), "runnable_v1")
+	assertScalarContains(t, mustMappingValue(t, slice, "status"), "reply_modes_runnable")
+	assertScalarContains(t, mustMappingValue(t, slice, "rule"), "Reply resolution is also")
+	assertScalarContains(t, mustMappingValue(t, slice, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution")
+	assertScalarContains(t, mustMappingValue(t, slice, "canonical_code_owner"), "internal/store.ReplyContextStore")
+	assertScalarContains(t, mustMappingValue(t, sliceReply, "contract"), "engine.cross_flow_routing.reply_resolution")
+}
+
 func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 
@@ -225,6 +240,7 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 }
 
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=platform_spec.routing_contract proof=TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority
 	root := loadPlatformSpecYAMLNode(t)
 
 	targetRequiredMissing := collectMappingValuesByKey(root, "target_required_missing")

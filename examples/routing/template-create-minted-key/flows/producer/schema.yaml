@@ -1,0 +1,12 @@
+name: producer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: validation_triggered
+        event: validation.triggered
+        source: external
+  outputs:
+    events:
+      - name: validation_requested
+        event: validation.requested

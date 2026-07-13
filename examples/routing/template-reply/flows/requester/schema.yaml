@@ -1,0 +1,36 @@
+name: requester
+mode: template
+instance:
+  by: account_id
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: requester_setup
+        event: requester.setup
+        resolution:
+          mode: select-or-create
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+      - name: request_submitted
+        event: requester.requested
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+      - name: provider_replied
+        event: provider.replied
+        resolution:
+          mode: reply
+          replies_to: provider_requested
+  outputs:
+    events:
+      - name: provider_requested
+        event: provider.requested

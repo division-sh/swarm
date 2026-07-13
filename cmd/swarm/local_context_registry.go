@@ -657,6 +657,7 @@ func classifyLocalContextIdentityError(err error) string {
 }
 
 func isConnectionRefusedError(err error) bool {
+	// routing-example-census: different-concept issue=none owner=cli.local_context_connection_diagnostics proof=TestLocalContextValidationTaxonomy
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "connect: cannot assign requested address") ||

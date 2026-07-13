@@ -672,14 +672,6 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 			flowPath:   "",
 			routeMatch: "timer.check",
 		},
-		{
-			name:       "cross-flow static subscriber",
-			fixture:    filepath.Join("tests", "tier7-composition", "test-cross-flow-subscription"),
-			eventType:  "flow-b/order.completed",
-			nodeID:     "flow-a-node",
-			flowPath:   "flow-a",
-			routeMatch: "flow-b/order.completed",
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixtureRoot := filepath.Join(repoRoot, tc.fixture)

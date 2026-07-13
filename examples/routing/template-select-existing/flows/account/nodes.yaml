@@ -1,0 +1,7 @@
+account-node:
+  id: account-node
+  execution_type: system_node
+  subscribes_to: [account.setup, account.ready]
+  event_handlers:
+    account.setup: {}
+    account.ready: {}

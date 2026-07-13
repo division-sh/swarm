@@ -159,6 +159,7 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 }
 
 func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=TestDescribeRoutesHumanAndJSONAreDeterministic
 	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var firstJSON, firstHuman string
 	for i := 0; i < 5; i++ {
@@ -244,7 +245,7 @@ func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T
 	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"route issues:", "route_plan_instance_key_adapter_invalid", "package.yaml:"} {
+	for _, want := range []string{"route issues:", "route_plan_instance_resolution_invalid", "package.yaml:"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human route issue missing %q:\n%s", want, humanOut.String())
 		}
@@ -679,6 +680,7 @@ account:
 }
 
 func writeDescribeStageGraphContracts(t testing.TB) string {
+	// routing-example-census: different-concept issue=none owner=cli.stage_graph_presentation proof=TestDescribeCommandGraphRendersStageGraph
 	t.Helper()
 	root := t.TempDir()
 	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `

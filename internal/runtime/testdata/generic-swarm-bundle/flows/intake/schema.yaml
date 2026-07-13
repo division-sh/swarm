@@ -17,10 +17,7 @@ pins:
     reads:
       - priority
   outputs:
-    events:
-      - item.processed
-      - item.review_requested
-      - item.rejected
+    events: []
     writes:
       - priority
       - results

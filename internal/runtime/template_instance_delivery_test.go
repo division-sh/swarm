@@ -827,6 +827,7 @@ auto_emit_on_create:
 }
 
 func templateInstanceConnectLifecycleRollbackFixtureFiles() map[string]string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_transaction proof=TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute
 	return map[string]string{
 		"package.yaml": `name: test
 version: "1.0.0"
@@ -1284,6 +1285,7 @@ func assertProviderRollbackRetryCommitted(t *testing.T, ctx context.Context, db 
 }
 
 func providerRollbackFixtureFiles(withCarrier bool) map[string]string {
+	// routing-example-census: provider-ingress issue=none owner=provider_normalized_lifecycle_transaction proof=TestProviderNormalizedLifecycleRollbackMatrix
 	nodes := "{}\n"
 	if withCarrier {
 		nodes = `consumer-node:
@@ -1446,6 +1448,7 @@ func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Con
 }
 
 func templateInstanceEmpireOutboxFixtureFiles() map[string]string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_outbox proof=TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect
 	return map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0

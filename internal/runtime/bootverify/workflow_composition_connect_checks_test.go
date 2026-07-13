@@ -8,11 +8,12 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
-	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{})
+	root := canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -20,10 +21,10 @@ func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
 	if reportContains(report.Errors(), "composition_connect_validation", "") {
 		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "pin_target_resolution", "deploy.done") {
+	if reportContains(report.Errors(), "pin_target_resolution", "work.ready") {
 		t.Fatalf("parent connect should satisfy output pin target proof, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "input_pin_wiring", "deploy.completed") {
+	if reportContains(report.Errors(), "input_pin_wiring", "work.ready") {
 		t.Fatalf("parent connect should satisfy input pin wiring proof, got %#v", report.Errors())
 	}
 }
@@ -524,6 +525,7 @@ func TestRun_FailsClosedForInvalidRenamedTemplateInstanceKeyAdapters(t *testing.
 }
 
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=bootverify.composition_connect_diagnostics proof=TestRun_FailsClosedForInvalidParentCompositionConnect
 	tests := []struct {
 		name      string
 		opts      compositionConnectFixtureOptions
@@ -894,6 +896,7 @@ func (o compositionConnectAdapterFixtureOptions) clone() compositionConnectAdapt
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
 	t.Helper()
 	root := t.TempDir()
 	connectFrom := firstTestValue(opts.connectFrom, "producer.deploy_done")
@@ -962,6 +965,7 @@ connect:
 }
 
 func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.root_output_connect_validation proof=TestRun_AllowsRootProducerCompositionConnectAsRouteProof
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1028,6 +1032,7 @@ root.ready:
 }
 
 func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.root_auto_emit_key_carries proof=TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1099,6 +1104,7 @@ deployment:
 }
 
 func writeCompositionConnectTopologyFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=TestRun_TreatsParentCompositionConnectAsEventTopologyProof
 	t.Helper()
 	root := t.TempDir()
 	writeCompositionConnectRootPackage(t, root, "composition-connect-topology", `
@@ -1117,6 +1123,7 @@ func writeCompositionConnectTopologyFixture(t *testing.T) string {
 }
 
 func writeCompositionConnectAmbiguityFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_ambiguity_diagnostics proof=TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1182,6 +1189,7 @@ ticket.ready:
 }
 
 func writeCompositionConnectRootPackage(t *testing.T, root, name, connectEntries string) {
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=TestRun_TreatsParentCompositionConnectAsEventTopologyProof
 	t.Helper()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: `+name+`
@@ -1280,7 +1288,7 @@ type selectResolutionCompositionFixtureOptions struct {
 
 func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
 	t.Helper()
-	root := t.TempDir()
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 	receiverMode := strings.TrimSpace(opts.receiverMode)
 	if receiverMode == "" {
 		receiverMode = "template"
@@ -1301,85 +1309,51 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 	if carryType == "" {
 		carryType = "string"
 	}
-	instanceBy := "account_id"
-	eventsFields := "  account_id: string\n"
-	if opts.compositeKey {
-		instanceBy = "[account_id, region]"
-		eventsFields += "  region: string\n"
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
+    to: account.account_setup
+`, "")
+	packageFile := filepath.Join(root, "package.yaml")
+	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
+	if receiverMode != "template" {
+		canonicalrouting.ReplaceFile(t, packageFile, "    mode: template\nconnect:\n", "    mode: "+receiverMode+"\nconnect:\n")
+		canonicalrouting.ReplaceFile(t, accountSchema, "mode: template\n", "mode: "+receiverMode+"\n")
 	}
-	usingBlock := ""
+	connectSuffix := ""
+	if delivery != "one" {
+		connectSuffix += "    delivery: " + delivery + "\n"
+	}
 	if opts.usingInstance {
-		usingBlock = `
-    using:
+		connectSuffix += `    using:
       instance:
         source: account_id
-        target: account_id`
+        target: account_id
+`
 	}
-	mapBlock := ""
 	if opts.connectMap {
-		mapBlock = `
-    map:
+		connectSuffix += `    map:
       account_id:
         source: payload.account_id
-        target: entity.account_id`
+        target: entity.account_id
+`
 	}
-	addressBlock := ""
-	if opts.legacyAddress {
-		addressBlock = `
-        address:
-          by: account_id
-          source: payload.account_id
-          target: entity.account_id
-          cardinality: one`
+	if connectSuffix != "" {
+		canonicalrouting.ReplaceFile(t, packageFile, "    to: account.account_ready\n", "    to: account.account_ready\n"+connectSuffix)
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: select-resolution-composition-connect
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: account
-    flow: account
-    mode: `+receiverMode+`
-connect:
-  - from: producer.account_ready
-    to: account.account_ready
-    delivery: `+delivery+usingBlock+mapBlock+`
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-composition-connect\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: account_ready
+	canonicalrouting.ReplaceFile(t, accountSchema, `          mode: select
+          instance_key: account_id
+`, "          mode: "+mode+"\n          instance_key: "+instanceKey+"\n")
+	if carryType != "text" {
+		canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
         event: account.ready
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n"+eventsFields)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
-name: account
-mode: `+receiverMode+`
-instance:
-  by: `+instanceBy+`
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: account_ready
-        event: account.ready`+addressBlock+`
+        resolution:
+          mode: `+mode+`
+          instance_key: `+instanceKey+`
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+`, `      - name: account_ready
+        event: account.ready
         resolution:
           mode: `+mode+`
           instance_key: `+instanceKey+`
@@ -1388,136 +1362,54 @@ pins:
             from: payload.account_id
             type: `+carryType+`
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n"+eventsFields)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
-account_state:
-  account_id:
-    type: string
-    _unused_reason: composition select route key test field
+	}
+	if opts.legacyAddress {
+		canonicalrouting.ReplaceFile(t, accountSchema, "        resolution:\n          mode: "+mode+"\n", `        address:
+          by: account_id
+          source: payload.account_id
+          target: entity.account_id
+          cardinality: one
+        resolution:
+          mode: `+mode+`
+`)
+	}
+	if opts.compositeKey {
+		canonicalrouting.ReplaceFile(t, accountSchema, "  by: account_id\n", "  by: [account_id, region]\n")
+		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    _unused_reason: receiver instance identity\n", `    _unused_reason: receiver instance identity
   region:
-    type: string
+    type: text
     _unused_reason: composition select composite-key test field
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), `
-account-node:
-  id: account-node-{account_id}
-  execution_type: system_node
-  event_handlers:
-    account.ready: {}
-`)
+	}
 	return root
 }
 
 func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {
 	t.Helper()
-	root := t.TempDir()
-	usingBlock := ""
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	packageFile := filepath.Join(root, "package.yaml")
 	if opts.usingInstance {
-		usingBlock = `
+		canonicalrouting.ReplaceFile(t, packageFile, "    to: validator.validation_requested\n", `    to: validator.validation_requested
     using:
       instance:
         source: validation_case_id
-        target: validation_case_id`
+        target: validation_case_id
+`)
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: create-resolution-composition-connect
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: validator
-    flow: validator
-    mode: template
-connect:
-  - from: producer.validation_requested
-    to: validator.validation_requested
-    delivery: one`+usingBlock+`
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-composition-connect\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-validation.triggered:
-  candidate: string
-validation.requested:
-  candidate: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
-producer-node:
-  id: producer-node
-  execution_type: system_node
-  subscribes_to: [validation.triggered]
-  event_handlers:
-    validation.triggered:
-      emit:
-        event: validation.requested
-        fields:
-          candidate: payload.candidate
-`)
-	carriesBlock := ""
-	if opts.includeCarry {
-		carriesBlock = `
-        carries:
+	validatorSchema := filepath.Join(root, "flows", "validator", "schema.yaml")
+	if opts.mode != runtimecontracts.FlowInputResolutionModeCreate {
+		canonicalrouting.ReplaceFile(t, validatorSchema, "          mode: create\n", "          mode: "+opts.mode+"\n")
+	}
+	if opts.mint != runtimecontracts.FlowInputResolutionMintUUID {
+		canonicalrouting.ReplaceFile(t, validatorSchema, "            mint: uuid\n", "            mint: "+opts.mint+"\n")
+	}
+	if !opts.includeCarry {
+		canonicalrouting.ReplaceFile(t, validatorSchema, `        carries:
           validation_case_id:
             from: instance.key.validation_case_id
-            type: uuid`
+            type: uuid
+`, "")
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
-name: validator
-mode: template
-instance:
-  by: validation_case_id
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-        resolution:
-          mode: `+opts.mode+`
-          instance_key:
-            mint: `+opts.mint+`
-            as: validation_case_id`+carriesBlock+`
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), `
-validation.requested:
-  candidate: string
-  validation_case_id: uuid
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
-validation_case:
-  validation_case_id:
-    type: uuid
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), `
-validator-node:
-  id: validator-node-{validation_case_id}
-  execution_type: system_node
-  event_handlers:
-    validation.requested: {}
-`)
 	return root
 }
 
@@ -1631,6 +1523,7 @@ func producerAutoEmitOnCreateBlock(opts compositionConnectFixtureOptions) string
 }
 
 func writeCompositionConnectConsumerFlow(t *testing.T, root string, opts compositionConnectFixtureOptions) {
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
 	t.Helper()
 	if opts.consumerRequiresInput {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "package.yaml"), `
@@ -1724,6 +1617,7 @@ func compositionConnectConsumerRegionEntitySchema(opts compositionConnectFixture
 }
 
 func writeCompositionConnectAdapterBootverifyFixture(t *testing.T, opts compositionConnectAdapterFixtureOptions) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_instance_adapter_validation proof=TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance
 	t.Helper()
 	root := t.TempDir()
 	outputKey := firstTestValue(opts.outputKey, "source_vertical_id")

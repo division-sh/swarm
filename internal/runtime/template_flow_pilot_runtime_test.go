@@ -53,7 +53,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 
 	evt := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999952",
-		events.EventType("producer/validation.requested"),
+		events.EventType("producer/account.ready"),
 		"",
 		"",
 		json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
@@ -70,12 +70,12 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
 		t.Fatalf("preflight failure/routes = %q/%#v, want one deterministic template route", preflight.TargetFailure, preflight.DeliveryRoutes)
 	}
-	if target := preflight.DeliveryRoutes[0].Target; target.FlowID != "scoring" || !strings.HasPrefix(target.FlowInstance, "scoring/") || target.EntityID == "" {
-		t.Fatalf("preflight target = %#v, want scoring template flow instance", target)
+	if target := preflight.DeliveryRoutes[0].Target; target.FlowID != "account" || !strings.HasPrefix(target.FlowInstance, "account/") || target.EntityID == "" {
+		t.Fatalf("preflight target = %#v, want account template flow instance", target)
 	}
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM flow_instances
-		WHERE flow_template = 'scoring'
+		WHERE flow_template = 'account'
 	`, 0)
 
 	if err := bus.Publish(ctx, evt); err != nil {
@@ -85,7 +85,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'scoring-handler'
+		  AND subscriber_id = 'account-node'
 	`, 1, evt.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -98,10 +98,10 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'scoring-handler'
+		  AND subscriber_id = 'account-node'
 		  AND delivery_target_route @> $2::jsonb
 	`, 1, evt.ID(), templateFlowPilotDeliveryTargetRouteJSON(t, events.RouteIdentity{
-		FlowID:       "scoring",
+		FlowID:       "account",
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}))
@@ -112,11 +112,11 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if !ok {
 		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
 	}
-	if loaded.StorageRef != flowInstance || loaded.WorkflowName != "scoring" || loaded.CurrentState != "pending" {
-		t.Fatalf("loaded scoring instance = storage:%q workflow:%q state:%q, want %s/scoring/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState, flowInstance)
+	if loaded.StorageRef != flowInstance || loaded.WorkflowName != "account" || loaded.CurrentState != "pending" {
+		t.Fatalf("loaded account instance = storage:%q workflow:%q state:%q, want %s/account/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState, flowInstance)
 	}
 	if loaded.Metadata["account_id"] != "acct-1" {
-		t.Fatalf("loaded scoring metadata = %#v, want account_id from route activation", loaded.Metadata)
+		t.Fatalf("loaded account metadata = %#v, want account_id from route activation", loaded.Metadata)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			name:    "ambiguous receiver key",
 			payload: json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "11111111-1111-4111-8111-111111111111", FlowInstance: "scoring/one", FlowTemplate: "scoring", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: "22222222-2222-4222-8222-222222222222", FlowInstance: "scoring/two", FlowTemplate: "scoring", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "one", EntityID: "11111111-1111-4111-8111-111111111111", FlowInstance: "account/one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "two", EntityID: "22222222-2222-4222-8222-222222222222", FlowInstance: "account/two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
 			},
 			wantFailure: string(runtimepinrouting.ConnectFailureTargetAmbiguous),
 		},
@@ -156,11 +156,11 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			raw := bus.Subscribe("raw-source-listener", events.EventType("producer/validation.requested"), events.EventType("validation.requested"))
+			raw := bus.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
 			defer bus.Unsubscribe("raw-source-listener")
 			evt := eventtest.RootIngress(
 				"99999999-9999-4999-8999-999999999953",
-				events.EventType("producer/validation.requested"),
+				events.EventType("producer/account.ready"),
 				"",
 				"",
 				tc.payload,
@@ -222,11 +222,11 @@ func loadTemplateFlowPilotInstanceIdentity(t *testing.T, ctx context.Context, db
 	if err := db.QueryRowContext(ctx, `
 		SELECT flow_instance, entity_id::text
 		FROM entity_state
-		WHERE flow_instance LIKE 'scoring/%'
+		WHERE flow_instance LIKE 'account/%'
 		ORDER BY created_at DESC
 		LIMIT 1
 	`).Scan(&flowInstance, &entityID); err != nil {
-		t.Fatalf("load scoring instance identity: %v", err)
+		t.Fatalf("load account instance identity: %v", err)
 	}
 	return flowInstance, entityID
 }

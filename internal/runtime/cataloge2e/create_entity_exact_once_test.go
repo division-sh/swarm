@@ -22,6 +22,7 @@ func TestCatalogRejectsStaticCreateEntityHandlerFixture(t *testing.T) {
 }
 
 func writeCreateEntityExactOnceFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_static_create_entity_retirement proof=TestCatalogRejectsStaticCreateEntityHandlerFixture
 	t.Helper()
 	root := t.TempDir()
 	writeFixtureFile(t, root, "package.yaml", `

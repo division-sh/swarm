@@ -1,0 +1,12 @@
+name: producer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: account_requested
+        event: account.requested
+        source: external
+  outputs:
+    events:
+      - name: account_ready
+        event: account.ready

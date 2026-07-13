@@ -1,0 +1,13 @@
+name: routing-parent-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: producer.work_ready
+    to: consumer.work_ready

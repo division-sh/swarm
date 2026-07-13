@@ -73,6 +73,7 @@ flows:
 }
 
 func writeCoordinator(t testing.TB, root string, opts Options) {
+	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners
 	t.Helper()
 	writeFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
 name: coordinator

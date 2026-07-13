@@ -90,24 +90,28 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	activation := store.activations[0]
 	if activation.Config[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
 		activation.Metadata[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
-		t.Fatalf("activation config/metadata = %#v/%#v, want account_id from renamed source_account_id adapter", activation.Config, activation.Metadata)
+		t.Fatalf("activation config/metadata = %#v/%#v, want account_id from receiver carry", activation.Config, activation.Metadata)
 	}
 	if activation.Metadata["entity_type"] != finalflowinstanceauthoring.TemplateEntityType ||
 		activation.Metadata["instance_kind"] != "template" ||
 		activation.Metadata["last_source_event"] != evt.ID() {
 		t.Fatalf("activation metadata = %#v, want entity_type/instance_kind/last_source_event", activation.Metadata)
 	}
+	persistedRoutes := store.routes[evt.ID()]
+	if len(persistedRoutes) != 1 || persistedRoutes[0].SubscriberID != finalflowinstanceauthoring.TemplateNodeID {
+		t.Fatalf("persisted delivery routes = %#v, want one %s subscriber", persistedRoutes, finalflowinstanceauthoring.TemplateNodeID)
+	}
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   finalflowinstanceauthoring.TemplateNodeID,
+		SubscriberID:   persistedRoutes[0].SubscriberID,
 		Target: events.RouteIdentity{
 			FlowID:       finalflowinstanceauthoring.TemplateFlowID,
 			FlowInstance: activation.Instance.InstancePath,
 			EntityID:     activation.Instance.EntityID,
 		},
 	}
-	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", store.routes[evt.ID()], want)
+	if !deliveryRoutesContain(persistedRoutes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", persistedRoutes, want)
 	}
 	if got := store.scopes[evt.ID()]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
@@ -120,7 +124,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("post-publish route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 
-	retryTarget := eb.SubscribeInternal(finalflowinstanceauthoring.TemplateNodeID)
+	retryTarget := eb.SubscribeInternal(persistedRoutes[0].SubscriberID)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish same-event retry: %v", err)
 	}
@@ -174,7 +178,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 		},
 		{
 			name:    "ambiguous receiver key",
-			payload: json.RawMessage(`{"source_account_id":"acct-42","score":"91","decision":"approved"}`),
+			payload: json.RawMessage(`{"account_id":"acct-42","score":"91","decision":"approved"}`),
 			flowInstances: []ActiveFlowInstanceDescriptor{
 				{InstanceID: "one", EntityID: "ent-1", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/one", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
 				{InstanceID: "two", EntityID: "ent-2", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/two", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
@@ -198,10 +202,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			raw := eb.Subscribe("raw-source-listener", events.EventType("intake/account.ready"), events.EventType("account.ready"))
+			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
 			defer eb.Unsubscribe("raw-source-listener")
 			evt := eventtest.RootIngress(uuid.NewString(),
-				events.EventType("intake/account.ready"),
+				events.EventType("producer/account.ready"),
 				"",
 				"",
 				tc.payload,
@@ -242,10 +246,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 func finalFlowInstanceAuthoringAccountReadyEvent(eventID, accountID string) events.Event {
 	return eventtest.RootIngress(
 		eventID,
-		events.EventType("intake/account.ready"),
+		events.EventType("producer/account.ready"),
 		"",
 		"",
-		json.RawMessage(`{"source_account_id":"`+accountID+`","score":"91","decision":"approved"}`),
+		json.RawMessage(`{"account_id":"`+accountID+`","score":"91","decision":"approved"}`),
 		0,
 		"",
 		"",

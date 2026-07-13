@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 )
 
 func TestEmitToolName_LocalizesScopedEventTypes(t *testing.T) {
@@ -563,15 +564,7 @@ func writeEmitFixtureFile(t *testing.T, path string, content string) {
 }
 
 func TestEmitRegistry_DoesNotGenerateMissingSchemaForChildLocalAgentEmitFixture(t *testing.T) {
-	repoRoot, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-required-agents-child")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
+	bundle := requiredagentsparentconnect.LoadBundle(t)
 	source := semanticview.Wrap(bundle)
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 

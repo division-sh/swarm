@@ -23,15 +23,15 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
 	edges := interFlowRouteEdges(view.RoutingTopology)
-	if len(edges) != 2 {
-		t.Fatalf("reply route edges = %#v, want request and response", edges)
-	}
 	roles := map[string]*routingtopology.Reply{}
 	for _, edge := range edges {
 		if edge.Resolution == nil || edge.Resolution.Reply == nil {
-			t.Fatalf("reply topology missing from edge %#v", edge)
+			continue
 		}
 		roles[edge.Resolution.Reply.Role] = edge.Resolution.Reply
+	}
+	if len(roles) != 2 {
+		t.Fatalf("reply route edges = %#v, want request and response roles", edges)
 	}
 	for _, role := range []string{"request", "response"} {
 		reply := roles[role]
@@ -50,24 +50,21 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 		t.Fatalf("root primary entity for valid no-root fixture = entity %#v error %q, want none", view.Root.PrimaryEntity, view.Root.PrimaryEntityError)
 	}
 
-	scoring := flowByID(t, view, "scoring")
-	if scoring.PrimaryEntity == nil || scoring.PrimaryEntity.Type != "validation" {
-		t.Fatalf("scoring primary entity = %#v, want validation", scoring.PrimaryEntity)
+	account := flowByID(t, view, "account")
+	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != "account_state" {
+		t.Fatalf("account primary entity = %#v, want account_state", account.PrimaryEntity)
 	}
-	if scoring.TemplateInstance == nil {
-		t.Fatalf("scoring template instance missing")
+	if account.TemplateInstance == nil {
+		t.Fatalf("account template instance missing")
 	}
-	if got := strings.Join(scoring.TemplateInstance.By, ","); got != "account_id" {
-		t.Fatalf("scoring instance.by = %q, want account_id", got)
-	}
-	if scoring.TemplateInstance.OnMissing != "create" || scoring.TemplateInstance.OnConflict != "reuse" {
-		t.Fatalf("scoring instance policy = %#v, want create/reuse", scoring.TemplateInstance)
+	if got := strings.Join(account.TemplateInstance.By, ","); got != "account_id" {
+		t.Fatalf("account instance.by = %q, want account_id", got)
 	}
 
 	producer := flowByID(t, view, "producer")
-	output := outputPinByName(t, producer, "validation_requested")
-	if output.Key != "account_id" || !containsString(output.Carries, "account_id") {
-		t.Fatalf("producer output key/carries = %#v, want account_id carried", output)
+	output := outputPinByName(t, producer, "account_ready")
+	if output.Event != "account.ready" || output.Key != "" || len(output.Carries) != 0 {
+		t.Fatalf("producer output = %#v, want canonical account.ready without duplicate key ownership", output)
 	}
 
 	edges := interFlowRouteEdges(view.RoutingTopology)
@@ -75,14 +72,14 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
 	}
 	edge := edges[0]
-	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "validation_requested" {
-		t.Fatalf("route producer/boundary = %#v, want producer.validation_requested", edge)
+	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "account_ready" {
+		t.Fatalf("route producer/boundary = %#v, want producer.account_ready", edge)
 	}
-	if edge.Consumer.FlowID != "scoring" || edge.Boundary.InputPin != "validation_requested" {
-		t.Fatalf("route consumer/boundary = %#v, want scoring.validation_requested", edge)
+	if edge.Consumer.FlowID != "account" || edge.Boundary.InputPin != "account_ready" {
+		t.Fatalf("route consumer/boundary = %#v, want account.account_ready", edge)
 	}
-	if edge.Resolution == nil || edge.Resolution.Mode != "instance_key" {
-		t.Fatalf("route resolution = %#v, want instance_key", edge.Resolution)
+	if edge.Resolution == nil || edge.Resolution.Mode != "select-or-create" {
+		t.Fatalf("route resolution = %#v, want select-or-create", edge.Resolution)
 	}
 	if edge.Resolution.InstanceKey == nil {
 		t.Fatalf("route instance key missing")
@@ -90,8 +87,8 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	if got := strings.Join(edge.Resolution.InstanceKey.Fields, ","); got != "account_id" {
 		t.Fatalf("route instance key fields = %q, want account_id", got)
 	}
-	if len(edge.Resolution.InstanceKey.Mappings) != 1 || edge.Resolution.InstanceKey.Mappings[0].Source != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Target != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route implicit mapping = %#v, want account_id -> account_id explicit=false", edge.Resolution.InstanceKey.Mappings)
+	if len(edge.Resolution.InstanceKey.Mappings) != 1 || edge.Resolution.InstanceKey.Mappings[0].Source != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Target != "account_id" || !edge.Resolution.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route explicit mapping = %#v, want account_id -> account_id explicit=true", edge.Resolution.InstanceKey.Mappings)
 	}
 }
 
@@ -564,13 +561,13 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 
 	var issue *routingtopology.Issue
 	for i := range view.RoutingTopology.Issues {
-		if view.RoutingTopology.Issues[i].Failure == "route_plan_instance_key_adapter_invalid" {
+		if view.RoutingTopology.Issues[i].Failure == "route_plan_instance_resolution_invalid" {
 			issue = &view.RoutingTopology.Issues[i]
 			break
 		}
 	}
 	if issue == nil {
-		t.Fatalf("route issues = %#v, want route_plan_instance_key_adapter_invalid", view.RoutingTopology.Issues)
+		t.Fatalf("route issues = %#v, want route_plan_instance_resolution_invalid", view.RoutingTopology.Issues)
 	}
 	if issue.AuthoredLocation == "" || !strings.Contains(issue.AuthoredLocation, "package.yaml:") {
 		t.Fatalf("route issue authored location = %q, want exact package.yaml:line", issue.AuthoredLocation)
@@ -580,7 +577,7 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	if diag.AuthoredLocation == "" {
 		t.Fatalf("diagnostic authored location empty: %#v", diag)
 	}
-	if !strings.Contains(diag.Message, "connect producer.validation_requested -> scoring.validation_requested") {
+	if !strings.Contains(diag.Message, "connect producer.account_ready -> account.account_ready") {
 		t.Fatalf("diagnostic message = %q, want connect context", diag.Message)
 	}
 }
@@ -664,8 +661,8 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 
 	producer := flowByID(t, view, finalflowinstanceauthoring.ProducerFlowID)
 	output := outputPinByName(t, producer, finalflowinstanceauthoring.ProducerOutputPin)
-	if output.Key != finalflowinstanceauthoring.TemplatePayloadKey || !containsString(output.Carries, finalflowinstanceauthoring.TemplatePayloadKey) {
-		t.Fatalf("producer output = %#v, want %s key/carry", output, finalflowinstanceauthoring.TemplatePayloadKey)
+	if output.Event != finalflowinstanceauthoring.ProducerOutput || output.Key != "" || len(output.Carries) != 0 {
+		t.Fatalf("producer output = %#v, want canonical event without duplicate key ownership", output)
 	}
 	edges := interFlowRouteEdges(view.RoutingTopology)
 	if len(edges) != 1 {
@@ -679,7 +676,7 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 		edge.Resolution.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
 		edge.Resolution.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
 		!edge.Resolution.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route instance key = %#v, want explicit renamed mapping", edge.Resolution)
+		t.Fatalf("route instance key = %#v, want explicit receiver carry mapping", edge.Resolution)
 	}
 
 	coordinator := flowByID(t, view, finalflowinstanceauthoring.CoordinatorFlowID)

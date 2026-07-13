@@ -1,0 +1,11 @@
+name: provider
+mode: static
+pins:
+  inputs:
+    events:
+      - name: provider_requested
+        event: provider.requested
+  outputs:
+    events:
+      - name: provider_replied
+        event: provider.replied

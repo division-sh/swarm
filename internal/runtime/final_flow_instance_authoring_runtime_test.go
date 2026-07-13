@@ -72,7 +72,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
 		"",
 		"",
-		json.RawMessage(`{"source_account_id":"acct-42","score":"91","decision":"approved"}`),
+		json.RawMessage(`{"account_id":"acct-42","score":"91","decision":"approved"}`),
 		0,
 		templateInstanceDeliveryRunID,
 		"",
@@ -88,7 +88,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	}
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account_case/%'
+		WHERE flow_instance LIKE 'account/%'
 	`, 0)
 
 	if err := bus.PublishAcknowledged(ctx, evt); err != nil {
@@ -109,13 +109,13 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	`, 1, evt.ID(), finalflowinstanceauthoring.TemplateNodeID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account_case/%'
+		WHERE flow_instance LIKE 'account/%'
 		  AND current_state = 'reviewed'
 		  AND fields @> $1::jsonb
 	`, 1, `{"account_id":"acct-42","score":"91","decision":"approved"}`)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account_case/%'
+		WHERE flow_instance LIKE 'account/%'
 	`, 1)
 
 	flowInstance, entityID := loadFinalFlowInstanceAuthoringTemplateIdentity(t, ctx, db)
@@ -156,7 +156,7 @@ func loadFinalFlowInstanceAuthoringTemplateIdentity(t *testing.T, ctx context.Co
 	if err := db.QueryRowContext(ctx, `
 		SELECT flow_instance, entity_id::text
 		FROM entity_state
-		WHERE flow_instance LIKE 'account_case%'
+		WHERE flow_instance LIKE 'account/%'
 		ORDER BY created_at DESC
 		LIMIT 1
 	`).Scan(&flowInstance, &entityID); err != nil {
@@ -226,7 +226,7 @@ func dumpFinalFlowInstanceAuthoringRuntimeProofState(t *testing.T, ctx context.C
 	stateRows, err := db.QueryContext(ctx, `
 		SELECT entity_id::text, flow_instance, current_state, fields::text
 		FROM entity_state
-		WHERE flow_instance LIKE 'account_case/%'
+		WHERE flow_instance LIKE 'account/%'
 		ORDER BY created_at
 	`)
 	if err != nil {

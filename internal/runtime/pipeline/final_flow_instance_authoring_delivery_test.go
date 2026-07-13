@@ -139,7 +139,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
 		finalflowinstanceauthoring.ProducerFlowID,
 		"",
-		json.RawMessage(`{"source_account_id":"acct-42","score":"91","decision":"approved"}`),
+		json.RawMessage(`{"account_id":"acct-42","score":"91","decision":"approved"}`),
 		0,
 		testPipelineRunID,
 		"",

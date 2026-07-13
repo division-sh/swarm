@@ -1,5 +1,0 @@
-name: analyzer-flow
-version: 1.0.0
-description: Child flow with required_agents for analyzer role.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

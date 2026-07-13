@@ -52,6 +52,8 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -4126,6 +4128,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=runtime.run_fork_identity proof=TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -7267,21 +7270,32 @@ func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) i
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
+	canonicalrouting.WriteFile(t, root, "schema.yaml", `
 name: served-event-publish-followup
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
 pins:
   inputs:
-    events: [thing.created, thing.unhandled]
+    events:
+      - name: thing_created
+        event: thing.created
+        source: external
+      - name: thing_reviewed
+        event: thing.reviewed
+        source: external
+      - name: thing_agent_hold
+        event: thing.agent_hold
+        source: external
+      - name: thing_unhandled
+        event: thing.unhandled
+        source: external
+  outputs:
+    events: []
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	canonicalrouting.WriteFile(t, root, "entities.yaml", `
 widget:
   amount:
     type: integer
@@ -7289,29 +7303,21 @@ widget:
   who: text
   note: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+	canonicalrouting.WriteFile(t, root, "events.yaml", `
 thing.created:
-  swarm:
-    source: external
   amount: integer
   who: text
 
 thing.reviewed:
-  swarm:
-    source: external
   note: text
 
 thing.agent_hold:
-  swarm:
-    source: external
   note: text
 
 thing.unhandled:
-  swarm:
-    source: external
   note: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+	canonicalrouting.WriteFile(t, root, "nodes.yaml", `
 entity-writer:
   id: entity-writer
   execution_type: system_node
@@ -7334,13 +7340,11 @@ entity-writer:
             target_field: note
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	return root
 }
 
 func writeServedTestSetupFixture(t *testing.T) string {
+	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=TestServedParityHarnessTestSetupEntitiesLifecycle
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7421,6 +7425,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
 }
 
 func writeServedJoinProofFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=engine.join proof=TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7609,47 +7614,58 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	return eventID
 }
 
-func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
+func addServedLegacyTemplateRootOverlay(t *testing.T, root string) {
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: served-event-publish-target-route
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
   - id: operating
     flow: operating
     mode: template
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: served-event-publish-target-route
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events:
+      - name: item_received
+        event: item.received
+        source: external
+  outputs:
+    events: []
+`, `name: routing-root-ingress
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
 pins:
   inputs:
-    events: [opco.bootstrap_requested]
+    events:
+      - name: item_received
+        event: item.received
+        source: external
+      - name: opco_bootstrap_requested
+        event: opco.bootstrap_requested
+        source: external
+      - name: opco_spinup_requested
+        event: opco.spinup_requested
+        source: external
+  outputs:
+    events: []
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-portfolio:
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "entities.yaml"), "{}\n", `portfolio:
   owner: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "events.yaml"), `item.processed:
+  item_id: text
+`, `item.processed:
+  item_id: text
 opco.bootstrap_requested:
-  swarm:
-    source: external
   owner: text
-
 opco.spinup_requested:
-  swarm:
-    source: external
-  instance_id: string
-  product_id: string
-  required:
-    - instance_id
-    - product_id
+  instance_id: text
+  product_id: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), "    item.processed: {}\n", `    item.processed: {}
 portfolio-bootstrap:
   id: portfolio-bootstrap
   execution_type: system_node
@@ -7675,9 +7691,12 @@ portfolio-node:
         product_id: payload.product_id
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+}
+
+func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
+	t.Helper()
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	addServedLegacyTemplateRootOverlay(t, root)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
 mode: template
@@ -7765,24 +7784,16 @@ func writeServedLiveAgentFixture(t *testing.T) string {
 	root := writeServedEventPublishFollowUpFixture(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 thing.created:
-  swarm:
-    source: external
   amount: integer
   who: text
 
 thing.reviewed:
-  swarm:
-    source: external
   note: text
 
 thing.agent_hold:
-  swarm:
-    source: external
   note: text
 
 thing.unhandled:
-  swarm:
-    source: external
   note: text
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
@@ -7827,73 +7838,8 @@ Handle live-agent parity events.
 
 func writeServedDynamicAutoEmitFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: served-dynamic-auto-emit
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: served-dynamic-auto-emit
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
-pins:
-  inputs:
-    events: [opco.bootstrap_requested]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-portfolio:
-  owner: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-opco.bootstrap_requested:
-  swarm:
-    source: external
-  owner: text
-
-opco.spinup_requested:
-  swarm:
-    source: external
-  instance_id: string
-  product_id: string
-  required:
-    - instance_id
-    - product_id
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-portfolio-bootstrap:
-  id: portfolio-bootstrap
-  execution_type: system_node
-  subscribes_to: [opco.bootstrap_requested]
-  event_handlers:
-    opco.bootstrap_requested:
-      data_accumulation:
-        source_event: opco.bootstrap_requested
-        writes:
-          - source_field: owner
-            target_field: owner
-      advances_to: waiting
-portfolio-node:
-  id: portfolio-node
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  event_handlers:
-    opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
-      advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	addServedLegacyTemplateRootOverlay(t, root)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
 mode: template
@@ -9540,7 +9486,7 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:           configPath,
-		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
+		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
 		DataSource:           dataDir,
 		WorkspaceBackend:     workspace.BackendHost,
 		WorkspaceBackendSet:  true,
@@ -9570,7 +9516,7 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
-		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
+		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            storebackend.ActiveDefaultBackend().String(),
@@ -10177,7 +10123,7 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 	})
 	ctx := context.Background()
 	firstHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	secondHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier1-primitives", "test-emits-single"))
+	secondHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("examples", "routing", "root-ingress"))
 	if firstHash == secondHash {
 		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
 	}
@@ -10671,7 +10617,7 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 
 func TestPrepareServeBundleSourceSQLiteStampsEphemeralWithoutPostgresCatalog(t *testing.T) {
 	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier1-primitives/test-emits-single")
+	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
 	identity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		t.Fatalf("BootBundleIdentity: %v", err)
@@ -13088,6 +13034,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 }
 
 func writeVerifyLintEvidenceFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=cli.verify_lint_evidence proof=TestRunVerifyCommand_SurfacesLintEvidence
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -13370,6 +13317,7 @@ support-node:
 }
 
 func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=cli.tutorial_lint proof=TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: ticket-flow
@@ -13613,6 +13561,7 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=contracts.state_schema proof=TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-state-schema-float
@@ -13668,6 +13617,7 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=engine.accumulation_projection proof=TestRunVerifyCommand_AllowsAccumulatorEntityProjection
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
 	root := t.TempDir()
@@ -13976,6 +13926,7 @@ func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID strin
 }
 
 func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentKey, agentID string) string {
+	// routing-example-census: different-concept issue=none owner=runtime.agent_slug_admission proof=TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
@@ -14032,6 +13983,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 }
 
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=runtime.artifact_repo_admission proof=TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -14118,6 +14070,7 @@ artifact-writer:
 }
 
 func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
+	// routing-example-census: different-concept issue=none owner=runtime.model_alias_validation proof=TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias
 	t.Helper()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-model-alias
@@ -15928,13 +15881,13 @@ func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(
 }
 
 func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
-	source := semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-required-agents-child")))
+	source := semanticview.Wrap(requiredagentsparentconnect.LoadBundle(t))
 
 	err := verifyBundle(context.Background(), source)
 	if err == nil {
 		t.Fatal("verifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
 	}
-	if strings.Contains(err.Error(), "'analysis.done' emitted but nobody subscribes") {
+	if strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
 		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
 	}
 }
@@ -16077,6 +16030,7 @@ func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testin
 }
 
 func writeVerifyMissingPinWarningFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_producer_path proof=TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `

@@ -1,0 +1,11 @@
+name: root ingress visible smoke
+steps:
+  - publish: item.received
+    payload:
+      item_id: smoke-item
+expect:
+  events:
+    include: [item.processed]
+  entities:
+    - type: default
+      current_state: done

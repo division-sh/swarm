@@ -1,6 +1,0 @@
-agent_fixtures:
-  analyzer:
-    - on: analysis.requested
-      emits: []
-    - on: analyzer-flow/analysis.requested
-      emits: []
