@@ -459,8 +459,16 @@ flows:
 		"schema.yaml": "name: standing-telegram-proof\n", "policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
 		"flows/telegram-ingress/schema.yaml": `name: telegram-ingress
 mode: singleton
-initial_state: active
-states: [active]
+stages:
+  active:
+    initial: true
+    gate:
+      decision: standing_review
+      outcomes:
+        keep:
+          advances_to: done
+  done:
+    terminal: true
 pins:
   inputs:
     events:
