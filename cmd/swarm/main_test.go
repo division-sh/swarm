@@ -4060,6 +4060,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
 	entityID := servedJoinEntityID(t, db, initial.RunID)
 
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
@@ -4122,6 +4123,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", "dispatcher", "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID,
 		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
@@ -4135,6 +4137,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 	if err := rt.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("wait for join source quiescence before fork frontier: %v", err)
 	}
+	waitServedRunDeliveryQuiescence(t, db, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
 	if _, err := (&store.PostgresStore{DB: db}).PlanRunFork(context.Background(), store.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
@@ -4212,6 +4215,33 @@ func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
+}
+
+func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	stable := 0
+	for time.Now().Before(deadline) {
+		var active int
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE run_id = $1::uuid
+			  AND status IN ('pending', 'in_progress')
+		`, runID).Scan(&active); err != nil {
+			t.Fatalf("count active served run deliveries: %v", err)
+		}
+		if active == 0 {
+			stable++
+			if stable == 4 {
+				return
+			}
+		} else {
+			stable = 0
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, servedEventPublishDebugSummary(t, db, "postgres", runID))
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
@@ -7723,9 +7753,16 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 		SelfCheck:               true,
 		RequireBundleMatch:      true,
 		Verbose:                 true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestOutboxSweeperConfig: servedJoinProofOutboxSweeperConfig(),
 	})
 	return endpoint, db, bundleHash, rt
+}
+
+func servedJoinProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
+	cfg := runtimebus.DefaultOutboxSweeperConfig()
+	// Keep the selected-fork proof independent from periodic recovery replay.
+	cfg.Interval = time.Hour
+	return cfg
 }
 
 func writeServedJoinProofFixture(t *testing.T) string {

@@ -715,6 +715,15 @@ func assertDirectiveOperationCompletionRows(t *testing.T, db interface {
 	if operationState != "succeeded" {
 		t.Fatalf("operation state = %s", operationState)
 	}
+	var producedByType string
+	if err := db.QueryRow(`SELECT COALESCE(produced_by_type, '') FROM events WHERE event_id = ?`, eventID).Scan(&producedByType); err != nil {
+		if err := db.QueryRow(`SELECT COALESCE(produced_by_type, '') FROM events WHERE event_id = $1::uuid`, eventID).Scan(&producedByType); err != nil {
+			t.Fatalf("load directive event producer classification: %v", err)
+		}
+	}
+	if producedByType != "platform" {
+		t.Fatalf("directive event produced_by_type = %q, want platform", producedByType)
+	}
 	var receiptCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&receiptCount); err != nil {
 		if err := db.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&receiptCount); err != nil {

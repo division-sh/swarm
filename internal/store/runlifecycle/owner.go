@@ -29,7 +29,6 @@ type Snapshot struct {
 }
 
 type EnsureActiveOptions struct {
-	ReopenCompleted         bool
 	HasStartedAtCol         bool
 	HasTriggerCols          bool
 	HasCounterCols          bool
@@ -53,6 +52,41 @@ const (
 )
 
 var ErrPersistedBundleUnavailable = errors.New("persisted bundle source unavailable")
+
+var ErrRunNotActive = errors.New("run is not active")
+
+var ErrRunNotFound = errors.New("run not found")
+
+type RunNotFoundError struct {
+	RunID string
+}
+
+func (e *RunNotFoundError) Error() string {
+	if e == nil {
+		return ErrRunNotFound.Error()
+	}
+	return fmt.Sprintf("%s: run_id=%s", ErrRunNotFound, strings.TrimSpace(e.RunID))
+}
+
+func (e *RunNotFoundError) Unwrap() error {
+	return ErrRunNotFound
+}
+
+type RunNotActiveError struct {
+	RunID  string
+	Status string
+}
+
+func (e *RunNotActiveError) Error() string {
+	if e == nil {
+		return ErrRunNotActive.Error()
+	}
+	return fmt.Sprintf("%s: run_id=%s status=%s", ErrRunNotActive, strings.TrimSpace(e.RunID), strings.TrimSpace(e.Status))
+}
+
+func (e *RunNotActiveError) Unwrap() error {
+	return ErrRunNotActive
+}
 
 type PersistedBundleUnavailableError struct {
 	BundleHash   string
@@ -115,6 +149,28 @@ func CanonicalBundleSource(raw string) (string, error) {
 
 func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions) error {
 	return ensureActive(ctx, db, runID, triggerEventID, triggerEventType, opts, true)
+}
+
+// RequirePresent locks an existing lifecycle row without requiring an active
+// status. Typed runtime-log evidence uses this after terminalization; it may
+// never create or reopen a run.
+func RequirePresent(ctx context.Context, db DBTX, runID string) error {
+	if db == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	var status string
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`, runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &RunNotFoundError{RunID: runID}
+	}
+	if err != nil {
+		return fmt.Errorf("require run row: %w", err)
+	}
+	return nil
 }
 
 func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions, allowTransactionWrap bool) error {
@@ -180,19 +236,6 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			}
 		}
 	}
-	reopenStatus := "runs.status"
-	reopenFailure := ""
-	reopenEndedAt := ""
-	if opts.ReopenCompleted {
-		reopenStatus = "CASE WHEN runs.status = 'completed' THEN 'running' ELSE runs.status END"
-		if opts.HasTerminalCols {
-			reopenFailure = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.failure END"
-			reopenEndedAt = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.ended_at END"
-		}
-	} else if opts.HasTerminalCols {
-		reopenFailure = "runs.failure"
-		reopenEndedAt = "runs.ended_at"
-	}
 	insertCols := []string{"run_id", "status"}
 	insertVals := []string{"$1::uuid", "'running'"}
 	args := []any{runID}
@@ -222,11 +265,11 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		INSERT INTO runs (` + strings.Join(insertCols, ", ") + `)
 		VALUES (` + strings.Join(insertVals, ", ") + `)
 		ON CONFLICT (run_id) DO UPDATE SET
-			status = ` + reopenStatus
+			status = runs.status`
 	if opts.HasTerminalCols {
 		query += `,
-			failure = ` + reopenFailure + `,
-			ended_at = ` + reopenEndedAt
+			failure = runs.failure,
+			ended_at = runs.ended_at`
 	}
 	if opts.HasBundleHashCol {
 		query += `,
@@ -249,9 +292,22 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&existed); err != nil {
 		return fmt.Errorf("ensure run row: inspect existing run: %w", err)
 	}
-	_, err = db.ExecContext(ctx, query, args...)
+	query += `
+		WHERE runs.status IN ('running', 'paused')`
+	result, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("ensure run row: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ensure run row: read affected rows: %w", err)
+	}
+	if rows == 0 {
+		var status string
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+			return fmt.Errorf("ensure run row: load inactive status: %w", err)
+		}
+		return &RunNotActiveError{RunID: runID, Status: status}
 	}
 	if !existed {
 		occurredAt := time.Now().UTC()

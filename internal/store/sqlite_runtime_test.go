@@ -1569,9 +1569,9 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 
 	logID := uuid.NewString()
-	if err := store.AppendEvent(ctx, eventtest.PersistedProjection(logID,
+	if err := store.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), eventtest.DiagnosticDirect(logID,
 
-		events.EventType("platform.runtime_log"),
+		events.EventTypePlatformRuntimeLog,
 		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {
 		t.Fatalf("AppendEvent runtime log: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -187,17 +188,39 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
 		return fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
 	}
+	wantIdentity := newPersistedEventIdentity(
+		runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy,
+		producedByType, sourceEventID, createdAt, sourceRoute, targetRoute, targetSet,
+	)
+	existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, caps, id)
+	if err != nil {
+		return err
+	}
+	duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+	if err != nil {
+		return err
+	}
+	if duplicate {
+		return nil
+	}
 	if caps.Events.LogRunID {
-		if err := sqliteEnsureRunRow(ctx, tx, runID, id, name, createdAt); err != nil {
-			return err
+		var ensureErr error
+		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
+			ensureErr = sqliteRequireRunRowPresent(ctx, tx, runID)
+		} else {
+			ensureErr = sqliteEnsureActiveRunRow(ctx, tx, runID, id, name, createdAt)
+		}
+		if ensureErr != nil {
+			return ensureErr
 		}
 	}
 	result, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO events (
+		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
 			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(event_id) DO NOTHING
 	`, id, sqliteNullUUID(runID), name, sqliteNullUUID(entityID), sqliteNullString(flowInstance), string(sourceRoute), string(targetRoute), string(targetSet),
 		scope, string(payload), chainDepth, sqliteNullString(producedBy), producedByType, sqliteNullUUID(sourceEventID), createdAt.UTC())
 	if err != nil {
@@ -205,10 +228,26 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read append sqlite event result: %w", err)
+		return fmt.Errorf("append sqlite event: read affected rows: %w", err)
 	}
 	if rows == 0 {
+		existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, caps, id)
+		if err != nil {
+			return err
+		}
+		duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+		if err != nil {
+			return err
+		}
+		if !duplicate {
+			return fmt.Errorf("append sqlite event: event_id=%s was not inserted", id)
+		}
 		return nil
+	}
+	if caps.Events.LogRunID && caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
+		if err := sqliteSyncRunCounts(ctx, tx, runID); err != nil {
+			return err
+		}
 	}
 	return recordPersistedEventAuthorActivity(ctx, s, evt, producedBy, producedByType)
 }
@@ -821,6 +860,40 @@ func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempot
 	}
 	record.Response = json.RawMessage(response)
 	return record, true, nil
+}
+
+func sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
+	if err := sqliteEnsureRunRow(ctx, tx, runID, triggerEventID, triggerEventType, now); err != nil {
+		return err
+	}
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return nil
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
+		return fmt.Errorf("ensure active sqlite run row: %w", err)
+	}
+	status = strings.TrimSpace(status)
+	if status != "running" && status != "paused" {
+		return &storerunlifecycle.RunNotActiveError{RunID: runID, Status: status}
+	}
+	return nil
+}
+
+func sqliteRequireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) error {
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return nil
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &storerunlifecycle.RunNotFoundError{RunID: runID}
+		}
+		return fmt.Errorf("require sqlite run row: %w", err)
+	}
+	return nil
 }
 
 func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {

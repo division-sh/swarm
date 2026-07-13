@@ -24,16 +24,28 @@ func withDiagnosticDirectOwner(ctx context.Context, eventType string) context.Co
 }
 
 func validateDiagnosticDirectOwner(ctx context.Context, evt events.Event) error {
+	eventType := strings.TrimSpace(string(evt.Type()))
+	inClosedCatalog := events.IsDiagnosticDirectEventType(events.EventType(eventType))
 	if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect {
+		if inClosedCatalog {
+			return fmt.Errorf("diagnostic-direct event %s requires its typed constructor and persistence owner", eventType)
+		}
 		return nil
 	}
-	eventType := strings.TrimSpace(string(evt.Type()))
-	if !events.IsDiagnosticDirectEventType(events.EventType(eventType)) {
+	if !inClosedCatalog {
 		return fmt.Errorf("diagnostic-direct event type %q is not in the closed catalog", eventType)
 	}
 	owner, _ := ctx.Value(diagnosticDirectOwnerContextKey{}).(string)
 	if strings.TrimSpace(owner) != eventType {
 		return fmt.Errorf("diagnostic-direct event %s requires its typed persistence owner", eventType)
+	}
+	return nil
+}
+
+func rejectDiagnosticDirectDeliveryPersistence(evt events.Event) error {
+	eventType := strings.TrimSpace(string(evt.Type()))
+	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect || events.IsDiagnosticDirectEventType(events.EventType(eventType)) {
+		return fmt.Errorf("diagnostic-direct event %s cannot use generic event delivery persistence", eventType)
 	}
 	return nil
 }

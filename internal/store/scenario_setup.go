@@ -71,7 +71,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 	if err != nil {
 		return ScenarioSetupResult{}, err
 	}
-	if err := s.ensureRunRow(ctx, caps, tx, req.RunID, "", "test.setup_entities", false); err != nil {
+	if err := s.ensureRunRow(ctx, caps, tx, req.RunID, "", "test.setup_entities"); err != nil {
 		return ScenarioSetupResult{}, err
 	}
 	for _, entity := range req.Entities {
@@ -136,7 +136,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	if err := s.runAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureRunRow(txctx, tx, req.RunID, "", "test.setup_entities", req.CreatedAt); err != nil {
+		if err := sqliteEnsureActiveRunRow(txctx, tx, req.RunID, "", "test.setup_entities", req.CreatedAt); err != nil {
 			return err
 		}
 		for _, entity := range req.Entities {

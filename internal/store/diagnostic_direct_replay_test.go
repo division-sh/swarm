@@ -21,6 +21,9 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		t.Fatalf("seed sqlite replay run: %v", err)
+	}
 
 	runtimeLogID := persistSQLiteRuntimeLogForReplayTest(t, ctx, store, runID)
 	inboundID := uuid.NewString()
@@ -29,9 +32,9 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	agentDirectiveID := uuid.NewString()
 	executableID := uuid.NewString()
 
-	appendSQLiteReplayTestEvent(t, ctx, store, eventtest.PersistedProjection(
+	appendSQLiteDiagnosticReplayTestEvent(t, ctx, store, eventtest.DiagnosticDirect(
 		inboundID,
-		events.EventType("platform.inbound_recorded"),
+		events.EventTypePlatformInboundRecord,
 		"github",
 		"",
 		json.RawMessage(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
@@ -41,9 +44,9 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		now.Add(time.Second),
 	))
-	appendSQLiteReplayTestEvent(t, ctx, store, eventtest.PersistedProjection(agentDirectiveID,
+	appendSQLiteDiagnosticReplayTestEvent(t, ctx, store, eventtest.DiagnosticDirect(agentDirectiveID,
 
-		events.EventType("platform.agent_directive"),
+		events.EventTypePlatformAgentDirective,
 		"runtime", "", json.RawMessage(`{"agent_id":"agent-1","directive":"resume"}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)))
 	if err := store.UpsertCommittedReplayScope(ctx, agentDirectiveID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		t.Fatalf("UpsertCommittedReplayScope(agent directive): %v", err)
@@ -103,15 +106,18 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+		t.Fatalf("seed postgres replay run: %v", err)
+	}
 
 	runtimeLogID := persistPostgresRuntimeLogForReplayTest(t, ctx, pg, runID)
 	inboundID := recordPostgresInboundEventForReplayTest(t, ctx, pg, runID, entityID)
 	agentDirectiveID := uuid.NewString()
 	executableID := uuid.NewString()
 
-	appendPostgresReplayTestEvent(t, ctx, pg, eventtest.PersistedProjection(agentDirectiveID,
+	appendPostgresDiagnosticReplayTestEvent(t, ctx, pg, eventtest.DiagnosticDirect(agentDirectiveID,
 
-		events.EventType("platform.agent_directive"),
+		events.EventTypePlatformAgentDirective,
 		"runtime", "", json.RawMessage(`{"agent_id":"agent-1","directive":"resume"}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)))
 	if err := pg.UpsertCommittedReplayScope(ctx, agentDirectiveID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		t.Fatalf("UpsertCommittedReplayScope(agent directive): %v", err)
@@ -209,9 +215,9 @@ func recordPostgresInboundEventForReplayTest(t *testing.T, ctx context.Context, 
 	eventID := uuid.NewString()
 	publicationID := uuid.NewString()
 	publicationEventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.DiagnosticDirect(
 		eventID,
-		events.EventType("platform.inbound_recorded"),
+		events.EventTypePlatformInboundRecord,
 		"github",
 		inboundEventIdempotencyKey("provider-event-1", entityID, "github"),
 		json.RawMessage(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
@@ -237,6 +243,20 @@ func appendSQLiteReplayTestEvent(t *testing.T, ctx context.Context, store *SQLit
 func appendPostgresReplayTestEvent(t *testing.T, ctx context.Context, pg *PostgresStore, evt events.Event) {
 	t.Helper()
 	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
+	}
+}
+
+func appendSQLiteDiagnosticReplayTestEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, evt events.Event) {
+	t.Helper()
+	if err := store.AppendEvent(withDiagnosticDirectOwner(ctx, string(evt.Type())), evt); err != nil {
+		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
+	}
+}
+
+func appendPostgresDiagnosticReplayTestEvent(t *testing.T, ctx context.Context, pg *PostgresStore, evt events.Event) {
+	t.Helper()
+	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, string(evt.Type())), evt); err != nil {
 		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
 	}
 }

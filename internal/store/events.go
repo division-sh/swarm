@@ -111,28 +111,10 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 	})
 }
 
-func (s *PostgresStore) appendEventSpecWithRunCreationValidationTx(ctx context.Context, caps StoreSchemaCapabilities, evt events.Event) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin event source validation tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
+func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
 		return err
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit event source validation tx: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -158,6 +140,9 @@ func (s *PostgresStore) PersistEventWithDeliveriesAndScope(
 	agentIDs []string,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -184,6 +169,9 @@ func (s *PostgresStore) PersistEventWithDeliveryRoutesAndScope(
 	deliveryTargets map[string]events.RouteIdentity,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -209,6 +197,9 @@ func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
 	deliveryRoutes []events.DeliveryRoute,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
+	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -774,6 +765,25 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	if err := s.validateEventPayload(ctx, name, payload); err != nil {
 		return err
 	}
+	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
+		return fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
+	}
+	wantIdentity := newPersistedEventIdentity(
+		runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy,
+		producedByType, sourceEventID, createdAt, sourceRoute, targetRoute, targetSet,
+	)
+	queryer := chooseRowQueryer(s.DB, tx)
+	existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, caps, id)
+	if err != nil {
+		return err
+	}
+	duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+	if err != nil {
+		return err
+	}
+	if duplicate {
+		return nil
+	}
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
@@ -807,12 +817,29 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 			ON CONFLICT (event_id) DO NOTHING
 		`
 		args = []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
-	} else if eventHasRouteIdentity(evt) {
-		return fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
 	}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, false); err != nil {
-			return err
+		var ensureErr error
+		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
+			ensureErr = s.ensureRuntimeLogRunRow(ctx, caps, tx, runID, id, name)
+		} else {
+			ensureErr = s.ensureRunRow(ctx, caps, tx, runID, id, name)
+		}
+		if ensureErr != nil {
+			if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
+				existingIdentity, found, loadErr := loadPostgresEventIdentity(ctx, queryer, caps, id)
+				if loadErr != nil {
+					return loadErr
+				}
+				duplicate, duplicateErr := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+				if duplicateErr != nil {
+					return duplicateErr
+				}
+				if duplicate {
+					return nil
+				}
+			}
+			return ensureErr
 		}
 		q = `
 			INSERT INTO events (
@@ -849,15 +876,23 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	}
 	rows, rowsErr := res.RowsAffected()
 	if rowsErr != nil {
-		return fmt.Errorf("read append event result: %w", rowsErr)
+		return fmt.Errorf("append event: read affected rows: %w", rowsErr)
 	}
 	if rows == 0 {
+		existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, caps, id)
+		if err != nil {
+			return err
+		}
+		duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+		if err != nil {
+			return err
+		}
+		if !duplicate {
+			return fmt.Errorf("append event: event_id=%s was not inserted", id)
+		}
 		return nil
 	}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, true); err != nil {
-			return err
-		}
 		if caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
 			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
 				return err
@@ -1610,13 +1645,12 @@ func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQu
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string, reopenCompleted bool) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
 	runID = nullUUIDString(runID)
 	if runID == "" || !caps.Events.HasRuns {
 		return nil
 	}
 	opts := runLifecycleOptions(caps)
-	opts.ReopenCompleted = reopenCompleted
 	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
 		opts.BundleHash = fact.BundleHash
 		opts.BundleSource = fact.BundleSource
@@ -1628,19 +1662,12 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
 
-func persistedBundleRunCreationValidationRequired(ctx context.Context, caps StoreSchemaCapabilities) bool {
-	if !caps.Events.HasRuns || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
-		return false
+func (s *PostgresStore) ensureRuntimeLogRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
+	runID = nullUUIDString(runID)
+	if runID == "" || !caps.Events.HasRuns {
+		return nil
 	}
-	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		return false
-	}
-	source, err := storerunlifecycle.CanonicalBundleSource(fact.BundleSource)
-	if err != nil {
-		return false
-	}
-	return source == storerunlifecycle.BundleSourcePersisted && strings.TrimSpace(fact.BundleHash) != ""
+	return storerunlifecycle.RequirePresent(ctx, chooseExecQueryer(s.DB, tx), runID)
 }
 
 func canonicalRunTerminalStatus(raw string) (string, error) {
@@ -1900,7 +1927,7 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	}
 	producedBy = strings.TrimSpace(evt.SourceAgent())
 	producedByType = "agent"
-	if producedBy == "" || producedBy == "runtime" {
+	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect || producedBy == "" || producedBy == "runtime" {
 		producedByType = "platform"
 	}
 	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())

@@ -34,7 +34,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	}
 	now := s.now()
 	return s.runAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureRunRow(txctx, tx, identity.RunID, "", "", now); err != nil {
+		if err := sqliteEnsureActiveRunRow(txctx, tx, identity.RunID, "", "", now); err != nil {
 			return err
 		}
 		if plan.Enabled {
@@ -106,6 +106,9 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 		return err
 	}
 	return s.runAuthorActivityMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
+		if err := sqliteEnsureActiveRunRow(txctx, tx, identity.RunID, "", "", s.now()); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
 			return err
 		}
