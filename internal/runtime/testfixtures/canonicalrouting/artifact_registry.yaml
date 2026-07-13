@@ -230,3 +230,664 @@ groups:
     proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go
     roots:
       - tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow
+go_groups:
+  - file: cmd/swarm/describe.go
+    disposition: different-concept
+    owner: cmd.swarm.describe
+    proof: TestDescribeRoutesHumanAndJSONAreDeterministic
+    functions:
+      - writeDescribeText
+  - file: cmd/swarm/describe_test.go
+    disposition: different-concept
+    owner: cmd.swarm.describe
+    proof: self
+    functions:
+      - TestDescribeCommandRendersDefaultedTemplateInstancePolicies
+  - file: cmd/swarm/describe_test.go
+    disposition: different-concept
+    owner: cmd.swarm.describe
+    proof: TestDescribeCommandJSONRendersExpandedAuthoringView
+    functions:
+      - writeDescribeDefaultedTemplatePolicyContracts
+  - file: cmd/swarm/inbound_admission_supported_surface_test.go
+    disposition: provider-ingress
+    owner: standing_ingress_admission
+    proof: TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres
+    functions:
+      - runInboundAdmissionSupportedSurfacePolicyMatrix
+      - writeInboundAdmissionPolicyMatrixFixture
+  - file: cmd/swarm/main_test.go
+    disposition: different-concept
+    owner: cmd.swarm.main
+    proof: self
+    functions:
+      - TestRunVerifyCommandFormatsPreBootLoaderDiagnostics
+      - TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites
+  - file: cmd/swarm/main_test.go
+    disposition: different-concept
+    owner: cmd.swarm.main
+    proof: TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime
+    functions:
+      - writeServedEventPublishActiveLoadFixture
+      - writeServedLiveAgentFixture
+      - writeVerifyAccumulatorSafetyCommandFixture
+      - writeVerifyBootTimerCommandFixture
+      - writeVerifyLintEvidenceWithMissingEmitSchemaFixture
+  - file: cmd/swarm/test_command_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: self
+    functions:
+      - TestScenarioSetupParserRejectsAmbiguousSetupForms
+      - TestSwarmTestRejectsInvalidSetupBeforeRPC
+  - file: internal/apispec/platform_spec_composition_routing_test.go
+    disposition: parser-only
+    owner: platform_spec.routing_contract
+    proof: self
+    functions:
+      - TestPlatformSpecCompositionRoutingSourceAuthority
+  - file: internal/apiv1/operator_run_completion_system_node_test.go
+    disposition: different-concept
+    owner: internal.apiv1.operator-run-completion-system-node
+    proof: TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces
+    functions:
+      - runCompletionSystemNodeBundle
+  - file: internal/providertriggers/admission_test.go
+    disposition: provider-ingress
+    owner: provider_trigger_admission
+    proof: self
+    functions:
+      - TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID
+  - file: internal/runtime/accprojection/resolver_test.go
+    disposition: different-concept
+    owner: internal.runtime.accprojection.resolver
+    proof: TestForHandler_FiltersProjectionIssuesToActiveHandler
+    functions:
+      - loadProjectionFlowBundle
+      - loadProjectionImportBoundaryWildcardBundle
+  - file: internal/runtime/agents/agent_llm_test.go
+    disposition: different-concept
+    owner: internal.runtime.agents.agent-llm
+    proof: TestFormatEventForAgent_UsesPostCompositionToolSurface
+    functions:
+      - writeAgentPromptTestBundle
+  - file: internal/runtime/artifact_action_result_delivery_test.go
+    disposition: different-concept
+    owner: internal.runtime.artifact-action-result-delivery
+    proof: TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery
+    functions:
+      - artifactActionResultDeliveryFixtureFiles
+  - file: internal/runtime/authoringview/view_test.go
+    disposition: different-concept
+    owner: internal.runtime.authoringview.view
+    proof: TestBuildShowsReplyPairedTopology
+    functions:
+      - loadDefaultedTemplatePolicySource
+      - writeDuplicateNodeIDFlow
+  - file: internal/runtime/bootverify/flow_package_import_completeness_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.flow-package-import-completeness-checks
+    proof: TestRun_FlowPackageImportCompletenessAcceptsFullyBoundFlowPackage
+    functions:
+      - writeFlowPackageAliasValidationFixture
+  - file: internal/runtime/bootverify/platform_entity_namespace_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.platform-entity-namespace
+    proof: self
+    functions:
+      - TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority
+  - file: internal/runtime/bootverify/report_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.report
+    proof: self
+    functions:
+      - TestRun_AcceptsExplicitSessionScopeDeclarations
+      - TestRun_AcceptsPackageBackedFlowSessionScopeDeclarations
+      - TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions
+      - TestRun_AllowsNonMaterializingRootDefaultStaticInputPinHandlers
+      - TestRun_AllowsRootNormalInputPinMaterializationWithoutEntityID
+      - TestRun_AllowsTimerFireEventWithAgentConsumer
+      - TestRun_DefaultsOmittedAgentModeButKeepsModelExplicit
+      - TestRun_DoesNotUseRootLocalReferenceAsProofForChildFlowDeadEventSchema
+      - TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema
+      - TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplicateIDs
+      - TestRun_PromptEntityWritesPrefersFlowScopedAuthorization
+      - TestRun_RejectsAuthoredGlobalSessionScope
+      - TestRun_RejectsBareItemInHandlerEmitFields
+      - TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers
+      - TestRun_RejectsEntitySessionScopeInStatelessFlow
+      - TestRun_RejectsImplicitMaterializationForStatefulStaticInputPinHandlers
+      - TestRun_RejectsPackageBackedEntitySessionScopeInStatelessFlow
+      - TestRun_RejectsRootAgentFlowSessionScope
+      - TestRun_RejectsRootDefaultStaticInputPinMaterializationWithOptionalEntityID
+      - TestRun_RejectsRootDefaultStaticInputPinMaterializationWithRequiredEntityID
+      - TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers
+      - TestRun_RejectsSelectEntityWithCreateEntity
+      - TestRun_RejectsSelectEntityWithEnvelopeTargetField
+      - TestRun_RejectsSelectEntityWithSelectOrCreateEntity
+      - TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority
+      - TestRun_RejectsSelectEntityWithUndeclaredPayloadRef
+      - TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers
+      - TestRun_RejectsSelectOrCreateEntityWithCreateEntity
+      - TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority
+      - TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef
+      - TestRun_RejectsYAMLScalarEmitFieldsAsExpressions
+      - TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization
+  - file: internal/runtime/bootverify/report_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.report
+    proof: TestRun_MapsMissingToolToToolResolutionWarning
+    functions:
+      - writeCrossFlowPinAmbiguityFixture
+      - writeDeadEventSchemaFixture
+      - writeSelectEntityInputPinFixture
+      - writeStagedLifecycleFixture
+      - writeTimerValidationFixtureWithOptions
+      - writeWave1ExpressionFixture
+      - writeWave1RootReaderCoverageFixture
+  - file: internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-accumulator-safety-checks
+    proof: TestRun_WarnsForAccumulateAllWithoutBoundedEscape
+    functions:
+      - writeAccumulatorAgentsFile
+      - writeAccumulatorRootAgentFixture
+      - writeAccumulatorSafetyFixture
+      - writeAccumulatorWildcardSameFlowAgentFixture
+      - writeAccumulatorWildcardSameFlowFixture
+      - writeAccumulatorWildcardSameFlowNodeFixture
+  - file: internal/runtime/bootverify/workflow_composition_connect_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-composition-connect-checks
+    proof: TestRun_AllowsParentCompositionConnectAsVerifyRouteProof
+    functions:
+      - producerAutoEmitOnCreateBlock
+      - writeCompositionConnectConsumerSchemaOnlyFlow
+      - writeCompositionConnectProducerFlow
+      - writeCompositionConnectProducerSchemaOnlyFlow
+  - file: internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-event-metadata-authority-checks
+    proof: self
+    functions:
+      - TestEventMetadataAuthorityRejectsInternalSwarmRestatements
+  - file: internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-event-metadata-authority-checks
+    proof: TestEventMetadataAuthorityRejectsInternalSwarmRestatements
+    functions:
+      - writeEventMetadataAuthorityFixture
+  - file: internal/runtime/bootverify/workflow_pin_routing_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-pin-routing-checks
+    proof: self
+    functions:
+      - TestPinTargetResolution_AllowsExplicitTargetEscapeHatches
+      - TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect
+      - TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposition
+      - TestPinTargetResolution_ChecksProjectScopeAgentUnderOwningFlow
+      - TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism
+      - TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath
+      - TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath
+      - TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect
+      - TestPinTargetResolution_FailsClosedForRootProducerTargetCommonPath
+      - TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithParentConnect
+  - file: internal/runtime/bootverify/workflow_pin_routing_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-pin-routing-checks
+    proof: TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism
+    functions:
+      - loadPinRoutingProducerAgentRouteBundleWithRootOutputs
+      - loadPinRoutingProducerRouteBundleForEvents
+      - loadPinRoutingVerifyBundle
+      - loadPinRoutingVerifySourceFixture
+      - pinRoutingVerifyGuardNodeYAML
+      - selectEntityDemotionConsumerNodes
+      - writeSelectEntityDemotionOtherConsumerFlow
+  - file: internal/runtime/bootverify/workflow_primary_entity_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-primary-entity-checks
+    proof: self
+    functions:
+      - TestRun_AllowsStatelessFlowWithoutPrimaryEntity
+      - TestRun_RejectsMissingPrimaryEntityForStagedStatefulNormalFlow
+      - TestRun_RejectsMissingPrimaryEntityForStatefulNormalFlow
+      - TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow
+  - file: internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-singleton-coordinator-checks
+    proof: self
+    functions:
+      - TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator
+      - TestRun_RejectsSingletonCoordinatorBackedOnlyByAgentMemory
+      - TestRun_RejectsSingletonCoordinatorUnresolvedContainedType
+      - TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath
+      - TestRun_ValidatesSingletonCoordinatorWithContainedState
+  - file: internal/runtime/bootverify/workflow_template_instance_checks_test.go
+    disposition: different-concept
+    owner: internal.runtime.bootverify.workflow-template-instance-checks
+    proof: self
+    functions:
+      - TestRun_ValidatesTemplateInstanceSingleAndCompositeKeys
+  - file: internal/runtime/bus/connect_route_plan_dispatch_test.go
+    disposition: different-concept
+    owner: internal.runtime.bus.connect-route-plan-dispatch
+    proof: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber
+    functions:
+      - connectRoutePlanInstanceKeySourceWithPolicy
+      - writeConnectRoutePlanInstanceKeyFixtureWithPolicy
+  - file: internal/runtime/bus/eventbus_target_routes_test.go
+    disposition: different-concept
+    owner: internal.runtime.bus.eventbus-target-routes
+    proof: TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors
+    functions:
+      - routedRootNodeFixtureFiles
+  - file: internal/runtime/bus/import_boundary_alias_routing_test.go
+    disposition: different-concept
+    owner: internal.runtime.bus.import-boundary-alias-routing
+    proof: TestImportBoundaryInputAliasRoutesParentEventToPackageInputPin
+    functions:
+      - writeBusImportBoundaryAliasFixtureWithParentSubscription
+      - writeBusImportBoundaryAliasTemplateFixture
+  - file: internal/runtime/conformance/primary_entity_conformance_test.go
+    disposition: different-concept
+    owner: internal.runtime.conformance.primary-entity-conformance
+    proof: TestPrimaryEntityConformance
+    functions:
+      - primaryEntityConformanceSchema
+  - file: internal/runtime/conformance/session_scope_conformance_test.go
+    disposition: different-concept
+    owner: internal.runtime.conformance.session-scope-conformance
+    proof: TestSessionScopeConformance
+    functions:
+      - conformanceAgentYAML
+  - file: internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go
+    disposition: different-concept
+    owner: legacy.static_multi_entity_retirement
+    proof: self
+    issue: "1738"
+    functions:
+      - TestRootDefaultStaticMultiEntityRetirementConformance
+      - TestStaticMultiEntityRetirementConformance
+  - file: internal/runtime/contracts/bundle_hash_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.bundle-hash
+    proof: self
+    functions:
+      - TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner
+  - file: internal/runtime/contracts/load_validation_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.load-validation
+    proof: self
+    functions:
+      - TestAgentAndEventCriteriaCitationYAMLDecode
+      - TestAgentRegistryEntryDerivesRuntimeScopeFromAuthoredMode
+      - TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values
+      - TestAgentRegistryEntryRejectsRetiredAuthoringAliases
+      - TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases
+      - TestAgentRegistryEntryRejectsRetiredModelTierField
+      - TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields
+      - TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults
+      - TestLoadWorkflowContractBundleAllowsAgentPromptInputs
+      - TestLoadWorkflowContractBundleAllowsPublicNodeStateTable
+      - TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners
+      - TestLoadWorkflowContractBundleRejectsLayer2AgentDefaultsBlock
+      - TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields
+      - TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias
+  - file: internal/runtime/contracts/prompt_schema_guard_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.prompt-schema-guard
+    proof: self
+    functions:
+      - TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution
+  - file: internal/runtime/contracts/prompt_schema_guard_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.prompt-schema-guard
+    proof: TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas
+    functions:
+      - writePromptTestBundle
+  - file: internal/runtime/contracts/workflow_contract_emit_lowering_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.workflow-contract-emit-lowering
+    proof: self
+    functions:
+      - TestEmitFromSugarDoesNotBleedIntoTargetMatch
+  - file: internal/runtime/contracts/workflow_contract_node_assertion_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.workflow-contract-node-assertion
+    proof: self
+    functions:
+      - TestSystemNodeContractTracksProducesDeclarationPresence
+  - file: internal/runtime/contracts/workflow_contract_wave1_test.go
+    disposition: different-concept
+    owner: internal.runtime.contracts.workflow-contract-wave1
+    proof: self
+    functions:
+      - TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments
+      - TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes
+      - TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector
+      - TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity
+  - file: internal/runtime/contracts/workflow_contract_yaml_test.go
+    disposition: parser-only
+    owner: internal.runtime.contracts.workflow-contract-yaml
+    proof: self
+    functions:
+      - TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence
+      - TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit
+      - TestFanOutSpecDecode_DistinguishesOmittedMaxItems
+      - TestFanOutSpecDecode_RejectsExplicitNullMaxItems
+      - TestFanOutSpecDecode_RejectsExplicitZeroMaxItems
+      - TestFanOutSpecDecode_RejectsNestedItemsSource
+      - TestFanOutSpecDecode_RejectsRetiredTarget
+      - TestFanOutSpecDecode_RejectsUnknownFieldWithCanonicalOptions
+      - TestFlowPinsDecode_AcceptsStructuredEventEntries
+      - TestFlowPinsDecode_PreservesLegacyStringEventEntries
+      - TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages
+      - TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision
+      - TestFlowSchemaDocumentDecodeStageTimersUseCanonicalSyntax
+      - TestFlowSchemaDocumentDecode_PreservesAddressedInputPins
+      - TestFlowSchemaDocumentDecode_PreservesEmptyTemplateInstancePresence
+      - TestFlowSchemaDocumentDecode_PreservesOmittedTemplateInstancePolicyPresence
+      - TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo
+      - TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields
+      - TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields
+      - TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut
+      - TestSystemNodeContractDecode_PreservesSupportedTopLevelFields
+      - TestSystemNodeEventHandlerDecode_AllowsOnSuccessEmitWithRules
+      - TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization
+      - TestSystemNodeEventHandlerDecode_LowersPolicySheetComputeModuleValueRows
+      - TestSystemNodeEventHandlerDecode_LowersPolicySheetLookupValueRows
+      - TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows
+      - TestSystemNodeEventHandlerDecode_LowersPolicySheetValidateValueRows
+      - TestSystemNodeEventHandlerDecode_PreservesCreateEntity
+      - TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap
+      - TestSystemNodeEventHandlerDecode_PreservesSelectEntity
+      - TestSystemNodeEventHandlerDecode_PreservesSelectOrCreateEntity
+      - TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate
+      - TestSystemNodeEventHandlerDecode_RejectsInvalidPolicySheetRows
+      - TestSystemNodeEventHandlerDecode_RejectsInvalidRulesEmitTemplateSpecialization
+      - TestSystemNodeEventHandlerDecode_RejectsRetiredBranch
+      - TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget
+      - TestSystemNodeEventHandlerDecode_RejectsRetiredPayloadTransform
+      - TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRuleEmit
+      - TestSystemNodeEventHandlerDecode_RejectsUnknownSelectEntityField
+      - TestSystemNodeEventHandlerDecode_RejectsUnknownSelectOrCreateEntityField
+      - TestSystemNodeEventHandlerDecode_RejectsUnsupportedOnSuccessEmitShapes
+      - TestSystemNodeHandlerDecodeJoinCanonicalShape
+      - TestWorkflowDataWriteDecode_PreservesContainedOperationForms
+      - TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape
+  - file: internal/runtime/contracts/workflow_contracts_tree_test.go
+    disposition: parser-only
+    owner: internal.runtime.contracts.workflow-contracts-tree
+    proof: self
+    functions:
+      - TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules
+      - TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler
+  - file: internal/runtime/contracts/workflow_contracts_tree_test.go
+    disposition: parser-only
+    owner: internal.runtime.contracts.workflow-contracts-tree
+    proof: TestDiscoverProjectPackagePathsIncludesNestedFlowPackages
+    functions:
+      - currentWorkflowContractsDirForTest
+  - file: internal/runtime/core/pinrouting/connect_route_plan_test.go
+    disposition: different-concept
+    owner: internal.runtime.core.pinrouting.connect-route-plan
+    proof: self
+    functions:
+      - TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter
+      - TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter
+  - file: internal/runtime/core/pinrouting/connect_route_plan_test.go
+    disposition: canonical-overlay
+    owner: canonicalrouting.parent_connect_lowering_variants
+    proof: TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture
+    functions:
+      - writeConnectRoutePlanPackageFixture
+  - file: internal/runtime/engine/declarative_node_test.go
+    disposition: different-concept
+    owner: internal.runtime.engine.declarative-node
+    proof: TestNewDeclarativeNode_RequiresExecutor
+    functions:
+      - writeEngineImportBoundaryWildcardFixture
+  - file: internal/runtime/engine/executor_test.go
+    disposition: different-concept
+    owner: internal.runtime.engine.executor
+    proof: TestNewExecutor_DefaultsMaxChainDepth
+    functions:
+      - loadEngineSingletonCoordinatorFlowBundle
+  - file: internal/runtime/flowmodel/model_test.go
+    disposition: parser-only
+    owner: internal.runtime.flowmodel.model
+    proof: self
+    functions:
+      - TestPolicyDocumentValidationRejectsUnknownFields
+  - file: internal/runtime/manager/flow_activation_test.go
+    disposition: different-concept
+    owner: internal.runtime.manager.flow-activation
+    proof: TestActivateFlowInstanceAddsDerivedRouteTableInstance
+    functions:
+      - loadAgentPlatformDefaultsMaterializationSource
+      - loadPackageBackedStaticAgentSource
+      - loadSoleParentFlowStaticAgentSource
+  - file: internal/runtime/pipeline/engine_adapter_test.go
+    disposition: different-concept
+    owner: internal.runtime.pipeline.engine-adapter
+    proof: self
+    functions:
+      - TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface
+      - TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput
+      - TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
+      - TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput
+      - TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface
+  - file: internal/runtime/pipeline/handler_engine_transaction_test.go
+    disposition: different-concept
+    owner: internal.runtime.pipeline.handler-engine-transaction
+    proof: self
+    functions:
+      - TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized
+  - file: internal/runtime/pipeline/select_entity_test.go
+    disposition: different-concept
+    owner: internal.runtime.pipeline.select-entity
+    proof: TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity
+    functions:
+      - newSelectEntityTestCoordinator
+      - newSelectEntityTestCoordinatorWithNodes
+      - newSelectOrCreateEntityTestCoordinator
+  - file: internal/runtime/pipeline/workflow_instance_activation_test.go
+    disposition: different-concept
+    owner: internal.runtime.pipeline.workflow-instance-activation
+    proof: self
+    functions:
+      - TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity
+      - TestTemplateInstanceRecordEvidenceUsesLocalizedHandlerEvidenceTarget
+      - TestTemplateInstanceSystemNodeDeliveryLocalizesConcreteEventToHandlerKey
+  - file: internal/runtime/pipeline/workflow_nodes_test.go
+    disposition: different-concept
+    owner: internal.runtime.pipeline.workflow-nodes
+    proof: TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias
+    functions:
+      - writePipelineImportBoundaryAliasFixture
+      - writePipelineImportBoundaryWildcardFixture
+  - file: internal/runtime/semanticview/authored_emit_sites_test.go
+    disposition: different-concept
+    owner: internal.runtime.semanticview.authored-emit-sites
+    proof: TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes
+    functions:
+      - authoredEmitSiteRulesSuccessNodeYAML
+      - authoredEmitSiteTemplateNodeYAML
+      - loadAuthoredEmitSiteFixture
+      - loadAuthoredEmitSiteLoweringFixture
+  - file: internal/runtime/semanticview/composition_connect_test.go
+    disposition: canonical-overlay
+    owner: canonicalrouting.parent_connect_semantic_variants
+    proof: TestCompositionConnectFactsExposeTypedPinsAndParentConnect
+    functions:
+      - writeCompositionConnectSemanticFixture
+  - file: internal/runtime/semanticview/endpoint_census_test.go
+    disposition: different-concept
+    owner: internal.runtime.semanticview.endpoint-census
+    proof: self
+    functions:
+      - TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner
+  - file: internal/runtime/semanticview/import_boundary_aliases_test.go
+    disposition: different-concept
+    owner: internal.runtime.semanticview.import-boundary-aliases
+    proof: TestImportBoundaryPinAliasesResolveInputAndOutputBindings
+    functions:
+      - writeImportBoundaryAliasFixture
+  - file: internal/runtime/semanticview/scopes_test.go
+    disposition: different-concept
+    owner: internal.runtime.semanticview.scopes
+    proof: self
+    functions:
+      - TestProjectScopes_PackageBackedScopeCarriesOwningFlowID
+      - TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir
+      - TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath
+      - TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath
+  - file: internal/runtime/swarmflowtest/catalog_runner_expected_yaml_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: self
+    functions:
+      - TestCatalogRunnerExpectedYAML_SequenceUsesStringEntityFieldsBefore
+      - TestCatalogRunnerExpectedYAML_SingleTriggerWhitespaceAndNormalization
+  - file: internal/runtime/swarmflowtest/catalog_runner_expected_yaml_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: TestCatalogRunnerExpectedYAML_SingleTriggerWhitespaceAndNormalization
+    functions:
+      - writeCatalogCaseFixture
+  - file: internal/runtime/swarmflowtest/catalog_runner_guardrails_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: self
+    functions:
+      - TestCatalogRunner_GuardOnFailDiscardPreventsStateAdvanceAndEmit
+  - file: internal/runtime/swarmflowtest/catalog_runner_harness_semantics_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: self
+    functions:
+      - TestCatalogCasePresent_RequiresAllCoreFiles
+      - TestCatalogRunner_AccumulationIgnoresDuplicateItems
+      - TestCatalogRunner_AccumulationRemainsPendingUntilExpectedCount
+      - TestCatalogRunner_AccumulationThresholdCompletesAtThreshold
+  - file: internal/runtime/swarmflowtest/catalog_runner_phase5_conformance_test.go
+    disposition: harness
+    owner: scenario_harness_semantics
+    proof: self
+    functions:
+      - TestCatalogRunner_GuardOnFailRejectPreservesStateAndSuppressesEmit
+      - TestCatalogRunner_SequenceOnlyTriggerUsesTrimmedSwarmEventName
+  - file: internal/runtime/template_instance_delivery_test.go
+    disposition: different-concept
+    owner: legacy.template_instance_delivery
+    proof: TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately
+    issue: "1738"
+    functions:
+      - templateInstanceActivationConfigSubscriberFixtureFiles
+      - templateInstanceDeliveryFixtureFiles
+      - templateInstanceEmpireStyleFixtureFiles
+  - file: internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go
+    disposition: negative-mutation
+    owner: canonicalrouting.structural_go_provenance
+    proof: self
+    functions:
+      - TestCanonicalRoutingGoProvenanceUsesStructuralRoutingOwner
+  - file: internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go
+    disposition: different-concept
+    owner: legacy.final_flow_instance_authoring
+    proof: TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners
+    issue: "1738"
+    functions:
+      - addLegacyStaticOverlay
+      - addRootDefaultStaticMaterializer
+      - coordinatorWritesYAML
+      - firstMapWriteYAML
+      - legacyHandlerBody
+      - validCoordinatorWritesPrefixYAML
+  - file: internal/runtime/testfixtures/sealedpackage/fixture.go
+    disposition: different-concept
+    owner: internal.runtime.testfixtures.sealedpackage.fixture
+    proof: TestSealedFlowPackageConformance_CoversBoundaryOwners
+    functions:
+      - addConsumerDependencies
+      - addProducerDependencies
+  - file: internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go
+    disposition: different-concept
+    owner: legacy.singleton_coordinator_authoring
+    proof: TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners
+    issue: "1738"
+    functions:
+      - firstMapWriteYAML
+      - validWritesPrefixYAML
+      - validWritesYAML
+      - writesYAML
+  - file: internal/runtime/testfixtures/templatefanin/fixture.go
+    disposition: different-concept
+    owner: routing.fan_in_stream_fixture
+    proof: TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+    issue: "2023"
+    functions:
+      - legacyMapYAML
+      - receiverHandlersYAML
+  - file: internal/runtime/testfixtures/templatereply/fixture.go
+    disposition: canonical-overlay
+    owner: canonicalrouting.template_reply_variants
+    proof: TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID
+    functions:
+      - Write
+      - addExplicitCorrelation
+      - addProviderContinuation
+  - file: internal/runtime/testfixtures/templatereply/fixture.go
+    disposition: different-concept
+    owner: template_reply.provider_continuation_fragment
+    proof: TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID
+    functions:
+      - mailboxProviderNodes
+  - file: internal/runtime/tools/emit_test.go
+    disposition: different-concept
+    owner: internal.runtime.tools.emit
+    proof: self
+    functions:
+      - TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode
+  - file: internal/store/bundle_catalog_read_surface_test.go
+    disposition: different-concept
+    owner: internal.store.bundle-catalog-read-surface
+    proof: self
+    functions:
+      - TestBundleCatalogReadSurfaceListGetAgentsAndCursor
+  - file: internal/store/manager_error_branches_test.go
+    disposition: different-concept
+    owner: internal.store.manager-error-branches
+    proof: self
+    functions:
+      - TestPostgresStore_Manager_ErrorBranches
+  - file: internal/store/postgres_smoke_test.go
+    disposition: different-concept
+    owner: internal.store.postgres-smoke
+    proof: self
+    functions:
+      - TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns
+  - file: internal/store/postgres_store_additional_test.go
+    disposition: different-concept
+    owner: internal.store.postgres-store-additional
+    proof: self
+    functions:
+      - TestExtractSubscriptions
+      - TestManagerHelpers_MatchingAndRedaction
+      - TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys
+      - TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership
+      - TestPostgresStore_Manager_MoreCoverage
+      - TestPostgresStore_MarkAgentTerminated_CleansRuntimeState
+  - file: internal/store/run_debug_read_surface_test.go
+    disposition: different-concept
+    owner: internal.store.run-debug-read-surface
+    proof: TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope
+    functions:
+      - seedRunDebugAgent
+  - file: internal/store/sqlite_runtime_test.go
+    disposition: different-concept
+    owner: internal.store.sqlite-runtime
+    proof: self
+    functions:
+      - TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics

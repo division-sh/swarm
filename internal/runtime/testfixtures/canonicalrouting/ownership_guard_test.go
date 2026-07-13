@@ -22,8 +22,18 @@ import (
 )
 
 type artifactRegistry struct {
-	Artifacts []artifactRegistryEntry `yaml:"artifacts"`
-	Groups    []artifactRegistryGroup `yaml:"groups"`
+	Artifacts []artifactRegistryEntry   `yaml:"artifacts"`
+	Groups    []artifactRegistryGroup   `yaml:"groups"`
+	GoGroups  []goArtifactRegistryGroup `yaml:"go_groups"`
+}
+
+type goArtifactRegistryGroup struct {
+	File        string   `yaml:"file"`
+	Functions   []string `yaml:"functions"`
+	Disposition string   `yaml:"disposition"`
+	Owner       string   `yaml:"owner"`
+	Proof       string   `yaml:"proof"`
+	Issue       string   `yaml:"issue"`
 }
 
 type artifactRegistryGroup struct {
@@ -43,9 +53,7 @@ type artifactRegistryEntry struct {
 }
 
 var (
-	goAuthoredRouting  = regexp.MustCompile(`(?m)(?:^\s*source:\s*external(?:\s|$)|[,{]\s*source:\s*external(?:\s|$)|^\s*(?:connect:|resolution:|delivery:|on_missing:|on_conflict:|broadcast:\s*true(?:\s|$)))`)
-	routingReplacement = regexp.MustCompile(`(?m)^\s*(?:pins:|connect:|flows:|instance:|resolution:|delivery:|on_missing:|on_conflict:|subscribes_to:|produces:|source:\s*external(?:\s|$)|broadcast:\s*true(?:\s|$))`)
-	censusAnnotation   = regexp.MustCompile(`routing-example-census:\s*([a-z-]+)\s+issue=(none|[0-9]+)\s+owner=([^\s]+)\s+proof=([^\s]+)`)
+	censusAnnotation = regexp.MustCompile(`routing-example-census:\s*([a-z-]+)\s+issue=(none|[0-9]+)\s+owner=([^\s]+)\s+proof=([^\s]+)`)
 )
 
 type goRoutingFamily struct {
@@ -145,12 +153,23 @@ func TestCanonicalRoutingExamplesOwnGoAuthoredFixtures(t *testing.T) {
 	repo := RepoRoot(t)
 	families := goRoutingFamilies(t, repo)
 	proofs := goFunctionNames(t, repo)
+	registered := loadGoArtifactRegistry(t, repo)
+	seen := map[string]struct{}{}
 	var problems []string
 	for _, family := range families {
-		if family.CanonicalLoader && family.UnownedLiterals == 0 && family.Marker == nil {
+		key := goArtifactRegistryKey(family.File, family.Function)
+		marker := family.Marker
+		if registeredMarker, ok := registered[key]; ok {
+			if marker != nil {
+				problems = append(problems, fmt.Sprintf("%s:%s has both source-local and registry census classifications", family.File, family.Function))
+			}
+			marker = registeredMarker
+			seen[key] = struct{}{}
+		}
+		if family.CanonicalLoader && family.UnownedLiterals == 0 && marker == nil {
 			continue
 		}
-		if family.Marker == nil {
+		if marker == nil {
 			detail := "without a canonical loader"
 			if family.CanonicalLoader {
 				detail = fmt.Sprintf("with %d routing literal(s) not owned by a non-replacing canonical mutation", family.UnownedLiterals)
@@ -158,9 +177,8 @@ func TestCanonicalRoutingExamplesOwnGoAuthoredFixtures(t *testing.T) {
 			problems = append(problems, fmt.Sprintf("%s:%s authors routing YAML %s or typed routing-example-census annotation", family.File, family.Function, detail))
 			continue
 		}
-		marker := family.Marker
 		switch marker.Disposition {
-		case "parser-only", "negative-mutation", "provider-ingress", "harness", "different-concept":
+		case "canonical-overlay", "parser-only", "negative-mutation", "provider-ingress", "harness", "different-concept":
 		default:
 			problems = append(problems, fmt.Sprintf("%s:%s has unknown census disposition %q", family.File, family.Function, marker.Disposition))
 		}
@@ -176,11 +194,19 @@ func TestCanonicalRoutingExamplesOwnGoAuthoredFixtures(t *testing.T) {
 		if marker.Disposition == "negative-mutation" && !strings.Contains(family.Source, "canonicalrouting.") {
 			problems = append(problems, fmt.Sprintf("%s:%s is marked negative-mutation but does not use the typed canonical mutator", family.File, family.Function))
 		}
+		if marker.Disposition == "canonical-overlay" && !strings.Contains(family.Source, "canonicalrouting.") {
+			problems = append(problems, fmt.Sprintf("%s:%s is marked canonical-overlay but does not use the typed canonical mutator", family.File, family.Function))
+		}
 		if marker.Issue != "none" {
 			issue, err := strconv.Atoi(marker.Issue)
 			if err != nil || issue <= 0 {
 				problems = append(problems, fmt.Sprintf("%s:%s has invalid issue %q", family.File, family.Function, marker.Issue))
 			}
+		}
+	}
+	for key := range registered {
+		if _, ok := seen[key]; !ok {
+			problems = append(problems, fmt.Sprintf("stale Go routing registry entry %s", key))
 		}
 	}
 	if len(problems) != 0 {
@@ -226,6 +252,67 @@ func replaceCanonicalRoute(t T) string {
 	if got := unownedRoutingLiteralCount(fn) + unownedRoutingArtifactReplacementCount(fn); got == 0 {
 		t.Fatal("route-bearing ReplaceFile must not be treated as a non-replacing canonical mutation")
 	}
+}
+
+func TestCanonicalRoutingGoProvenanceUsesStructuralRoutingOwner(t *testing.T) {
+	cases := map[string]string{
+		"emit":       "emit:\n  event: bypassed\n",
+		"replies_to": "resolution:\n  mode: reply\n  replies_to: request\n",
+		"carries":    "carries:\n  - account_id\n",
+	}
+	for name, replacement := range cases {
+		t.Run(name, func(t *testing.T) {
+			source := fmt.Sprintf(`package fixture
+import "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+func replaceCanonicalRoute(t T) string {
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	canonicalrouting.ReplaceFile(t, join(root, "schema.yaml"), "old", %q)
+	return root
+}`, replacement)
+			file, err := parser.ParseFile(token.NewFileSet(), "adversarial.go", source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fn := file.Decls[1].(*ast.FuncDecl)
+			if got := unownedRoutingLiteralCount(fn) + unownedRoutingArtifactReplacementCount(fn); got == 0 {
+				t.Fatalf("%s-only replacement escaped structural routing provenance", name)
+			}
+		})
+	}
+}
+
+func TestCanonicalRoutingGoProvenanceRequiresHelperMutationClassification(t *testing.T) {
+	const source = `package fixture
+import "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+func load(t T) string {
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateReply)
+	mutateRoute(t, root)
+	return root
+}
+func mutateRoute(t T, root string) {
+	canonicalrouting.ReplaceFile(t, join(root, "schema.yaml"), "old", "emit:\n  event: bypassed\n  replies_to: request\n  carries: [account_id]\n")
+}`
+	file, err := parser.ParseFile(token.NewFileSet(), "adversarial.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := file.Decls[2].(*ast.FuncDecl)
+	if callsCanonicalRoutingOwner(helper) {
+		t.Fatal("helper must not inherit canonical provenance merely because its caller loads an example")
+	}
+	if got := unownedRoutingLiteralCount(helper) + unownedRoutingArtifactReplacementCount(helper); got == 0 {
+		t.Fatal("route-bearing helper mutation escaped independent structural classification")
+	}
+}
+
+func TestCanonicalRoutingGoCensusIncludesCompleteStructuralBundle(t *testing.T) {
+	repo := RepoRoot(t)
+	for _, family := range goRoutingFamilies(t, repo) {
+		if family.File == "internal/apiv1/operator_run_completion_system_node_test.go" && family.Function == "runCompletionSystemNodeBundle" {
+			return
+		}
+	}
+	t.Fatal("structural Go routing census omitted runCompletionSystemNodeBundle")
 }
 
 func TestCanonicalRoutingGoProvenanceRejectsRouteBearingGenericMerge(t *testing.T) {
@@ -289,6 +376,16 @@ func TestCanonicalRoutingTrackedSplitsRemainOpen(t *testing.T) {
 		}
 		issues[issue] = struct{}{}
 	}
+	for _, marker := range loadGoArtifactRegistry(t, repo) {
+		if marker.Issue == "none" {
+			continue
+		}
+		issue, err := strconv.Atoi(marker.Issue)
+		if err != nil || issue <= 0 {
+			t.Fatalf("Go routing registry has invalid tracked issue %q", marker.Issue)
+		}
+		issues[issue] = struct{}{}
+	}
 	ordered := make([]int, 0, len(issues))
 	for issue := range issues {
 		ordered = append(ordered, issue)
@@ -328,69 +425,53 @@ func goRoutingFamilies(t testing.TB, repo string) []goRoutingFamily {
 	t.Helper()
 	fset := token.NewFileSet()
 	var families []goRoutingFamily
-	for _, root := range []string{"cmd", "internal"} {
-		err := filepath.Walk(filepath.Join(repo, root), func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || filepath.Ext(path) != ".go" {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			parsed, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(repo, path)
-			if err != nil {
-				return err
-			}
-			for _, decl := range parsed.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil {
-					continue
-				}
-				start := fset.Position(fn.Pos()).Offset
-				end := fset.Position(fn.End()).Offset
-				if start < 0 || end > len(raw) || start >= end {
-					continue
-				}
-				source := string(raw[start:end])
-				literalCount := routingLiteralCount(fn)
-				rawMatch := goAuthoredRouting.MatchString(source)
-				canonicalLoader := callsCanonicalRoutingOwner(fn)
-				artifactReplacements := 0
-				if canonicalLoader {
-					artifactReplacements = unownedRoutingArtifactReplacementCount(fn)
-				}
-				marker, markerCount := censusMarker(source)
-				if markerCount > 0 && literalCount == 0 && !rawMatch && artifactReplacements == 0 {
-					t.Fatalf("%s:%s has a routing-example-census annotation with no matching routing literal", filepath.ToSlash(rel), fn.Name.Name)
-				}
-				if literalCount == 0 && !rawMatch && artifactReplacements == 0 {
-					continue
-				}
-				if markerCount > 1 {
-					t.Fatalf("%s:%s has duplicate routing-example-census annotations", filepath.ToSlash(rel), fn.Name.Name)
-				}
-				families = append(families, goRoutingFamily{
-					File:            filepath.ToSlash(rel),
-					Function:        fn.Name.Name,
-					Source:          source,
-					CanonicalLoader: canonicalLoader,
-					Literals:        literalCount,
-					UnownedLiterals: unownedRoutingLiteralCount(fn) + artifactReplacements,
-					Marker:          marker,
-				})
-			}
-			return nil
-		})
+	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
+		parsed, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
 		if err != nil {
-			t.Fatalf("scan Go routing sources under %s: %v", root, err)
+			return err
 		}
+		rel, err := filepath.Rel(repo, path)
+		if err != nil {
+			return err
+		}
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			start := fset.Position(fn.Pos()).Offset
+			end := fset.Position(fn.End()).Offset
+			if start < 0 || end > len(raw) || start >= end {
+				continue
+			}
+			source := string(raw[start:end])
+			literalCount := routingLiteralCount(fn)
+			canonicalLoader := callsCanonicalRoutingOwner(fn)
+			artifactReplacements := unownedRoutingArtifactReplacementCount(fn)
+			marker, markerCount := censusMarker(source)
+			if markerCount > 0 && literalCount == 0 && artifactReplacements == 0 {
+				t.Fatalf("%s:%s has a routing-example-census annotation with no matching routing literal", filepath.ToSlash(rel), fn.Name.Name)
+			}
+			if literalCount == 0 && artifactReplacements == 0 {
+				continue
+			}
+			if markerCount > 1 {
+				t.Fatalf("%s:%s has duplicate routing-example-census annotations", filepath.ToSlash(rel), fn.Name.Name)
+			}
+			families = append(families, goRoutingFamily{
+				File:            filepath.ToSlash(rel),
+				Function:        fn.Name.Name,
+				Source:          source,
+				CanonicalLoader: canonicalLoader,
+				Literals:        literalCount,
+				UnownedLiterals: unownedRoutingLiteralCount(fn) + artifactReplacements,
+				Marker:          marker,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan repository Go routing sources: %v", err)
 	}
 	sort.Slice(families, func(i, j int) bool {
 		if families[i].File == families[j].File {
@@ -426,34 +507,91 @@ func loadArtifactRegistry(t testing.TB, repo string) artifactRegistry {
 	return registry
 }
 
+func loadGoArtifactRegistry(t testing.TB, repo string) map[string]*goCensusMarker {
+	t.Helper()
+	result := map[string]*goCensusMarker{}
+	for _, group := range loadArtifactRegistry(t, repo).GoGroups {
+		file := filepath.ToSlash(filepath.Clean(strings.TrimSpace(group.File)))
+		if file == "." || len(group.Functions) == 0 || strings.TrimSpace(group.Disposition) == "" || strings.TrimSpace(group.Owner) == "" || strings.TrimSpace(group.Proof) == "" {
+			t.Fatalf("incomplete Go routing registry group: %#v", group)
+		}
+		issue := strings.TrimSpace(group.Issue)
+		if issue == "" {
+			issue = "none"
+		}
+		for _, function := range group.Functions {
+			function = strings.TrimSpace(function)
+			if function == "" {
+				t.Fatalf("Go routing registry group %s contains an empty function", file)
+			}
+			key := goArtifactRegistryKey(file, function)
+			if _, exists := result[key]; exists {
+				t.Fatalf("duplicate Go routing registry entry %s", key)
+			}
+			proof := strings.TrimSpace(group.Proof)
+			if proof == "self" {
+				proof = function
+			}
+			result[key] = &goCensusMarker{
+				Disposition: strings.TrimSpace(group.Disposition),
+				Issue:       issue,
+				Owner:       strings.TrimSpace(group.Owner),
+				Proof:       proof,
+			}
+		}
+	}
+	return result
+}
+
+func goArtifactRegistryKey(file, function string) string {
+	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(file))) + ":" + strings.TrimSpace(function)
+}
+
 func goFunctionNames(t testing.TB, repo string) map[string]struct{} {
 	t.Helper()
 	result := map[string]struct{}{}
 	fset := token.NewFileSet()
-	for _, root := range []string{"cmd", "internal"} {
-		err := filepath.Walk(filepath.Join(repo, root), func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+	err := walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
+		parsed, err := parser.ParseFile(fset, path, raw, 0)
+		if err != nil {
+			return err
+		}
+		for _, decl := range parsed.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				result[fn.Name.Name] = struct{}{}
 			}
-			if info.IsDir() || filepath.Ext(path) != ".go" {
-				return nil
-			}
-			parsed, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return err
-			}
-			for _, decl := range parsed.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok {
-					result[fn.Name.Name] = struct{}{}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan repository Go proof functions: %v", err)
+	}
+	return result
+}
+
+func walkRepositoryGoFiles(repo string, visit func(path string, raw []byte) error) error {
+	return filepath.Walk(repo, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path != repo {
+				switch info.Name() {
+				case ".git", "vendor", "node_modules", ".swarm", "data":
+					return filepath.SkipDir
 				}
 			}
 			return nil
-		})
-		if err != nil {
-			t.Fatalf("scan Go proof functions under %s: %v", root, err)
 		}
-	}
-	return result
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return visit(path, raw)
+	})
 }
 
 func routingLiteralCount(fn *ast.FuncDecl) int {
@@ -479,11 +617,13 @@ func routingStringExpressions(fn *ast.FuncDecl) []ast.Expr {
 		if !ok {
 			return true
 		}
-		if _, nested := parents[expr].(*ast.BinaryExpr); nested {
-			return true
+		if parent, nested := parents[expr].(*ast.BinaryExpr); nested {
+			if _, parentIsConstant := constantString(parent); parentIsConstant {
+				return true
+			}
 		}
 		value, ok := constantString(expr)
-		if ok && goAuthoredRouting.MatchString(value) {
+		if ok && yamlTextContainsAuthoredRouting(value) {
 			expressions = append(expressions, expr)
 		}
 		return true
@@ -613,7 +753,7 @@ func canonicalRouteBearingReplacement(call *ast.CallExpr) bool {
 	}
 	for _, arg := range call.Args {
 		value, ok := constantString(arg)
-		if ok && routingReplacement.MatchString(value) {
+		if ok && yamlTextContainsAuthoredRouting(value) {
 			return true
 		}
 	}

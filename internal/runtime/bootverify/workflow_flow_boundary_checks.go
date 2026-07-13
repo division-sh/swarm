@@ -207,7 +207,6 @@ func (p inputPinProducerSourceProof) boundaryDetails() string {
 }
 
 func (c *checkerContext) inputPinProducerSourceProof(flowID, eventType string) inputPinProducerSourceProof {
-	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_producer_source proof=TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface
 	return inputPinProducerSourceProof{
 		resolution: semanticview.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
 			HarnessInjections: c.opts.HarnessInjections,
