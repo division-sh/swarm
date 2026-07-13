@@ -4770,13 +4770,17 @@ func wrapServedDirectiveFaultStore(t *testing.T, stores storeBundle, faults *ser
 }
 
 func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+	return startServedControlProofRuntimeWithFixture(t, backend, writeServedEventPublishFollowUpFixture)
+}
+
+func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		contractsPath := fixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		oldBuildStores := buildStoresForServe
@@ -4812,7 +4816,7 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
-		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		contractsPath := fixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
@@ -4871,7 +4875,7 @@ func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Back
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntimeWithFixture(t, backend, writeServedExternalEventFixture)
 	runServedRuntimeIngressControlLifecycleProof(t, rt)
 }
 
@@ -4942,7 +4946,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 			return stores, err
 		}
 		opts.ConfigPath = configPath
-		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		contractsPath := writeServedExternalEventFixture(t)
 		opts.ContractsPath = contractsPath
 		opts.PlatformSpecPath = defaultPlatformSpecPath
 		opts.APIListenAddr = "127.0.0.1:0"
@@ -5026,9 +5030,9 @@ type servedConversationForkSource struct {
 func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversationForkProofRuntime) {
 	t.Helper()
 	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "thing.unhandled",
+		"event_name":      "external.observed",
 		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"note": "conversation-fork"},
+		"payload":         map[string]any{},
 		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
 	})
 	if !initial.NewRunCreated || initial.RunID == "" {
@@ -5403,17 +5407,17 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
 
 	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "thing.reviewed",
+		"event_name":      "item.processed",
 		"run_id":          runID,
 		"source_event_id": initialEventID,
-		"payload":         map[string]any{"note": "queued while run paused"},
+		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": keyPrefix + "-run-queued",
 	})
 	if queued.RunID != runID || queued.SourceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "pending", 1)
-	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "entity-writer", "delivered", 250*time.Millisecond)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "item-observer", "pending", 1)
+	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 
 	continueKey := keyPrefix + "-run-continue"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
@@ -5427,7 +5431,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"idempotency_key": continueKey,
 	})
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "item-observer", "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
@@ -5470,9 +5474,9 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	}
 
 	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "thing.unhandled",
+		"event_name":      "external.observed",
 		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"note": "queued while runtime paused"},
+		"payload":         map[string]any{},
 		"idempotency_key": keyPrefix + "-runtime-queued",
 	})
 	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
@@ -6210,15 +6214,15 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, suffix string) (runID, eventID, entityID string) {
 	t.Helper()
 	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "thing.created",
+		"event_name":      "item.received",
 		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"amount": 7, "who": suffix},
+		"payload":         map[string]any{"item_id": suffix},
 		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
 	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
 		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, rt.DB, rt.Backend, result.RunID, result.EventID, rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, "item-handler", rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
 	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
@@ -6336,7 +6340,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 
 	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "event-replay")
 	eventReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-event-replay"
-	beforeHoldEvents := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold")
+	beforeHoldEvents := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
 	beforeAuditEvents := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
 	var eventReplay servedEventReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{
@@ -6346,8 +6350,8 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	requireServedLiveAgentEventReplayResult(t, rt, eventReplayOriginal.EventID, eventReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "event.replay", eventReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s thing.agent_hold events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
 		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
@@ -6360,14 +6364,14 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if eventReplayAgain.ReplayEventID != eventReplay.ReplayEventID || eventReplayAgain.AuditEventID != eventReplay.AuditEventID {
 		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s thing.agent_hold events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
 
 	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
 	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
-	beforeHoldEvents = servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold")
+	beforeHoldEvents = servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
 	beforeAuditEvents = servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
 	var agentReplay servedAgentReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
@@ -6378,8 +6382,8 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	requireServedLiveAgentAgentReplayResult(t, rt, agentReplayOriginal.EventID, agentReplay)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay", agentReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s thing.agent_hold events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
 		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
@@ -6393,8 +6397,8 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if agentReplayAgain.ReplayEventID != agentReplay.ReplayEventID || agentReplayAgain.AuditEventID != agentReplay.AuditEventID {
 		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s thing.agent_hold events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
 }
@@ -6836,10 +6840,10 @@ func requireServedAgentDirectiveOperationCount(t *testing.T, db *sql.DB, backend
 func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime, runID, sourceEventID, label string) servedEventPublishRPCResult {
 	t.Helper()
 	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "thing.agent_hold",
+		"event_name":      "item.processed",
 		"run_id":          runID,
 		"source_event_id": sourceEventID,
-		"payload":         map[string]any{"note": label},
+		"payload":         map[string]any{"item_id": "hold"},
 		"idempotency_key": "issue-1910-" + rt.Backend + "-" + runID + "-agent-hold-" + label,
 	})
 	if result.RunID != runID || result.SourceEventID != sourceEventID || result.NewRunCreated || result.EventID == "" {
@@ -7269,6 +7273,7 @@ func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) i
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=runtime.event_publish_follow_up proof=TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
@@ -7281,56 +7286,56 @@ initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
 `)
-	canonicalrouting.AppendRootExternalInputs(t, root,
-		canonicalrouting.RootExternalInput{Name: "thing_created", Event: "thing.created"},
-		canonicalrouting.RootExternalInput{Name: "thing_reviewed", Event: "thing.reviewed"},
-		canonicalrouting.RootExternalInput{Name: "thing_agent_hold", Event: "thing.agent_hold"},
-		canonicalrouting.RootExternalInput{Name: "thing_unhandled", Event: "thing.unhandled"},
-	)
-	canonicalrouting.MergeMappingFile(t, root, "entities.yaml", `
-widget:
-  amount:
-    type: integer
-    initial: 0
-  who: text
-  note: text
-`)
-	canonicalrouting.MergeMappingFile(t, root, "events.yaml", `
-thing.created:
-  amount: integer
-  who: text
-
-thing.reviewed:
-  note: text
-
-thing.agent_hold:
-  note: text
-
-thing.unhandled:
-  note: text
-`)
-	canonicalrouting.MergeMappingFile(t, root, "nodes.yaml", `
-entity-writer:
-  id: entity-writer
-  execution_type: system_node
-  subscribes_to: [thing.created, thing.reviewed]
-  event_handlers:
-    thing.created:
-      data_accumulation:
-        source_event: thing.created
-        writes:
-          - source_field: amount
-            target_field: amount
-          - source_field: who
-            target_field: who
-      advances_to: waiting
-    thing.reviewed:
-      data_accumulation:
-        source_event: thing.reviewed
-        writes:
-          - source_field: note
-            target_field: note
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), `    item.received:
       advances_to: done
+      emit:
+        event: item.processed
+        fields:
+          item_id: payload.item_id
+`, `    item.received:
+      rules:
+        initialize:
+          condition: "payload.item_id != 'emit'"
+          advances_to: waiting
+        emit_processed:
+          condition: "payload.item_id == 'emit'"
+          emit:
+            event: item.processed
+            fields:
+              item_id: payload.item_id
+`)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), `item-observer:
+  id: item-observer
+  execution_type: system_node
+  subscribes_to: [item.processed]
+  event_handlers:
+    item.processed: {}
+`, `item-observer:
+  id: item-observer
+  execution_type: system_node
+  subscribes_to: [item.processed]
+  event_handlers:
+    item.processed:
+      rules:
+        complete:
+          condition: "payload.item_id == 'review'"
+          advances_to: done
+`)
+	return root
+}
+
+func writeServedExternalEventFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=runtime.externally_handled_event proof=TestServedParityHarnessRuntimeIngressControlLifecycle
+	t.Helper()
+	root := writeServedEventPublishFollowUpFixture(t)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "events.yaml"), `item.processed:
+  item_id: text
+`, `item.processed:
+  item_id: text
+external.observed:
+  swarm:
+    source: external
+    consumer: external
 `)
 	return root
 }
@@ -7765,7 +7770,7 @@ load-agent:
   model: regular
   mode: task
   subscriptions:
-    - thing.agent_hold
+    - item.processed
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
 Handle the active-load event and wait for test release.
@@ -7776,44 +7781,6 @@ Handle the active-load event and wait for test release.
 func writeServedLiveAgentFixture(t *testing.T) string {
 	t.Helper()
 	root := writeServedEventPublishFollowUpFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-thing.created:
-  amount: integer
-  who: text
-
-thing.reviewed:
-  note: text
-
-thing.agent_hold:
-  note: text
-
-thing.unhandled:
-  note: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-entity-writer:
-  id: entity-writer
-  execution_type: system_node
-  subscribes_to: [thing.created, thing.reviewed]
-  event_handlers:
-    thing.created:
-      data_accumulation:
-        source_event: thing.created
-        writes:
-          - source_field: amount
-            target_field: amount
-          - source_field: who
-            target_field: who
-      advances_to: waiting
-    thing.reviewed:
-      data_accumulation:
-        source_event: thing.reviewed
-        writes:
-          - source_field: note
-            target_field: note
-      advances_to: done
-`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 load-agent:
   id: load-agent
@@ -7822,7 +7789,7 @@ load-agent:
   model: regular
   mode: task
   subscriptions:
-    - thing.agent_hold
+    - item.processed
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
 Handle live-agent parity events.
@@ -8073,11 +8040,6 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
-	t.Helper()
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, "entity-writer", probe)
-}
-
 func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql.DB, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
 	t.Helper()
 	if probe == nil {
@@ -8109,9 +8071,9 @@ const (
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "thing.created",
+		"event", "publish", "item.received",
 		"--bundle-hash", bundleHash,
-		"--payload-json", `{"amount":7,"who":"operator"}`,
+		"--payload-json", `{"item_id":"item-1"}`,
 		"--idempotency-key", "issue-1255-" + backend + "-initial",
 	})
 	if code != 0 {
@@ -8126,18 +8088,18 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "entity-writer"); got == 0 {
-		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/entity-writer authority", backend, got)
+	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "item-handler"); got == 0 {
+		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/item-handler authority", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, "item-handler", probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "thing.created", "entity-writer")
+	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", "item-handler")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
 	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "thing.reviewed",
+		"event", "publish", "item.processed",
 		"--run-id", runID,
-		"--payload-json", `{"note":"approved"}`,
+		"--payload-json", `{"item_id":"review"}`,
 		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
 	})
 	if code != 0 {
@@ -8157,23 +8119,23 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUpEventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, "item-observer", probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
-	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "thing.reviewed", "entity-writer")
-	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "thing.reviewed", "entity-writer")
+	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", "item-observer")
+	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", "item-observer")
 
 	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
 		"run", "trace", runID,
-		"--event-name", "thing.reviewed",
+		"--event-name", "item.processed",
 		"--entity-id", entityID,
 		"--limit", "10",
 	})
 	if traceCode != 0 {
 		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
 	}
-	for _, want := range []string{"thing.reviewed", followUpEventID, "delivered", "node/entity-writer"} {
+	for _, want := range []string{"item.processed", followUpEventID, "delivered", "node/item-observer"} {
 		if !strings.Contains(traceStdout, want) {
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
@@ -8192,7 +8154,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if entityViewCode != 0 {
 		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
 	}
-	for _, want := range []string{entityID, "state=done", `"note":"approved"`} {
+	for _, want := range []string{entityID, "state=done", "fields={}"} {
 		if !strings.Contains(entityViewStdout, want) {
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}
@@ -8200,9 +8162,9 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.unhandled",
+		"event_name":      "item.processed",
 		"run_id":          runID,
-		"payload":         map[string]any{"note": "lost"},
+		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": unhandledIdempotencyKey,
 	})
 	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
@@ -8311,9 +8273,9 @@ func runServedEventPublishActiveLoadProof(
 ) {
 	t.Helper()
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "thing.created",
+		"event_name":      "item.received",
 		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"amount": 7, "who": "operator"},
+		"payload":         map[string]any{"item_id": "item-1"},
 		"idempotency_key": "issue-1434-" + backend + "-initial",
 	})
 	runID := initial.RunID
@@ -8321,15 +8283,15 @@ func runServedEventPublishActiveLoadProof(
 	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
 		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, "item-handler", probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.agent_hold",
+		"event_name":      "item.processed",
 		"run_id":          runID,
 		"source_event_id": initialEventID,
-		"payload":         map[string]any{"note": "hold active agent delivery"},
+		"payload":         map[string]any{"item_id": "hold"},
 		"idempotency_key": "issue-1434-" + backend + "-agent-hold",
 	})
 	holdElapsed := time.Since(holdStart)
@@ -8391,10 +8353,10 @@ func runServedEventPublishActiveLoadProof(
 
 	followStart := time.Now()
 	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.reviewed",
+		"event_name":      "item.processed",
 		"run_id":          runID,
 		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"note": "approved under active load"},
+		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": "issue-1434-" + backend + "-follow-up",
 	})
 	followElapsed := time.Since(followStart)
@@ -8415,18 +8377,18 @@ func runServedEventPublishActiveLoadProof(
 		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, followUp.EventID, "subscribed")
-	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", "entity-writer", "pending", "in_progress", "delivered")
+	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", "item-observer", "pending", "in_progress", "delivered")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "thing.reviewed", "entity-writer")
+	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "item.processed", "item-observer")
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUp.EventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, "item-observer", probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
-	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "thing.reviewed", "entity-writer")
+	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", "item-observer")
 }
 
 func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {

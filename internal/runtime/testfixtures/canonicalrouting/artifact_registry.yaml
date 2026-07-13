@@ -34,3 +34,199 @@ artifacts:
   - {root: tests/tier8-boot-verification/test-boot-success, disposition: different-concept, owner: bootverify.minimal_boot_contract, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
   - {root: tests/tier8-boot-verification/test-platform-mailbox-event-subscription, disposition: negative-mutation, owner: bootverify.platform_event_ownership, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
   - {root: tests/tier12-runtime-tools/test-flow-data-access, disposition: different-concept, owner: runtime.flow_data_access, proof: internal/runtime/cataloge2e/tier12_runtime_tools_e2e_test.go}
+groups:
+  - disposition: different-concept
+    owner: runtime.generic_contract_bundle
+    proof: internal/runtime/testcases/helpers_test.go
+    roots:
+      - internal/runtime/testdata/generic-swarm-bundle
+  - disposition: different-concept
+    owner: engine.primitive
+    proof: internal/runtime/cataloge2e/tier1_primitives_e2e_test.go
+    roots:
+      - tests/tier1-primitives/test-advances-to
+      - tests/tier1-primitives/test-advances-to-terminal
+      - tests/tier1-primitives/test-clear-gates
+      - tests/tier1-primitives/test-compute-standalone
+      - tests/tier1-primitives/test-data-accumulation-direct
+      - tests/tier1-primitives/test-data-accumulation-literal
+      - tests/tier1-primitives/test-data-accumulation-mapped
+      - tests/tier1-primitives/test-emits-multiple
+      - tests/tier1-primitives/test-emits-payload-transform
+      - tests/tier1-primitives/test-from-filter
+      - tests/tier1-primitives/test-guard-compound-condition
+      - tests/tier1-primitives/test-guard-discard
+      - tests/tier1-primitives/test-guard-entity-ref
+      - tests/tier1-primitives/test-guard-escalate
+      - tests/tier1-primitives/test-guard-kill
+      - tests/tier1-primitives/test-guard-multi
+      - tests/tier1-primitives/test-guard-multi-fail
+      - tests/tier1-primitives/test-guard-pass
+      - tests/tier1-primitives/test-guard-policy-ref
+      - tests/tier1-primitives/test-guard-reject
+      - tests/tier1-primitives/test-on-complete-first-match
+      - tests/tier1-primitives/test-on-complete-second-match
+      - tests/tier1-primitives/test-on-complete-with-state
+      - tests/tier1-primitives/test-payload-transform-multi-source
+      - tests/tier1-primitives/test-record-evidence
+      - tests/tier1-primitives/test-rules-advances-to
+      - tests/tier1-primitives/test-rules-data-accumulation
+      - tests/tier1-primitives/test-rules-else
+      - tests/tier1-primitives/test-rules-match
+      - tests/tier1-primitives/test-rules-no-match
+      - tests/tier1-primitives/test-sets-gate
+  - disposition: different-concept
+    owner: policy.pattern
+    proof: internal/runtime/cataloge2e/tier10_policy_patterns_e2e_test.go
+    roots:
+      - tests/tier10-policy-patterns/test-policy-capacity-query
+      - tests/tier10-policy-patterns/test-policy-counter-escalate
+      - tests/tier10-policy-patterns/test-policy-hard-gate-override
+      - tests/tier10-policy-patterns/test-policy-multi-guard-partial
+      - tests/tier10-policy-patterns/test-policy-threshold-three-way
+      - tests/tier10-policy-patterns/test-policy-timeout-elapsed
+  - disposition: negative-mutation
+    owner: legacy_static_multi_entity_retirement
+    proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go
+    roots:
+      - tests/tier11-flow-composition/test-child-flow-absolute-path
+      - tests/tier11-flow-composition/test-child-flow-loads
+      - tests/tier11-flow-composition/test-child-flow-local-events
+      - tests/tier11-flow-composition/test-child-flow-pin-wiring
+      - tests/tier11-flow-composition/test-child-flow-policy-inherit
+      - tests/tier11-flow-composition/test-child-flow-sibling-isolation
+      - tests/tier11-flow-composition/test-child-flow-tool-inherit
+      - tests/tier11-flow-composition/test-data-pin-wiring
+      - tests/tier11-flow-composition/test-data-pin-write-conflict
+      - tests/tier11-flow-composition/test-gates-in-child-flow
+      - tests/tier11-flow-composition/test-multi-level-policy-inherit
+      - tests/tier11-flow-composition/test-nested-three-levels
+      - tests/tier11-flow-composition/test-sibling-both-instantiated-isolated
+      - tests/tier11-flow-composition/test-subject-id-cross-flow-inherit
+      - tests/tier11-flow-composition/test-subject-id-first-flow-seeds
+      - tests/tier11-flow-composition/test-tool-override
+      - tests/tier11-flow-composition/test-wildcard-deep-subscription
+  - disposition: different-concept
+    owner: runtime.run_fork
+    proof: internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go
+    roots:
+      - tests/tier12-runtime-fork/test-non-agent-replay-fail-closed
+      - tests/tier12-runtime-fork/test-selected-contract-fork-execution
+  - disposition: different-concept
+    owner: engine.list_processing
+    proof: internal/runtime/cataloge2e/tier3_list_processing_e2e_test.go
+    roots:
+      - tests/tier3-list-processing/test-fan-out-basic
+      - tests/tier3-list-processing/test-fan-out-count
+      - tests/tier3-list-processing/test-fan-out-emit-mapping
+      - tests/tier3-list-processing/test-fan-out-empty
+      - tests/tier3-list-processing/test-filter-basic
+      - tests/tier3-list-processing/test-filter-empty
+      - tests/tier3-list-processing/test-group-by-standalone
+      - tests/tier3-list-processing/test-reduce-count
+      - tests/tier3-list-processing/test-reduce-max
+      - tests/tier3-list-processing/test-reduce-min
+      - tests/tier3-list-processing/test-reduce-operation-count
+      - tests/tier3-list-processing/test-reduce-pick-or-average
+      - tests/tier3-list-processing/test-reduce-sum
+      - tests/tier3-list-processing/test-reduce-weighted-average
+  - disposition: different-concept
+    owner: engine.cross_entity
+    proof: internal/runtime/cataloge2e/tier4_cross_entity_e2e_test.go
+    roots:
+      - tests/tier4-cross-entity/test-clear-multiple-targets
+      - tests/tier4-cross-entity/test-clear-state
+      - tests/tier4-cross-entity/test-create-entity
+      - tests/tier4-cross-entity/test-query-filter
+      - tests/tier4-cross-entity/test-query-group-by
+  - disposition: different-concept
+    owner: engine.flow_lifecycle
+    proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go
+    roots:
+      - tests/tier5-flow-lifecycle/test-auto-emit-on-create
+      - tests/tier5-flow-lifecycle/test-template-no-boot-instance
+      - tests/tier5-flow-lifecycle/test-terminal-state-preserves
+      - tests/tier5-flow-lifecycle/test-terminal-state-rejects
+      - tests/tier5-flow-lifecycle/test-wildcard-subscription
+  - disposition: different-concept
+    owner: engine.event_loop
+    proof: internal/runtime/cataloge2e/tier6_event_loop_e2e_test.go
+    roots:
+      - tests/tier6-event-loop/test-atomicity-commit
+      - tests/tier6-event-loop/test-atomicity-guard-rollback
+      - tests/tier6-event-loop/test-atomicity-rollback
+      - tests/tier6-event-loop/test-chain-depth-limit
+      - tests/tier6-event-loop/test-cross-entity-concurrent
+      - tests/tier6-event-loop/test-dead-letter
+      - tests/tier6-event-loop/test-entity-serialization
+      - tests/tier6-event-loop/test-event-persisted-before-delivery
+      - tests/tier6-event-loop/test-event-validation
+      - tests/tier6-event-loop/test-guards-pre-handler-state
+      - tests/tier6-event-loop/test-on-complete-atomicity-chain
+  - disposition: different-concept
+    owner: engine.composition
+    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go
+    roots:
+      - tests/tier7-composition/test-agent-emits-to-node
+      - tests/tier7-composition/test-dual-delivery
+      - tests/tier7-composition/test-full-lifecycle
+      - tests/tier7-composition/test-multi-gate-pipeline
+      - tests/tier7-composition/test-two-node-chain
+  - disposition: negative-mutation
+    owner: legacy_static_multi_entity_retirement
+    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go
+    roots:
+      - tests/tier7-composition/test-wildcard-cross-flow
+  - disposition: negative-mutation
+    owner: bootverify.invalid_contract
+    proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go
+    roots:
+      - tests/tier8-boot-verification/test-boot-advances-to-list
+      - tests/tier8-boot-verification/test-boot-bare-condition
+      - tests/tier8-boot-verification/test-boot-cel-parse-error
+      - tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-mismatch
+      - tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-rule-list-mismatch
+      - tests/tier8-boot-verification/test-boot-condition-payload-mismatch
+      - tests/tier8-boot-verification/test-boot-condition-policy
+      - tests/tier8-boot-verification/test-boot-create-entity-plus-accumulate
+      - tests/tier8-boot-verification/test-boot-deprecated-field
+      - tests/tier8-boot-verification/test-boot-dialect-dual
+      - tests/tier8-boot-verification/test-boot-dialect-guard
+      - tests/tier8-boot-verification/test-boot-emit-mismatch
+      - tests/tier8-boot-verification/test-boot-event-cycle
+      - tests/tier8-boot-verification/test-boot-event-no-producer
+      - tests/tier8-boot-verification/test-boot-event-no-schema
+      - tests/tier8-boot-verification/test-boot-handler-field-undefined
+      - tests/tier8-boot-verification/test-boot-missing-pin
+      - tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion
+      - tests/tier8-boot-verification/test-boot-on-complete-dict
+      - tests/tier8-boot-verification/test-boot-on-complete-state-invalid
+      - tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch
+      - tests/tier8-boot-verification/test-boot-payload-mismatch
+      - tests/tier8-boot-verification/test-boot-policy-conflict
+      - tests/tier8-boot-verification/test-boot-produces-drift
+      - tests/tier8-boot-verification/test-boot-prompt-missing
+      - tests/tier8-boot-verification/test-boot-required-agent-missing
+      - tests/tier8-boot-verification/test-boot-self-emit
+      - tests/tier8-boot-verification/test-boot-state-machine-invalid
+      - tests/tier8-boot-verification/test-boot-state-machine-unreachable
+      - tests/tier8-boot-verification/test-boot-tool-missing
+  - disposition: different-concept
+    owner: engine.composition_pattern
+    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go
+    roots:
+      - tests/tier9-composition-patterns/test-compose-accumulate-compute-branch
+      - tests/tier9-composition-patterns/test-compose-clear-gates-reenter
+      - tests/tier9-composition-patterns/test-compose-gate-chain-three
+      - tests/tier9-composition-patterns/test-compose-gate-data-advance-emit
+      - tests/tier9-composition-patterns/test-compose-guard-counter-escalate
+      - tests/tier9-composition-patterns/test-compose-guard-multi-source
+      - tests/tier9-composition-patterns/test-compose-guard-query-capacity
+      - tests/tier9-composition-patterns/test-compose-lifecycle-seven-states
+      - tests/tier9-composition-patterns/test-compose-rules-fanout-data
+      - tests/tier9-composition-patterns/test-compose-rules-per-rule-data
+  - disposition: negative-mutation
+    owner: legacy_multi_emit_retirement
+    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go
+    roots:
+      - tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow
