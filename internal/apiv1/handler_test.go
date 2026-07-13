@@ -165,6 +165,9 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 		{name: "invalid request object id", body: `{"jsonrpc":"2.0","id":{},"method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, wantCode: codeInvalidRequest},
 		{name: "invalid request array id", body: `{"jsonrpc":"2.0","id":[],"method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, wantCode: codeInvalidRequest},
 		{name: "invalid request boolean id", body: `{"jsonrpc":"2.0","id":true,"method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, wantCode: codeInvalidRequest},
+		{name: "duplicate semantic key", body: `{"jsonrpc":"2.0","id":"duplicate-key","method":"run.list","params":{"limit":1,"limit":2}}`, wantCode: codeInvalidRequest},
+		{name: "unsafe integer param", body: `{"jsonrpc":"2.0","id":"unsafe-integer","method":"run.list","params":{"limit":9007199254740992}}`, wantCode: codeInvalidRequest},
+		{name: "negative zero param", body: `{"jsonrpc":"2.0","id":"negative-zero","method":"run.list","params":{"limit":-0}}`, wantCode: codeInvalidRequest},
 		{name: "method not found", body: `{"jsonrpc":"2.0","id":"missing","method":"missing.method","params":{}}`, wantCode: codeMethodNotFound},
 		{name: "invalid params object", body: `{"jsonrpc":"2.0","id":"bad-params-object","method":"run.get","params":["run-1"]}`, wantCode: codeInvalidParams},
 		{name: "invalid params required", body: `{"jsonrpc":"2.0","id":"bad-params-required","method":"run.get","params":{}}`, wantCode: codeInvalidParams},
@@ -224,6 +227,19 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 				t.Fatalf("standard error data missing correlation_id: %#v", data)
 			}
 		})
+	}
+}
+
+func TestRequestBodyHashUsesCanonicalSemanticNumbers(t *testing.T) {
+	lower := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": float64(9007199254740990)}})
+	upper := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": float64(9007199254740991)}})
+	if lower == upper {
+		t.Fatalf("distinct safe integers share request hash %q", lower)
+	}
+	integer := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": 1}})
+	decimal := requestBodyHash("mailbox.decide", map[string]any{"fields": map[string]any{"score": 1.0}})
+	if integer != decimal {
+		t.Fatalf("equivalent semantic numbers have different hashes: %q != %q", integer, decimal)
 	}
 }
 

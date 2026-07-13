@@ -30,6 +30,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -5531,7 +5532,19 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	var decided map[string]any
 	decideParams := map[string]any{
 		"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash,
+		"fields":          map[string]any{"score": int64(9007199254740991)},
 		"idempotency_key": "decide-" + fixture.CardID,
+	}
+	unsafeRaw := fmt.Sprintf(`{"jsonrpc":"2.0","id":"unsafe-decision-number","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","observed_content_hash":%q,"fields":{"score":9007199254740992},"idempotency_key":%q}}`, fixture.CardID, fixture.ContentHash, "unsafe-decide-"+fixture.CardID)
+	unsafe := requestServedRawJSONRPC(t, rt.Endpoint, unsafeRaw)
+	if unsafe.Error == nil || unsafe.Error.Code != -32600 {
+		t.Fatalf("%s unsafe mailbox.decide = %#v, want invalid request", rt.Backend, unsafe)
+	}
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.decide", "unsafe-decide-"+fixture.CardID, 0)
+	var stillPending map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &stillPending)
+	if card := servedAnyMap(t, stillPending["decision_card"]); card["status"] != decisioncard.StatusPending {
+		t.Fatalf("%s card after unsafe decision = %#v", rt.Backend, card)
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", decideParams, &decided)
 	if decided["status"] != decisioncard.StatusDecided || strings.TrimSpace(fmt.Sprint(decided["decision_event_id"])) == "" {
@@ -5542,6 +5555,22 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	if replay["idempotency_replayed"] != true || replay["decision_event_id"] != decided["decision_event_id"] {
 		t.Fatalf("%s mailbox.decide replay = %#v, original %#v", rt.Backend, replay, decided)
 	}
+	conflictingParams := map[string]any{}
+	for key, value := range decideParams {
+		conflictingParams[key] = value
+	}
+	conflictingParams["fields"] = map[string]any{"score": int64(9007199254740990)}
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflictingParams)
+	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
+		t.Fatalf("%s numeric decision conflict = %#v, want %s", rt.Backend, conflict.Data, apiv1.IdempotencyConflictCode)
+	}
+	var decidedDetail map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &decidedDetail)
+	decidedCard := servedAnyMap(t, decidedDetail["decision_card"])
+	if fields := servedAnyMap(t, decidedCard["fields"]); !jsonScalarInt(fields["score"], 9007199254740991) {
+		t.Fatalf("%s persisted decision fields = %#v", rt.Backend, fields)
+	}
+	requireServedDecisionEventSafeInteger(t, rt.DB, rt.Backend, strings.TrimSpace(fmt.Sprint(decided["decision_event_id"])))
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -5572,6 +5601,39 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
 	}
+}
+
+func requireServedDecisionEventSafeInteger(t *testing.T, db *sql.DB, backend, eventID string) {
+	t.Helper()
+	var eventName, payload string
+	query := `SELECT event_name, payload FROM events WHERE event_id = ?`
+	args := []any{eventID}
+	if backend == "postgres" {
+		query = `SELECT event_name, payload::text FROM events WHERE event_id = $1::uuid`
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&eventName, &payload); err != nil {
+		t.Fatalf("%s load decision event %s: %v", backend, eventID, err)
+	}
+	if eventName != "mailbox.card_decided" || !strings.Contains(payload, "9007199254740991") {
+		t.Fatalf("%s decision event = %s %s, want exact safe integer", backend, eventName, payload)
+	}
+	var decoded map[string]any
+	if err := canonicaljson.Decode([]byte(payload), &decoded); err != nil {
+		t.Fatalf("%s decode decision event payload: %v", backend, err)
+	}
+	fields := servedAnyMap(t, decoded["fields"])
+	if !jsonScalarInt(fields["score"], 9007199254740991) {
+		t.Fatalf("%s decision event fields = %#v", backend, fields)
+	}
+}
+
+func servedAnyMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("value = %#v, want object", value)
+	}
+	return object
 }
 
 func requireServedMailboxSubscription(t *testing.T, endpoint, cardID string) {
@@ -5868,7 +5930,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		Stage: activation.Stage, StageActivationID: activation.ActivationID, DecisionID: activation.DecisionID,
 		Snapshot: decisioncard.Snapshot{Decision: activation.DecisionID, Title: "Launch review", Context: map[string]any{"environment": "staging"},
 			Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-				"approve": {Verdict: "approve", AdvancesTo: "done"},
+				"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
 				"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 			}},
 		BundleHash: bundleHash, WorkflowVersion: "1.0.0",
@@ -8492,6 +8554,26 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 	var envelope servedJSONRPCEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode %s envelope: %v", method, err)
+	}
+	return envelope
+}
+
+func requestServedRawJSONRPC(t *testing.T, endpoint, raw string) servedJSONRPCEnvelope {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("build raw JSON-RPC request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("raw JSON-RPC request: %v", err)
+	}
+	defer resp.Body.Close()
+	var envelope servedJSONRPCEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode raw JSON-RPC response: %v", err)
 	}
 	return envelope
 }

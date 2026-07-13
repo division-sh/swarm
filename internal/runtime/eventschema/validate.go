@@ -2,6 +2,7 @@ package eventschema
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"sort"
@@ -62,13 +63,21 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 		}
 	}
 	for _, key := range []string{"minLength", "maxLength", "minItems", "maxItems"} {
-		if value, ok := runtimesharedjson.AsFloat64(schema[key]); ok {
-			out[key] = int(value)
+		if raw, exists := schema[key]; exists {
+			if value, ok := runtimesharedjson.AsFloat64(raw); ok && math.Trunc(value) == value && value >= 0 {
+				out[key] = int(value)
+			} else {
+				out[key] = raw
+			}
 		}
 	}
 	for _, key := range []string{"minimum", "maximum"} {
-		if value, ok := runtimesharedjson.AsFloat64(schema[key]); ok {
-			out[key] = value
+		if raw, exists := schema[key]; exists {
+			if value, ok := runtimesharedjson.AsFloat64(raw); ok {
+				out[key] = value
+			} else {
+				out[key] = raw
+			}
 		}
 	}
 	required := uniqueSortedStrings(requiredList(schema["required"]), false)
@@ -252,12 +261,20 @@ func validateStringRefinements(path string, schema map[string]any, value string)
 	}
 	length := utf8.RuneCountInString(value)
 	if minRaw, ok := schema["minLength"]; ok {
-		if min, ok := runtimesharedjson.AsFloat64(minRaw); ok && length < int(min) {
+		min, ok := runtimesharedjson.AsFloat64(minRaw)
+		if !ok || math.Trunc(min) != min || min < 0 {
+			return fmt.Errorf("schema validation failed: %s minLength is not a supported non-negative integer", path)
+		}
+		if length < int(min) {
 			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
 		}
 	}
 	if maxRaw, ok := schema["maxLength"]; ok {
-		if max, ok := runtimesharedjson.AsFloat64(maxRaw); ok && length > int(max) {
+		max, ok := runtimesharedjson.AsFloat64(maxRaw)
+		if !ok || math.Trunc(max) != max || max < 0 {
+			return fmt.Errorf("schema validation failed: %s maxLength is not a supported non-negative integer", path)
+		}
+		if length > int(max) {
 			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
 		}
 	}
@@ -266,12 +283,20 @@ func validateStringRefinements(path string, schema map[string]any, value string)
 
 func validateArrayLength(path string, schema map[string]any, length int) error {
 	if minRaw, ok := schema["minItems"]; ok {
-		if min, ok := runtimesharedjson.AsFloat64(minRaw); ok && length < int(min) {
+		min, ok := runtimesharedjson.AsFloat64(minRaw)
+		if !ok || math.Trunc(min) != min || min < 0 {
+			return fmt.Errorf("schema validation failed: %s minItems is not a supported non-negative integer", path)
+		}
+		if length < int(min) {
 			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
 		}
 	}
 	if maxRaw, ok := schema["maxItems"]; ok {
-		if max, ok := runtimesharedjson.AsFloat64(maxRaw); ok && length > int(max) {
+		max, ok := runtimesharedjson.AsFloat64(maxRaw)
+		if !ok || math.Trunc(max) != max || max < 0 {
+			return fmt.Errorf("schema validation failed: %s maxItems is not a supported non-negative integer", path)
+		}
+		if length > int(max) {
 			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
 		}
 	}
@@ -285,13 +310,19 @@ func validateNumericBounds(path string, schema map[string]any, value any) error 
 	}
 	if minRaw, ok := schema["minimum"]; ok {
 		min, ok := runtimesharedjson.AsFloat64(minRaw)
-		if ok && n < min {
+		if !ok {
+			return fmt.Errorf("schema validation failed: %s minimum is not a supported JSON number", path)
+		}
+		if n < min {
 			return fmt.Errorf("schema validation failed: %s must be >= %v", path, min)
 		}
 	}
 	if maxRaw, ok := schema["maximum"]; ok {
 		max, ok := runtimesharedjson.AsFloat64(maxRaw)
-		if ok && n > max {
+		if !ok {
+			return fmt.Errorf("schema validation failed: %s maximum is not a supported JSON number", path)
+		}
+		if n > max {
 			return fmt.Errorf("schema validation failed: %s must be <= %v", path, max)
 		}
 	}

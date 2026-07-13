@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
@@ -355,7 +356,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			return err
 		}
 		replayed = wasReplay
-		return json.Unmarshal(completion.Response, &result)
+		return canonicaljson.Decode(completion.Response, &result)
 	})
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, err)

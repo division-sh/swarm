@@ -17,8 +17,10 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -550,7 +552,7 @@ func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Reques
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "request must be an object"})
 	}
 	var req rpcRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
+	if err := canonicaljson.Decode(raw, &req); err != nil {
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"error": err.Error()})
 	}
 	idRaw, hasID := object["id"]
@@ -589,7 +591,7 @@ func decodeParams(raw json.RawMessage, correlationID string) (map[string]any, *r
 		return map[string]any{}, nil
 	}
 	var params map[string]any
-	if err := json.Unmarshal(raw, &params); err != nil {
+	if err := canonicaljson.Decode(raw, &params); err != nil {
 		return nil, &rpcError{
 			Code:    codeInvalidParams,
 			Message: "invalid params",
@@ -698,29 +700,11 @@ func validateParamValue(descriptor apispec.ContentDescriptor, value any) string 
 }
 
 func isJSONNumber(value any) bool {
-	switch typed := value.(type) {
-	case float64:
-		return true
-	case json.Number:
-		_, err := typed.Float64()
-		return err == nil
-	default:
-		return false
-	}
+	return runtimesharedjson.IsNumeric(value)
 }
 
 func isJSONInteger(value any) bool {
-	switch typed := value.(type) {
-	case float64:
-		return typed == float64(int64(typed))
-	case json.Number:
-		if _, err := typed.Int64(); err == nil {
-			return true
-		}
-		return false
-	default:
-		return false
-	}
+	return runtimesharedjson.IsInteger(value)
 }
 
 func invalidParams(correlationID string, details any) *rpcError {
@@ -879,7 +863,7 @@ func requestBodyHash(method string, params map[string]any) string {
 		"method": strings.TrimSpace(method),
 		"params": params,
 	}
-	raw, err := json.Marshal(body)
+	raw, err := canonicaljson.Bytes(body)
 	if err != nil {
 		raw = []byte(strings.TrimSpace(method))
 	}

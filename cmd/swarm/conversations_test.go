@@ -243,7 +243,7 @@ func TestConversationTurnRuntimeLogProjection(t *testing.T) {
 
 func TestConversationTurnJSONPreservesCanonicalRuntimeLogShape(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
-	failureRaw := runtimeLogDataLimitFailure(t, "9007199254740993")
+	failureRaw := runtimeLogDataLimitFailure(t, "9007199254740991")
 	failureValue, err := runtimeLogDecodeJSONValue(failureRaw)
 	if err != nil {
 		t.Fatalf("decode failure fixture: %v", err)
@@ -275,7 +275,7 @@ func TestConversationTurnJSONPreservesCanonicalRuntimeLogShape(t *testing.T) {
 			"action":   "published",
 			"run_id":   fullRunID,
 			"failure":  failureValue,
-			"evidence": json.Number("9007199254740993"),
+			"evidence": json.Number("9007199254740991"),
 		}
 		writeJSONRPCResult(t, w, req.ID, result)
 	}))
@@ -312,8 +312,8 @@ func TestConversationTurnJSONPreservesCanonicalRuntimeLogShape(t *testing.T) {
 	if details["action"] != "published" || details["run_id"] != fullRunID || !reflect.DeepEqual(details["failure"], failureValue) {
 		t.Errorf("machine details were projected or elided: %#v", details)
 	}
-	if evidence, ok := details["evidence"].(json.Number); !ok || evidence.String() != "9007199254740993" {
-		t.Errorf("details.evidence = %#v, want exact large json.Number", details["evidence"])
+	if evidence, ok := details["evidence"].(json.Number); !ok || evidence.String() != "9007199254740991" {
+		t.Errorf("details.evidence = %#v, want exact safe-boundary json.Number", details["evidence"])
 	}
 	failure := log["failure"].(map[string]any)
 	if failure["class"] != "platform.data_limit_exceeded" {

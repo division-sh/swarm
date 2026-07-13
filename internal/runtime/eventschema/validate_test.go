@@ -1,6 +1,7 @@
 package eventschema
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -59,6 +60,53 @@ func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testin
 	}
 	if _, ok := tags["items"].(map[string]any)["description"]; ok {
 		t.Fatalf("canonical item schema retained description: %#v", tags)
+	}
+}
+
+func TestValidateValueAgainstSchemaEnforcesSafeNumericBoundsExactly(t *testing.T) {
+	const maxSafe = float64(9007199254740991)
+	for _, schemaType := range []string{"integer", "number"} {
+		t.Run(schemaType+"/minimum", func(t *testing.T) {
+			schema := map[string]any{"type": schemaType, "minimum": json.Number("9007199254740991")}
+			if err := ValidateValueAgainstSchema(schema, maxSafe-1); err == nil || !strings.Contains(err.Error(), "must be >=") {
+				t.Fatalf("minimum validation error = %v", err)
+			}
+			if err := ValidateValueAgainstSchema(schema, maxSafe); err != nil {
+				t.Fatalf("safe minimum boundary rejected: %v", err)
+			}
+		})
+		t.Run(schemaType+"/maximum", func(t *testing.T) {
+			schema := map[string]any{"type": schemaType, "maximum": json.Number("9007199254740990")}
+			if err := ValidateValueAgainstSchema(schema, maxSafe); err == nil || !strings.Contains(err.Error(), "must be <=") {
+				t.Fatalf("maximum validation error = %v", err)
+			}
+			if err := ValidateValueAgainstSchema(schema, maxSafe-1); err != nil {
+				t.Fatalf("safe maximum boundary rejected: %v", err)
+			}
+		})
+	}
+	for _, key := range []string{"minimum", "maximum"} {
+		schema := map[string]any{"type": "integer", key: json.Number("9007199254740992")}
+		if err := ValidateValueAgainstSchema(schema, float64(1)); err == nil || !strings.Contains(err.Error(), "not a supported JSON number") {
+			t.Fatalf("unsafe %s validation error = %v", key, err)
+		}
+	}
+}
+
+func TestValidateValueAgainstSchemaRejectsFractionalLengthConstraints(t *testing.T) {
+	for _, schema := range []map[string]any{
+		{"type": "string", "minLength": 1.5},
+		{"type": "string", "maxLength": 1.5},
+		{"type": "array", "minItems": 1.5},
+		{"type": "array", "maxItems": 1.5},
+	} {
+		value := any("x")
+		if schema["type"] == "array" {
+			value = []any{"x"}
+		}
+		if err := ValidateValueAgainstSchema(schema, value); err == nil || !strings.Contains(err.Error(), "supported non-negative integer") {
+			t.Fatalf("ValidateValueAgainstSchema(%#v) error = %v", schema, err)
+		}
 	}
 }
 
