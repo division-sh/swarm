@@ -5,24 +5,8 @@ import (
 	"strings"
 	"time"
 
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
-
-func budgetExecutionScopeKey(actor models.AgentConfig) string {
-	entityID := actor.EffectiveEntityID()
-	if entityID != "" {
-		return entityID
-	}
-	if agentID := strings.TrimSpace(actor.ID); agentID != "" {
-		return "__agent__:" + agentID
-	}
-	return ""
-}
-
-func BudgetExecutionScopeKey(actor models.AgentConfig) string {
-	return budgetExecutionScopeKey(actor)
-}
 
 func coalesce(values ...string) string {
 	for _, value := range values {

@@ -848,6 +848,9 @@ func sqlitePipelineTxHelper(site runtimeWriterCallSite) bool {
 }
 
 func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
+	if site.Receiver == "" && strings.HasPrefix(site.Path, "internal/store/") && site.UsesFunctionTxParam && site.Kind != primitiveBegin {
+		return true
+	}
 	if site.Receiver == "SQLiteRuntimeStore" && site.ReceiverVariable != "" && site.CallReceiver == site.ReceiverVariable {
 		return false
 	}
@@ -917,7 +920,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "sqlite schema bootstrap",
-			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|agent_lifecycle_schema|platformschema/platformschema)\.go$`),
+			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|agent_lifecycle_schema|completion_schema_migration|platformschema/platformschema)\.go$`),
 			kinds:          allPrimitiveKinds(),
 			classification: classDifferentConcept,
 			reason:         "schema/bootstrap owns dialect DDL and PRAGMA behavior, split from selected runtime mutation writers",

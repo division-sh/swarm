@@ -5102,7 +5102,8 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		t.Fatalf("%s prelaunch rejection = %#v requests=%d, want error before HTTP launch", rt.Backend, prelaunch, rt.LLMRequests.Load())
 	}
 	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_snapshots", turnFork.Fork.ForkID, 1)
-	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_turns", turnFork.Fork.ForkID, 0)
+	requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_turns", turnFork.Fork.ForkID, 1)
+	requireServedConversationForkTurnState(t, rt.DB, rt.Backend, turnFork.Fork.ForkID, 1, "failed")
 	if err := rt.Credentials.Set(context.Background(), "OPENAI_COMPATIBLE_API_KEY", "forkchat-proof-key"); err != nil {
 		t.Fatalf("set forkchat proof credential: %v", err)
 	}
@@ -5112,7 +5113,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	chatParams := map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "inspect snapshot and try emit_event", "idempotency_key": chatKey}
 	var chat store.ConversationForkChatResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_chat", chatParams, &chat)
-	if chat.IdempotencyReplayed || chat.Turn.TurnIndex != 1 || chat.Snapshot.SourceTurn.TurnID != fixture.Turn1ID {
+	if chat.IdempotencyReplayed || chat.Turn.TurnIndex != 2 || chat.Snapshot.SourceTurn.TurnID != fixture.Turn1ID {
 		t.Fatalf("%s fork chat = %#v", rt.Backend, chat)
 	}
 	if len(chat.Snapshot.EntitySnapshot) != 1 || chat.Snapshot.EntitySnapshot[0].CurrentState != "draft" || chat.Snapshot.EntitySnapshot[0].Fields["name"] != "Before" {
@@ -5285,6 +5286,21 @@ func requireServedConversationForkRowCount(t *testing.T, db *sql.DB, backend, ta
 	}
 	if got != want {
 		t.Fatalf("%s %s rows for fork %s = %d, want %d", backend, table, forkID, got, want)
+	}
+}
+
+func requireServedConversationForkTurnState(t *testing.T, db *sql.DB, backend, forkID string, turnIndex int, want string) {
+	t.Helper()
+	query := `SELECT state FROM conversation_fork_turns WHERE fork_id=? AND turn_index=?`
+	if backend == "postgres" {
+		query = `SELECT state FROM conversation_fork_turns WHERE fork_id=$1::uuid AND turn_index=$2`
+	}
+	var got string
+	if err := db.QueryRowContext(context.Background(), query, forkID, turnIndex).Scan(&got); err != nil {
+		t.Fatalf("%s load conversation fork turn state: %v", backend, err)
+	}
+	if got != want {
+		t.Fatalf("%s conversation fork turn %d state = %q, want %q", backend, turnIndex, got, want)
 	}
 }
 
@@ -11574,7 +11590,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	}
 }
 
-func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthoritySchema(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	pg := &store.PostgresStore{DB: db}
@@ -11588,10 +11604,6 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBin
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `DROP TABLE run_fork_selected_contract_bindings`); err != nil {
-		t.Fatalf("drop selected binding table: %v", err)
-	}
-
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--store", "postgres",

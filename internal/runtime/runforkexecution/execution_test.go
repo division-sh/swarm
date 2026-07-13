@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,8 +22,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -531,6 +536,331 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	}
 	if typedRuntimeDiagnostics == 0 {
 		t.Fatalf("typed runtime diagnostics parented to fork event = %d, want > 0", typedRuntimeDiagnostics)
+	}
+}
+
+func TestExecuteSelectedContractRunForkProviderCompletionRecordsDurableAuthority(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	loader := ContractBundleSourceLoader{
+		RepoRoot:         repoRoot,
+		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	var providerCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-selected-fork",
+			"choices":[{"message":{"role":"assistant","content":"completed","tool_calls":[{
+				"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}
+			}]}}],
+			"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}
+		}`))
+	}))
+	defer provider.Close()
+	providerCredentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := providerCredentials.Set(ctx, llmselection.OpenAICompatibleCredentialEnv, "test-key"); err != nil {
+		t.Fatalf("store provider credential: %v", err)
+	}
+	cfg := &config.Config{LLM: config.LLMConfig{
+		Backend: llmselection.BackendOpenAICompatible,
+		Models: llmselection.ModelAliases{
+			llmselection.ModelAliasRegular: {llmselection.BackendOpenAICompatible: "gpt-selected-fork"},
+		},
+		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		OpenAICompatible: config.OpenAICompatibleConfig{
+			BaseURL: provider.URL,
+		},
+	}}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002203, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+		AgentRuntime: SelectedContractAgentRuntimeOptions{
+			Config:              cfg,
+			ProviderCredentials: providerCredentials,
+			QuiescenceTimeout:   5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if providerCalls.Load() != 1 {
+		t.Fatalf("provider calls = %d, want 1", providerCalls.Load())
+	}
+	proof := result.ForkLocalRuntimeContainer
+	if proof == nil || proof.RuntimeExecutionID == "" || proof.RuntimeGeneration == 0 || proof.AuthorityExecutionOwner == "" {
+		t.Fatalf("selected completion runtime authority proof = %#v", proof)
+	}
+
+	var operations, attempts, turns int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runtime_external_effect_operations
+		WHERE effect_kind = 'provider_turn'
+		  AND authority_kind = 'selected_contract_fork'
+		  AND authority_id = $1
+		  AND selected_execution_id = $1::uuid
+		  AND generation = $2
+		  AND authority_evidence->>'execution_id' = $1
+		  AND (authority_evidence->>'generation')::bigint = $2
+	`, proof.RuntimeExecutionID, proof.RuntimeGeneration).Scan(&operations); err != nil {
+		t.Fatalf("count selected completion operations: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runtime_external_effect_attempts a
+		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+		WHERE o.selected_execution_id = $1::uuid
+		  AND a.adapter = 'openai_compatible'
+		  AND a.generation = $2
+		  AND a.execution_owner = $3
+		  AND a.state = 'settled'
+	`, proof.RuntimeExecutionID, proof.RuntimeGeneration, proof.AuthorityExecutionOwner).Scan(&attempts); err != nil {
+		t.Fatalf("count selected completion attempts: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_turns t
+		JOIN runtime_external_effect_attempts a ON a.attempt_id = t.completion_attempt_id
+		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+		WHERE o.selected_execution_id = $1::uuid
+		  AND t.run_id = $2::uuid
+		  AND t.agent_id = 'test-agent'
+		  AND t.usage_exactness = 'exact'
+		  AND t.input_tokens = 11
+		  AND t.output_tokens = 3
+	`, proof.RuntimeExecutionID, result.Materialization.ForkRunID).Scan(&turns); err != nil {
+		t.Fatalf("count selected completion turns: %v", err)
+	}
+	if operations != 1 || attempts != 1 || turns != 1 {
+		t.Fatalf("selected completion evidence operations=%d attempts=%d turns=%d, want 1/1/1", operations, attempts, turns)
+	}
+}
+
+func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	forkEventID := uuid.NewString()
+	bindingID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
+		t.Fatalf("seed selected-contract container competition runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,created_at) VALUES ($1::uuid,$2::uuid,'selected.test','global',$3)`, forkEventID, sourceRunID, now); err != nil {
+		t.Fatalf("seed selected-contract container competition event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_bindings
+			(binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at)
+		VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)
+	`, bindingID, forkRunID, sourceRunID, forkEventID, now); err != nil {
+		t.Fatalf("seed selected-contract container competition binding: %v", err)
+	}
+
+	servedDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open served PostgreSQL handle: %v", err)
+	}
+	defer servedDB.Close()
+	standaloneDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open standalone PostgreSQL handle: %v", err)
+	}
+	defer standaloneDB.Close()
+	if err := servedDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping served PostgreSQL handle: %v", err)
+	}
+	if err := standaloneDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping standalone PostgreSQL handle: %v", err)
+	}
+
+	selection := store.RunForkContractSelection{
+		Mode:            "selected_contracts",
+		ContractsRoot:   "/tmp/contracts",
+		WorkflowName:    "workflow",
+		WorkflowVersion: "v1",
+	}
+	admission := store.RunForkSelectedContractExecutionAdmission{
+		Owner:                 store.RunForkSelectedContractExecutionAdmissionOwner,
+		FutureExecutionOwner:  store.RunForkSelectedContractExecutionOwner,
+		NonMutating:           true,
+		ExecutionSupported:    false,
+		ForkRunID:             forkRunID,
+		SourceRunID:           sourceRunID,
+		ForkEventID:           forkEventID,
+		ContractSelection:     selection,
+		ContractBindingOwner:  store.RunForkSelectedContractBindingOwner,
+		AdmissionOwner:        store.RunForkContractFrontierAdmissionOwner,
+		AdmissionUse:          store.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		ExecutionModelOwner:   store.RunForkSelectedContractExecutionModelOwner,
+		SourceWorkflowName:    "workflow",
+		SourceWorkflowVersion: "v1",
+	}
+	planning := store.RunForkSelectedContractRecipientPlanning{
+		Owner:                      store.RunForkSelectedContractRecipientPlanningOwner,
+		FutureExecutionOwner:       store.RunForkSelectedContractExecutionOwner,
+		NonMutating:                true,
+		RecipientPlanningSupported: true,
+		ContractSelection:          selection,
+	}
+	baseRequest := publishSelectedContractForkEventsRequest{
+		Admission:         admission,
+		RecipientPlanning: planning,
+		SourceRunID:       sourceRunID,
+		ForkRunID:         forkRunID,
+		ForkEventID:       forkEventID,
+		ForkTime:          now,
+		SourceEvents:      []string{forkEventID},
+		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
+	}
+	type contenderResult struct {
+		surface   string
+		container selectedContractForkLocalRuntimeContainer
+		store     *store.PostgresStore
+		err       error
+	}
+	start := make(chan struct{})
+	results := make(chan contenderResult, 2)
+	contenders := []struct {
+		surface string
+		db      *sql.DB
+	}{
+		{surface: "served", db: servedDB},
+		{surface: "standalone", db: standaloneDB},
+	}
+	for _, contender := range contenders {
+		contender := contender
+		go func() {
+			<-start
+			pg := &store.PostgresStore{DB: contender.db}
+			req := baseRequest
+			req.Store = pg
+			container, buildErr := buildSelectedContractForkLocalRuntimeContainer(ctx, req)
+			results <- contenderResult{surface: contender.surface, container: container, store: pg, err: buildErr}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	var winner contenderResult
+	var loser contenderResult
+	if first.err == nil {
+		winner, loser = first, second
+	} else {
+		winner, loser = second, first
+	}
+	if winner.err != nil || loser.err == nil {
+		t.Fatalf("served/standalone authority race first=%s/%v second=%s/%v, want exactly one winner", first.surface, first.err, second.surface, second.err)
+	}
+	if winner.surface == loser.surface {
+		t.Fatalf("served/standalone authority race returned duplicate surface %q", winner.surface)
+	}
+	proof := winner.container.Proof()
+	if proof.RuntimeExecutionID == "" || proof.RuntimeGeneration != 1 || proof.AuthorityExecutionOwner == "" {
+		t.Fatalf("winning %s authority proof = %#v", winner.surface, proof)
+	}
+
+	authority := winner.container.authority
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind:        runtimeeffects.UsageTargetAgentTurn,
+		ID:          uuid.NewString(),
+		RunID:       forkRunID,
+		AgentID:     "selected-agent",
+		SessionID:   uuid.NewString(),
+		RuntimeMode: "task",
+		ScopeKey:    "selected-authority-race",
+	}
+	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(winner.store)),
+		"served-standalone-authority-race",
+	)
+	handle, err := runtimeeffects.BeginCompletion(providerCtx, "openai_compatible", []byte("request"), nil)
+	if err != nil {
+		t.Fatalf("winning %s authorize provider completion: %v", winner.surface, err)
+	}
+	if err := handle.MarkLaunched(providerCtx); err != nil {
+		t.Fatalf("winning %s launch provider completion: %v", winner.surface, err)
+	}
+	var providerLaunches atomic.Int32
+	providerLaunches.Add(1)
+	if err := handle.MarkResponseObserved(providerCtx, map[string]any{"surface": winner.surface}); err != nil {
+		t.Fatalf("winning %s observe provider response: %v", winner.surface, err)
+	}
+	inputTokens, outputTokens := int64(1), int64(1)
+	if err := handle.SettleCompletion(providerCtx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"surface": winner.surface}},
+		Usage: runtimeeffects.CompletionUsage{
+			ResolvedModel: "test-model",
+			Exactness:     runtimeeffects.CompletionUsageExact,
+			InputTokens:   &inputTokens,
+			OutputTokens:  &outputTokens,
+		},
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: authority.Target.ID, RunID: forkRunID, AgentID: authority.Target.AgentID,
+			SessionID: authority.Target.SessionID, RuntimeMode: authority.Target.RuntimeMode,
+			ScopeKey: authority.Target.ScopeKey, ParseOK: true,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: authority.Target.ScopeKey, AgentID: authority.Target.AgentID,
+			Model: "test-model", ModelAlias: "regular", BackendProfile: "test",
+			Provider: "test", Transport: "http", ResolvedModel: "test-model",
+			InvocationType: authority.Target.RuntimeMode,
+		},
+		Now: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("winning %s settle provider completion: %v", winner.surface, err)
+	}
+	if providerLaunches.Load() != 1 {
+		t.Fatalf("provider launches = %d, want 1", providerLaunches.Load())
+	}
+	if err := winner.container.Quiesce(ctx); err != nil {
+		t.Fatalf("quiesce winning %s container: %v", winner.surface, err)
+	}
+	if err := winner.container.Close(ctx); err != nil {
+		t.Fatalf("close winning %s container: %v", winner.surface, err)
+	}
+
+	var authorities, attempts, reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND generation=1 AND state='closed'`, forkRunID).Scan(&authorities); err != nil {
+		t.Fatalf("count served/standalone authority rows: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1::uuid AND a.state='settled'`, proof.RuntimeExecutionID).Scan(&attempts); err != nil {
+		t.Fatalf("count served/standalone completion attempts: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, handle.Attempt().AttemptID).Scan(&reservations); err != nil {
+		t.Fatalf("count no-cap completion reservations: %v", err)
+	}
+	if authorities != 1 || attempts != 1 || reservations != 0 {
+		t.Fatalf("served/standalone authority evidence authorities=%d attempts=%d reservations=%d, want 1/1/0", authorities, attempts, reservations)
 	}
 }
 
@@ -2019,7 +2349,13 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 			t.Fatalf("count fork route recoveries: %v", err)
 		}
 	}
-	if forkRows != 0 || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 0 || lineageRows != 0 || routeRecoveryRows != 0 {
+	var forkStatus string
+	if forkRunID != "" {
+		if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
+			t.Fatalf("load retained fork tombstone: %v", err)
+		}
+	}
+	if forkRows != 1 || forkStatus != "cancelled" || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 1 || lineageRows != 0 || routeRecoveryRows != 0 {
 		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d route_recoveries:%d",
 			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows)
 	}

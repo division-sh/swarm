@@ -1,0 +1,306 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+)
+
+func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	if !authority.Valid() {
+		return false, nil
+	}
+	switch authority.Kind {
+	case runtimeeffects.AuthorityNormalAgent:
+		var epoch, generation int64
+		var phase string
+		err := q.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=$1`, authority.Normal.AgentID).Scan(&epoch, &generation, &phase)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return err == nil && epoch == authority.Normal.RuntimeEpoch && generation == int64(authority.Normal.Generation) && strings.TrimSpace(phase) == "running", err
+	case runtimeeffects.AuthoritySelectedContractFork:
+		var current selectedRuntimeAuthorityRow
+		err := q.QueryRowContext(ctx, `
+			SELECT execution_id::text, fork_run_id::text, generation, admission_fingerprint,
+			       container_plan_fingerprint, actor_census_fingerprint, effective_config_fingerprint,
+			       state, COALESCE(execution_owner,''), lease_expires_at, fence_generation
+			FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1::uuid
+		`, authority.SelectedFork.ExecutionID).Scan(&current.executionID, &current.forkRunID, &current.generation, &current.admissionFingerprint,
+			&current.containerFingerprint, &current.actorFingerprint, &current.configFingerprint, &current.state,
+			&current.owner, &current.lease, &current.fence)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return selectedRuntimeAuthorityMatches(authority, current, time.Now().UTC()), nil
+	case runtimeeffects.AuthorityConversationForkChat:
+		return forkChatAuthorityCurrentPostgres(ctx, q, authority)
+	default:
+		return false, nil
+	}
+}
+
+func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	if !authority.Valid() {
+		return false, nil
+	}
+	switch authority.Kind {
+	case runtimeeffects.AuthorityNormalAgent:
+		var epoch, generation int64
+		var phase string
+		err := q.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=?`, authority.Normal.AgentID).Scan(&epoch, &generation, &phase)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return err == nil && epoch == authority.Normal.RuntimeEpoch && generation == int64(authority.Normal.Generation) && strings.TrimSpace(phase) == "running", err
+	case runtimeeffects.AuthoritySelectedContractFork:
+		var current selectedRuntimeAuthorityRow
+		var lease conversationForkTimeValue
+		err := q.QueryRowContext(ctx, `
+			SELECT execution_id, fork_run_id, generation, admission_fingerprint,
+			       container_plan_fingerprint, actor_census_fingerprint, effective_config_fingerprint,
+			       state, COALESCE(execution_owner,''), lease_expires_at, fence_generation
+			FROM run_fork_selected_contract_runtime_executions WHERE execution_id=?
+		`, authority.SelectedFork.ExecutionID).Scan(&current.executionID, &current.forkRunID, &current.generation, &current.admissionFingerprint,
+			&current.containerFingerprint, &current.actorFingerprint, &current.configFingerprint, &current.state,
+			&current.owner, &lease, &current.fence)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !lease.Valid {
+			return false, nil
+		}
+		current.lease = lease.Time
+		return selectedRuntimeAuthorityMatches(authority, current, time.Now().UTC()), nil
+	case runtimeeffects.AuthorityConversationForkChat:
+		return forkChatAuthorityCurrentSQLite(ctx, q, authority)
+	default:
+		return false, nil
+	}
+}
+
+func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+	if !authority.Valid() {
+		return invalidExternalAuthority(authority, "invalid")
+	}
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
+		return claimOrValidateForkChatAuthorityPostgres(ctx, tx, authority)
+	}
+	current, err := externalEffectAuthorityCurrentPostgres(ctx, tx, authority)
+	if err != nil {
+		return fmt.Errorf("validate external effect authority: %w", err)
+	}
+	if !current {
+		return invalidExternalAuthority(authority, "stale")
+	}
+	return nil
+}
+
+func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+	if !authority.Valid() {
+		return invalidExternalAuthority(authority, "invalid")
+	}
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
+		return claimOrValidateForkChatAuthoritySQLite(ctx, tx, authority)
+	}
+	current, err := externalEffectAuthorityCurrentSQLite(ctx, tx, authority)
+	if err != nil {
+		return fmt.Errorf("validate sqlite external effect authority: %w", err)
+	}
+	if !current {
+		return invalidExternalAuthority(authority, "stale")
+	}
+	return nil
+}
+
+func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (time.Time, error) {
+	switch authority.Kind {
+	case runtimeeffects.AuthorityNormalAgent:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthoritySelectedContractFork:
+		var lease time.Time
+		err := q.QueryRowContext(ctx, `
+			SELECT lease_expires_at
+			FROM run_fork_selected_contract_runtime_executions
+			WHERE execution_id=$1::uuid AND state='running' AND execution_owner=$2 AND fence_generation=$3
+		`, authority.SelectedFork.ExecutionID, authority.ExecutionOwner, authority.FenceGeneration).Scan(&lease)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("load selected-contract attempt lease: %w", err)
+		}
+		return lease.UTC(), nil
+	case runtimeeffects.AuthorityConversationForkChat:
+		var lease time.Time
+		err := q.QueryRowContext(ctx, `
+			SELECT lease_expires_at
+			FROM conversation_fork_turns
+			WHERE fork_turn_id=$1::uuid AND state='executing' AND execution_owner=$2 AND fence_generation=$3
+		`, authority.ForkChat.ForkTurnID, authority.ExecutionOwner, authority.FenceGeneration).Scan(&lease)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("load forkchat attempt lease: %w", err)
+		}
+		return lease.UTC(), nil
+	default:
+		return time.Time{}, fmt.Errorf("load attempt lease for unsupported authority kind %q", authority.Kind)
+	}
+}
+
+func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (time.Time, error) {
+	switch authority.Kind {
+	case runtimeeffects.AuthorityNormalAgent:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthoritySelectedContractFork:
+		var lease conversationForkTimeValue
+		err := q.QueryRowContext(ctx, `
+			SELECT lease_expires_at
+			FROM run_fork_selected_contract_runtime_executions
+			WHERE execution_id=? AND state='running' AND execution_owner=? AND fence_generation=?
+		`, authority.SelectedFork.ExecutionID, authority.ExecutionOwner, authority.FenceGeneration).Scan(&lease)
+		if err != nil || !lease.Valid {
+			return time.Time{}, fmt.Errorf("load sqlite selected-contract attempt lease: %w", err)
+		}
+		return lease.Time.UTC(), nil
+	case runtimeeffects.AuthorityConversationForkChat:
+		var lease conversationForkTimeValue
+		err := q.QueryRowContext(ctx, `
+			SELECT lease_expires_at
+			FROM conversation_fork_turns
+			WHERE fork_turn_id=? AND state='executing' AND execution_owner=? AND fence_generation=?
+		`, authority.ForkChat.ForkTurnID, authority.ExecutionOwner, authority.FenceGeneration).Scan(&lease)
+		if err != nil || !lease.Valid {
+			return time.Time{}, fmt.Errorf("load sqlite forkchat attempt lease: %w", err)
+		}
+		return lease.Time.UTC(), nil
+	default:
+		return time.Time{}, fmt.Errorf("load sqlite attempt lease for unsupported authority kind %q", authority.Kind)
+	}
+}
+
+type selectedRuntimeAuthorityRow struct {
+	executionID          string
+	forkRunID            string
+	generation           uint64
+	admissionFingerprint string
+	containerFingerprint string
+	actorFingerprint     string
+	configFingerprint    string
+	state                string
+	owner                string
+	lease                time.Time
+	fence                uint64
+}
+
+func selectedRuntimeAuthorityMatches(authority runtimeeffects.Authority, current selectedRuntimeAuthorityRow, now time.Time) bool {
+	selected := authority.SelectedFork
+	return strings.TrimSpace(current.executionID) == strings.TrimSpace(selected.ExecutionID) &&
+		strings.TrimSpace(current.forkRunID) == strings.TrimSpace(selected.ForkRunID) &&
+		current.generation == selected.Generation &&
+		current.admissionFingerprint == selected.AdmissionFingerprint &&
+		current.containerFingerprint == selected.ContainerPlanFingerprint &&
+		current.actorFingerprint == selected.ActorCensusFingerprint &&
+		current.configFingerprint == selected.EffectiveConfigFingerprint &&
+		current.state == "running" && current.owner == authority.ExecutionOwner && current.fence == authority.FenceGeneration && current.lease.After(now)
+}
+
+func forkChatAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	var forkID, actor, occurrence, hash, state, owner string
+	var lease sql.NullTime
+	var fence uint64
+	err := q.QueryRowContext(ctx, `SELECT fork_id::text, actor_token_id, request_occurrence_id::text, request_hash, state, COALESCE(execution_owner,''), lease_expires_at, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=$1::uuid`, authority.ForkChat.ForkTurnID).
+		Scan(&forkID, &actor, &occurrence, &hash, &state, &owner, &lease, &fence)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return forkChatAuthorityMatches(authority, forkID, actor, occurrence, hash, state, owner, lease.Time, lease.Valid, fence), nil
+}
+
+func forkChatAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	var forkID, actor, occurrence, hash, state, owner string
+	var lease conversationForkTimeValue
+	var fence uint64
+	err := q.QueryRowContext(ctx, `SELECT fork_id, actor_token_id, request_occurrence_id, request_hash, state, COALESCE(execution_owner,''), lease_expires_at, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=?`, authority.ForkChat.ForkTurnID).
+		Scan(&forkID, &actor, &occurrence, &hash, &state, &owner, &lease, &fence)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return forkChatAuthorityMatches(authority, forkID, actor, occurrence, hash, state, owner, lease.Time, lease.Valid, fence), nil
+}
+
+func forkChatAuthorityMatches(authority runtimeeffects.Authority, forkID, actor, occurrence, hash, state, owner string, lease time.Time, leaseValid bool, fence uint64) bool {
+	forkchat := authority.ForkChat
+	return forkID == forkchat.ForkID && actor == forkchat.ActorTokenID && occurrence == forkchat.RequestOccurrenceID && hash == forkchat.RequestHash &&
+		state == "executing" && owner == authority.ExecutionOwner && fence == authority.FenceGeneration && leaseValid && lease.After(time.Now().UTC())
+}
+
+func claimOrValidateForkChatAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
+	now := time.Now().UTC()
+	expires := now.Add(conversationForkChatExecutionLease)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE conversation_fork_turns
+		SET state='executing', lease_expires_at=GREATEST(lease_expires_at,$4), updated_at=$5
+		WHERE fork_turn_id=$1::uuid AND fork_id=$6::uuid AND actor_token_id=$7
+		  AND request_occurrence_id=$8::uuid AND request_hash=$9 AND state IN ('prepared','executing')
+		  AND execution_owner=$2 AND fence_generation=$3 AND lease_expires_at>$5
+	`, authority.ForkChat.ForkTurnID, authority.ExecutionOwner, authority.FenceGeneration, expires, now,
+		authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID, authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash)
+	if err != nil {
+		return fmt.Errorf("claim forkchat authority: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("confirm forkchat authority claim: %w", err)
+	}
+	if rows != 1 {
+		return invalidExternalAuthority(authority, "forkchat_claim_conflict")
+	}
+	return nil
+}
+
+func claimOrValidateForkChatAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
+	now := time.Now().UTC()
+	expires := now.Add(conversationForkChatExecutionLease)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE conversation_fork_turns
+		SET state='executing', lease_expires_at=CASE WHEN lease_expires_at>? THEN lease_expires_at ELSE ? END, updated_at=?
+		WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=?
+		  AND request_occurrence_id=? AND request_hash=? AND state IN ('prepared','executing')
+		  AND execution_owner=? AND fence_generation=? AND lease_expires_at>?
+	`, expires, expires, now, authority.ForkChat.ForkTurnID, authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID,
+		authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash, authority.ExecutionOwner,
+		authority.FenceGeneration, now)
+	if err != nil {
+		return fmt.Errorf("claim sqlite forkchat authority: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("confirm sqlite forkchat authority claim: %w", err)
+	}
+	if rows != 1 {
+		return invalidExternalAuthority(authority, "forkchat_claim_conflict")
+	}
+	return nil
+}
+
+func invalidExternalAuthority(authority runtimeeffects.Authority, reason string) error {
+	return runtimefailures.New(runtimefailures.ClassSupersededGeneration, "external_effect_authority_stale", "external-effects", "check_authority", map[string]any{
+		"authority_kind": authority.Kind,
+		"authority_id":   authority.ID,
+		"reason":         strings.TrimSpace(reason),
+	})
+}

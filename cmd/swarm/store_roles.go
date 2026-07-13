@@ -43,9 +43,11 @@ type selectedConcreteRuntimeStore interface {
 	budgetspend.Store
 	runtime.InboundPersistence
 	runtimeingress.Store
-	runtimellm.TurnPersistence
 	runtimestartupownership.Store
-	runtimeeffects.ProviderHeadStore
+	runtimeeffects.Store
+	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionHeartbeatStore
+	runtimeeffects.RecoveryStore
 
 	apiv1.MailboxAPIStore
 	apiv1.ObservabilityReadStore
@@ -143,7 +145,6 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "AgentDeliveryLifecycleStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "agent delivery lifecycle reads are selected public read capabilities"},
 		{Name: "RuntimeIngressStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "runtime ingress persistence/control is required for runtime construction"},
 		{Name: "IdempotencyStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "API idempotency is a selected public control capability"},
-		{Name: "TurnStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "turn persistence is required for runtime construction"},
 		{Name: "StartupOwnership", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "startup ownership persistence is required for runtime construction"},
 		{Name: "RunQuiescenceStore", Classification: selectedStoreRoleServeControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "serve abandon-active-runs quiescence is a selected control capability"},
 		{Name: "RunReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "run.get/list/diagnose reads are selected public read capabilities"},

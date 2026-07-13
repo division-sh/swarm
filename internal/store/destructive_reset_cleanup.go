@@ -505,6 +505,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 			return `SELECT COUNT(*) FROM conversation_fork_turns t WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = t.fork_id AND f.source_run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM conversation_fork_turns t USING conversation_forks f WHERE t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`, args, nil
+	case "conversation_fork_turn_completions":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM conversation_fork_turn_completions c WHERE EXISTS (SELECT 1 FROM conversation_fork_turns t JOIN conversation_forks f ON f.fork_id = t.fork_id WHERE t.fork_turn_id = c.fork_turn_id AND f.source_run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM conversation_fork_turn_completions c USING conversation_fork_turns t, conversation_forks f WHERE c.fork_turn_id = t.fork_turn_id AND t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`, args, nil
 	case "run_fork_delivery_event_replays":
 		if mode == "count" {
 			return `

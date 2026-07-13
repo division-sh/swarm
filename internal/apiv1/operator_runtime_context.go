@@ -52,7 +52,6 @@ func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swrun
 		selected.AgentRuntime.HumanTaskStore = contextDef.Runtime.Stores.HumanTaskStore
 		selected.AgentRuntime.SessionRegistry = contextDef.Runtime.Stores.SessionRegistry
 		selected.AgentRuntime.ConversationStore = contextDef.Runtime.Stores.ConversationStore
-		selected.AgentRuntime.TurnStore = contextDef.Runtime.Stores.TurnStore
 		selected.AgentRuntime.ScheduleStore = contextDef.Runtime.Stores.ScheduleStore
 		selected.AgentRuntime.MailboxStore = contextDef.Runtime.Stores.MailboxStore
 		selected.AgentRuntime.Workspace = contextDef.Runtime.Workspace

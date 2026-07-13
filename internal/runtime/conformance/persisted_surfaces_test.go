@@ -233,7 +233,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -282,10 +282,22 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	runtime := runtimellm.NewAnthropicAPIRuntimeWithProviderCredentials(&config.Config{}, registry, "worker-1", nil, pg, nil, bus, conformanceProviderCredentialResolver(t, "ANTHROPIC_API_KEY", "test-key"))
+	credentials := conformanceProviderCredentialResolver(t, "ANTHROPIC_API_KEY", "test-key")
+	runtime, err := (runtimellm.RuntimeFactory{
+		Cfg:                  &config.Config{},
+		Sessions:             registry,
+		Conversations:        pg,
+		LockOwner:            "worker-1",
+		Events:               bus,
+		Credentials:          credentials.Store,
+		CompletionController: runtimeeffects.NewController(pg),
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build LLM runtime: %v", err)
+	}
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
+		base := runtimeeffects.WithLifecycleToken(context.Background(), lifecycleToken)
 		base = runtimesessions.WithScope(base, runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -388,7 +400,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -435,27 +447,39 @@ printf '{"result":"ok"}'
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	runtime := runtimellm.NewClaudeCLIRuntimeWithOptions(&config.Config{
-		Workspace: config.WorkspaceConfig{
-			DockerBin: fakeDocker,
-		},
-		LLM: config.LLMConfig{
-			ClaudeCLI: config.ClaudeCLIConfig{
-				Command:      "claude",
-				OutputFormat: "json",
+	credentials := conformanceProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	runtime, err := (runtimellm.RuntimeFactory{
+		Cfg: &config.Config{
+			Workspace: config.WorkspaceConfig{
+				DockerBin: fakeDocker,
+			},
+			LLM: config.LLMConfig{
+				Backend: "claude_cli",
+				ClaudeCLI: config.ClaudeCLIConfig{
+					Command:      "claude",
+					OutputFormat: "json",
+				},
 			},
 		},
-	}, registry, "worker-1", nil, nil, staticWorkspaceResolver{
-		target: &runtimeworkspace.Target{
-			Container: "swarm-agent-1",
-			Workdir:   "/workspace",
+		Sessions:  registry,
+		LockOwner: "worker-1",
+		Workspaces: staticWorkspaceResolver{
+			target: &runtimeworkspace.Target{
+				Container: "swarm-agent-1",
+				Workdir:   "/workspace",
+			},
 		},
-	}, pg, bus, runtimellm.ClaudeCLIRuntimeOptions{
-		ProviderCredentials: conformanceProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
-	})
+		Conversations:        pg,
+		Events:               bus,
+		Credentials:          credentials.Store,
+		CompletionController: runtimeeffects.NewController(pg),
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build LLM runtime: %v", err)
+	}
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
+		base := runtimeeffects.WithLifecycleToken(context.Background(), lifecycleToken)
 		base = runtimesessions.WithScope(base, runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -2160,6 +2184,33 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	}
+}
+
+func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) runtimeeffects.LifecycleToken {
+	t.Helper()
+	seedConformanceAgent(t, ctx, pg, agentID)
+	result, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID:      uuid.NewString(),
+		OperationKind:    "start",
+		RequestHash:      "conformance-start-" + agentID,
+		AgentID:          agentID,
+		Trigger:          "conformance_test",
+		ExpectedPhase:    runtimemanager.AgentLifecycleRegistered,
+		TargetEpoch:      1,
+		TargetGeneration: 1,
+		TargetPhase:      runtimemanager.AgentLifecycleRunning,
+		ConfigRevision:   "conformance-revision",
+		RunMode:          runtimemanager.AgentRunModeStandard,
+		Now:              time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("start agent lifecycle %s: %v", agentID, err)
+	}
+	return runtimeeffects.LifecycleToken{
+		RuntimeEpoch: result.RuntimeEpoch,
+		AgentID:      result.AgentID,
+		Generation:   result.Generation,
 	}
 }
 

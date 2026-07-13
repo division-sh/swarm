@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -58,86 +57,6 @@ func TestBudgetTrackerUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
 
 	if got, want := tracker.TerminalInstanceStates(), []string{"archived"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TerminalInstanceStates() = %#v, want root-only %#v", got, want)
-	}
-}
-
-func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
-	store := &budgetSpendStoreCapture{}
-	tracker := &BudgetTracker{store: store}
-	ctx := context.Background()
-
-	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "anthropic", llm.UsageTokens{
-		Model:        "claude-3-5-sonnet",
-		InputTokens:  11,
-		OutputTokens: 7,
-	}, true, map[string]any{
-		"flow_instance":   "flow/1",
-		"model_alias":     "regular",
-		"backend_profile": "anthropic",
-		"provider":        "anthropic",
-		"transport":       "api",
-		"resolved_model":  "claude-3-5-sonnet",
-	}); err != nil {
-		t.Fatalf("RecordLLMUsage exact: %v", err)
-	}
-	if len(store.records) != 1 {
-		t.Fatalf("records after exact = %d, want 1", len(store.records))
-	}
-	assertBudgetSpendRecord(t, store.records[0], budgetspend.SpendRecord{
-		FlowInstance:    "flow/1",
-		AgentID:         "agent-1",
-		Model:           "claude-3-5-sonnet",
-		ModelAlias:      "regular",
-		BackendProfile:  "anthropic",
-		Provider:        "anthropic",
-		Transport:       "api",
-		ResolvedModel:   "claude-3-5-sonnet",
-		InputTokens:     11,
-		OutputTokens:    7,
-		InvocationType:  "anthropic",
-		UsageAccounting: "exact",
-	})
-
-	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "claude_cli", llm.UsageTokens{
-		Model:        "sonnet",
-		InputTokens:  13,
-		OutputTokens: 5,
-	}, false, map[string]any{
-		"flow_instance":   "flow/1",
-		"model_alias":     "regular",
-		"backend_profile": "claude_cli",
-		"provider":        "claude",
-		"transport":       "cli",
-		"resolved_model":  "sonnet",
-	}); err != nil {
-		t.Fatalf("RecordLLMUsage estimated: %v", err)
-	}
-	if len(store.records) != 2 {
-		t.Fatalf("records after estimated = %d, want 2", len(store.records))
-	}
-	assertBudgetSpendRecord(t, store.records[1], budgetspend.SpendRecord{
-		FlowInstance:    "flow/1",
-		AgentID:         "agent-1",
-		Model:           "sonnet",
-		ModelAlias:      "regular",
-		BackendProfile:  "claude_cli",
-		Provider:        "claude",
-		Transport:       "cli",
-		ResolvedModel:   "sonnet",
-		InputTokens:     13,
-		OutputTokens:    5,
-		InvocationType:  "claude_cli",
-		UsageAccounting: "estimated",
-	})
-}
-
-func assertBudgetSpendRecord(t *testing.T, got budgetspend.SpendRecord, want budgetspend.SpendRecord) {
-	t.Helper()
-	if got.FlowInstance != want.FlowInstance || got.AgentID != want.AgentID || got.Model != want.Model || got.ModelAlias != want.ModelAlias || got.BackendProfile != want.BackendProfile || got.Provider != want.Provider || got.Transport != want.Transport || got.ResolvedModel != want.ResolvedModel || got.InputTokens != want.InputTokens || got.OutputTokens != want.OutputTokens || got.InvocationType != want.InvocationType || got.UsageAccounting != want.UsageAccounting {
-		t.Fatalf("spend record = %#v, want matching %#v", got, want)
-	}
-	if got.RecordedAt.IsZero() {
-		t.Fatal("spend record RecordedAt is zero")
 	}
 }
 

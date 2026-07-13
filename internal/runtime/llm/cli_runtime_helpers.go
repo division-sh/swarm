@@ -12,19 +12,9 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
-
-func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {
-	if r.turns == nil {
-		return
-	}
-	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_cli_turn_failed", "Persisting the CLI agent turn failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
-	}
-}
 
 func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) {
 	if r.conversations == nil || s == nil {
@@ -803,52 +793,6 @@ func hasToolPrefix(names []string, prefix string) bool {
 		}
 	}
 	return false
-}
-
-func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig) UsageTokens {
-	// This is intentionally crude. Claude Code does not currently expose usage
-	// metadata in a stable non-interactive way, so we approximate from payload sizes
-	// and apply a role-based floor to avoid undercounting long-session context.
-	inText := strings.TrimSpace(in.Content)
-	outRaw := []byte{}
-	if out != nil && len(out.Raw) > 0 {
-		outRaw = out.Raw
-	}
-
-	inTokens := estimateTokensFromBytes([]byte(inText))
-	outTokens := estimateTokensFromBytes(outRaw)
-
-	minIn := 800
-	if strings.TrimSpace(actor.EffectiveEntityID()) == "" {
-		minIn = 1200
-	}
-	if inTokens < minIn {
-		inTokens = minIn
-	}
-	if outTokens < 200 {
-		outTokens = 200
-	}
-
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-	model := strings.TrimSpace(actor.ResolvedModel)
-	if model == "" {
-		model, _ = llmselection.ResolveModelName(profile, llmselection.ModelResolution{Model: actor.Model})
-	}
-
-	return UsageTokens{
-		InputTokens:  inTokens,
-		OutputTokens: outTokens,
-		Model:        model,
-	}
-}
-
-func estimateTokensFromBytes(b []byte) int {
-	// Rough: ~4 bytes per token for English/ASCII-heavy text.
-	// Clamp to zero for empty payloads.
-	if len(b) == 0 {
-		return 0
-	}
-	return (len(b) + 3) / 4
 }
 
 func toolNamesCSV(tools []ToolDefinition) string {

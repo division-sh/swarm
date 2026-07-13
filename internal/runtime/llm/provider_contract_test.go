@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -24,7 +26,7 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		{
 			name:            "anthropic api",
 			mode:            "api",
-			runtime:         NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil),
+			runtime:         NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil),
 			provider:        "anthropic",
 			transport:       ProviderTransportAPI,
 			usageAccounting: BudgetUsageExact,
@@ -32,10 +34,10 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		{
 			name:              "claude cli",
 			mode:              "cli_test",
-			runtime:           NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil),
+			runtime:           NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil),
 			provider:          "claude",
 			transport:         ProviderTransportCLI,
-			usageAccounting:   BudgetUsageEstimated,
+			usageAccounting:   BudgetUsageExact,
 			strictNativeTools: true,
 			startupProbe:      true,
 			caps: NativeToolCapabilities{
@@ -47,7 +49,7 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		{
 			name:            "openai compatible",
 			mode:            "openai_compatible",
-			runtime:         NewOpenAICompatibleRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil),
+			runtime:         NewOpenAICompatibleRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil),
 			provider:        "openai_compatible",
 			transport:       ProviderTransportAPI,
 			usageAccounting: BudgetUsageExact,
@@ -55,7 +57,7 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		{
 			name:            "openai responses",
 			mode:            "openai_responses",
-			runtime:         NewOpenAIResponsesRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil),
+			runtime:         NewOpenAIResponsesRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil),
 			provider:        "openai",
 			transport:       ProviderTransportAPI,
 			usageAccounting: BudgetUsageExact,
@@ -102,6 +104,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.backend, func(t *testing.T) {
+			harness := effecttest.New()
 			cfg := &config.Config{
 				LLM: config.LLMConfig{
 					Backend: tt.backend,
@@ -112,7 +115,8 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 				cfg.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
 			}
 			runtime, err := RuntimeFactory{
-				Cfg: cfg,
+				Cfg:                  cfg,
+				CompletionController: runtimeeffects.NewController(harness),
 			}.Build()
 			if err != nil {
 				t.Fatalf("Build: %v", err)
@@ -129,10 +133,12 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 }
 
 func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
+	harness := effecttest.New()
 	_, err := RuntimeFactory{
 		Cfg: &config.Config{
 			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
 		},
+		CompletionController: runtimeeffects.NewController(harness),
 	}.Build()
 	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
 		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)
@@ -145,7 +151,7 @@ func TestRuntimeFactoryRejectsContractProfileMismatch(t *testing.T) {
 		RuntimeMode: "api",
 		Provider:    "openai",
 		Transport:   llmselection.TransportAPI,
-	}, NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil))
+	}, NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil))
 	if err == nil || !strings.Contains(err.Error(), "resolves provider") {
 		t.Fatalf("RequireProviderContractForProfile error = %v, want provider mismatch", err)
 	}

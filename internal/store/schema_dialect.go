@@ -10,6 +10,7 @@ import (
 var (
 	sqliteCreateTablePattern         = regexp.MustCompile(`(?is)^create\s+table\s+if\s+not\s+exists\s+("?[a-z_][a-z0-9_]*"?)\s*\((.*)\)\s*$`)
 	sqliteCreateIndexPattern         = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+if\s+not\s+exists\s+("?[a-z_][a-z0-9_]*"?)\s+on\s+("?[a-z_][a-z0-9_]*"?)\s*\(`)
+	sqliteForeignKeyPattern          = regexp.MustCompile(`(?is)^foreign\s+key\s*\(([^)]+)\)\s+references\s+("?[a-z_][a-z0-9_]*"?)\s*\(([^)]+)\)\s*$`)
 	sqliteUnsupportedConstructChecks = []struct {
 		pattern *regexp.Regexp
 		label   string
@@ -111,10 +112,51 @@ func sqliteRenderTableLine(line string) (string, error) {
 		return sqliteRenderUniqueConstraint(line)
 	case strings.HasPrefix(upper, "CHECK "):
 		return sqliteRenderCheckConstraint(line)
-	case strings.HasPrefix(upper, "FOREIGN KEY "), strings.HasPrefix(upper, "CONSTRAINT "):
+	case strings.HasPrefix(upper, "FOREIGN KEY "):
+		return sqliteRenderForeignKeyConstraint(line)
+	case strings.HasPrefix(upper, "CONSTRAINT "):
 		return "", fmt.Errorf("unsupported SQLite table constraint")
 	}
 	return sqliteRenderColumnDefinition(line)
+}
+
+func sqliteRenderForeignKeyConstraint(line string) (string, error) {
+	matches := sqliteForeignKeyPattern.FindStringSubmatch(strings.TrimSpace(line))
+	if len(matches) != 4 {
+		return "", fmt.Errorf("unsupported SQLite foreign key constraint %q", line)
+	}
+	columns, err := sqliteRenderIdentifierList(matches[1])
+	if err != nil {
+		return "", err
+	}
+	tableName, err := sqliteRenderIdent(matches[2], "foreign key table")
+	if err != nil {
+		return "", err
+	}
+	references, err := sqliteRenderIdentifierList(matches[3])
+	if err != nil {
+		return "", err
+	}
+	if len(columns) != len(references) {
+		return "", fmt.Errorf("SQLite foreign key column count does not match referenced column count")
+	}
+	return fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s(%s)", strings.Join(columns, ", "), tableName, strings.Join(references, ", ")), nil
+}
+
+func sqliteRenderIdentifierList(raw string) ([]string, error) {
+	parts, err := splitTopLevelComma(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		ident, rest, err := parseSchemaLeadingIdent(strings.TrimSpace(part))
+		if err != nil || strings.TrimSpace(rest) != "" {
+			return nil, fmt.Errorf("unsupported SQLite identifier list %q", raw)
+		}
+		out = append(out, quoteIdent(ident))
+	}
+	return out, nil
 }
 
 func sqliteRenderColumnDefinition(line string) (string, error) {

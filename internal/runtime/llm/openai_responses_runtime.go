@@ -23,25 +23,24 @@ import (
 )
 
 type OpenAIResponsesRuntime struct {
-	cfg               *config.Config
-	sessions          sessions.Registry
-	turns             TurnPersistence
-	conversations     ConversationPersistence
-	budget            BudgetGuard
-	lockOwner         string
-	httpClient        *http.Client
-	baseURL           string
-	apiKey            string
-	events            EventPublisher
-	providerAdmission *ProviderAdmissionRegistry
-	credentials       ProviderCredentialResolver
+	cfg                  *config.Config
+	sessions             sessions.Registry
+	conversations        ConversationPersistence
+	lockOwner            string
+	httpClient           *http.Client
+	baseURL              string
+	apiKey               string
+	events               EventPublisher
+	providerAdmission    *ProviderAdmissionRegistry
+	credentials          ProviderCredentialResolver
+	completionController *runtimeeffects.Controller
 }
 
-func NewOpenAIResponsesRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *OpenAIResponsesRuntime {
-	return NewOpenAIResponsesRuntimeWithProviderCredentials(cfg, sessions, lockOwner, turns, conversations, budget, publisher, NewProviderCredentialResolver(nil))
+func NewOpenAIResponsesRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher) *OpenAIResponsesRuntime {
+	return NewOpenAIResponsesRuntimeWithProviderCredentials(cfg, sessions, lockOwner, conversations, publisher, NewProviderCredentialResolver(nil))
 }
 
-func NewOpenAIResponsesRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher, credentials ProviderCredentialResolver) *OpenAIResponsesRuntime {
+func NewOpenAIResponsesRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher, credentials ProviderCredentialResolver) *OpenAIResponsesRuntime {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -50,9 +49,7 @@ func NewOpenAIResponsesRuntimeWithProviderCredentials(cfg *config.Config, sessio
 	return &OpenAIResponsesRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
-		turns:         turns,
 		conversations: conversations,
-		budget:        budget,
 		lockOwner:     lockOwner,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
@@ -204,14 +201,6 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
-	scopeKey := budgetExecutionScopeKey(actor)
-	if r.budget != nil {
-		unlockScope := r.budget.LockExecutionScope(scopeKey)
-		defer unlockScope()
-		if r.budget.IsEntityEmergency(entityID) {
-			return nil, budgetEmergencyFailure(entityID)
-		}
-	}
 
 	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
 	if err != nil {
@@ -272,12 +261,16 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	if err != nil {
 		return nil, err
 	}
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
+	if err != nil {
+		return nil, err
+	}
 
 	start := time.Now()
-	rawResp, parsed, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
+	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 	latency := time.Since(start)
 	if err != nil {
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
@@ -286,7 +279,12 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ParseOK:        false,
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_turn"),
-		}, nil))
+		}, nil)
+		if dispatch != nil {
+			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+				return nil, errors.Join(err, settleErr)
+			}
+		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
 		if projectionErr == nil {
 			s.ParseFailures++
@@ -305,7 +303,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	usage, ok := openAIResponsesUsage(parsed)
 	if !ok {
 		err := errors.New("openai-responses response missing usage")
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
@@ -314,7 +312,10 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ParseOK:        false,
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_usage"),
-		}, nil))
+		}, nil)
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(reqBody.Model), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "usage_decode"}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
+		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
 			return nil, projectionErr
 		}
@@ -324,7 +325,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 
 	resp, err := convertOpenAIResponsesResponse(parsed)
 	if err != nil {
-		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
@@ -333,7 +334,11 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 			ParseOK:        false,
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_decode"),
-		}, nil))
+		}, nil)
+		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
+		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
 			return nil, projectionErr
 		}
@@ -342,7 +347,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	}
 	resp.Raw = rawResp
 
-	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
 		RuntimeMode:    resolved.RuntimeMode.String(),
 		SessionID:      s.ID,
@@ -350,16 +355,10 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 		ResponseRaw:    rawResp,
 		ParseOK:        true,
 		Latency:        latency,
-	}, &resp))
-
-	if r.budget != nil {
-		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
-		meta := usageMetadataForContext(ctx, profile, usage.Model)
-		meta["session_id"] = s.ID
-		meta["usage_accounting"] = string(BudgetUsageExact)
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, true, meta); err != nil {
-			logPublisherRuntime(ctx, r.events, "warn", "record_openai_responses_llm_usage_failed", "Recording OpenAI Responses LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
-		}
+	}, &resp)
+	usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+	if err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"}); err != nil {
+		return nil, err
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
@@ -384,10 +383,10 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	return &resp, nil
 }
 
-func (r *OpenAIResponsesRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, openAIResponsesResponse, error) {
+func (r *OpenAIResponsesRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, openAIResponsesResponse, *completionDispatch, error) {
 	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, err
+		return nil, openAIResponsesResponse{}, nil, err
 	}
 	defer release()
 	return r.sendRequest(ctx, payload)
@@ -425,15 +424,6 @@ func (r *OpenAIResponsesRuntime) persistConversation(ctx context.Context, s *Ses
 			"mode":      mode.String(),
 			"scope_key": strings.TrimSpace(s.ScopeKey),
 		}, err)
-	}
-}
-
-func (r *OpenAIResponsesRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {
-	if r.turns == nil {
-		return
-	}
-	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_openai_responses_turn_failed", "Persisting the OpenAI Responses agent turn failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}
 }
 
@@ -483,46 +473,61 @@ func (r *OpenAIResponsesRuntime) buildRequest(ctx context.Context, s *Session, i
 	}, nil
 }
 
-func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, openAIResponsesResponse, error) {
+func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, openAIResponsesResponse, *completionDispatch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIResponsesURL(r.baseURL), bytes.NewReader(payload))
 	if err != nil {
-		return nil, openAIResponsesResponse{}, fmt.Errorf("build openai-responses request: %w", err)
+		return nil, openAIResponsesResponse{}, nil, fmt.Errorf("build openai-responses request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.apiKey)
-	attempt, err := runtimeeffects.Begin(ctx, "openai_responses", payload, nil)
+	attempt, err := runtimeeffects.BeginCompletion(ctx, "openai_responses", payload, nil)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, err
+		return nil, openAIResponsesResponse{}, nil, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
-		return nil, openAIResponsesResponse{}, err
+	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateOutcomeUncertain}
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
+	if err != nil {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		return nil, openAIResponsesResponse{}, dispatch, err
+	}
+	req = req.WithContext(heartbeatCtx)
+	if err := attempt.MarkLaunched(heartbeatCtx); err != nil {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		return nil, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"stage": "transport"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"stage": "transport"}, err)
+		return nil, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "read_response", map[string]any{"stage": "read_response"}, err)
+		return nil, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
+	dispatch.evidence = map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}
+	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); err != nil {
+		return body, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
 	var parsed openAIResponsesResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, openAIResponsesResponse{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-responses-adapter", "decode_response", map[string]any{"stage": "decode_response"}, err)
+		return body, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_responses", httpResp.StatusCode))
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_responses", httpResp.StatusCode))
+		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "openai-responses-adapter", "decode_response", nil, nil)
+		err = runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "provider_error_effect_outcome_unconfirmed", "openai-responses-adapter", "decode_response", nil)
+		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
-	if err := attempt.Succeed(ctx, map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}); err != nil {
-		return body, parsed, err
-	}
-	return body, parsed, nil
+	dispatch.state = runtimeeffects.StateSettled
+	return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil)
 }
 
 func openAIResponsesURL(baseURL string) string {

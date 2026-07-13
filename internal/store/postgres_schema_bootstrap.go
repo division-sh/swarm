@@ -42,6 +42,9 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaBootstrapLock); err != nil {
 		return fmt.Errorf("serialize postgres schema bootstrap: %w", err)
 	}
+	if err := migratePostgresCompletionAuthoritySchema(ctx, tx, request.PlatformPlans); err != nil {
+		return err
+	}
 	target, report, err := inspectPostgresCompatibility(ctx, tx, expected)
 	if err != nil {
 		return err

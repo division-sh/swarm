@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -19,26 +18,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// budgetExecutionScopeKey controls intra-process serialization for LLM budget
-// preflight/recording. Entity-scoped agents keep per-entity locking.
-// Global/no-entity agents get per-agent scope keys so sharded work can execute
-// concurrently instead of funneling through one global lock.
-func budgetExecutionScopeKey(actor models.AgentConfig) string {
-	entityID := actor.EffectiveEntityID()
-	if entityID != "" {
-		return entityID
-	}
-	if agentID := strings.TrimSpace(actor.ID); agentID != "" {
-		return "__agent__:" + agentID
-	}
-	return ""
-}
-
 // BudgetTracker is a pragmatic Phase-1 guardrail:
-// - records spend in spend_ledger (exact for API usage, estimated for CLI usage)
+// - projects retained spend into threshold and control-plane state
 // - emits internal budget.threshold_crossed signals for control-plane handling
 //
-// It is not accounting-grade. The intent is runaway-spend prevention.
+// Completion accounting is owned by the selected-store completion settlement.
 type BudgetTracker struct {
 	store          budgetspend.Store
 	bus            *runtimebus.EventBus
@@ -51,7 +35,6 @@ type BudgetTracker struct {
 
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
-	scopeMu   sync.Map          // key(scope) => *sync.Mutex
 }
 
 type SpendRecord = budgetspend.SpendRecord
@@ -135,29 +118,6 @@ func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
 
 func (t *BudgetTracker) IsThrottle(entityID string) bool {
 	return t.IsEntityThrottle(entityID)
-}
-
-func (t *BudgetTracker) RecordEntityLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
-	return t.RecordLLMUsage(ctx, entityID, agentID, runtimeMode, usage, exact, meta)
-}
-
-// LockExecutionScope serializes budget-critical LLM execution checks/records
-// per entity scope within the current process.
-func (t *BudgetTracker) LockExecutionScope(entityID string) func() {
-	if t == nil {
-		return func() {}
-	}
-	scopeKey := strings.TrimSpace(entityID)
-	if scopeKey == "" {
-		scopeKey = "__system__"
-	}
-	muAny, _ := t.scopeMu.LoadOrStore(scopeKey, &sync.Mutex{})
-	mu, _ := muAny.(*sync.Mutex)
-	if mu == nil {
-		return func() {}
-	}
-	mu.Lock()
-	return mu.Unlock
 }
 
 // EvaluateAll periodically re-evaluates budget state to ensure month-boundary
@@ -273,133 +233,6 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 		}
 	}
 	return nil
-}
-
-func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
-	if t == nil || t.store == nil {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	agentID = strings.TrimSpace(agentID)
-	runtimeMode = strings.TrimSpace(runtimeMode)
-	usage.Model = strings.TrimSpace(usage.Model)
-	if usage.Model == "" {
-		usage.Model = "unknown"
-	}
-
-	flowInstance, err := t.resolveSpendFlowInstance(ctx, entityID, meta)
-	if err != nil {
-		return err
-	}
-	metadata := spendRecordMetadata(meta)
-	return t.RecordSpend(ctx, SpendRecord{
-		EntityID:       entityID,
-		FlowInstance:   flowInstance,
-		AgentID:        agentID,
-		Model:          usage.Model,
-		ModelAlias:     metadata.ModelAlias,
-		BackendProfile: metadata.BackendProfile,
-		Provider:       metadata.Provider,
-		Transport:      metadata.Transport,
-		ResolvedModel:  metadata.ResolvedModel,
-		InputTokens:    usage.InputTokens,
-		OutputTokens:   usage.OutputTokens,
-		CostUSD:        t.estimateLLMCostUSD(usage.Model, usage.InputTokens, usage.OutputTokens),
-		InvocationType: runtimeMode,
-		UsageAccounting: func() string {
-			if exact {
-				return string(llm.BudgetUsageExact)
-			}
-			return string(llm.BudgetUsageEstimated)
-		}(),
-	})
-}
-
-type spendLLMMetadata struct {
-	ModelAlias     string
-	BackendProfile string
-	Provider       string
-	Transport      string
-	ResolvedModel  string
-}
-
-func spendRecordMetadata(meta any) spendLLMMetadata {
-	values, ok := meta.(map[string]any)
-	if !ok {
-		return spendLLMMetadata{}
-	}
-	return spendLLMMetadata{
-		ModelAlias:     strings.TrimSpace(asString(values["model_alias"])),
-		BackendProfile: strings.TrimSpace(asString(values["backend_profile"])),
-		Provider:       strings.TrimSpace(asString(values["provider"])),
-		Transport:      strings.TrimSpace(asString(values["transport"])),
-		ResolvedModel:  strings.TrimSpace(asString(values["resolved_model"])),
-	}
-}
-
-func (t *BudgetTracker) resolveSpendFlowInstance(ctx context.Context, entityID string, meta any) (string, error) {
-	if values, ok := meta.(map[string]any); ok {
-		if flowInstance := strings.TrimSpace(asString(values["flow_instance"])); flowInstance != "" {
-			return flowInstance, nil
-		}
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return "global", nil
-	}
-	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
-	if err != nil {
-		return "", err
-	}
-	flowInstance, err := t.store.ResolveFlowInstance(ctx, identity.RunID, identity.EntityID)
-	if err != nil {
-		return "", fmt.Errorf("resolve spend flow_instance for entity %s: %w", entityID, err)
-	}
-	flowInstance = strings.TrimSpace(flowInstance)
-	if flowInstance == "" {
-		return "", fmt.Errorf("resolve spend flow_instance for entity %s: empty flow_instance", entityID)
-	}
-	return flowInstance, nil
-}
-
-func (t *BudgetTracker) estimateLLMCostUSD(model string, inputTokens, outputTokens int) float64 {
-	// Rough defaults; intended to be "good enough" until provider usage/cost is plumbed precisely.
-	// Prices are treated as USD per 1M tokens.
-	tier := modelTier(model)
-
-	inUSDPerM, outUSDPerM := 0.0, 0.0
-	switch tier {
-	case "haiku":
-		inUSDPerM = 0.80
-		outUSDPerM = 4.00
-	case "opus":
-		inUSDPerM = 15.00
-		outUSDPerM = 75.00
-	default: // sonnet-ish default
-		inUSDPerM = 3.00
-		outUSDPerM = 15.00
-	}
-	if inputTokens < 0 {
-		inputTokens = 0
-	}
-	if outputTokens < 0 {
-		outputTokens = 0
-	}
-	return float64(inputTokens)/1_000_000.0*inUSDPerM + float64(outputTokens)/1_000_000.0*outUSDPerM
-}
-
-func modelTier(model string) string {
-	m := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.Contains(m, "haiku"):
-		return "haiku"
-	case strings.Contains(m, "opus"):
-		return "opus"
-	case strings.Contains(m, "sonnet"):
-		return "sonnet"
-	default:
-		return "sonnet"
-	}
 }
 
 func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) error {

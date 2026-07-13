@@ -9,32 +9,57 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/google/uuid"
 )
 
 const (
-	ConversationForkChatSnapshotOwner = "conversation.fork_chat.snapshot.v1"
-	ConversationForkChatSandboxOwner  = "conversation.fork_chat.sandbox.v1"
+	ConversationForkChatSnapshotOwner  = "conversation.fork_chat.snapshot.v1"
+	ConversationForkChatSandboxOwner   = "conversation.fork_chat.sandbox.v1"
+	conversationForkChatExecutionLease = 2 * time.Minute
 )
 
 type ConversationForkChatPrepareRequest struct {
-	ForkID string
-	Now    time.Time
+	ForkID         string
+	Message        string
+	Method         string
+	ActorTokenID   string
+	RequestHash    string
+	IdempotencyKey string
+	Now            time.Time
 }
 
 type ConversationForkChatRecordRequest struct {
 	ForkID       string
 	Message      string
 	ActorTokenID string
+	Prepared     ConversationForkChatPrepared
 	Execution    ConversationForkChatExecution
 	Now          time.Time
 }
 
+type ConversationForkChatFailureRequest struct {
+	Prepared         ConversationForkChatPrepared
+	Cause            error
+	OutcomeUncertain bool
+	Now              time.Time
+}
+
 type ConversationForkChatPrepared struct {
-	Fork           OperatorConversationForkSession
-	Snapshot       ConversationForkSnapshot
-	SandboxPolicy  ConversationForkSandboxPolicy
-	AvailableTools []string
+	Fork                OperatorConversationForkSession
+	Snapshot            ConversationForkSnapshot
+	SandboxPolicy       ConversationForkSandboxPolicy
+	AvailableTools      []string
+	ForkTurnID          string
+	TurnIndex           int
+	RequestOccurrenceID string
+	RequestHash         string
+	IdempotencyKey      string
+	ActorTokenID        string
+	ExecutionOwner      string
+	LeaseExpiresAt      time.Time
+	FenceGeneration     uint64
 }
 
 type ConversationForkChatResult struct {
@@ -89,6 +114,17 @@ type ConversationForkChatExecution struct {
 	ToolCalls        []OperatorConversationToolCall
 	ToolResults      []OperatorConversationToolResult
 	AvailableTools   []string
+	ExecutionOwner   string
+	FenceGeneration  uint64
+}
+
+type ConversationForkChatReplayStateError struct {
+	ForkTurnID string
+	State      string
+}
+
+func (e *ConversationForkChatReplayStateError) Error() string {
+	return fmt.Sprintf("conversation fork chat request already exists in state %s", strings.TrimSpace(e.State))
 }
 
 func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context, req ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error) {
@@ -112,6 +148,14 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 	if err != nil {
 		return ConversationForkChatPrepared{}, err
 	}
+	message := strings.TrimSpace(req.Message)
+	actorTokenID := strings.TrimSpace(req.ActorTokenID)
+	requestHash := strings.TrimSpace(req.RequestHash)
+	method := strings.TrimSpace(req.Method)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if message == "" || actorTokenID == "" || requestHash == "" || method == "" {
+		return ConversationForkChatPrepared{}, fmt.Errorf("conversation fork chat preparation requires message, method, actor token, and request hash")
+	}
 	now := req.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -131,6 +175,11 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 
 	var prepared ConversationForkChatPrepared
 	err = s.runForkMutation(ctx, forkID, true, func(txctx context.Context, tx *sql.Tx) error {
+		if idempotencyKey != "" {
+			if err := rejectConversationForkChatReplay(txctx, s, tx, forkID, method, actorTokenID, idempotencyKey, requestHash); err != nil {
+				return err
+			}
+		}
 		fork, err := loadActiveConversationForkForChat(txctx, s, tx, forkID, now)
 		if err != nil {
 			return err
@@ -140,11 +189,18 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 			return err
 		}
 		policy := defaultConversationForkSandboxPolicy()
+		forkTurnID, turnIndex, occurrenceID, executionOwner, leaseExpiresAt, err := preallocateConversationForkTurn(txctx, s, tx, forkID, method, actorTokenID, idempotencyKey, requestHash, message, now)
+		if err != nil {
+			return err
+		}
 		prepared = ConversationForkChatPrepared{
 			Fork:           fork,
 			Snapshot:       snapshot,
 			SandboxPolicy:  policy,
 			AvailableTools: conversationForkSandboxAvailableTools(policy),
+			ForkTurnID:     forkTurnID, TurnIndex: turnIndex, RequestOccurrenceID: occurrenceID,
+			RequestHash: requestHash, IdempotencyKey: idempotencyKey, ActorTokenID: actorTokenID,
+			ExecutionOwner: executionOwner, LeaseExpiresAt: leaseExpiresAt, FenceGeneration: 1,
 		}
 		return nil
 	})
@@ -152,6 +208,33 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		return ConversationForkChatPrepared{}, fmt.Errorf("prepare conversation fork chat: %w", err)
 	}
 	return prepared, nil
+}
+
+func rejectConversationForkChatReplay(
+	ctx context.Context,
+	owner conversationForkStore,
+	tx *sql.Tx,
+	forkID, method, actorTokenID, idempotencyKey, requestHash string,
+) error {
+	var existingID, existingForkID, existingHash, state string
+	err := owner.queryRow(ctx, tx, `
+		SELECT CAST(fork_turn_id AS TEXT), CAST(fork_id AS TEXT), request_hash, state
+		FROM conversation_fork_turns
+		WHERE actor_token_id=? AND idempotency_key=?
+	`, actorTokenID, idempotencyKey).Scan(&existingID, &existingForkID, &existingHash, &state)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load keyed conversation fork turn: %w", err)
+	}
+	if existingHash != requestHash || existingForkID != forkID {
+		return &APIIdempotencyConflictError{
+			OriginalRequestHash: existingHash, ConflictingRequestHash: requestHash,
+			Method: method, ResourceID: existingForkID,
+		}
+	}
+	return &ConversationForkChatReplayStateError{ForkTurnID: existingID, State: state}
 }
 
 func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, req ConversationForkChatRecordRequest) (ConversationForkChatResult, error) {
@@ -170,6 +253,100 @@ func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Cont
 	return owner.recordOperatorConversationForkChat(ctx, req)
 }
 
+func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, req ConversationForkChatFailureRequest) error {
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.failOperatorConversationForkChat(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Context, req ConversationForkChatFailureRequest) error {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.failOperatorConversationForkChat(ctx, req)
+}
+
+func (s *PostgresStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared ConversationForkChatPrepared, now time.Time) error {
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.heartbeatOperatorConversationForkChat(ctx, prepared, now)
+}
+
+func (s *SQLiteRuntimeStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared ConversationForkChatPrepared, now time.Time) error {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.heartbeatOperatorConversationForkChat(ctx, prepared, now)
+}
+
+func (s conversationForkStore) heartbeatOperatorConversationForkChat(ctx context.Context, prepared ConversationForkChatPrepared, now time.Time) error {
+	if prepared.ForkTurnID == "" || prepared.Fork.ForkID == "" || prepared.ActorTokenID == "" || prepared.RequestOccurrenceID == "" ||
+		prepared.RequestHash == "" || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 {
+		return fmt.Errorf("conversation fork chat heartbeat requires exact prepared authority")
+	}
+	now = now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	expires := now.Add(conversationForkChatExecutionLease)
+	return s.runForkMutation(ctx, prepared.Fork.ForkID, true, func(txctx context.Context, tx *sql.Tx) error {
+		res, err := s.exec(txctx, tx, `
+			UPDATE conversation_fork_turns
+			SET lease_expires_at=CASE WHEN lease_expires_at>? THEN lease_expires_at ELSE ? END,updated_at=?
+			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
+			  AND state IN ('prepared','executing') AND execution_owner=? AND fence_generation=? AND lease_expires_at>?
+		`, expires, expires, now, prepared.ForkTurnID, prepared.Fork.ForkID, prepared.ActorTokenID, prepared.RequestOccurrenceID,
+			prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration, now)
+		if err := requireExactlyOneMutation(res, err, "heartbeat conversation fork chat"); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s conversationForkStore) failOperatorConversationForkChat(ctx context.Context, req ConversationForkChatFailureRequest) error {
+	prepared := req.Prepared
+	if prepared.ForkTurnID == "" || prepared.Fork.ForkID == "" || prepared.RequestOccurrenceID == "" || prepared.RequestHash == "" || prepared.FenceGeneration == 0 || req.Cause == nil {
+		return fmt.Errorf("conversation fork chat failure requires exact prepared authority and cause")
+	}
+	now := req.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	failure := runtimefailures.FromError(req.Cause, "conversation-fork-chat", "execute")
+	failureJSON, err := json.Marshal(failure.Failure)
+	if err != nil {
+		return err
+	}
+	state := "failed"
+	if req.OutcomeUncertain {
+		state = "outcome_uncertain"
+	}
+	return s.runForkMutation(ctx, prepared.Fork.ForkID, true, func(txctx context.Context, tx *sql.Tx) error {
+		res, err := s.exec(txctx, tx, `
+			UPDATE conversation_fork_turns
+			SET state=?,lease_expires_at=NULL,failure=?,updated_at=?,terminal_at=?
+			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
+			  AND fence_generation=? AND (state='prepared' OR (state='executing' AND execution_owner=?))
+		`, state, string(failureJSON), now, now, prepared.ForkTurnID, prepared.Fork.ForkID, prepared.ActorTokenID,
+			prepared.RequestOccurrenceID, prepared.RequestHash, prepared.FenceGeneration, prepared.ExecutionOwner)
+		if err != nil {
+			return fmt.Errorf("terminalize failed conversation fork turn: %w", err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil || rows != 1 {
+			return fmt.Errorf("terminalize failed conversation fork turn rejected stale or terminal authority")
+		}
+		return nil
+	})
+}
+
 func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Context, req ConversationForkChatRecordRequest) (ConversationForkChatResult, error) {
 	forkID, err := normalizeUUIDParam(req.ForkID, "fork_id")
 	if err != nil {
@@ -184,6 +361,11 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 		return ConversationForkChatResult{}, &EntityReadParamError{Field: "actor_token_id", Reason: "is required"}
 	}
 	execution := req.Execution
+	prepared := req.Prepared
+	if prepared.ForkTurnID == "" || prepared.Fork.ForkID != forkID || prepared.RequestHash == "" || prepared.RequestOccurrenceID == "" ||
+		prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 || execution.ExecutionOwner != prepared.ExecutionOwner || execution.FenceGeneration != prepared.FenceGeneration {
+		return ConversationForkChatResult{}, fmt.Errorf("conversation fork chat terminalization requires exact prepared authority")
+	}
 	execution.AssistantMessage = strings.TrimSpace(execution.AssistantMessage)
 	if execution.AssistantMessage == "" {
 		return ConversationForkChatResult{}, &EntityReadParamError{Field: "execution.assistant_message", Reason: "is required"}
@@ -229,7 +411,7 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 		if err != nil {
 			return err
 		}
-		turn, err := insertConversationForkTurn(txctx, s, tx, forkID, actorTokenID, message, execution, requestPayload, responsePayload, policy, now)
+		turn, err := completeConversationForkTurn(txctx, s, tx, prepared, actorTokenID, message, execution, requestPayload, responsePayload, policy, now)
 		if err != nil {
 			return err
 		}
@@ -240,6 +422,54 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 		return ConversationForkChatResult{}, fmt.Errorf("record conversation fork chat: %w", err)
 	}
 	return result, nil
+}
+
+func completeConversationForkTurn(
+	ctx context.Context,
+	owner conversationForkStore,
+	tx *sql.Tx,
+	prepared ConversationForkChatPrepared,
+	actorTokenID, message string,
+	execution ConversationForkChatExecution,
+	requestPayload, responsePayload json.RawMessage,
+	policy ConversationForkSandboxPolicy,
+	now time.Time,
+) (OperatorConversationTurn, error) {
+	var childCount int
+	if err := owner.queryRow(ctx, tx, `SELECT COUNT(*) FROM conversation_fork_turn_completions WHERE fork_turn_id=?`, prepared.ForkTurnID).Scan(&childCount); err != nil {
+		return OperatorConversationTurn{}, fmt.Errorf("count conversation fork completion children: %w", err)
+	}
+	if childCount == 0 {
+		return OperatorConversationTurn{}, fmt.Errorf("conversation fork chat cannot succeed without a settled completion child")
+	}
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return OperatorConversationTurn{}, err
+	}
+	toolCallsJSON, err := json.Marshal(execution.ToolCalls)
+	if err != nil {
+		return OperatorConversationTurn{}, err
+	}
+	var createdAt conversationForkTimeValue
+	if err := owner.queryRow(ctx, tx, `
+		UPDATE conversation_fork_turns
+		SET state='succeeded',assistant_message=?,request_payload=?,response_payload=?,tool_calls=?,
+		    sandbox_policy=?,snapshot_owner=?,lease_expires_at=NULL,failure=NULL,updated_at=?,terminal_at=?
+		WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
+		  AND state='executing' AND execution_owner=? AND fence_generation=?
+		RETURNING created_at
+	`, execution.AssistantMessage, string(requestPayload), string(responsePayload), string(toolCallsJSON), string(policyJSON),
+		ConversationForkChatSnapshotOwner, now, now, prepared.ForkTurnID, prepared.Fork.ForkID, actorTokenID,
+		prepared.RequestOccurrenceID, prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration).Scan(&createdAt); err != nil {
+		return OperatorConversationTurn{}, fmt.Errorf("terminalize conversation fork turn: %w", err)
+	}
+	return OperatorConversationTurn{
+		TurnID: prepared.ForkTurnID, TurnIndex: prepared.TurnIndex,
+		RequestPayload: cloneRawMessage(requestPayload), ResponsePayload: cloneRawMessage(responsePayload),
+		ToolCalls: cloneConversationToolCalls(execution.ToolCalls), ToolResults: cloneConversationToolResults(execution.ToolResults),
+		TurnBlocks: conversationForkSandboxTurnBlocks(execution), ParseOK: true, CreatedAt: createdAt.Time,
+		AssistantVisibleOutput: execution.AssistantMessage,
+	}, nil
 }
 
 func requireConversationForkChatCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -476,65 +706,38 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 	return out, nil
 }
 
-func insertConversationForkTurn(
+func preallocateConversationForkTurn(
 	ctx context.Context,
 	owner conversationForkStore,
 	tx *sql.Tx,
-	forkID string,
-	actorTokenID string,
-	message string,
-	execution ConversationForkChatExecution,
-	requestPayload json.RawMessage,
-	responsePayload json.RawMessage,
-	policy ConversationForkSandboxPolicy,
+	forkID, method, actorTokenID, idempotencyKey, requestHash, message string,
 	now time.Time,
-) (OperatorConversationTurn, error) {
+) (string, int, string, string, time.Time, error) {
+	if idempotencyKey != "" {
+		if err := rejectConversationForkChatReplay(ctx, owner, tx, forkID, method, actorTokenID, idempotencyKey, requestHash); err != nil {
+			return "", 0, "", "", time.Time{}, err
+		}
+	}
 	var nextIndex int
-	if err := owner.queryRow(ctx, tx, `
-		SELECT COALESCE(MAX(turn_index), 0) + 1
-		FROM conversation_fork_turns
-		WHERE fork_id = ?
-	`, forkID).Scan(&nextIndex); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("allocate conversation fork turn index: %w", err)
+	if err := owner.queryRow(ctx, tx, `SELECT COALESCE(MAX(turn_index),0)+1 FROM conversation_fork_turns WHERE fork_id=?`, forkID).Scan(&nextIndex); err != nil {
+		return "", 0, "", "", time.Time{}, fmt.Errorf("allocate conversation fork turn index: %w", err)
 	}
-	policyJSON, err := json.Marshal(policy)
-	if err != nil {
-		return OperatorConversationTurn{}, err
+	occurrenceID := uuid.NewString()
+	if idempotencyKey != "" {
+		occurrenceID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"conversation.fork_chat", method, actorTokenID, idempotencyKey}, "\x00"))).String()
 	}
-	toolCallsJSON, err := json.Marshal(execution.ToolCalls)
-	if err != nil {
-		return OperatorConversationTurn{}, err
-	}
-	var turn OperatorConversationTurn
-	var createdAt conversationForkTimeValue
-	if err := owner.queryRow(ctx, tx, `
+	forkTurnID := uuid.NewString()
+	executionOwner := "forkchat:" + forkTurnID + ":" + uuid.NewString()
+	leaseExpiresAt := now.Add(conversationForkChatExecutionLease).UTC()
+	if _, err := owner.exec(ctx, tx, `
 		INSERT INTO conversation_fork_turns (
-			fork_id, turn_index, actor_token_id, message, assistant_message,
-			request_payload, response_payload, tool_calls, sandbox_policy,
-			snapshot_owner, created_at
-		)
-		VALUES (
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?
-		)
-		RETURNING CAST(fork_turn_id AS TEXT), created_at
-	`, forkID, nextIndex, actorTokenID, message, execution.AssistantMessage,
-		string(requestPayload), string(responsePayload), string(toolCallsJSON), string(policyJSON),
-		ConversationForkChatSnapshotOwner, now).Scan(&turn.TurnID, &createdAt); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("insert conversation fork turn: %w", err)
+			fork_turn_id,fork_id,turn_index,actor_token_id,request_occurrence_id,request_hash,idempotency_key,
+			message,state,execution_owner,lease_expires_at,fence_generation,tool_calls,evidence,created_at,updated_at
+		) VALUES (?,?,?,?,?,?,NULLIF(?,''),?,'prepared',?,?,1,'[]','{}',?,?)
+	`, forkTurnID, forkID, nextIndex, actorTokenID, occurrenceID, requestHash, idempotencyKey, message, executionOwner, leaseExpiresAt, now, now); err != nil {
+		return "", 0, "", "", time.Time{}, fmt.Errorf("preallocate conversation fork turn: %w", err)
 	}
-	turn.TurnIndex = nextIndex
-	turn.RequestPayload = cloneRawMessage(requestPayload)
-	turn.ResponsePayload = cloneRawMessage(responsePayload)
-	turn.ToolCalls = cloneConversationToolCalls(execution.ToolCalls)
-	turn.ToolResults = cloneConversationToolResults(execution.ToolResults)
-	turn.TurnBlocks = conversationForkSandboxTurnBlocks(execution)
-	turn.ParseOK = true
-	turn.LatencyMS = 0
-	turn.CreatedAt = createdAt.Time
-	turn.AssistantVisibleOutput = execution.AssistantMessage
-	return turn, nil
+	return forkTurnID, nextIndex, occurrenceID, executionOwner, leaseExpiresAt, nil
 }
 
 func loadConversationForkTurns(ctx context.Context, owner conversationForkStore, db *sql.DB, forkID string) ([]OperatorConversationTurn, error) {
@@ -544,7 +747,7 @@ func loadConversationForkTurns(ctx context.Context, owner conversationForkStore,
 			request_payload, response_payload, tool_calls,
 			assistant_message, created_at
 		FROM conversation_fork_turns
-		WHERE fork_id = ?
+		WHERE fork_id = ? AND state = 'succeeded'
 		ORDER BY turn_index ASC, created_at ASC, fork_turn_id ASC
 	`, forkID)
 	if err != nil {

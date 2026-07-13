@@ -57,8 +57,9 @@ type claudeAttemptProofStore interface {
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecyclePersistence
 	runtimeeffects.Store
+	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
-	runtimellm.TurnPersistence
 	runtimellm.ConversationPersistence
 	GetEventReceipt(context.Context, string, string) (runtimemanager.EventReceipt, bool, error)
 }
@@ -115,7 +116,7 @@ type claudeAttemptProofProviderHeadFaultStore struct {
 	err error
 }
 
-func (s claudeAttemptProofProviderHeadFaultStore) SettleExternalAttemptAndPromoteProviderHead(context.Context, runtimeeffects.ProviderHeadSettlement) error {
+func (s claudeAttemptProofProviderHeadFaultStore) SettleCompletion(context.Context, runtimeeffects.Attempt, runtimeeffects.CompletionSettlement) error {
 	return s.err
 }
 
@@ -189,7 +190,7 @@ func makeClaudeAttemptProofDeliveryRetryEligible(t *testing.T, backend claudeAtt
 	}
 }
 
-func TestClaudePostlaunchFailureTerminalizesAndRestartSkips(t *testing.T) {
+func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProviderRedispatch(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
 			backend := newClaudeAttemptProofBackend(t, backendName)
@@ -211,12 +212,9 @@ func TestClaudePostlaunchFailureTerminalizesAndRestartSkips(t *testing.T) {
 			if err := manager.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("process initial Claude proof delivery: %v", err)
 			}
-			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
-			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != "claude_cli_attempt_outcome_unconfirmed" {
-				t.Fatalf("terminal receipt = %#v, want original outcome-uncertain evidence and zero retries", receipt)
-			}
-			if reason := loadClaudeAttemptProofDeliveryReason(t, backend, eventID); reason != "terminal_failure" {
-				t.Fatalf("terminal delivery reason = %q, want terminal_failure", reason)
+			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusError, calls)
+			if receipt.RetryCount != 1 || receipt.Failure == nil || receipt.Failure.Detail.Code != "claude_cli_process_failed" {
+				t.Fatalf("first receipt = %#v, want original retryable connector classification", receipt)
 			}
 			attempts := loadClaudeAttemptProofAttempts(t, backend)
 			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) {
@@ -226,12 +224,17 @@ func TestClaudePostlaunchFailureTerminalizesAndRestartSkips(t *testing.T) {
 				t.Fatalf("shutdown first manager: %v", err)
 			}
 
+			makeClaudeAttemptProofDeliveryRetryEligible(t, backend, eventID)
 			restarted, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
 			if _, err := restarted.RecoverWithStartupReplayDiagnostics(context.Background()); err != nil {
 				t.Fatalf("recover restarted manager: %v", err)
 			}
-			if calls.Load() != 1 || readClaudeAttemptProofCount(t, captureDir) != 1 {
-				t.Fatalf("restart replay agent_calls=%d process_calls=%d, want one original invocation", calls.Load(), readClaudeAttemptProofCount(t, captureDir))
+			if err := restarted.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+				t.Fatalf("replay postlaunch-failure delivery: %v", err)
+			}
+			dead := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+			if dead.RetryCount != 1 || calls.Load() != 2 || readClaudeAttemptProofCount(t, captureDir) != 1 {
+				t.Fatalf("restart replay receipt=%#v agent_calls=%d process_calls=%d, want one refused retry and one provider invocation", dead, calls.Load(), readClaudeAttemptProofCount(t, captureDir))
 			}
 			if got := loadClaudeAttemptProofAttempts(t, backend); len(got) != 1 || got[0].id != attempts[0].id || got[0].state != string(runtimeeffects.StateOutcomeUncertain) {
 				t.Fatalf("attempts after restart = %#v, want unchanged uncertain attempt", got)
@@ -273,11 +276,25 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 				t.Fatalf("provider-head fault receipt = %#v, want original terminal failure", receipt)
 			}
 			attempts := loadClaudeAttemptProofAttempts(t, backend)
-			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) {
-				t.Fatalf("provider-head fault attempts = %#v, want one outcome_uncertain attempt", attempts)
+			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateResponseObserved) {
+				t.Fatalf("provider-head fault attempts = %#v, want response_observed before recovery", attempts)
+			}
+			if turns, spend := loadClaudeAttemptProofCompletionRows(t, backend, attempts[0].id); turns != 0 || spend != 0 {
+				t.Fatalf("partial atomic settlement turns=%d spend=%d, want 0/0", turns, spend)
 			}
 			if got := loadClaudeAttemptProofProviderHead(t, backend); got != "" {
 				t.Fatalf("provider head = %q after injected commit failure, want empty", got)
+			}
+			summary, err := baseStore.ReconcileExternalEffectAttempts(context.Background(), time.Now().UTC().Add(10*time.Minute))
+			if err != nil || summary.OutcomeUncertain != 1 {
+				t.Fatalf("recover provider-head fault summary=%#v err=%v", summary, err)
+			}
+			attempts = loadClaudeAttemptProofAttempts(t, backend)
+			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) {
+				t.Fatalf("provider-head fault attempts after recovery = %#v, want one outcome_uncertain attempt", attempts)
+			}
+			if turns, _ := loadClaudeAttemptProofCompletionRows(t, backend, attempts[0].id); turns != 1 {
+				t.Fatalf("recovered completion target rows = %d, want 1", turns)
 			}
 			if got := readClaudeAttemptProofCount(t, captureDir); got != 1 || calls.Load() != 1 {
 				t.Fatalf("after commit failure process_count=%d agent_calls=%d, want one", got, calls.Load())
@@ -334,7 +351,7 @@ func TestClaudeAttemptIdentitySelectedStoreModeAndProcessParity(t *testing.T) {
 					eventID := publishClaudeAttemptProofEvent(t, eventBus, surface)
 					receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusProcessed, calls)
 					if receipt.RetryCount != 0 || calls.Load() != 1 {
-						t.Fatalf("%s receipt=%#v agent_calls=%d, want one successful invocation", surface.name, receipt, calls.Load())
+						t.Fatalf("%s receipt=%#v failure=%+v agent_calls=%d, want one successful invocation", surface.name, receipt, receipt.Failure, calls.Load())
 					}
 					attempts := loadClaudeAttemptProofAttempts(t, backend)
 					if len(attempts) != 1 || attempts[0].ordinal != 1 || attempts[0].state != string(runtimeeffects.StateSettled) {
@@ -442,13 +459,12 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 		cfg,
 		backend.sessions,
 		"claude-proof-worker",
-		backend.store,
-		nil,
 		claudeAttemptProofWorkspace{},
 		backend.store,
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{
-			ProviderCredentials: runtimellm.NewProviderCredentialResolver(runtimecredentials.NewEnvStore()),
+			ProviderCredentials:  runtimellm.NewProviderCredentialResolver(runtimecredentials.NewEnvStore()),
+			CompletionController: runtimeeffects.NewController(backend.store),
 		},
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
@@ -505,7 +521,7 @@ func waitClaudeAttemptProofReceipt(t *testing.T, backend claudeAttemptProofBacke
 				query = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`
 			}
 			deliveryErr := backend.db.QueryRowContext(context.Background(), query, eventID, claudeAttemptProofAgentConfig().ID).Scan(&deliveryStatus)
-			t.Fatalf("receipt %s did not reach %s: found=%v receipt=%#v err=%v delivery=%q delivery_err=%v agent_calls=%d", eventID, want, found, receipt, err, deliveryStatus, deliveryErr, calls.Load())
+			t.Fatalf("receipt %s did not reach %s: found=%v receipt=%#v failure=%+v err=%v delivery=%q delivery_err=%v agent_calls=%d", eventID, want, found, receipt, receipt.Failure, err, deliveryStatus, deliveryErr, calls.Load())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -519,9 +535,9 @@ type claudeAttemptProofAttempt struct {
 
 func loadClaudeAttemptProofAttempts(t *testing.T, backend claudeAttemptProofBackend) []claudeAttemptProofAttempt {
 	t.Helper()
-	query := `SELECT attempt_id, attempt_ordinal, state FROM agent_external_effect_attempts WHERE adapter='claude_cli' ORDER BY attempt_ordinal`
+	query := `SELECT attempt_id, attempt_ordinal, state FROM runtime_external_effect_attempts WHERE adapter='claude_cli' ORDER BY attempt_ordinal`
 	if backend.name == "postgres" {
-		query = `SELECT attempt_id::text, attempt_ordinal, state FROM agent_external_effect_attempts WHERE adapter='claude_cli' ORDER BY attempt_ordinal`
+		query = `SELECT attempt_id::text, attempt_ordinal, state FROM runtime_external_effect_attempts WHERE adapter='claude_cli' ORDER BY attempt_ordinal`
 	}
 	rows, err := backend.db.QueryContext(context.Background(), query)
 	if err != nil {
@@ -540,6 +556,23 @@ func loadClaudeAttemptProofAttempts(t *testing.T, backend claudeAttemptProofBack
 		t.Fatalf("read Claude attempts: %v", err)
 	}
 	return attempts
+}
+
+func loadClaudeAttemptProofCompletionRows(t *testing.T, backend claudeAttemptProofBackend, attemptID string) (int, int) {
+	t.Helper()
+	query := `SELECT (SELECT COUNT(*) FROM agent_turns WHERE completion_attempt_id=?), (SELECT COUNT(*) FROM spend_ledger WHERE external_effect_attempt_id=?)`
+	if backend.name == "postgres" {
+		query = `SELECT (SELECT COUNT(*) FROM agent_turns WHERE completion_attempt_id=$1::uuid), (SELECT COUNT(*) FROM spend_ledger WHERE external_effect_attempt_id=$1::uuid)`
+	}
+	var turns, spend int
+	args := []any{attemptID, attemptID}
+	if backend.name == "postgres" {
+		args = args[:1]
+	}
+	if err := backend.db.QueryRowContext(context.Background(), query, args...).Scan(&turns, &spend); err != nil {
+		t.Fatalf("load Claude completion rows: %v", err)
+	}
+	return turns, spend
 }
 
 func loadClaudeAttemptProofProviderHead(t *testing.T, backend claudeAttemptProofBackend) string {
@@ -670,7 +703,7 @@ func runClaudeAttemptProofProcessHelper() int {
 		fmt.Fprintln(os.Stderr, "injected provider process failure")
 		return 1
 	}
-	fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q}\n", providerSessionID)
+	fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q,\"model\":\"claude-proof\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":12,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}\n", providerSessionID)
 	return 0
 }
 

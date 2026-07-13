@@ -21,8 +21,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 42 {
-		t.Fatalf("platform table plan count = %d, want 42", len(platformPlans))
+	if len(platformPlans) != 46 {
+		t.Fatalf("platform table plan count = %d, want 46", len(platformPlans))
 	}
 	entityPlans, err := GenerateEntityTableDDLs(runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -586,6 +586,7 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"events",
 		"activity_attempts",
 		"run_fork_selected_contract_bindings",
+		"run_fork_selected_contract_runtime_executions",
 		"run_fork_selected_contract_executions",
 		"run_fork_selected_contract_branch_divergences",
 		"run_fork_selected_contract_route_recoveries",
@@ -603,9 +604,14 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 		"conversation_forks",
 		"conversation_fork_snapshots",
 		"conversation_fork_turns",
+		"conversation_fork_turn_completions",
+		"runtime_external_effect_operations",
+		"runtime_external_effect_attempts",
 		"runtime_ingress_state",
 		"run_control_state",
 		"spend_ledger",
+		"budget_admission_scopes",
+		"runtime_effect_budget_reservations",
 		"flow_instances",
 		"timers",
 		"dead_letters",
