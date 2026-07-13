@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -281,13 +283,15 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 	source := semanticview.Wrap(bundle)
 	catalog := testProviderTriggerCatalog(t)
-	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressEventStore) {
+	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore) {
+		persistence := &processIngressProofStore{}
 		eventsStore := &processIngressEventStore{}
+		persistence.store = eventsStore
 		bus, err := runtimebus.NewEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{ProviderOutputVerifier: catalog})
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
 		}
-		gateway := runtimepkg.NewInboundGateway(bus, nil, nil)
+		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, persistence)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {
@@ -300,12 +304,12 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
 				EntityID: entityID, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
-		}, eventsStore
+		}, persistence, eventsStore
 	}
 	hashA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-	contextA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
-	contextB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
+	contextA, persistenceA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
+	contextB, persistenceB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
 	installed, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
@@ -322,107 +326,14 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("selected-context response = %d %q, want 202", rec.Code, rec.Body.String())
 	}
-	if eventsA.recorded || len(eventsA.events) != 0 {
-		t.Fatalf("non-selected context A was touched: marker=%v events=%d", eventsA.recorded, len(eventsA.events))
+	if persistenceA.recorded || len(eventsA.events) != 0 {
+		t.Fatalf("non-selected context A was touched: publication=%v events=%d", persistenceA.recorded, len(eventsA.events))
 	}
-	if !eventsB.recorded || len(eventsB.events) != 2 {
-		t.Fatalf("selected context B marker/events = %v/%d, want true and raw plus normalized", eventsB.recorded, len(eventsB.events))
+	if !persistenceB.recorded || len(eventsB.events) != 2 {
+		t.Fatalf("selected context B publication/events = %v/%d, want true and raw plus normalized", persistenceB.recorded, len(eventsB.events))
 	}
 	if got := eventsB.events[0].RunID(); got != contextB.StandingTargets[0].RunID {
 		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
-	}
-}
-
-func TestRuntimeProjectSupervisorRejectsChangedStandingBundleWithoutMutation(t *testing.T) {
-	standingBundle := &runtimecontracts.WorkflowContractBundle{PackageTree: []runtimecontracts.LoadedProjectPackage{{
-		Manifest: runtimecontracts.ProjectPackageDocument{Flows: []runtimecontracts.ProjectFlowRef{{
-			ID: "service", Mode: runtimecontracts.FlowModeSingleton, Activation: runtimecontracts.ProjectFlowActivationStanding,
-		}}},
-	}}}
-	source := semanticview.Wrap(standingBundle)
-	bus, err := runtimebus.NewEventBus(nil)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	oldRT := &runtimepkg.Runtime{Bus: bus}
-	oldHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	newHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-	oldTarget := runtimepkg.StandingTarget{
-		BundleHash: oldHash, FlowID: "service", Alias: "chat", Provider: "telegram",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "service/a",
-		EntityID: "41000000-0000-0000-0000-000000000002", SigningSecret: "webhook_signing.telegram",
-	}
-	catalog := testProviderTriggerCatalog(t)
-	oldTarget.AdmissionPlan, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, runtimepkg.BundleContext{
-		BundleHash: oldHash, Source: source, Runtime: oldRT, StandingTargets: []runtimepkg.StandingTarget{oldTarget},
-	})
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	var ready atomic.Bool
-	ready.Store(true)
-	supervisor := &runtimeProjectSupervisor{
-		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
-		currentBundle: standingBundle, currentRT: oldRT,
-		currentBundleSourceFact: runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted},
-		runtimeContexts:         manager,
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		err := supervisor.rejectChangedStandingBundle(newHash)
-		if err == nil || !strings.Contains(err.Error(), oldHash) || !strings.Contains(err.Error(), newHash) || !strings.Contains(err.Error(), "explicit future reset/migration") {
-			t.Fatalf("attempt %d changed-bundle error = %v", attempt+1, err)
-		}
-	}
-	if !ready.Load() || supervisor.CurrentRuntime() != oldRT || supervisor.CurrentProject().ProjectDir != "/tmp/current" {
-		t.Fatalf("changed-bundle rejection mutated supervisor: ready=%v runtime=%p status=%#v", ready.Load(), supervisor.CurrentRuntime(), supervisor.CurrentProject())
-	}
-	lookup := manager.LookupIngress("chat", "telegram")
-	if !lookup.Loaded() || lookup.Context.Runtime != oldRT || lookup.Target.RunID != oldTarget.RunID {
-		t.Fatalf("old context after changed-bundle rejection = %#v", lookup)
-	}
-}
-
-func TestRuntimeProjectSupervisorRejectsChangedStandingBundleWithoutIngress(t *testing.T) {
-	standingBundle := &runtimecontracts.WorkflowContractBundle{PackageTree: []runtimecontracts.LoadedProjectPackage{{
-		Manifest: runtimecontracts.ProjectPackageDocument{Flows: []runtimecontracts.ProjectFlowRef{{
-			ID: "scheduler", Mode: runtimecontracts.FlowModeSingleton, Activation: runtimecontracts.ProjectFlowActivationStanding,
-		}}},
-	}}}
-	source := semanticview.Wrap(standingBundle)
-	bus, err := runtimebus.NewEventBus(nil)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	oldRT := &runtimepkg.Runtime{Bus: bus}
-	oldHash := "bundle-v1:sha256:" + strings.Repeat("d", 64)
-	newHash := "bundle-v1:sha256:" + strings.Repeat("e", 64)
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleHash: oldHash, Source: source, Runtime: oldRT,
-	})
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	var ready atomic.Bool
-	ready.Store(true)
-	supervisor := &runtimeProjectSupervisor{
-		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
-		currentBundle: standingBundle, currentRT: oldRT,
-		currentBundleSourceFact: runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted},
-		runtimeContexts:         manager,
-	}
-	if err := supervisor.rejectChangedStandingBundle(newHash); err == nil || !strings.Contains(err.Error(), "explicit future reset/migration") {
-		t.Fatalf("changed standing bundle without ingress error = %v", err)
-	}
-	if !ready.Load() || supervisor.CurrentRuntime() != oldRT || supervisor.CurrentProject().ProjectDir != "/tmp/current" {
-		t.Fatalf("changed standing bundle without ingress mutated supervisor: ready=%v runtime=%p status=%#v", ready.Load(), supervisor.CurrentRuntime(), supervisor.CurrentProject())
 	}
 }
 
@@ -496,6 +407,7 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
 	newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
 	newIdentity := runtimecontracts.BundleIdentity{BundleHash: newHash}
+	oldRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: oldSource}, BundleSourceFact: oldFact}
 	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: newSource}, BundleSourceFact: newFact}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		BundleHash: oldHash, BundleSourceFact: oldFact, Source: oldSource, Runtime: oldRT,
@@ -551,7 +463,7 @@ func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurface
 	}
 	hash := runtimeContextTestHash("d")
 	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
-	oldRT := &runtimepkg.Runtime{Bus: oldBus}
+	oldRT := &runtimepkg.Runtime{Bus: oldBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
 	newRT := &runtimepkg.Runtime{Bus: newBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: oldRT})
 	if err != nil {
@@ -1096,11 +1008,79 @@ func (processIngressCredentialStore) Set(context.Context, string, string) error 
 func (processIngressCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (processIngressCredentialStore) Delete(context.Context, string) error      { return nil }
 
-type processIngressEventStore struct {
-	events   []events.Event
-	seen     map[string]struct{}
+type processIngressProofStore struct {
 	recorded bool
+	store    runtimebus.EventStore
 }
+
+type processIngressMutation struct {
+	ctx          context.Context
+	store        runtimebus.EventStore
+	finalization runtimeinbound.Finalization
+	finalized    bool
+}
+
+func (m *processIngressMutation) Context() context.Context { return m.ctx }
+func (m *processIngressMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	return m.store.AppendEvent(ctx, evt)
+}
+func (m *processIngressMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	return m.store.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+func (m *processIngressMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, _ map[string]events.RouteIdentity) error {
+	return m.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+func (*processIngressMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
+	return nil
+}
+func (*processIngressMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+func (*processIngressMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
+	return nil
+}
+func (*processIngressMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
+	return nil
+}
+
+func (m *processIngressMutation) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
+	m.finalization = finalization
+	m.finalized = true
+	return nil
+}
+
+func (s *processIngressProofStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+	s.recorded = true
+	mutation := &processIngressMutation{store: s.store}
+	mutation.ctx = runtimebus.WithEventMutationContext(ctx, mutation)
+	if err := fn(mutation); err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	if !mutation.finalized {
+		return runtimeinbound.Record{}, errors.New("process ingress publication was not finalized")
+	}
+	var routes []events.DeliveryRoute
+	if err := json.Unmarshal(mutation.finalization.RecipientManifest, &routes); err != nil {
+		return runtimeinbound.Record{}, fmt.Errorf("decode process ingress recipient manifest: %w", err)
+	}
+	manifest, fingerprint, count, err := runtimeinbound.CanonicalRecipientManifest(routes)
+	if err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	return runtimeinbound.Record{
+		Request: request, State: "committed", RecipientManifest: manifest,
+		RecipientFingerprint: fingerprint, RecipientCount: count,
+		PublicationEvent: mutation.finalization.PublicationEvent, Created: true,
+	}, nil
+}
+func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+	return runtimeinbound.Record{}, false, nil
+}
+func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Context) error {
+	return nil
+}
+
+type processIngressEventStore struct{ events []events.Event }
 
 func (s *processIngressEventStore) AppendEvent(_ context.Context, event events.Event) error {
 	s.events = append(s.events, event)

@@ -255,6 +255,33 @@ mutating_api_parity_ledger:
       and explicit Postgres, including persisted running state, platform.resumed
       transition event, queued ingress release, idempotency replay, and generic
       settlement postconditions.
+  - method: standing.suspend
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: standing_service_suspend_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessStandingServiceLifecycle}
+    notes: >
+      Shared served harness proves real /v1/rpc persistent suspension of the
+      current standing generation, complete quiescence, and idempotent replay.
+  - method: standing.resume
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: standing_service_resume_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessStandingServiceLifecycle}
+    notes: >
+      Shared served harness proves real /v1/rpc resume of the persisted standing
+      override and publication through the loaded declaration owner.
+  - method: standing.reset
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: standing_service_reset_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessStandingServiceLifecycle}
+    notes: >
+      Shared served harness proves real /v1/rpc generation replacement, prior
+      run quiescence, fresh publication, and idempotent replay.
   - method: runtime.nuke
     classification: postgres_only_with_spec_ref
     backends: [postgres_only]

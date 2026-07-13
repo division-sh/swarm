@@ -500,6 +500,14 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"action"},
 		Reason: "control command action is command input, not a registered human-code family",
 	},
+	"standing.go\x00newStandingActionCommand": {
+		Names:  []string{"action"},
+		Reason: "standing operation action is command construction input, not a registered human-code family",
+	},
+	"standing.go\x00runStandingActionCommand": {
+		Names:  []string{"action"},
+		Reason: "standing operation action is a separate desired-state control taxonomy",
+	},
 	"conversations.go\x00writeConversationDetailResult": {
 		Names:  []string{"outcome", "status"},
 		Reason: "conversation status and safe projected turn outcome are separate conversation-detail taxonomies owned by #1820",

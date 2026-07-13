@@ -104,18 +104,18 @@ func (s *SQLiteRuntimeStore) now() time.Time {
 	return s.nowFn().UTC()
 }
 
-func (s *SQLiteRuntimeStore) SetEventPayloadValidator(validator func(eventType string, payload []byte) error) {
+func (s *SQLiteRuntimeStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
 	if s == nil {
 		return
 	}
 	s.eventPayloadValidator = EventPayloadValidator(validator)
 }
 
-func (s *SQLiteRuntimeStore) validateEventPayload(eventType string, payload []byte) error {
+func (s *SQLiteRuntimeStore) validateEventPayload(ctx context.Context, eventType string, payload []byte) error {
 	if s == nil || s.eventPayloadValidator == nil {
 		return nil
 	}
-	if err := s.eventPayloadValidator(strings.TrimSpace(eventType), payload); err != nil {
+	if err := s.eventPayloadValidator(ctx, strings.TrimSpace(eventType), payload); err != nil {
 		return fmt.Errorf("validate event payload: %w", err)
 	}
 	return nil
@@ -159,6 +159,9 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 			return s.AppendEventTx(txctx, tx, evt)
 		})
 	}
+	if err := validateDiagnosticDirectOwner(ctx, evt); err != nil {
+		return err
+	}
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
 	}
@@ -177,7 +180,7 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	if err != nil {
 		return err
 	}
-	if err := s.validateEventPayload(name, payload); err != nil {
+	if err := s.validateEventPayload(ctx, name, payload); err != nil {
 		return err
 	}
 	sourceRoute, targetRoute, targetSet := eventRouteStorageEnvelope(evt)
@@ -621,6 +624,9 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		case "continue":
 			state, err = sqliteContinueRunControl(txctx, tx, state, req)
 		case "stop":
+			if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			state, err = s.sqliteStopRunControl(txctx, tx, state, req)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
@@ -648,6 +654,18 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		return runtimeruncontrol.State{}, err
 	}
 	return state, nil
+}
+
+func rejectSQLiteStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	var serviceID string
+	err := tx.QueryRowContext(ctx, `SELECT service_id FROM standing_services WHERE current_run_id = ?`, runID).Scan(&serviceID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect sqlite standing run control ownership: %w", err)
+	}
+	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
 }
 
 func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdempotencyRequest, execute func(context.Context) (APIIdempotencyCompletion, error)) (APIIdempotencyCompletion, bool, error) {

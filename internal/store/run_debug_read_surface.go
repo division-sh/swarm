@@ -713,6 +713,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 
 func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
+	quiescenceArgs := append([]any{runID}, diagnosticDirectReplayEventArgs()...)
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries d
@@ -730,9 +731,9 @@ func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string)
 			AND r.subscriber_type = 'platform'
 			AND r.subscriber_id = 'pipeline'
 		WHERE e.run_id = $1::uuid
-		  AND e.event_name <> '`+runtimeLogEventName+`'
-		  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-	`, runID).Scan(&out.UnsettledPipelineEvents); err != nil {
+		  AND `+postgresDiagnosticDirectReplayExclusionSQL("e", 2)+`
+		  AND r.event_id IS NULL
+	`, quiescenceArgs...).Scan(&out.UnsettledPipelineEvents); err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
 	if err := s.DB.QueryRowContext(ctx, `

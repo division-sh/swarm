@@ -27,7 +27,7 @@ binding_context:
     - platform-spec.yaml#platform_tables.destructive_reset_cleanup_policy
     - platform-spec.yaml#platform_events.event_construction.constructor_classes.diagnostic_direct
     - 'platform-spec.yaml#platform_events.catalog["platform.inbound_recorded"]'
-    - platform-spec.yaml#flow_model.cross_flow_routing.reply_resolution
+    - platform-spec.yaml#engine.cross_flow_routing.reply_resolution
     - platform-spec.yaml#flow_model.flow_instance_authoring.template_instance_model.connect_time_lifecycle_rule
   implementation_spec_action: >-
     The implementation PR updates every exact section above for the ledger,

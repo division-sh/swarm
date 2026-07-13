@@ -53,6 +53,7 @@ const (
 	RuntimeAlreadyPausedCode               = "RUNTIME_ALREADY_PAUSED"
 	RuntimeNotPausedCode                   = "RUNTIME_NOT_PAUSED"
 	RuntimeNukeInProgressCode              = "RUNTIME_NUKE_IN_PROGRESS"
+	StandingServiceNotFoundCode            = "STANDING_SERVICE_NOT_FOUND"
 )
 
 type Registry struct {

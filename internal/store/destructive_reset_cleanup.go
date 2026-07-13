@@ -464,6 +464,13 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 		}
 		return `DELETE FROM bundles`, nil, nil
 	}
+	switch table {
+	case "standing_service_journal", "standing_service_generations", "standing_services":
+		if mode == "count" {
+			return fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)), nil, nil
+		}
+		return fmt.Sprintf(`DELETE FROM %s`, quoteIdent(table)), nil, nil
+	}
 	if len(runIDs) == 0 && mode == "delete" {
 		return "", nil, nil
 	}
@@ -472,6 +479,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 	}
 	args := []any{pq.Array(runIDs)}
 	switch table {
+	case "inbound_publications":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
+		}
+		return `DELETE FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
 	case "event_receipts":
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil

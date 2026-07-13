@@ -14,6 +14,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -280,6 +281,30 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if _, exists := am.lifecycle.executionSnapshot(a.ID()); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
+	if persist {
+		if _, txActive := runtimepipeline.PipelineSQLTxFromContext(ctx); txActive {
+			if am.lifecycle == nil || am.lifecycle.store == nil {
+				return fmt.Errorf("transactional agent registration requires lifecycle persistence")
+			}
+			result, err := am.lifecycle.persistRegistration(ctx, rec)
+			if err != nil {
+				return err
+			}
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+				if err := am.publishCommittedAgent(postCommitCtx, rec, a, result); err != nil && am.bus != nil {
+					_ = am.bus.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
+						Level: "error", Message: "Post-commit agent publication failed",
+						Component: "flow_activation", Action: "agent_post_commit_publish_failed",
+						Detail: map[string]any{"agent_id": a.ID()}, Failure: failureEnvelope(err, "flow_activation", "publish_agent"),
+					})
+				}
+			}) {
+				return fmt.Errorf("transactional agent registration requires post-commit publication owner")
+			}
+			return nil
+		}
+	}
 	if err := am.lifecycle.registerExecution(ctx, rec, persist, a); err != nil {
 		return err
 	}
@@ -294,6 +319,24 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
+	if isRunning {
+		if _, err := am.replaceExecution(runCtx, a.ID(), "start", "", nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec PersistedAgent, a Agent, result AgentLifecycleTransitionResult) error {
+	rec.LifecycleEpoch = result.RuntimeEpoch
+	rec.LifecycleGeneration = result.Generation
+	rec.LifecyclePhase = result.Phase
+	rec.LifecycleRunMode = result.RunMode
+	if err := am.lifecycle.registerExecution(ctx, rec, false, a); err != nil {
+		return err
+	}
+	_ = am.projectLifecycleDiagnostics(ctx)
+	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	if isRunning {
 		if _, err := am.replaceExecution(runCtx, a.ID(), "start", "", nil); err != nil {
 			return err

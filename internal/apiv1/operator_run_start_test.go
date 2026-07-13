@@ -399,7 +399,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
 			BundleSourceFact: runStartTestBundleSourceFact(),
-			PayloadValidator: func(eventType string, payload []byte) error {
+			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
 				if eventType != "scan.requested" {
 					return fmt.Errorf("unexpected event type %q", eventType)
 				}

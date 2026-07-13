@@ -141,6 +141,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "bus store interface names raw event transaction primitives that remain confined to runtime unit-of-work ownership",
 		},
+		"internal/runtime/manager/agent_manager.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2007,
+			Reason:         "agent lifecycle activation consumes the selected inbound/pipeline transaction context so process-local publication can be staged until commit",
+		},
 		"internal/runtime/dbtx.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
@@ -251,6 +256,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "pipeline runtime SQL/TX helpers are explicit unit-of-work boundary primitives",
+		},
+		"internal/runtime/pipeline/standing_service_store.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2007,
+			Reason:         "standing reconciliation, terminalization, and publication admission are the selected-store transaction owner for declaration-owned standing services",
 		},
 		"internal/runtime/pipeline/system_node_receipt_store.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

@@ -2,10 +2,8 @@ package runtime_test
 
 import (
 	"context"
-	"encoding/json"
-	"io"
+	"database/sql"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,12 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	storepkg "github.com/division-sh/swarm/internal/store"
 )
 
 type boundedProviderCredentialStore struct{}
@@ -56,99 +53,102 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 	if bus != nil {
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
-	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed)
+	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
 	gateway.SetCredentialStore(boundedProviderCredentialStore{})
 	return gateway
 }
 
+// handleBoundedProviderDelivery exercises provider parsing through the real
+// standing-service inbound publication operation.
 func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, store runtimepkg.InboundPersistence, w http.ResponseWriter, r *http.Request, runID, entityID, provider, signingSecret string) {
 	t.Helper()
-	_ = gateway
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		payload = map[string]any{"raw": string(body)}
-	}
-	query := r.URL.Query()
-	form := make(url.Values)
-	formParsed := false
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "application/x-www-form-urlencoded") {
-		parsed, parseErr := url.ParseQuery(string(body))
-		if parseErr == nil {
-			form = parsed
-			formParsed = true
-		}
-	}
+	_ = bus
 	plan, err := testProviderTriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: entityID, Provider: provider, SigningSecret: "test.signing_secret",
+		Alias: entityID, Provider: provider, SigningSecret: signingSecret,
 	})
 	if err != nil {
 		t.Fatalf("compile provider admission: %v", err)
 	}
-	delivery, err := plan.Accept(providertriggers.Request{
-		Provider: provider,
-		Target:   providertriggers.Target{EntityID: entityID, EntitySlug: entityID, WebhookSecret: signingSecret},
-		Method:   r.Method, URL: r.URL.String(), Body: body, Headers: r.Header, Payload: payload,
-		ContentType: r.Header.Get("Content-Type"), Query: query, Form: form, FormParsed: formParsed,
-		Received: time.Now().UTC(), UserAgent: r.UserAgent(),
-	})
-	if err != nil {
-		status := http.StatusBadRequest
-		if providerErr, ok := err.(providertriggers.Error); ok {
-			status = providerErr.Status
-		}
-		http.Error(w, err.Error(), status)
-		return
-	}
-	if delivery.Response != nil {
-		w.WriteHeader(delivery.Response.Status)
-		_, _ = w.Write(delivery.Response.Body)
-		return
-	}
-	_ = store
-	batchEvents := make([]runtimebus.InboundDeliveryEvent, 0, len(delivery.Events))
-	for _, output := range delivery.Events {
-		envelope := events.EventEnvelope{}
-		if output.Kind == providertriggers.OutputKindRaw {
-			envelope = events.EventEnvelope{EntityID: entityID}
-		}
-		event := eventtest.RootIngress(
-			"", output.Name, "bounded-provider-integration", "",
-			mustBoundedJSON(t, output.Payload), 0, runID, "", envelope, time.Now().UTC(),
-		)
-		batchEvents = append(batchEvents, runtimebus.InboundDeliveryEvent{
-			Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization,
-		})
-	}
-	result, err := bus.PublishInboundDelivery(r.Context(), runtimebus.InboundDeliveryBatch{
-		Claim: runtimebus.InboundDeliveryClaim{
-			ProviderEventID: delivery.ProviderEventID,
-			EntityID:        entityID,
-			Provider:        provider,
-		},
-		Events:                    batchEvents,
-		AcknowledgeBeforeDispatch: delivery.AcknowledgeBeforeDispatch,
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	if result.Duplicate {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
+	target := ensureBoundedStandingTarget(t, r.Context(), store, runID, entityID, provider)
+	target.Provider = provider
+	target.SigningSecret = signingSecret
+	target.AdmissionPlan = plan
+	gateway.HandleResolvedWebhook(w, r, target, nil)
 }
 
-func mustBoundedJSON(t testing.TB, value any) []byte {
+func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, provider string) runtimepkg.InboundTarget {
 	t.Helper()
-	body, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal bounded provider delivery: %v", err)
+	packageKey := "test.provider." + strings.ToLower(strings.TrimSpace(provider))
+	flowID := "bounded-inbound"
+	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
+	const bundleHash = "bundle-v1:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const bundleSource = "ephemeral"
+	var flowInstance string
+
+	switch selected := persistence.(type) {
+	case *storepkg.PostgresStore:
+		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
+			t.Fatalf("load postgres bounded provider flow instance: %v", err)
+		}
+		insertPostgresStandingFixture(t, ctx, selected.DB, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+	case *storepkg.SQLiteRuntimeStore:
+		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
+			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
+		}
+		insertSQLiteStandingFixture(t, ctx, selected.DB, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+	default:
+		t.Fatalf("unsupported bounded provider persistence %T", persistence)
 	}
-	return body
+
+	return runtimepkg.InboundTarget{
+		BundleHash: bundleHash, ServiceID: serviceID, PackageKey: packageKey,
+		FlowID: flowID, RunID: runID, Generation: 1, PublicationSequence: 1,
+		InstanceID: flowInstance, FlowInstance: flowInstance, EntityID: entityID,
+		EntitySlug: entityID, Alias: entityID,
+	}
+}
+
+func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO standing_services (
+			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
+			operator_override, effective_state, current_bundle_hash, current_bundle_source,
+			revision_sequence, current_generation, current_run_id, publication_state,
+			publication_sequence, created_at, updated_at
+		) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'published', 1, now(), now())
+		ON CONFLICT (service_id) DO NOTHING
+	`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID); err != nil {
+		t.Fatalf("seed postgres standing service: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
+		VALUES ($1::uuid, 1, $2::uuid, $3, $4, now())
+		ON CONFLICT (service_id, generation) DO NOTHING
+	`, serviceID, runID, bundleHash, bundleSource); err != nil {
+		t.Fatalf("seed postgres standing generation: %v", err)
+	}
+}
+
+func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO standing_services (
+			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
+			operator_override, effective_state, current_bundle_hash, current_bundle_source,
+			revision_sequence, current_generation, current_run_id, publication_state,
+			publication_sequence, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, 1, ?, 'published', 1, ?, ?)
+		ON CONFLICT(service_id) DO NOTHING
+	`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID, now, now); err != nil {
+		t.Fatalf("seed sqlite standing service: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
+		VALUES (?, 1, ?, ?, ?, ?)
+		ON CONFLICT(service_id, generation) DO NOTHING
+	`, serviceID, runID, bundleHash, bundleSource, now); err != nil {
+		t.Fatalf("seed sqlite standing generation: %v", err)
+	}
 }

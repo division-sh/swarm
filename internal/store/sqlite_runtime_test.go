@@ -418,6 +418,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
+		LifecycleStore:    sqliteStore,
 	}, sqliteStore)
 	bundle := sqliteFlowActivationBundle()
 
@@ -457,6 +458,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
+		LifecycleStore:    sqliteStore,
 	}, sqliteStore)
 	bundle := sqliteFlowActivationBundle()
 
@@ -511,8 +513,10 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		"instance_id":        "component-b",
 		"template_id":        "review",
 	})
-	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
-		t.Fatalf("runtime logs = %#v, want no activation dead-letter/runtime errors", logs)
+	for _, entry := range bus.runtimeLogEntries() {
+		if entry.Level == "error" || entry.Failure != nil {
+			t.Fatalf("runtime log = %#v, want no activation dead-letter/runtime errors", entry)
+		}
 	}
 }
 
@@ -755,7 +759,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	store.SetEventPayloadValidator(func(eventType string, _ []byte) error {
+	store.SetEventPayloadValidator(func(_ context.Context, eventType string, _ []byte) error {
 		if eventType == "item.failed" {
 			return errors.New("schema violation")
 		}

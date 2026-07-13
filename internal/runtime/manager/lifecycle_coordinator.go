@@ -236,6 +236,35 @@ func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec P
 	return nil
 }
 
+func (c *agentLifecycleCoordinator) persistRegistration(ctx context.Context, rec PersistedAgent) (AgentLifecycleTransitionResult, error) {
+	if c == nil || c.store == nil {
+		return AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle persistence is required")
+	}
+	agentID := strings.TrimSpace(rec.Config.ID)
+	revision, err := lifecycleConfigRevision(rec)
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
+	epoch := rec.LifecycleEpoch
+	if epoch <= 0 {
+		epoch = runtimebus.CurrentRuntimeEpoch()
+	}
+	generation := rec.LifecycleGeneration
+	if generation == 0 {
+		generation = 1
+	}
+	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
+	return c.store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "spawn", AgentID: agentID, Trigger: "spawn",
+		RequestHash: lifecycleRequestHash("spawn", agentID, revision, planHash), TargetEpoch: epoch,
+		TargetGeneration: generation, TargetPhase: AgentLifecycleRegistered,
+		ConfigRevision: revision, RunMode: AgentRunModeStopped, Agent: &rec, Subordinate: plan, Now: time.Now().UTC(),
+	})
+}
+
 func (c *agentLifecycleCoordinator) unregisterLocal(agentID string) {
 	if c == nil {
 		return

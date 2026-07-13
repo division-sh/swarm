@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -107,6 +108,74 @@ func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runti
 	return nil
 }
 
+func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
+	}
+	route.Identity = runtimeflowidentity.StoredRoute(route.Identity.ScopeKey, route.Identity.InstanceID, route.Identity.InstancePath)
+	if !route.Identity.Valid() {
+		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
+	}
+	sourceFlow := strings.TrimSpace(route.SourceFlow)
+	if sourceFlow == "" {
+		sourceFlow = route.Identity.ScopeKey
+	}
+	return s.runRuntimeMutation(ctx, "sqlite flow instance route upsert", func(txctx context.Context, tx *sql.Tx) error {
+		var materializedFrom sql.NullInt64
+		if strings.TrimSpace(route.EventPattern) != "" && strings.TrimSpace(route.SubscriberType) != "" && strings.TrimSpace(route.SubscriberID) != "" {
+			_ = tx.QueryRowContext(txctx, `
+				SELECT rule_id
+				FROM routing_rules
+				WHERE event_pattern = ?
+				  AND subscriber_type = ?
+				  AND subscriber_id = ?
+				  AND COALESCE(source_flow, '') = ?
+				  AND is_wildcard = TRUE
+				  AND is_materialized = FALSE
+				  AND status = 'active'
+				ORDER BY created_at ASC
+				LIMIT 1
+			`, route.EventPattern, route.SubscriberType, route.SubscriberID, sourceFlow).Scan(&materializedFrom)
+		}
+		result, err := tx.ExecContext(txctx, `
+			UPDATE routing_rules
+			SET source_flow = NULLIF(?, ''), materialized_from = ?, status = 'active'
+			WHERE event_pattern = ?
+			  AND subscriber_type = ?
+			  AND subscriber_id = ?
+			  AND COALESCE(flow_instance, '') = ?
+			  AND is_materialized = TRUE
+		`, sourceFlow, nullableSQLiteInt64(materializedFrom), route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.InstancePath)
+		if err != nil {
+			return fmt.Errorf("update sqlite flow instance route %s/%s: %w", route.Identity.ScopeKey, route.Identity.InstanceID, err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("inspect sqlite flow instance route update: %w", err)
+		}
+		if updated > 0 {
+			return nil
+		}
+		if _, err := tx.ExecContext(txctx, `
+			INSERT INTO routing_rules (
+				event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
+				is_wildcard, is_materialized, materialized_from, status, created_at
+			) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), FALSE, TRUE, ?, 'active', ?)
+		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.InstancePath, sourceFlow,
+			nullableSQLiteInt64(materializedFrom), time.Now().UTC()); err != nil {
+			return fmt.Errorf("insert sqlite flow instance route %s/%s: %w", route.Identity.ScopeKey, route.Identity.InstanceID, err)
+		}
+		return nil
+	})
+}
+
+func nullableSQLiteInt64(value sql.NullInt64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
+}
+
 func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
@@ -143,6 +212,36 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 	return nil
 }
 
+func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
+	}
+	return s.runRuntimeMutation(ctx, "sqlite flow instance route delete", func(txctx context.Context, tx *sql.Tx) error {
+		var status string
+		err := tx.QueryRowContext(txctx, `SELECT status FROM flow_instances WHERE instance_id = ?`, identity.InstancePath).Scan(&status)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("flow instance not found for route removal: %s", identity.InstancePath)
+			}
+			return fmt.Errorf("load sqlite flow instance for route removal %s: %w", identity.InstancePath, err)
+		}
+		if strings.TrimSpace(status) != "terminated" {
+			return fmt.Errorf("flow instance route removal requires terminal flow_instances status for %s", identity.InstancePath)
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE routing_rules SET status = 'inactive'
+			WHERE flow_instance = ? AND is_materialized = TRUE AND status = 'active'
+		`, identity.InstancePath); err != nil {
+			return fmt.Errorf("delete sqlite flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
+		}
+		return nil
+	})
+}
+
 func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
@@ -162,6 +261,25 @@ func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity 
 		return fmt.Errorf("rollback flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
 	}
 	return nil
+}
+
+func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
+	}
+	return s.runRuntimeMutation(ctx, "sqlite flow instance route rollback", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE routing_rules SET status = 'inactive'
+			WHERE flow_instance = ? AND is_materialized = TRUE AND status = 'active'
+		`, identity.InstancePath); err != nil {
+			return fmt.Errorf("rollback sqlite flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
+		}
+		return nil
+	})
 }
 
 func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
@@ -210,146 +328,6 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 	return out, nil
 }
 
-func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
-	}
-	return s.runRuntimeMutation(ctx, "upsert flow instance route", func(txctx context.Context, tx *sql.Tx) error {
-		return upsertSQLiteFlowInstanceRouteTx(txctx, tx, route)
-	})
-}
-
-func upsertSQLiteFlowInstanceRouteTx(ctx context.Context, tx *sql.Tx, route runtimebus.FlowInstanceRouteRecord) error {
-	if tx == nil {
-		return fmt.Errorf("sqlite flow instance route transaction is required")
-	}
-	route.Identity = runtimeflowidentity.StoredRoute(route.Identity.ScopeKey, route.Identity.InstanceID, route.Identity.InstancePath)
-	if !route.Identity.Valid() {
-		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
-	}
-	sourceFlow := strings.TrimSpace(route.SourceFlow)
-	if sourceFlow == "" {
-		sourceFlow = route.Identity.ScopeKey
-	}
-	var materializedFrom sql.NullString
-	if strings.TrimSpace(route.EventPattern) != "" && strings.TrimSpace(route.SubscriberType) != "" && strings.TrimSpace(route.SubscriberID) != "" {
-		_ = tx.QueryRowContext(ctx, `
-			SELECT CAST(rule_id AS TEXT)
-			FROM routing_rules
-			WHERE event_pattern = ?
-			  AND subscriber_type = ?
-			  AND subscriber_id = ?
-			  AND COALESCE(source_flow, '') = ?
-			  AND is_wildcard = true
-			  AND is_materialized = false
-			  AND status = 'active'
-			ORDER BY created_at ASC
-			LIMIT 1
-		`, route.EventPattern, route.SubscriberType, route.SubscriberID, sourceFlow).Scan(&materializedFrom)
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE routing_rules
-		SET source_flow = NULLIF(?, ''),
-		    materialized_from = ?,
-		    status = 'active'
-		WHERE event_pattern = ?
-		  AND subscriber_type = ?
-		  AND subscriber_id = ?
-		  AND COALESCE(flow_instance, '') = ?
-		  AND is_materialized = true
-	`, sourceFlow, nullableFlowInstanceRouteID(materializedFrom), route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.InstancePath)
-	if err != nil {
-		return fmt.Errorf("update SQLite flow instance route %s/%s: %w", route.Identity.ScopeKey, route.Identity.InstanceID, err)
-	}
-	if rows, rowsErr := res.RowsAffected(); rowsErr == nil && rows > 0 {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance,
-			source_flow, is_wildcard, is_materialized, materialized_from,
-			status, created_at
-		)
-		VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), false, true, ?, 'active', CURRENT_TIMESTAMP)
-	`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.InstancePath, sourceFlow, nullableFlowInstanceRouteID(materializedFrom)); err != nil {
-		return fmt.Errorf("insert SQLite flow instance route %s/%s: %w", route.Identity.ScopeKey, route.Identity.InstanceID, err)
-	}
-	return nil
-}
-
-func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
-	}
-	return s.runRuntimeMutation(ctx, "delete flow instance route", func(txctx context.Context, tx *sql.Tx) error {
-		return deleteSQLiteFlowInstanceRouteTx(txctx, tx, identity)
-	})
-}
-
-func deleteSQLiteFlowInstanceRouteTx(ctx context.Context, tx *sql.Tx, identity runtimeflowidentity.Route) error {
-	if tx == nil {
-		return fmt.Errorf("sqlite flow instance route transaction is required")
-	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
-		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
-	}
-	var status string
-	err := tx.QueryRowContext(ctx, `
-		SELECT status
-		FROM flow_instances
-		WHERE instance_id = ?
-	`, identity.InstancePath).Scan(&status)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("flow instance not found for route removal: %s", identity.InstancePath)
-		}
-		return fmt.Errorf("load SQLite flow instance for route removal %s: %w", identity.InstancePath, err)
-	}
-	if strings.TrimSpace(status) != "terminated" {
-		return fmt.Errorf("flow instance route removal requires terminal flow_instances status for %s", identity.InstancePath)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE routing_rules
-		SET status = 'inactive'
-		WHERE flow_instance = ?
-		  AND is_materialized = true
-		  AND status = 'active'
-	`, identity.InstancePath); err != nil {
-		return fmt.Errorf("delete SQLite flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
-	}
-	return nil
-}
-
-func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
-	}
-	return s.runRuntimeMutation(ctx, "rollback flow instance route", func(txctx context.Context, tx *sql.Tx) error {
-		return rollbackSQLiteFlowInstanceRouteTx(txctx, tx, identity)
-	})
-}
-
-func rollbackSQLiteFlowInstanceRouteTx(ctx context.Context, tx *sql.Tx, identity runtimeflowidentity.Route) error {
-	if tx == nil {
-		return fmt.Errorf("sqlite flow instance route transaction is required")
-	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
-		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE routing_rules
-		SET status = 'inactive'
-		WHERE flow_instance = ?
-		  AND is_materialized = true
-		  AND status = 'active'
-	`, identity.InstancePath); err != nil {
-		return fmt.Errorf("rollback SQLite flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
-	}
-	return nil
-}
-
 func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
@@ -362,7 +340,7 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 		SELECT COALESCE(NULLIF(source_flow, ''), ''), flow_instance
 		FROM routing_rules
 		JOIN flow_instances fi ON fi.instance_id = routing_rules.flow_instance
-		WHERE is_materialized = true
+		WHERE is_materialized = TRUE
 		  AND routing_rules.status = 'active'
 		  AND fi.status = 'active'
 		  AND flow_instance IS NOT NULL
@@ -370,14 +348,14 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 		ORDER BY flow_instance ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list SQLite flow instance routes: %w", err)
+		return nil, fmt.Errorf("list sqlite flow instance routes: %w", err)
 	}
 	defer rows.Close()
 	out := []runtimeflowidentity.Route{}
 	for rows.Next() {
 		var sourceFlow, instancePath string
 		if err := rows.Scan(&sourceFlow, &instancePath); err != nil {
-			return nil, fmt.Errorf("scan SQLite flow instance route: %w", err)
+			return nil, fmt.Errorf("scan sqlite flow instance route: %w", err)
 		}
 		route := runtimeflowidentity.StoredRoute(sourceFlow, "", instancePath)
 		if route.Valid() {
@@ -385,16 +363,9 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate SQLite flow instance routes: %w", err)
+		return nil, fmt.Errorf("iterate sqlite flow instance routes: %w", err)
 	}
 	return out, nil
-}
-
-func nullableFlowInstanceRouteID(value sql.NullString) any {
-	if !value.Valid || strings.TrimSpace(value.String) == "" {
-		return nil
-	}
-	return strings.TrimSpace(value.String)
 }
 
 func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {

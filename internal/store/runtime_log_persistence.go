@@ -79,7 +79,7 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if !enabled {
 		return unsupportedSchemaCapability("events", SchemaFlavorUnavailable)
 	}
-	if err := s.validateEventPayload(runtimeLogEventName, record.Payload); err != nil {
+	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
 	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
@@ -88,9 +88,12 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	}
 	if strings.TrimSpace(record.RunID) != "" {
 		if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-			return s.AppendEventTx(ctx, tx, evt)
+			return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
 		}
-		return s.AppendEvent(ctx, evt)
+		return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
+	}
+	if err := validateDiagnosticDirectOwner(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt); err != nil {
+		return err
 	}
 	execer := execQueryer(s.DB)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
@@ -160,7 +163,7 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if !enabled {
 		return unsupportedSchemaCapability("events", SchemaFlavorUnavailable)
 	}
-	if err := s.validateEventPayload(runtimeLogEventName, record.Payload); err != nil {
+	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
 	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
@@ -168,9 +171,13 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 		return err
 	}
 	if strings.TrimSpace(record.RunID) != "" {
-		return s.AppendEvent(ctx, evt)
+		return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
 	}
 	return s.runRuntimeMutation(ctx, "sqlite runtime log", func(txctx context.Context, tx *sql.Tx) error {
+		txctx = withDiagnosticDirectOwner(txctx, diagnosticDirectRuntimeLog)
+		if err := validateDiagnosticDirectOwner(txctx, evt); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT OR IGNORE INTO events (
 				event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,

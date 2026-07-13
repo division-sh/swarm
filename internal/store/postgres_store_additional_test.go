@@ -1469,7 +1469,7 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
+	pg.SetEventPayloadValidator(func(_ context.Context, eventType string, payload []byte) error {
 		if strings.TrimSpace(eventType) != "task.completed" {
 			t.Fatalf("unexpected event type %q", eventType)
 		}
@@ -1507,10 +1507,10 @@ func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersisten
 	}
 }
 
-func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
+func TestPostgresStore_InboundEvidenceOwnerRejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
+	pg.SetEventPayloadValidator(func(_ context.Context, eventType string, payload []byte) error {
 		if strings.TrimSpace(eventType) != "platform.inbound_recorded" {
 			t.Fatalf("unexpected event type %q", eventType)
 		}
@@ -1518,16 +1518,21 @@ func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePe
 	})
 	ctx := context.Background()
 	entityID := uuid.NewString()
+	publicationID := uuid.NewString()
+	publicationEventID := uuid.NewString()
 
-	inserted, err := pg.RecordInboundEvent(ctx, "provider-evt-1", entityID, "github")
+	eventID := uuid.NewString()
+	evt := eventtest.PersistedProjection(eventID,
+		events.EventType("platform.inbound_recorded"),
+		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
+		[]byte(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`"}`),
+		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+	err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt)
 	if err == nil {
-		t.Fatal("expected RecordInboundEvent to fail on payload validator rejection")
-	}
-	if inserted {
-		t.Fatal("expected rejected inbound marker not to report insertion")
+		t.Fatal("expected typed inbound evidence append to fail on payload validator rejection")
 	}
 	if !strings.Contains(err.Error(), "validate event payload") {
-		t.Fatalf("RecordInboundEvent payload validator error = %v", err)
+		t.Fatalf("typed inbound evidence payload validator error = %v", err)
 	}
 
 	var count int
@@ -1539,19 +1544,23 @@ func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePe
 	}
 }
 
-func TestPostgresStore_RecordInboundEvent_PlatformCatalogSchemaMatchesProducerPayload(t *testing.T) {
+func TestPostgresStore_InboundEvidenceOwnerPlatformCatalogSchemaMatchesPayload(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	pg.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	ctx := context.Background()
 	entityID := uuid.NewString()
+	publicationID := uuid.NewString()
+	publicationEventID := uuid.NewString()
 
-	inserted, err := pg.RecordInboundEvent(ctx, "provider-evt-1", entityID, "github")
-	if err != nil {
-		t.Fatalf("RecordInboundEvent: %v", err)
-	}
-	if !inserted {
-		t.Fatal("expected inbound marker insertion")
+	eventID := uuid.NewString()
+	evt := eventtest.PersistedProjection(eventID,
+		events.EventType("platform.inbound_recorded"),
+		"github", inboundEventIdempotencyKey("provider-evt-1", entityID, "github"),
+		[]byte(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-evt-1","entity_id":"`+entityID+`"}`),
+		0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt); err != nil {
+		t.Fatalf("append typed inbound evidence: %v", err)
 	}
 
 	var payloadRaw []byte
@@ -1566,7 +1575,7 @@ func TestPostgresStore_RecordInboundEvent_PlatformCatalogSchemaMatchesProducerPa
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
 		t.Fatalf("unmarshal inbound event payload: %v", err)
 	}
-	for _, key := range []string{"provider", "provider_event_id", "entity_id"} {
+	for _, key := range []string{"publication_id", "publication_event_id", "provider", "provider_event_id", "entity_id"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("inbound payload missing %s: %#v", key, payload)
 		}
@@ -1582,7 +1591,7 @@ func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValid
 	t.Helper()
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
-	return func(eventType string, payload []byte) error {
+	return func(_ context.Context, eventType string, payload []byte) error {
 		schema, ok := registry[strings.TrimSpace(eventType)]
 		if !ok {
 			return nil
@@ -2414,70 +2423,6 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	}
 	if persistedCount != 1 {
 		t.Fatalf("expected persisted event row, count=%d", persistedCount)
-	}
-}
-
-func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	if _, err := s.RecordInboundEvent(ctx, "", "v", "p"); err == nil {
-		t.Fatal("expected provider_event_id required")
-	}
-	if _, err := s.RecordInboundEvent(ctx, "e", "", "p"); err == nil {
-		t.Fatal("expected entity_id required")
-	}
-	if _, err := s.RecordInboundEvent(ctx, "e", "v", ""); err == nil {
-		t.Fatal("expected provider required")
-	}
-}
-
-func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	entityID := uuid.NewString()
-	if ok, err := s.RecordInboundEvent(ctx, "evt-old", entityID, "chat"); err != nil || !ok {
-		t.Fatalf("record old ok=%v err=%v", ok, err)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		UPDATE events
-		SET created_at = now() - interval '2 days'
-		WHERE event_name = 'platform.inbound_recorded'
-		  AND payload->>'provider_event_id' = 'evt-old'
-	`); err != nil {
-		t.Fatalf("age event: %v", err)
-	}
-
-	n, err := s.PurgeInboundEventsBefore(ctx, time.Now().Add(-24*time.Hour), 0)
-	if err != nil {
-		t.Fatalf("purge: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("expected 1 purged row, got %d", n)
-	}
-}
-
-func TestPostgresStore_Inbound_RecordAndPurge(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	entityID := uuid.NewString()
-	ok, err := s.RecordInboundEvent(ctx, "evt-1", entityID, "chat")
-	if err != nil || !ok {
-		t.Fatalf("record inbound ok=%v err=%v", ok, err)
-	}
-	ok, err = s.RecordInboundEvent(ctx, "evt-1", entityID, "chat")
-	if err != nil || ok {
-		t.Fatalf("expected duplicate record to be no-op ok=%v err=%v", ok, err)
-	}
-
-	if n, err := s.PurgeInboundEventsBefore(ctx, time.Now().Add(-1*time.Hour), 10); err != nil || n != 0 {
-		t.Fatalf("purge n=%d err=%v", n, err)
 	}
 }
 

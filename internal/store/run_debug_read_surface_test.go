@@ -309,6 +309,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	unsettledEventID := uuid.NewString()
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
+	inboundEvidenceEventID := uuid.NewString()
+	directiveEvidenceEventID := uuid.NewString()
 	now := time.Now().UTC()
 
 	if _, err := db.ExecContext(ctx, `
@@ -327,9 +329,12 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 			($1::uuid, $2::uuid, 'quiescence.active_delivery', 'global', '{}'::jsonb, 'test', 'platform', $6),
 			($1::uuid, $3::uuid, 'quiescence.missing_pipeline_receipt', 'global', '{}'::jsonb, 'test', 'platform', $7),
 			($1::uuid, $4::uuid, '`+runtimeLogEventName+`', 'global', '{}'::jsonb, 'test', 'platform', $8),
-			($9::uuid, $5::uuid, 'quiescence.ready', 'global', '{}'::jsonb, 'test', 'platform', $10)
+			($9::uuid, $5::uuid, 'quiescence.ready', 'global', '{}'::jsonb, 'test', 'platform', $10),
+			($9::uuid, $11::uuid, '`+diagnosticDirectInboundRecord+`', 'global', '{}'::jsonb, 'test', 'platform', $10),
+			($9::uuid, $12::uuid, '`+diagnosticDirectAgentDirective+`', 'global', '{}'::jsonb, 'test', 'platform', $10)
 	`, blockedRunID, activeEventID, unsettledEventID, runtimeLogEventID, readyEventID,
-		now.Add(-50*time.Second), now.Add(-40*time.Second), now.Add(-30*time.Second), readyRunID, now.Add(-20*time.Second)); err != nil {
+		now.Add(-50*time.Second), now.Add(-40*time.Second), now.Add(-30*time.Second), readyRunID, now.Add(-20*time.Second),
+		inboundEvidenceEventID, directiveEvidenceEventID); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {

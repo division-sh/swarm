@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -78,6 +79,12 @@ type DecisionCardAuthority interface {
 	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
 }
 
+type StandingServiceController interface {
+	SuspendStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
+	ResumeStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
+	ResetStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
+}
+
 type OperatorReadOptions struct {
 	Now                       func() time.Time
 	Ready                     func() bool
@@ -106,6 +113,7 @@ type OperatorReadOptions struct {
 	Idempotency               APIIdempotencyStore
 	Events                    EventPublisher
 	RunControl                RunControlController
+	StandingServices          StandingServiceController
 	RuntimeIngress            RuntimeIngressController
 	RuntimeContexts           *swruntime.RuntimeContextManager
 	ResetCoordinator          DestructiveResetCoordinator
@@ -287,6 +295,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRunControlHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorStandingServiceHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRuntimeControlHandlers(opts) {

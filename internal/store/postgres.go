@@ -30,7 +30,7 @@ type PostgresStore struct {
 	scheduleClaimKeys map[string]struct{}
 }
 
-type EventPayloadValidator func(eventType string, payload []byte) error
+type EventPayloadValidator func(ctx context.Context, eventType string, payload []byte) error
 
 func DSNFromConfig(cfg config.DatabaseConfig, password string) string {
 	host := strings.TrimSpace(cfg.Host)

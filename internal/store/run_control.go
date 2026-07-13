@@ -84,6 +84,9 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 		}
 		switch action {
 		case "stop":
+			if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			state, err = s.stopRunControlTx(txctx, tx, caps, state, req)
 		case "pause":
 			state, err = pauseRunControlTx(txctx, tx, state, req)
@@ -230,7 +233,7 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps S
 	default:
 		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
 	}
-	abandoned, err := s.abandonPendingRunDeliveriesTx(ctx, tx, caps, state.RunID)
+	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, caps, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
@@ -260,6 +263,47 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps S
 	state.UpdatedAt = req.Now.UTC()
 	state.AbandonedDeliveries = abandoned
 	return state, nil
+}
+
+func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	var serviceID string
+	err := tx.QueryRowContext(ctx, `SELECT service_id::text FROM standing_services WHERE current_run_id = $1::uuid`, runID).Scan(&serviceID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect standing run control ownership: %w", err)
+	}
+	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
+}
+
+func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, runID, reason string, now time.Time) (int, error) {
+	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
+		return 0, fmt.Errorf("run stop requires canonical event_deliveries.run_id")
+	}
+	deliveries, err := lockActiveRunQuiescenceDeliveriesTx(ctx, tx, []string{runID})
+	if err != nil {
+		return 0, err
+	}
+	eventIDs := map[string]struct{}{}
+	for _, delivery := range deliveries {
+		if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, "run_stopped", reason, now); err != nil {
+			return 0, err
+		}
+		eventIDs[delivery.EventID] = struct{}{}
+	}
+	for eventID := range eventIDs {
+		if err := upsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, "run_stopped", reason, now); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := terminateActiveRunSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
+		return 0, err
+	}
+	if _, err := cancelActiveRunTimersTx(ctx, tx, []string{runID}); err != nil {
+		return 0, err
+	}
+	return len(deliveries), nil
 }
 
 func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, runID string) (int, error) {

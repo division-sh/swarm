@@ -33,10 +33,11 @@ const (
 )
 
 type startupRecoverySnapshot struct {
-	RecoveryOnStartup   bool
-	InspectionComplete  bool
-	ActiveScheduleCount int
-	Manager             runtimemanager.RecoverableStateSnapshot
+	RecoveryOnStartup     bool
+	InspectionComplete    bool
+	ActiveScheduleCount   int
+	StandingScheduleCount int
+	Manager               runtimemanager.RecoverableStateSnapshot
 }
 
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
@@ -71,6 +72,7 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 	}
 	if s.InspectionComplete {
 		detail["active_schedule_count"] = s.ActiveScheduleCount
+		detail["standing_schedule_count"] = s.StandingScheduleCount
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
 		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
 		detail["manager_recoverable_work_present"] = s.Manager.HasRecoverableWork()
@@ -225,7 +227,21 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupR
 			snapshot.InspectionComplete = false
 			return snapshot, fmt.Errorf("inspect active schedules: %w", err)
 		}
-		snapshot.ActiveScheduleCount = len(schedules)
+		for _, schedule := range schedules {
+			intrinsic := false
+			if rt.Stores.PipelineStore != nil && strings.TrimSpace(schedule.RunID) != "" {
+				intrinsic, err = rt.Stores.PipelineStore.StandingRunUsesIntrinsicRecovery(ctx, schedule.RunID)
+				if err != nil {
+					snapshot.InspectionComplete = false
+					return snapshot, fmt.Errorf("classify standing schedule: %w", err)
+				}
+			}
+			if intrinsic {
+				snapshot.StandingScheduleCount++
+				continue
+			}
+			snapshot.ActiveScheduleCount++
+		}
 	}
 	if rt.Manager != nil {
 		managerSnapshot, err := rt.Manager.RecoverableStateSnapshot(ctx)

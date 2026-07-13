@@ -1404,6 +1404,7 @@ const doctorAgentContractsPath = "tests/tier8-boot-verification/test-boot-prompt
 func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude.yaml")
+	storePath := filepath.Join(t.TempDir(), "runtime.db")
 	workspace := []string{
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -1417,6 +1418,10 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		providerPacks = append(providerPacks, fmt.Sprintf("      - %q", dir))
 	}
 	writeRuntimeConfigText(t, path, strings.Join([]string{
+		"store:",
+		"  backend: sqlite",
+		"  sqlite:",
+		"    path: " + storePath,
 		"runtime:",
 		"  recovery_on_startup: false",
 		strings.Join(workspace, "\n"),

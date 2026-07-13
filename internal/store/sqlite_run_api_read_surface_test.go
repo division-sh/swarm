@@ -211,6 +211,8 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	unsettledEventID := uuid.NewString()
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
+	inboundEvidenceEventID := uuid.NewString()
+	directiveEvidenceEventID := uuid.NewString()
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -228,11 +230,15 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 			(?, ?, 'quiescence.active_delivery', 'global', '{}', 'test', 'platform', ?),
 			(?, ?, 'quiescence.missing_pipeline_receipt', 'global', '{}', 'test', 'platform', ?),
 			(?, ?, ?, 'global', '{}', 'test', 'platform', ?),
-			(?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?)
+			(?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?),
+			(?, ?, ?, 'global', '{}', 'test', 'platform', ?),
+			(?, ?, ?, 'global', '{}', 'test', 'platform', ?)
 	`, blockedRunID, activeEventID, now.Add(-50*time.Second),
 		blockedRunID, unsettledEventID, now.Add(-40*time.Second),
 		blockedRunID, runtimeLogEventID, runtimeLogEventName, now.Add(-30*time.Second),
-		readyRunID, readyEventID, now.Add(-20*time.Second)); err != nil {
+		readyRunID, readyEventID, now.Add(-20*time.Second),
+		readyRunID, inboundEvidenceEventID, diagnosticDirectInboundRecord, now.Add(-10*time.Second),
+		readyRunID, directiveEvidenceEventID, diagnosticDirectAgentDirective, now.Add(-5*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}
 	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {

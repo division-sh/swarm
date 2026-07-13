@@ -3,17 +3,20 @@ package store
 import (
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/events"
 )
 
 // diagnosticDirectReplayEventNames mirrors the platform-spec
 // diagnostic_direct_persisted catalog entries. These rows are persisted for
 // queryability and causality, not executable pipeline replay.
 func diagnosticDirectReplayEventNames() []string {
-	return []string{
-		"platform.runtime_log",
-		"platform.agent_directive",
-		"platform.inbound_recorded",
+	types := events.DiagnosticDirectEventTypes()
+	names := make([]string, 0, len(types))
+	for _, eventType := range types {
+		names = append(names, string(eventType))
 	}
+	return names
 }
 
 func diagnosticDirectReplayEventArgs() []any {

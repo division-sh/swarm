@@ -513,7 +513,7 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	default:
 		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
 	}
-	abandoned, err := s.sqliteAbandonPendingRunDeliveriesTx(ctx, tx, state.RunID)
+	abandoned, err := s.sqliteQuiesceStoppedRunWorkTx(ctx, tx, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
@@ -536,6 +536,32 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	state.UpdatedAt = req.Now.UTC()
 	state.AbandonedDeliveries = abandoned
 	return state, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteQuiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time) (int, error) {
+	deliveries, err := sqliteLockActiveRunQuiescenceDeliveriesTx(ctx, tx, []string{runID})
+	if err != nil {
+		return 0, err
+	}
+	eventIDs := map[string]struct{}{}
+	for _, delivery := range deliveries {
+		if err := sqliteTerminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, "run_stopped", reason, now); err != nil {
+			return 0, err
+		}
+		eventIDs[delivery.EventID] = struct{}{}
+	}
+	for eventID := range eventIDs {
+		if err := sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, "run_stopped", reason, now); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := sqliteTerminateActiveRunSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
+		return 0, err
+	}
+	if _, err := sqliteCancelActiveRunTimersTx(ctx, tx, []string{runID}); err != nil {
+		return 0, err
+	}
+	return len(deliveries), nil
 }
 
 func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {

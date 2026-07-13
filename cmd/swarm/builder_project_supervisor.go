@@ -262,13 +262,6 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	candidateHash, err := runtimecontracts.BundleHash(bundle)
-	if err != nil {
-		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle hash: %w", err)
-	}
-	if err := s.rejectChangedStandingBundle(candidateHash); err != nil {
-		return s.CurrentProject(), err
-	}
 	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -322,10 +315,6 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	if err := s.validatePersistedStandingOwnership(ctx, newRT, bundleSourceFact); err != nil {
-		return s.CurrentProject(), err
-	}
-
 	admissionCandidate.catalog = candidateCatalog
 	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, &admissionCandidate)
 	if err != nil {
@@ -371,42 +360,6 @@ func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.
 		candidate.survivingTargets[loaded.BundleHash] = targets
 	}
 	return candidate, nil
-}
-
-func (s *runtimeProjectSupervisor) validatePersistedStandingOwnership(ctx context.Context, candidate *runtime.Runtime, candidateFact runtimecorrelation.BundleSourceFact) error {
-	if candidate == nil || candidate.Stores.PipelineStore == nil {
-		return nil
-	}
-	facts := []runtimecorrelation.BundleSourceFact{candidateFact.Normalized()}
-	s.mu.RLock()
-	manager := s.runtimeContexts
-	currentHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
-	s.mu.RUnlock()
-	if manager != nil {
-		for _, loaded := range manager.LoadedContexts() {
-			if strings.TrimSpace(loaded.BundleHash) == currentHash {
-				continue
-			}
-			facts = append(facts, loaded.BundleSourceFact.Normalized())
-		}
-	}
-	return candidate.Stores.PipelineStore.ValidatePersistedStandingOwnership(ctx, facts)
-}
-
-func (s *runtimeProjectSupervisor) rejectChangedStandingBundle(candidateHash string) error {
-	s.mu.RLock()
-	manager := s.runtimeContexts
-	currentHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
-	currentBundle := s.currentBundle
-	currentRuntime := s.currentRT
-	s.mu.RUnlock()
-	if manager == nil || currentHash == "" || currentHash == strings.TrimSpace(candidateHash) {
-		return nil
-	}
-	if currentRuntime == nil || !bundleHasStandingActivation(currentBundle) {
-		return nil
-	}
-	return fmt.Errorf("standing service bundle change rejected before replacement: admitted bundle_hash=%s candidate bundle_hash=%s; serve the admitted bundle or perform an explicit future reset/migration", currentHash, strings.TrimSpace(candidateHash))
 }
 
 func (s *runtimeProjectSupervisor) sourceReplacementDisabled() string {
@@ -459,9 +412,6 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	s.mu.RUnlock()
 	newHash := strings.TrimSpace(fact.BundleHash)
 	if manager != nil && oldHash != "" {
-		if err := s.rejectChangedStandingBundle(newHash); err != nil {
-			return s.CurrentProject(), err
-		}
 		plannedTargets, err := newRT.PlanStandingTargets()
 		if err != nil {
 			return builderpkg.ProjectStatus{}, err
@@ -510,7 +460,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			rollbackErr := handoff.Rollback()
 			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
-		targets, _, err := newRT.EnsureStandingTargets(ctx)
+		targets, _, err := newRT.EnsureStandingReplacementTargets(ctx, oldRT)
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
@@ -771,7 +721,9 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	}
 	target := lookup.Target
 	lookup.Context.Runtime.InboundGateway.HandleResolvedWebhook(w, r, runtime.InboundTarget{
-		BundleHash: target.BundleHash, FlowID: target.FlowID, RunID: target.RunID,
+		BundleHash: target.BundleHash, ServiceID: target.ServiceID, PackageKey: target.PackageKey,
+		FlowID: target.FlowID, RunID: target.RunID, Generation: target.Generation,
+		PublicationSequence: target.PublicationSequence, InstanceID: target.InstanceID,
 		FlowInstance: target.FlowInstance, EntityID: target.EntityID, EntitySlug: target.Alias,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}, lookup.Context.Source)

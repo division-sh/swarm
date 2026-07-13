@@ -842,7 +842,7 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 
 func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(eventType string, payload []byte) error {
+		PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
 			if strings.TrimSpace(eventType) != "task.completed" {
 				t.Fatalf("unexpected event type %q", eventType)
 			}
@@ -862,7 +862,7 @@ func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 
 func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(string, []byte) error {
+		PayloadValidator: func(context.Context, string, []byte) error {
 			return context.DeadlineExceeded
 		},
 	})
@@ -892,7 +892,7 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 
 func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(string, []byte) error {
+		PayloadValidator: func(context.Context, string, []byte) error {
 			return context.DeadlineExceeded
 		},
 	})
@@ -907,7 +907,7 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 
 func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipientPlanning(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(string, []byte) error {
+		PayloadValidator: func(context.Context, string, []byte) error {
 			return context.DeadlineExceeded
 		},
 	})
