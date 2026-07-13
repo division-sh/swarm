@@ -1,18 +1,16 @@
 package templateflowpilot
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-// Options toggles the template-flow pilot variants used by conformance and
-// runtime tests.
+// Options applies one deliberate negative mutation to the canonical
+// select-or-create artifact.
 type Options struct {
 	BadConnectMapping            bool
 	UnsupportedReceiverSelection bool
@@ -23,7 +21,11 @@ type Options struct {
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := Write(t, opts)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRoot(t)))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t),
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
@@ -37,154 +39,40 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "package.yaml"), `
-name: template-flow-pilot
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: scoring
-    flow: scoring
-    mode: template
-connect:
-  - from: producer.validation_requested
-    to: scoring.validation_requested
-    delivery: one
-`+connectAdapterYAML(opts))
-	writeFile(t, filepath.Join(root, "schema.yaml"), "name: template-flow-pilot\n")
-	writeFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeProducer(t, root, opts)
-	writeScoring(t, root, opts)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectOrCreate)
+	addDataAccumulationOverlay(t, root)
+	applyNegativeMutation(t, root, opts)
 	return root
 }
 
-func connectAdapterYAML(opts Options) string {
-	if !opts.BadConnectMapping {
-		return ""
-	}
-	return `    using:
-      instance:
-        source: missing_account_id
-        target: account_id
-`
-}
-
-func writeProducer(t testing.TB, root string, opts Options) {
+func addDataAccumulationOverlay(t testing.TB, root string) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  inputs:
-    events:
-      - name: intake_received
-        event: intake.received
-        source: external
-  outputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-        key: account_id
-        carries: [account_id, score, decision]
-`)
-	writeFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "producer", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-intake.received:
-  account_id: string
-  score: string
-  decision: string
-validation.requested:
-  account_id: string
-  score: string
-  decision: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
-intake-validator:
-  id: intake-validator
-  execution_type: system_node
-  subscribes_to: [intake.received]
-  produces: [validation.requested]
-  event_handlers:
-    intake.received:
-      emit:
-        event: validation.requested
-`+producerEmitRouteYAML(opts)+`        fields:
-          account_id: payload.account_id
-          score: payload.score
-          decision: payload.decision
-`)
-}
-
-func producerEmitRouteYAML(opts Options) string {
-	if opts.ProducerTarget {
-		return `        target:
-          flow: scoring
-          match:
-            account_id: payload.account_id
-`
-	}
-	if opts.ProducerBroadcast {
-		return "        broadcast: true\n"
-	}
-	return ""
-}
-
-func writeScoring(t testing.TB, root string, opts Options) {
-	t.Helper()
-	writeFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
-name: scoring
-mode: template
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-  outputs:
-    events: []
-`)
-	writeFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "scoring", "tools.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
-validation.requested:
-  account_id: string
-  score: string
-  decision: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
-validation:
-  account_id:
-    type: string
-  score:
-    type: string
-  decision:
-    type: string
-`)
-	writeFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
-scoring-handler:
-  id: scoring-handler
-  execution_type: system_node
-  subscribes_to: [validation.requested]
-  event_handlers:
-    validation.requested:
-`+receiverSelectionYAML(opts)+`      data_accumulation:
+	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
+	canonicalrouting.ReplaceFile(t, producerEvents,
+		"account.requested:\n  account_id: text\n",
+		"account.requested:\n  account_id: text\n  score: text\n  decision: text\n")
+	canonicalrouting.ReplaceFile(t, producerEvents,
+		"account.ready:\n  account_id: text\n",
+		"account.ready:\n  account_id: text\n  score: text\n  decision: text\n")
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "events.yaml"),
+		"account_id: text\n", "account_id: text\n  score: text\n  decision: text\n")
+	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, producerNodes,
+		"          account_id: payload.account_id\n",
+		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
+	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
+	canonicalrouting.ReplaceFile(t, accountSchema,
+		"mode: template\n",
+		"mode: template\ninitial_state: pending\nstates: [pending, done]\nterminal_states: [done]\n")
+	accountEntities := filepath.Join(root, "flows", "account", "entities.yaml")
+	canonicalrouting.ReplaceFile(t, accountEntities,
+		"    _unused_reason: receiver instance identity\n",
+		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
+	accountNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, accountNodes,
+		"    account.ready: {}\n",
+		`    account.ready:
+      data_accumulation:
         writes:
           - source_field: account_id
             target_field: account_id
@@ -196,31 +84,30 @@ scoring-handler:
 `)
 }
 
-func receiverSelectionYAML(opts Options) string {
-	if !opts.UnsupportedReceiverSelection {
-		return ""
-	}
-	return `      select_entity:
-        by:
-          account_id: payload.account_id
-`
-}
-
-func repoRoot(t testing.TB) string {
+func applyNegativeMutation(t testing.TB, root string, opts Options) {
+	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=TestTemplateFlowPilotConformance_FailClosedMatrix
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve repo root")
+	packageFile := filepath.Join(root, "package.yaml")
+	if opts.BadConnectMapping {
+		canonicalrouting.ReplaceFile(t, packageFile,
+			"  - from: producer.account_ready\n    to: account.account_ready\n",
+			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: missing_account_id\n        target: account_id\n")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
-}
-
-func writeFile(t testing.TB, path, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	if opts.UnsupportedReceiverSelection {
+		accountNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
+		canonicalrouting.ReplaceFile(t, accountNodes,
+			"    account.ready:\n      data_accumulation:\n",
+			"    account.ready:\n      select_entity:\n        by:\n          account_id: payload.account_id\n      data_accumulation:\n")
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
+	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
+	if opts.ProducerTarget {
+		canonicalrouting.ReplaceFile(t, producerNodes,
+			"        event: account.ready\n        fields:\n",
+			"        event: account.ready\n        target:\n          flow: account\n          match:\n            account_id: payload.account_id\n        fields:\n")
+	}
+	if opts.ProducerBroadcast {
+		canonicalrouting.ReplaceFile(t, producerNodes,
+			"        event: account.ready\n        fields:\n",
+			"        event: account.ready\n        broadcast: true\n        fields:\n")
 	}
 }

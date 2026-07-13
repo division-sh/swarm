@@ -1,4 +1,0 @@
-name: flow-a
-version: 1.0.0
-platform_version: ">=0.7.0 <0.8.0"
-description: Flow A - creates invoices from completed orders

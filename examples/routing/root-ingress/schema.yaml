@@ -1,0 +1,12 @@
+name: routing-root-ingress
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events:
+      - name: item_received
+        event: item.received
+        source: external
+  outputs:
+    events: []

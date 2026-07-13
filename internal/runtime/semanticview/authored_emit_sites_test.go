@@ -374,6 +374,7 @@ dispatcher:
 }
 
 func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string, broadcast bool) string {
+	// routing-example-census: parser-only issue=none owner=semanticview.authored_emit_site proof=TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return "{}\n"
 	}
@@ -401,6 +402,7 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string,
 }
 
 func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string, broadcast bool) string {
+	// routing-example-census: parser-only issue=none owner=semanticview.authored_emit_site proof=TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return "{}\n"
 	}

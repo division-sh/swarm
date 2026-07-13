@@ -1,0 +1,30 @@
+open_split_issues: [1738, 2023, 2024]
+artifacts:
+  - {root: tests/tier11-flow-composition/test-dynamic-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go, issue: 1738}
+  - {root: tests/tier9-composition-patterns/test-compose-create-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go, issue: 1738}
+  - {root: tests/tier2-accumulation/test-accumulate-all, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-crash-recovery, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-expected-from-entity, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-from-filter, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-idempotent, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-on-complete-rollback, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-on-timeout, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-partial, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-threshold, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-timeout, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier2-accumulation/test-accumulate-with-compute, disposition: different-concept, owner: engine.accumulation, proof: internal/runtime/cataloge2e/tier2_accumulation_e2e_test.go}
+  - {root: tests/tier5-flow-lifecycle/test-timer-cancel, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go}
+  - {root: tests/tier5-flow-lifecycle/test-timer-fire, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go}
+  - {root: tests/tier5-flow-lifecycle/test-timer-recurring, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go}
+  - {root: tests/tier5-flow-lifecycle/test-timer-start-on, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-event-no-consumer, disposition: negative-mutation, owner: bootverify.event_consumer_exists, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-permission-tool-mismatch, disposition: negative-mutation, owner: bootverify.agent_permission_validation, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-prompt-ref, disposition: different-concept, owner: contracts.prompt_resolution, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-prompt-ref-stub, disposition: different-concept, owner: contracts.prompt_resolution, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-prompt-stub, disposition: different-concept, owner: contracts.prompt_resolution, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-boot-success, disposition: different-concept, owner: bootverify.minimal_boot_contract, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier8-boot-verification/test-platform-mailbox-event-subscription, disposition: negative-mutation, owner: bootverify.platform_event_ownership, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go}
+  - {root: tests/tier12-runtime-tools/test-flow-data-access, disposition: different-concept, owner: runtime.flow_data_access, proof: internal/runtime/cataloge2e/tier12_runtime_tools_e2e_test.go}

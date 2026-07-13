@@ -1,5 +1,0 @@
-name: result-sink
-version: 1.0.0
-description: Canonical consumer for analyzer completion output.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

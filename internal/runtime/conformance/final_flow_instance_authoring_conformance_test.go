@@ -31,8 +31,8 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if accountPrimary.EntityType != finalflowinstanceauthoring.TemplateEntityType {
 		t.Fatalf("template primary entity = %q, want %s", accountPrimary.EntityType, finalflowinstanceauthoring.TemplateEntityType)
 	}
-	if got := accountPrimary.Contract.Fields[finalflowinstanceauthoring.TemplateInstanceBy].Type; got != "string" {
-		t.Fatalf("template primary entity key field type = %q, want string", got)
+	if got := accountPrimary.Contract.Fields[finalflowinstanceauthoring.TemplateInstanceBy].Type; got != "text" {
+		t.Fatalf("template primary entity key field type = %q, want text", got)
 	}
 
 	instance, err := bundle.ResolveFlowTemplateInstance(finalflowinstanceauthoring.TemplateFlowID)
@@ -42,16 +42,12 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if got := strings.Join(instance.By, ","); got != finalflowinstanceauthoring.TemplateInstanceBy {
 		t.Fatalf("template instance.by = %q, want %s", got, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
-	if instance.OnMissing != "create" || instance.OnConflict != "reuse" {
-		t.Fatalf("template lifecycle policy = %s/%s, want create/reuse", instance.OnMissing, instance.OnConflict)
-	}
-
 	output, ok := bundle.FlowOutputEventPin(finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
 	if !ok {
 		t.Fatalf("producer output pin %s missing", finalflowinstanceauthoring.ProducerOutputPin)
 	}
-	if output.Key != finalflowinstanceauthoring.TemplatePayloadKey || !finalFixtureContainsString(output.Carries, finalflowinstanceauthoring.TemplatePayloadKey) {
-		t.Fatalf("producer output key/carries = %q/%#v, want %s carried", output.Key, output.Carries, finalflowinstanceauthoring.TemplatePayloadKey)
+	if output.Event != finalflowinstanceauthoring.ProducerOutput || output.Key != "" || len(output.Carries) != 0 {
+		t.Fatalf("producer output = %#v, want canonical event without duplicate key ownership", output)
 	}
 
 	plans, issues := pinrouting.LowerCompositionConnectRoutePlans(source)
@@ -65,14 +61,14 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if plan.ResolutionKind != pinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
 		t.Fatalf("route plan resolution = %s runtime=%v, want instance_key runtime resolution", plan.ResolutionKind, plan.RequiresRuntimeResolution)
 	}
-	if plan.Source.FlowID != finalflowinstanceauthoring.ProducerFlowID || plan.Source.Pin != finalflowinstanceauthoring.ProducerOutputPin || plan.Source.Key != finalflowinstanceauthoring.TemplatePayloadKey {
-		t.Fatalf("route plan source = %#v, want %s.%s keyed by %s", plan.Source, finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin, finalflowinstanceauthoring.TemplatePayloadKey)
+	if plan.Source.FlowID != finalflowinstanceauthoring.ProducerFlowID || plan.Source.Pin != finalflowinstanceauthoring.ProducerOutputPin || plan.Source.Key != "" {
+		t.Fatalf("route plan source = %#v, want %s.%s without producer key authority", plan.Source, finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
 	}
 	if plan.Receiver.FlowID != finalflowinstanceauthoring.TemplateFlowID || plan.Receiver.Pin != finalflowinstanceauthoring.TemplateInputPin || plan.Receiver.Mode != "template" {
 		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateInputPin)
 	}
-	if plan.InstanceKey == nil || strings.Join(plan.InstanceKey.Fields, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
-		t.Fatalf("route plan instance key = %#v, want %s", plan.InstanceKey, finalflowinstanceauthoring.TemplateInstanceBy)
+	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select-or-create" || strings.Join(plan.InstanceKey.Fields, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
+		t.Fatalf("route plan instance key = %#v, want select-or-create/%s", plan.InstanceKey, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
 	if len(plan.InstanceKey.Mappings) != 1 ||
 		plan.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
@@ -138,28 +134,28 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		loadError   bool
 	}{
 		{
-			name:        "missing output key evidence",
+			name:        "missing receiver instance key",
 			opts:        finalflowinstanceauthoring.Options{MissingOutputKey: true},
 			checkID:     "composition_connect_validation",
-			wantMessage: "output_key_missing",
+			wantMessage: "requires instance_key to name a carried field",
 		},
 		{
-			name:        "missing output carries evidence",
+			name:        "missing receiver carry evidence",
 			opts:        finalflowinstanceauthoring.Options{MissingOutputCarries: true},
-			checkID:     "output_pin_key_carries_validation",
-			wantMessage: "carries",
+			checkID:     "composition_connect_validation",
+			wantMessage: "must name a declared carries.account_id field",
 		},
 		{
 			name:        "renamed key adapter references missing producer evidence",
 			opts:        finalflowinstanceauthoring.Options{BadConnectMapping: true},
 			checkID:     "composition_connect_validation",
-			wantMessage: "connect_key_adapter_source_missing",
+			wantMessage: "connect.using.instance is incompatible with input pin resolution",
 		},
 		{
 			name:        "duplicate adapter mapping is ambiguous",
 			opts:        finalflowinstanceauthoring.Options{DuplicateConnectMapping: true},
 			checkID:     "composition_connect_validation",
-			wantMessage: "connect_key_adapter_duplicate_source",
+			wantMessage: "connect.using.instance is incompatible with input pin resolution",
 		},
 		{
 			name:        "normal connected receiver select_entity is illegal",

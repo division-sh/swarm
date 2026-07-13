@@ -1,0 +1,6 @@
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to: [work.ready]
+  event_handlers:
+    work.ready: {}

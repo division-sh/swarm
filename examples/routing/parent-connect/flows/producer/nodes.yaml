@@ -1,0 +1,11 @@
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  produces: [work.ready]
+  event_handlers:
+    work.requested:
+      emit:
+        event: work.ready
+        fields:
+          work_id: payload.work_id

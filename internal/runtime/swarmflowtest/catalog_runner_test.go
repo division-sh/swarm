@@ -2053,7 +2053,6 @@ func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument
 		"tier6-event-loop/test-dead-letter",
 		"tier6-event-loop/test-entity-serialization",
 		"tier6-event-loop/test-on-complete-atomicity-chain",
-		"tier7-composition/test-cross-flow-subscription",
 		"tier7-composition/test-dual-delivery",
 		"tier7-composition/test-multi-gate-pipeline",
 		"tier7-composition/test-wildcard-cross-flow",

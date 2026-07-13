@@ -1,0 +1,4 @@
+account_state:
+  account_id:
+    type: text
+    _unused_reason: receiver instance identity

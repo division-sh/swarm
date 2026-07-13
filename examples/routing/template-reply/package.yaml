@@ -1,0 +1,22 @@
+name: template-reply
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: initiator
+    flow: initiator
+    mode: static
+  - id: requester
+    flow: requester
+    mode: template
+  - id: provider
+    flow: provider
+    mode: static
+connect:
+  - from: initiator.requester_setup
+    to: requester.requester_setup
+  - from: initiator.request_submitted
+    to: requester.request_submitted
+  - from: requester.provider_requested
+    to: provider.provider_requested
+  - from: provider.provider_replied
+    to: requester.provider_replied

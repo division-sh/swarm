@@ -37,25 +37,28 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 		t.Fatalf("template reply hard invalidities = %#v, want none", got)
 	}
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
-	if len(issues) != 0 || len(plans) != 2 {
-		t.Fatalf("reply lowering plans=%#v issues=%#v, want two paired plans", plans, issues)
+	if len(issues) != 0 {
+		t.Fatalf("reply lowering issues=%#v, want none", issues)
 	}
 	roles := map[string]runtimepinrouting.ConnectRoutePlanReplyResolution{}
 	for _, plan := range plans {
 		if plan.ReplyResolution == nil {
-			t.Fatalf("reply plan = %#v, want typed reply resolution", plan)
+			continue
 		}
 		if plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse && plan.ResolutionKind != runtimepinrouting.ConnectResolutionReply {
 			t.Fatalf("reply response plan resolution = %q, want reply", plan.ResolutionKind)
 		}
 		roles[plan.ReplyResolution.Role] = *plan.ReplyResolution
 	}
+	if len(roles) != 2 {
+		t.Fatalf("reply lowering plans=%#v, want exactly two paired reply roles", plans)
+	}
 	for _, role := range []string{runtimepinrouting.ConnectReplyRoleRequest, runtimepinrouting.ConnectReplyRoleResponse} {
 		got, ok := roles[role]
 		if !ok {
 			t.Fatalf("reply role %q missing from %#v", role, roles)
 		}
-		if got.RequestOutputPin != templatereply.RequesterRequestPin || got.ReplyInputPin != templatereply.RequesterReplyPin || got.ProviderFlowID != templatereply.ProviderFlowID || got.CorrelationKey != templatereply.CorrelationKey {
+		if got.RequestOutputPin != templatereply.RequesterRequestPin || got.ReplyInputPin != templatereply.RequesterReplyPin || got.ProviderFlowID != templatereply.ProviderFlowID || got.CorrelationKey != "" {
 			t.Fatalf("reply role %q pairing = %#v", role, got)
 		}
 	}
@@ -126,7 +129,7 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 
 func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPersistedContext(t *testing.T) {
 	ctx := context.Background()
-	source := templatereply.LoadSource(t, templatereply.Options{})
+	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 	store := newReplyConformanceStore()
 	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -271,7 +274,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			source := templatereply.LoadSource(t, templatereply.Options{})
+			source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 			backend := tc.setup(t)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID)

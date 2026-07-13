@@ -28,8 +28,7 @@ pins:
     reads:
       - score
   outputs:
-    events:
-      - item.completed
+    events: []
     writes:
       - status
 required_agents:

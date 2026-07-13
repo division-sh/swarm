@@ -26,7 +26,6 @@ func TestTier11Probe(t *testing.T) {
 		"test-child-flow-pin-wiring",
 		"test-multi-level-policy-inherit",
 		"test-nested-three-levels",
-		"test-required-agents-child",
 		"test-child-flow-sibling-isolation",
 	} {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", fixtureName)

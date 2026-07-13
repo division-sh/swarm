@@ -23,7 +23,6 @@ var tier11FlowCompositionFixtures = []string{
 	"test-data-pin-write-conflict",
 	"test-dynamic-flow-instance",
 	"test-gates-in-child-flow",
-	"test-required-agents-child",
 	"test-child-flow-sibling-isolation",
 	"test-multi-level-policy-inherit",
 	"test-sibling-both-instantiated-isolated",
@@ -37,9 +36,7 @@ var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-wildcard-deep-subscription": {reason: "parent wildcard back-propagation fixture depends on legacy cross-flow subject-link semantics; authored migration belongs to #416"},
 }
 
-var tier11StartedRuntimeFixtures = map[string]struct{}{
-	"test-required-agents-child": {},
-}
+var tier11StartedRuntimeFixtures = map[string]struct{}{}
 
 var tier11StaticMultiEntityRetiredFixtures = map[string]struct{}{
 	"test-child-flow-loads":                   {},

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -1554,16 +1555,24 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	eventID := uuid.NewString()
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   "entity-writer",
+		SubscriberID:   "item-handler",
 	}
-	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootInputProjectEventFixtureFiles()))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t),
+		canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress),
+		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
+	if err != nil {
+		t.Fatalf("load canonical root ingress: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
 	rt, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	resolved := rt.Resolve("thing.created")
-	if len(resolved) != 1 || resolved[0].ID != "entity-writer" || resolved[0].Path != "validation" || resolved[0].RouteSource != "root_input_flow" {
-		t.Fatalf("resolved subscribers = %#v, want root_input_flow validation/entity-writer", resolved)
+	resolved := rt.Resolve("item.received")
+	if len(resolved) != 1 || resolved[0].ID != "item-handler" || resolved[0].Path != "" || resolved[0].RouteSource != "subscription" {
+		t.Fatalf("resolved subscribers = %#v, want canonical same-flow item-handler subscription", resolved)
 	}
 
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{
@@ -1578,13 +1587,13 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("thing.created"))
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("item.received"))
 	evt := eventtest.RootIngress(
 		eventID,
-		events.EventType("thing.created"),
+		events.EventType("item.received"),
 		"",
 		"",
-		[]byte(`{}`),
+		[]byte(`{"item_id":"item-1"}`),
 		0,
 		"",
 		"",
@@ -1599,11 +1608,11 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if len(plan.PersistedRecipients) != 0 {
 		t.Fatalf("persisted recipients = %#v, want none for internal root-input node carrier", plan.PersistedRecipients)
 	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" || plan.RoutedRecipients[0].RouteSource != "root_input_flow" {
-		t.Fatalf("routed recipients = %#v, want loaded root-input validation/entity-writer", plan.RoutedRecipients)
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "item-handler" || plan.RoutedRecipients[0].Path != "" || plan.RoutedRecipients[0].RouteSource != "subscription" {
+		t.Fatalf("routed recipients = %#v, want canonical same-flow item-handler", plan.RoutedRecipients)
 	}
 	if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
-		t.Fatalf("delivery routes = %#v, want empty-target node/entity-writer route", got)
+		t.Fatalf("delivery routes = %#v, want empty-target node/item-handler route", got)
 	}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -1615,6 +1624,44 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	}
 	if routes := store.routes[evt.ID()]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+}
+
+func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t),
+		canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect),
+		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
+	if err != nil {
+		t.Fatalf("load canonical parent connect: %v", err)
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := eventtest.RootIngress(
+		uuid.NewString(), events.EventType("producer/work.ready"), "", "",
+		[]byte(`{"work_id":"work-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 {
+		t.Fatalf("parent-connect plan failure/routes = %q/%#v", plan.TargetFailure, plan.DeliveryRoutes)
+	}
+	want := plan.DeliveryRoutes[0]
+	if want.SubscriberType != "node" || want.SubscriberID != "consumer-node" ||
+		want.Target.FlowID != "consumer" || want.Target.FlowInstance != "consumer" || want.Target.EntityID == "" {
+		t.Fatalf("parent-connect route = %#v, want singular static consumer identity", want)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !deliveryRoutesContain(store.routes[evt.ID()], want) {
+		t.Fatalf("persisted parent-connect routes = %#v, want %#v", store.routes[evt.ID()], want)
 	}
 }
 
@@ -1881,47 +1928,6 @@ version: 1.0.0
   subscribes_to: [opco.spinup_requested]
   event_handlers:
     opco.spinup_requested: {}
-`,
-	}
-}
-
-func routedRootInputProjectEventFixtureFiles() map[string]string {
-	return map[string]string{
-		"package.yaml": `name: test-root-input-project-event
-version: 1.0.0
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
-		"schema.yaml": `name: test-root-input-project-event
-pins:
-  inputs:
-    events: [thing.created]
-  outputs:
-    events: []
-`,
-		"events.yaml": `thing.created:
-  entity_id: string
-`,
-		"flows/validation/schema.yaml": `name: validation
-mode: static
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
-pins:
-  inputs:
-    events: [thing.created]
-  outputs:
-    events: []
-`,
-		"flows/validation/nodes.yaml": `entity-writer:
-  id: entity-writer
-  execution_type: system_node
-  subscribes_to: [thing.created]
-  event_handlers:
-    thing.created: {}
 `,
 	}
 }

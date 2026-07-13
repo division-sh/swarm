@@ -1,0 +1,27 @@
+name: account
+mode: template
+instance:
+  by: account_id
+pins:
+  inputs:
+    events:
+      - name: account_setup
+        event: account.setup
+        resolution:
+          mode: select-or-create
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+  outputs:
+    events: []

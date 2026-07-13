@@ -1,0 +1,6 @@
+validator-node:
+  id: validator-node
+  execution_type: system_node
+  subscribes_to: [validation.requested]
+  event_handlers:
+    validation.requested: {}

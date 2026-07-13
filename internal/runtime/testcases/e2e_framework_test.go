@@ -13,8 +13,8 @@ func TestGenericBundle_E2EFrameworkShape(t *testing.T) {
 	if !hasAll(bundle.FlowInputEvents("intake"), "item.created") {
 		t.Fatalf("expected intake input events, got %v", bundle.FlowInputEvents("intake"))
 	}
-	if !hasAll(bundle.FlowOutputEvents("processing"), "item.completed", "item.rejected") {
-		t.Fatalf("expected processing output events, got %v", bundle.FlowOutputEvents("processing"))
+	if _, ok := bundle.NodeEventHandler("processing-node", "item.review_requested"); !ok {
+		t.Fatal("expected processing handler to support rule-outcome assertions")
 	}
 	if _, ok := bundle.NodeEventHandler("delivery-node", "item.completed"); !ok {
 		t.Fatal("expected delivery handler to support publish-and-wait style assertions")

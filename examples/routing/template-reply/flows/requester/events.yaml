@@ -1,0 +1,9 @@
+requester.setup:
+  account_id: text
+requester.requested:
+  account_id: text
+provider.requested:
+  account_id: text
+provider.replied:
+  account_id: text
+  result: text

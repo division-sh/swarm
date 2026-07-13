@@ -1,0 +1,13 @@
+provider-node:
+  id: provider-node
+  execution_type: system_node
+  subscribes_to: [provider.requested]
+  produces: [provider.replied]
+  event_handlers:
+    provider.requested:
+      emit:
+        event: provider.replied
+        fields:
+          account_id: payload.account_id
+          result:
+            literal: approved

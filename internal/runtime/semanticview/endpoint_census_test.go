@@ -452,7 +452,7 @@ func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		filepath.Join(repoRoot, "tests", "tier7-composition", "test-cross-flow-subscription"),
+		filepath.Join(repoRoot, "examples", "routing", "parent-connect"),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {

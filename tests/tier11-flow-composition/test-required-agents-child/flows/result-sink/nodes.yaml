@@ -1,6 +1,0 @@
-result-recorder:
-  id: result-recorder
-  execution_type: system_node
-  subscribes_to: [analysis.done]
-  event_handlers:
-    analysis.done: {}

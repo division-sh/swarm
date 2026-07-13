@@ -1,8 +1,0 @@
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [item.received]
-  outputs:
-    events: [item.processed]

@@ -107,10 +107,10 @@ func assertSealedPackageConformanceDependencies(t *testing.T, source semanticvie
 func assertSealedPackageConformanceWildcardScope(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
-	if _, ok := source.NodeEventHandler("consumer-handler", "producer/audit.seen"); ok {
+	if _, ok := source.NodeEventHandler("consumer-node", "producer/audit.seen"); ok {
 		t.Fatal("consumer handler matched producer/audit.seen through raw sibling wildcard fallback")
 	}
-	if _, ok := source.NodeEventHandler("consumer-handler", "consumer/audit.seen"); !ok {
+	if _, ok := source.NodeEventHandler("consumer-node", "consumer/audit.seen"); !ok {
 		t.Fatal("consumer handler did not match its own package-subtree wildcard event")
 	}
 }
@@ -126,10 +126,10 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one parent connect route plan", plans)
 	}
 	plan := plans[0]
-	if got, want := plan.Source.ResolvedEvent, "producer/shared.done"; got != want {
+	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}
-	if got, want := plan.Receiver.ResolvedEvent, "consumer/shared.done"; got != want {
+	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
 	if plan.Target.FlowInstance != "consumer" || plan.Target.EntityID != runtimeflowidentity.EntityID("consumer") {
@@ -147,13 +147,13 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if carriers := eb.RouteTable().Resolve("consumer/shared.done"); !sealedPackageConformanceSubscribersContain(carriers, "consumer-handler", "consumer", "receiver_carrier") {
-		t.Fatalf("receiver carrier route consumer/shared.done = %#v, want consumer-handler receiver_carrier", carriers)
+	if carriers := eb.RouteTable().Resolve("consumer/work.ready"); !sealedPackageConformanceSubscribersContain(carriers, "consumer-node", "consumer", "receiver_carrier") {
+		t.Fatalf("receiver carrier route consumer/work.ready = %#v, want consumer-node receiver_carrier", carriers)
 	}
 
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   "consumer-handler",
+		SubscriberID:   "consumer-node",
 		Target: events.RouteIdentity{
 			FlowID:       "consumer",
 			FlowInstance: "consumer",
@@ -162,10 +162,10 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	}
 	evt := eventtest.ChildWithLineage(
 		"evt-sealed-conformance-connect",
-		events.EventType("producer/shared.done"),
+		events.EventType("producer/work.ready"),
 		"producer",
 		"",
-		json.RawMessage(`{"flow_instance":"consumer"}`),
+		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
 		events.EventLineage{RunID: "run-sealed-package-conformance", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
 		events.EventEnvelope{},

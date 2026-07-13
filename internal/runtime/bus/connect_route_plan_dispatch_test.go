@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -1015,7 +1016,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInst
 	}
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   "validator-node-" + minted,
+		SubscriberID:   "validator-node",
 		Target: events.RouteIdentity{
 			FlowID:       "validator",
 			FlowInstance: activation.Instance.InstancePath,
@@ -1112,7 +1113,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	}
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
-		SubscriberID:   "validator-node-" + eventID,
+		SubscriberID:   "validator-node",
 		Target: events.RouteIdentity{
 			FlowID:       "validator",
 			FlowInstance: activation.Instance.InstancePath,
@@ -2833,80 +2834,10 @@ func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 
 func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, mint string) string {
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: create-resolution-connect-route-plan-bus
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: validator
-    flow: validator
-    mode: template
-connect:
-  - from: producer.validation_requested
-    to: validator.validation_requested
-    delivery: one
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-connect-route-plan-bus\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
-name: validator
-mode: template
-instance:
-  by: validation_case_id
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-        resolution:
-          mode: create
-          instance_key:
-            mint: `+mint+`
-            as: validation_case_id
-        carries:
-          validation_case_id:
-            from: instance.key.validation_case_id
-            type: uuid
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), "validation.requested:\n  candidate: string\n  validation_case_id: uuid\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
-validation_case:
-  validation_case_id:
-    type: uuid
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), `
-validator-node:
-  id: validator-node-{validation_case_id}
-  execution_type: system_node
-  event_handlers:
-    validation.requested: {}
-`)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	if strings.TrimSpace(mint) != "uuid" {
+		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), "            mint: uuid\n", "            mint: "+strings.TrimSpace(mint)+"\n")
+	}
 	return root
 }
 
@@ -2916,6 +2847,7 @@ func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMiss
 }
 
 func writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t testing.TB, mode, onMissing, onConflict string) string {
+	// routing-example-census: different-concept issue=1738 owner=resolution_vs_legacy_instance_policy_precedence proof=TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute
 	t.Helper()
 	root := t.TempDir()
 	mode = strings.TrimSpace(mode)
@@ -3001,6 +2933,7 @@ func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_instance_key_adapter proof=TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -3086,6 +3019,7 @@ func writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t testing.TB, delivery, o
 }
 
 func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, delivery, policyLines string) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -3156,6 +3090,7 @@ consumer-node:
 }
 
 func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `

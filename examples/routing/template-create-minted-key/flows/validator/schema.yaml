@@ -1,0 +1,20 @@
+name: validator
+mode: template
+instance:
+  by: validation_case_id
+pins:
+  inputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: uuid
+            as: validation_case_id
+        carries:
+          validation_case_id:
+            from: instance.key.validation_case_id
+            type: uuid
+  outputs:
+    events: []

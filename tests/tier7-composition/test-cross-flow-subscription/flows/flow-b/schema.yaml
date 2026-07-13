@@ -1,9 +1,0 @@
-name: flow-b
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [order.submitted]
-  outputs:
-    events: [order.completed]

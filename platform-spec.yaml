@@ -9697,9 +9697,9 @@ flow_model:
             broadcast:true, receiver select_entity/select_or_create_entity, and
             explicit create_flow_instance are not lifecycle authority.
         implementation_slice_1835:
-          status: spec_locked_create_select_select_or_create_and_fan_in_stream_modes_runnable_remaining_modes_fail_closed
+          status: create_select_select_or_create_fan_in_stream_and_reply_modes_runnable_fan_out_and_fan_in_barrier_fail_closed
           canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
-          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec + internal/runtime/bootverify.composition_connect_validation
+          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
           rule: |
             Receiver input pins may declare an explicit instance-resolution
             contract under `resolution:{mode,...}`. This receiver-side contract
@@ -9718,10 +9718,12 @@ flow_model:
             convergence on exactly one receiver instance for concurrent same-key
             missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
             only for `aggregation: stream` / bounded windowed delivery into an
-            explicit singleton/coordinator receiver. All other locked modes and
-            fan-in barrier semantics are recognized by contracts and verifier
-            and fail closed as
-            design-locked/not-runnable until their implementation slices land.
+            explicit singleton/coordinator receiver. Reply resolution is also
+            runnable through the route-scoped reply-context contract under
+            `engine.cross_flow_routing.reply_resolution`. Fan-out and fan-in
+            barrier semantics are recognized by contracts and verifier and fail
+            closed as design-locked/not-runnable until their implementation
+            slices land.
             Static root ingress, parent-connect static delivery, and
             harness-injected inputs remain existing #1807 input-source /
             connect behavior; they are not instance-resolution runtime modes.
@@ -9898,13 +9900,16 @@ flow_model:
                 common package topology; the route plan owns target-set
                 materialization.
             reply:
-              status: spec_locked_not_runnable_in_1835_pr1
+              status: runnable_v1
               contract: >
                 Reply routes a response back to the originating request
                 instance. By default the platform mints and threads origin
                 instance identity plus request correlation from stable request
                 event identity. An explicit correlation override is reserved for
-                provider-supplied request/idempotency ids.
+                provider-supplied request/idempotency ids. The full lowering,
+                route-scoped delivery-context, persistence, terminal-claim,
+                continuation-carrier, replay, and failure contract is owned by
+                engine.cross_flow_routing.reply_resolution.
           legacy_same_concept_seams:
             non_authoritative_for_new_resolution_surface:
             - flow.instance.by/on_missing/on_conflict as authoring shorthand for `resolution`

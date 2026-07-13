@@ -16,9 +16,7 @@ pins:
       - results
       - priority
   outputs:
-    events:
-      - item.completed
-      - item.rejected
+    events: []
     writes:
       - score
       - status

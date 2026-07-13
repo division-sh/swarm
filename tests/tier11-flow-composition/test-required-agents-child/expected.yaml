@@ -1,9 +1,0 @@
-trigger:
-  event: analyzer-flow/analysis.requested
-  payload:
-expected:
-
-  handler_outcome: success
-  agent_received:
-    analyzer:
-      - analyzer-flow/analysis.requested

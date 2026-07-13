@@ -84,7 +84,18 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			edge := firstInterFlowEdge(t, tc.load())
+			var edge Edge
+			found := false
+			for _, candidate := range tc.load().Edges {
+				if candidate.Scope == DeliveryScopeInterFlowConnect && candidate.Resolution != nil && candidate.Resolution.Mode == tc.mode {
+					edge = candidate
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("topology has no inter-flow %s edge", tc.mode)
+			}
 			if edge.Resolution == nil || edge.Resolution.Mode != tc.mode || edge.Resolution.InstanceKey == nil {
 				t.Fatalf("resolution = %#v, want %s instance key", edge.Resolution, tc.mode)
 			}

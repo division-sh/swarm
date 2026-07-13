@@ -18,7 +18,6 @@ var tier1PrimitiveFixtures = []string{
 	"test-data-accumulation-mapped",
 	"test-emits-multiple",
 	"test-emits-payload-transform",
-	"test-emits-single",
 	"test-from-filter",
 	"test-guard-compound-condition",
 	"test-guard-discard",

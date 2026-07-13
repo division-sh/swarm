@@ -1,0 +1,15 @@
+name: template-select-existing
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: account
+    flow: account
+    mode: template
+connect:
+  - from: producer.account_setup
+    to: account.account_setup
+  - from: producer.account_ready
+    to: account.account_ready

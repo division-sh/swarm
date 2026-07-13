@@ -1,0 +1,4 @@
+validation_case:
+  validation_case_id:
+    type: uuid
+    _unused_reason: platform-minted receiver instance identity

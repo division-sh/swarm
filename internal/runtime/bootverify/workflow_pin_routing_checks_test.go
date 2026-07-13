@@ -21,6 +21,7 @@ func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *te
 }
 
 func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_AllowsExplicitBroadcastOptOut
 	bundle := loadPinRoutingVerifyBundle(t, "emit:\n        event: result.ready\n        broadcast: true\n")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "pin_target_resolution", "") {
@@ -47,6 +48,7 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t
 }
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath(t *testing.T) {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -285,6 +287,7 @@ func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPat
 }
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
         event: shared.ready
@@ -427,6 +430,7 @@ func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposi
 }
 
 func TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_event_identity proof=TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents
 	for _, tt := range []struct {
 		name string
 		body string
@@ -519,6 +523,7 @@ func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T)
 }
 
 func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *testing.T) {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready
@@ -852,6 +857,7 @@ consumer:
 }
 
 func pinRoutingProducerRouteConnect() string {
+	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_resolution proof=TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath
 	return `
 connect:
   - from: producer.shared.ready
@@ -860,6 +866,7 @@ connect:
 }
 
 func pinRoutingProducerRouteAdaptedConnect() string {
+	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_resolution proof=TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath
 	return `
 connect:
   - from: producer.shared.ready
@@ -878,6 +885,7 @@ type selectEntityDemotionFixtureOptions struct {
 }
 
 func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtureOptions) *runtimecontracts.WorkflowContractBundle {
+	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=TestRedundantInTopologySelectEntityFailsClosedForParentConnect
 	t.Helper()
 	root := t.TempDir()
 	consumerMode := opts.consumerMode
@@ -950,6 +958,7 @@ flows:`+flows+connectBlock+`
 }
 
 func writeSelectEntityDemotionProducerFlow(t *testing.T, root string) {
+	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=TestRedundantInTopologySelectEntityFailsClosedForParentConnect
 	t.Helper()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
@@ -1043,6 +1052,7 @@ other-consumer-node:
 }
 
 func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selectEntityDemotionFixtureOptions) {
+	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=TestRedundantInTopologySelectEntityFailsClosedForParentConnect
 	t.Helper()
 	consumerMode := opts.consumerMode
 	if strings.TrimSpace(consumerMode) == "" {
@@ -1267,6 +1277,7 @@ flows: []
 }
 
 func loadPinRoutingRootConnectBundle(t *testing.T, emitBlock string) *runtimecontracts.WorkflowContractBundle {
+	// routing-example-census: different-concept issue=none owner=bootverify.root_output_connect_validation proof=TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect
 	t.Helper()
 	root := t.TempDir()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
@@ -1336,6 +1347,7 @@ root.ready:
 }
 
 func pinRoutingVerifyNodeYAML(nodeID, trigger, eventType string, broadcast bool) string {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism
 	if strings.TrimSpace(nodeID) == "" {
 		return "{}\n"
 	}
@@ -1372,6 +1384,7 @@ func pinRoutingVerifyGuardNodeYAML(nodeID, trigger, eventType string) string {
 }
 
 func pinRoutingVerifyRuleNodeYAML(nodeID, trigger, eventType string, broadcast bool) string {
+	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism
 	if strings.TrimSpace(nodeID) == "" {
 		return "{}\n"
 	}

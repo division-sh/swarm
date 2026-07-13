@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
@@ -36,14 +37,14 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	if !strings.HasPrefix(plan.AuthoredLocation, filepath.Join(root, "package.yaml")+":") {
 		t.Fatalf("AuthoredLocation = %q, want exact root package.yaml:line", plan.AuthoredLocation)
 	}
-	if got, want := plan.Source.ResolvedEvent, "producer/deploy.done"; got != want {
+	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("Source.ResolvedEvent = %q, want %q", got, want)
 	}
-	if got, want := plan.Receiver.ResolvedEvent, "consumer/deploy.completed"; got != want {
+	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("Receiver.ResolvedEvent = %q, want %q", got, want)
 	}
-	if plan.Address == nil || plan.Address.By != "vertical_id" {
-		t.Fatalf("Address = %#v, want loaded vertical_id address", plan.Address)
+	if plan.Address == nil || plan.Address.By != "work_id" {
+		t.Fatalf("Address = %#v, want loaded work_id address", plan.Address)
 	}
 	if got, want := plan.ResolutionKind, ConnectResolutionStatic; got != want {
 		t.Fatalf("ResolutionKind = %q, want %q", got, want)
@@ -652,7 +653,7 @@ func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *tes
 		Descriptors: []Descriptor{
 			{
 				EntityID:     "ent-address",
-				FlowInstance: "consumer/addressed",
+				FlowInstance: "account/addressed",
 				AddressFields: map[string]string{
 					"entity.customer_id": "cust-1",
 					"entity.vertical_id": "v-other",
@@ -660,7 +661,7 @@ func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *tes
 			},
 			{
 				EntityID:     "ent-instance",
-				FlowInstance: "consumer/instance-key",
+				FlowInstance: "account/instance-key",
 				AddressFields: map[string]string{
 					"entity.customer_id": "cust-other",
 					"entity.vertical_id": "v-wrong",
@@ -672,7 +673,7 @@ func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *tes
 	if materialized.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", materialized.Failure)
 	}
-	if got, want := materialized.Target.FlowInstance, "consumer/addressed"; got != want {
+	if got, want := materialized.Target.FlowInstance, "account/addressed"; got != want {
 		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
 	}
 }
@@ -1093,6 +1094,7 @@ func TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTar
 }
 
 func TestLowerCompositionConnectRoutePlanFailsClosedForInvalidInputs(t *testing.T) {
+	// routing-example-census: parser-only issue=none owner=pinrouting.typed_route_plan_lowering proof=TestLowerCompositionConnectRoutePlanFailsClosedForInvalidInputs
 	tests := []struct {
 		name    string
 		connect runtimecontracts.FlowPackageConnect
@@ -1289,56 +1291,25 @@ func outputEventNames(pins []runtimecontracts.FlowOutputEventPin) []string {
 
 func writeConnectRoutePlanPackageFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    adapter: deploy_done_to_completed
-    delivery: one
+	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "    to: consumer.work_ready\n", `    to: consumer.work_ready
+    adapter: work_ready_projection
     map:
-      vertical_id:
-        source: payload.vertical_id
-        target: entity.vertical_id
+      work_id:
+        source: payload.work_id
+        target: entity.work_id
 `)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-`, "deploy.done: {}\n", "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "consumer", `
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.completed
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), "        event: work.ready\n", `        event: work.ready
         address:
-          by: vertical_id
-          source: payload.vertical_id
-          target: entity.vertical_id
+          by: work_id
+          source: payload.work_id
+          target: entity.work_id
           cardinality: one
-`, "deploy.completed: {}\n", `
-deployment:
-  vertical_id:
-    type: string
+`)
+	canonicalrouting.WriteFile(t, root, "flows/consumer/entities.yaml", `
+work:
+  work_id:
+    type: text
 `)
 	return root
 }
@@ -1349,67 +1320,10 @@ func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
 
 func writeCreateResolutionConnectRoutePlanPackageFixture(t *testing.T, mint string) string {
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: create-resolution-connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: validator
-    flow: validator
-    mode: template
-connect:
-  - from: producer.validation_requested
-    to: validator.validation_requested
-    delivery: one
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-`, "validation.requested:\n  candidate: string\n", "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
-name: validator
-mode: template
-instance:
-  by: validation_case_id
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: validation_requested
-        event: validation.requested
-        resolution:
-          mode: create
-          instance_key:
-            mint: `+mint+`
-            as: validation_case_id
-        carries:
-          validation_case_id:
-            from: instance.key.validation_case_id
-            type: uuid
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), "validation.requested:\n  candidate: string\n  validation_case_id: uuid\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
-validation_case:
-  validation_case_id:
-    type: uuid
-`)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	if strings.TrimSpace(mint) != "uuid" {
+		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), "            mint: uuid\n", "            mint: "+strings.TrimSpace(mint)+"\n")
+	}
 	return root
 }
 
@@ -1442,70 +1356,47 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T
 	if mode == "" {
 		mode = runtimecontracts.FlowInputResolutionModeSelect
 	}
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: select-resolution-connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: account
-    flow: account
-    mode: template
-connect:
-  - from: producer.account_ready
-    to: account.account_ready
-    delivery: one
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: account_ready
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
+    to: account.account_setup
+`, "")
+	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
+	canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
         event: account.ready
-`, "account.ready:\n  account_id: string\n", "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
-name: account
-mode: template
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: account_ready
+        resolution:
+          mode: select
+          instance_key: account_id
+`, `      - name: account_ready
         event: account.ready
         resolution:
           mode: `+mode+`
           instance_key: account_id
-`+options.extraResolution+`
-        carries:
+`+options.extraResolution)
+	canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: `+mode+`
+          instance_key: account_id
+`+options.extraResolution+`        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+`, `      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: `+mode+`
+          instance_key: account_id
+`+options.extraResolution+`        carries:
           account_id:
             from: payload.account_id
             type: `+accountIDCarryType+`
 `)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n  account_id: string\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
-account_state:
-  account_id:
-    type: `+accountIDEntityType+`
-`)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: "+accountIDEntityType+"\n")
 	return root
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1565,6 +1456,7 @@ deployment:
 }
 
 func writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t *testing.T, usingBlock, outputKey, outputCarries, instanceBy string) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1625,66 +1517,46 @@ deployment:
 
 func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: addressed-template-connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
+    to: account.account_setup
+`, "")
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `      - name: account_ready
+        event: account.ready
+`, `      - name: account_ready
+        event: account.ready
+        key: account_id
+        carries: [account_id, customer_id]
 `)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: addressed-template-connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id, customer_id]
-`, "deploy.done:\n  vertical_id: string\n  customer_id: string\n", "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: vertical_id
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
+	for _, eventsFile := range []string{"flows/producer/events.yaml", "flows/account/events.yaml"} {
+		canonicalrouting.ReplaceFile(t, filepath.Join(root, eventsFile), `account.ready:
+  account_id: text
+`, `account.ready:
+  account_id: text
+  customer_id: text
+`)
+	}
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: text
+`, `      - name: account_ready
+        event: account.ready
         address:
           by: customer_id
           source: payload.customer_id
           target: entity.customer_id
           cardinality: one
 `)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n  customer_id: string\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `    _unused_reason: receiver instance identity
+`, `    _unused_reason: receiver instance identity
   customer_id:
-    type: string
+    type: text
     indexed: true
 `)
 	return root

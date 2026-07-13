@@ -10,7 +10,6 @@ import (
 
 var tier7CompositionFixtures = []string{
 	"test-agent-emits-to-node",
-	"test-cross-flow-subscription",
 	"test-dual-delivery",
 	"test-full-lifecycle",
 	"test-multi-gate-pipeline",
@@ -25,8 +24,7 @@ var tier7StartedRuntimeFixtures = map[string]struct{}{
 }
 
 var tier7StaticMultiEntityRetiredFixtures = map[string]struct{}{
-	"test-cross-flow-subscription": {},
-	"test-wildcard-cross-flow":     {},
+	"test-wildcard-cross-flow": {},
 }
 
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {

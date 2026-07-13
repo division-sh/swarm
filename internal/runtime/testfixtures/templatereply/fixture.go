@@ -1,13 +1,12 @@
 package templatereply
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const (
@@ -31,6 +30,7 @@ type Options struct {
 	AmbiguousRequestEdge      bool
 	MismatchedProvider        bool
 	DefaultEventIDCorrelation bool
+	ExplicitCorrelation       bool
 	OptionalReplyCorrelation  bool
 	ProviderContinuation      string
 	ContinuationRequestKey    string
@@ -49,7 +49,11 @@ func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBu
 func LoadBundleResult(t testing.TB, opts Options) (*runtimecontracts.WorkflowContractBundle, error) {
 	t.Helper()
 	root := Write(t, opts)
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRoot(t)))
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t),
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
 }
 
 func LoadSource(t testing.TB, opts Options) semanticview.Source {
@@ -59,151 +63,125 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "package.yaml"), packageYAML(opts))
-	writeFile(t, filepath.Join(root, "schema.yaml"), "name: template-reply\n")
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeFile(t, filepath.Join(root, name), "{}\n")
+	if opts == (Options{}) || opts.DefaultEventIDCorrelation {
+		return canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateReply)
 	}
-	writeRequester(t, root, opts)
-	writeProvider(t, root, "provider", opts)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateReply)
+	if requiresExplicitCorrelation(opts) {
+		addExplicitCorrelation(t, root)
+	}
+	requesterSchema := filepath.Join(root, "flows", RequesterFlowID, "schema.yaml")
+	if opts.MissingRepliesTo {
+		canonicalrouting.ReplaceFile(t, requesterSchema, "          replies_to: provider_requested\n", "")
+	}
+	if opts.MissingCorrelationCarry {
+		canonicalrouting.ReplaceFile(t, requesterSchema, "        carries: [provider_request_id]\n", "")
+	}
+	packageFile := filepath.Join(root, "package.yaml")
+	if opts.AmbiguousRequestEdge {
+		canonicalrouting.ReplaceFile(t, packageFile,
+			"  - from: requester.provider_requested\n    to: provider.provider_requested\n",
+			"  - from: requester.provider_requested\n    to: provider.provider_requested\n  - from: requester.provider_requested\n    to: provider.provider_requested\n")
+	}
 	if opts.MismatchedProvider {
-		writeProvider(t, root, "other-provider", Options{})
+		addMismatchedProvider(t, root)
+	}
+	if opts.ProviderContinuation != "" {
+		addProviderContinuation(t, root, opts)
 	}
 	return root
 }
 
-func packageYAML(opts Options) string {
-	extraFlow := ""
-	replyFrom := "provider.provider_replied"
-	if opts.MismatchedProvider {
-		extraFlow = "  - id: other-provider\n    flow: other-provider\n    mode: static\n"
-		replyFrom = "other-provider.provider_replied"
-	}
-	extraRequest := ""
-	if opts.AmbiguousRequestEdge {
-		extraRequest = "  - from: requester.provider_requested\n    to: provider.provider_requested\n"
-	}
-	return `name: template-reply
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: requester
-    flow: requester
-    mode: template
-  - id: provider
-    flow: provider
-    mode: static
-` + extraFlow + `connect:
-  - from: requester.provider_requested
-    to: provider.provider_requested
-` + extraRequest + `  - from: ` + replyFrom + `
-    to: requester.provider_replied
-`
+func requiresExplicitCorrelation(opts Options) bool {
+	return opts.ExplicitCorrelation || opts.MissingRepliesTo || opts.MissingCorrelationCarry ||
+		opts.AmbiguousRequestEdge || opts.MismatchedProvider || opts.OptionalReplyCorrelation ||
+		opts.ProviderContinuation != ""
 }
 
-func writeRequester(t testing.TB, root string, opts Options) {
-	repliesTo := "          replies_to: provider_requested\n"
-	if opts.MissingRepliesTo {
-		repliesTo = ""
+func addExplicitCorrelation(t testing.TB, root string) {
+	t.Helper()
+	requesterSchema := filepath.Join(root, "flows", RequesterFlowID, "schema.yaml")
+	canonicalrouting.ReplaceFile(t, requesterSchema,
+		"          replies_to: provider_requested\n",
+		"          replies_to: provider_requested\n          correlation_key: provider_request_id\n")
+	canonicalrouting.ReplaceFile(t, requesterSchema,
+		"      - name: provider_requested\n        event: provider.requested\n",
+		"      - name: provider_requested\n        event: provider.requested\n        key: provider_request_id\n        carries: [provider_request_id]\n")
+	providerSchema := filepath.Join(root, "flows", ProviderFlowID, "schema.yaml")
+	canonicalrouting.ReplaceFile(t, providerSchema,
+		"      - name: provider_replied\n        event: provider.replied\n",
+		"      - name: provider_replied\n        event: provider.replied\n        key: provider_request_id\n        carries: [provider_request_id]\n")
+	for _, flowID := range []string{RequesterFlowID, ProviderFlowID} {
+		eventsFile := filepath.Join(root, "flows", flowID, "events.yaml")
+		canonicalrouting.ReplaceFile(t, eventsFile, "provider.requested:\n", "provider.requested:\n  provider_request_id: text\n")
+		canonicalrouting.ReplaceFile(t, eventsFile, "provider.replied:\n", "provider.replied:\n  provider_request_id: text\n")
 	}
-	carries := "        carries: [provider_request_id]\n"
-	if opts.MissingCorrelationCarry {
-		carries = ""
-	}
-	correlation := "          correlation_key: provider_request_id\n"
-	if opts.DefaultEventIDCorrelation {
-		correlation = ""
-	}
-	writeFile(t, filepath.Join(root, "flows", "requester", "schema.yaml"), `
-name: requester
-mode: template
-instance:
-  by: account_id
-  on_missing: reject
-  on_conflict: reject
-initial_state: active
-states: [active]
-pins:
-  inputs:
-    events:
-      - name: provider_replied
-        event: provider.replied
-        resolution:
-          mode: reply
-`+repliesTo+correlation+`  outputs:
-    events:
-      - name: provider_requested
-        event: provider.requested
-        key: provider_request_id
-`+carries)
-	writeFlowSupportFiles(t, root, "requester")
-	writeFile(t, filepath.Join(root, "flows", "requester", "entities.yaml"), `
-requester_state:
-  account_id:
-    type: text
-    _unused_reason: template reply origin identity fixture field
-`)
-	writeFile(t, filepath.Join(root, "flows", "requester", "events.yaml"), eventContractsYAML(opts.OptionalReplyCorrelation))
-	writeFile(t, filepath.Join(root, "flows", "requester", "nodes.yaml"), `
-requester-node:
-  id: requester-node
-  execution_type: system_node
-  subscribes_to: [provider.replied]
-  event_handlers:
-    provider.replied:
-      advances_to: active
-`)
+	initiatorEvents := filepath.Join(root, "flows", "initiator", "events.yaml")
+	canonicalrouting.ReplaceFile(t, initiatorEvents,
+		"request.submitted:\n  account_id: text\n",
+		"request.submitted:\n  account_id: text\n  provider_request_id: text\n")
+	canonicalrouting.ReplaceFile(t, initiatorEvents,
+		"requester.requested:\n  account_id: text\n",
+		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
+	requesterEvents := filepath.Join(root, "flows", RequesterFlowID, "events.yaml")
+	canonicalrouting.ReplaceFile(t, requesterEvents,
+		"requester.requested:\n  account_id: text\n",
+		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
+	initiatorNodes := filepath.Join(root, "flows", "initiator", "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, initiatorNodes,
+		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",
+		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n          provider_request_id: payload.provider_request_id\n")
+	requesterNodes := filepath.Join(root, "flows", RequesterFlowID, "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, requesterNodes,
+		"          account_id: payload.account_id\n",
+		"          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
+	providerNodes := filepath.Join(root, "flows", ProviderFlowID, "nodes.yaml")
+	canonicalrouting.ReplaceFile(t, providerNodes,
+		"        fields:\n          account_id: payload.account_id\n",
+		"        fields:\n          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
 }
 
-func writeProvider(t testing.TB, root, flowID string, opts Options) {
-	writeFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
-name: `+flowID+`
-mode: static
-pins:
-  inputs:
-    events:
-      - name: provider_requested
-        event: provider.requested
-`+providerContinuationInputsYAML(opts)+`  outputs:
-    events:
-      - name: provider_replied
-        event: provider.replied
-        key: provider_request_id
-        carries: [provider_request_id]
-`)
-	writeFlowSupportFiles(t, root, flowID)
-	writeFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), eventContractsYAML(opts.OptionalReplyCorrelation))
-	writeFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), providerNodesYAML(opts))
+func addMismatchedProvider(t testing.TB, root string) {
+	t.Helper()
+	packageFile := filepath.Join(root, "package.yaml")
+	canonicalrouting.ReplaceFile(t, packageFile,
+		"  - id: provider\n    flow: provider\n    mode: static\n",
+		"  - id: provider\n    flow: provider\n    mode: static\n  - id: other-provider\n    flow: other-provider\n    mode: static\n")
+	canonicalrouting.ReplaceFile(t, packageFile,
+		"  - from: provider.provider_replied\n    to: requester.provider_replied\n",
+		"  - from: other-provider.provider_replied\n    to: requester.provider_replied\n")
+	canonicalrouting.CopyTree(t, filepath.Join(root, "flows", ProviderFlowID), filepath.Join(root, "flows", "other-provider"))
+	otherSchema := filepath.Join(root, "flows", "other-provider", "schema.yaml")
+	canonicalrouting.ReplaceFile(t, otherSchema, "name: provider\n", "name: other-provider\n")
 }
 
-func providerContinuationInputsYAML(opts Options) string {
+func addProviderContinuation(t testing.TB, root string, opts Options) {
+	t.Helper()
+	providerSchema := filepath.Join(root, "flows", ProviderFlowID, "schema.yaml")
 	switch opts.ProviderContinuation {
 	case ContinuationHuman:
-		return `      - name: human_task_deferred
+		canonicalrouting.ReplaceFile(t, providerSchema, "  outputs:\n", `      - name: human_task_deferred
         event: human_task.deferred
       - name: human_task_approved
         event: human_task.approved
-`
+  outputs:
+`)
+		canonicalrouting.WriteFile(t, root, "flows/provider/nodes.yaml", humanProviderNodes(opts))
 	default:
-		return ""
+		t.Fatalf("unsupported provider continuation %q", opts.ProviderContinuation)
 	}
 }
 
-func providerNodesYAML(opts Options) string {
-	switch opts.ProviderContinuation {
-	case ContinuationHuman:
-		requestKey := opts.ContinuationRequestKey
-		if requestKey == "" {
-			requestKey = "human-request"
-		}
-		accountID := opts.ContinuationAccountID
-		if accountID == "" {
-			accountID = "account-a"
-		}
-		return `
-provider-node:
+func humanProviderNodes(opts Options) string {
+	requestKey := opts.ContinuationRequestKey
+	if requestKey == "" {
+		requestKey = "human-request"
+	}
+	accountID := opts.ContinuationAccountID
+	if accountID == "" {
+		accountID = "account-a"
+	}
+	return `provider-node:
   id: provider-node
   execution_type: system_node
   subscribes_to: [provider.requested, human_task.deferred, human_task.approved]
@@ -215,64 +193,8 @@ provider-node:
       emit:
         event: provider.replied
         fields:
-          provider_request_id:
-            literal: ` + requestKey + `
-          account_id:
-            literal: ` + accountID + `
-          result:
-            literal: approved
+          provider_request_id: {literal: ` + requestKey + `}
+          account_id: {literal: ` + accountID + `}
+          result: {literal: approved}
 `
-	default:
-		return `
-provider-node:
-  id: provider-node
-  execution_type: system_node
-  subscribes_to: [provider.requested]
-  event_handlers:
-    provider.requested: {}
-`
-	}
-}
-
-func eventContractsYAML(optionalReplyCorrelation bool) string {
-	replyRequired := "[provider_request_id, account_id, result]"
-	if optionalReplyCorrelation {
-		replyRequired = "[account_id, result]"
-	}
-	return `
-provider.requested:
-  provider_request_id: text
-  account_id: text
-  required: [provider_request_id, account_id]
-provider.replied:
-  provider_request_id: text
-  account_id: text
-  result: text
-  required: ` + replyRequired + `
-`
-}
-
-func writeFlowSupportFiles(t testing.TB, root, flowID string) {
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeFile(t, filepath.Join(root, "flows", flowID, name), "{}\n")
-	}
-}
-
-func writeFile(t testing.TB, path, body string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-func repoRoot(t testing.TB) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve template reply fixture path")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
 }

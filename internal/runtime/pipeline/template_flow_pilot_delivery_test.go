@@ -25,11 +25,11 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	entityID := uuid.NewString()
 	instanceID := "ti-template-flow-pilot"
-	flowInstance := "scoring/" + instanceID
+	flowInstance := "account/" + instanceID
 	if err := workflowStore.Create(ctx, WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
-		WorkflowName:    "scoring",
+		WorkflowName:    "account",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Config: map[string]any{
@@ -44,10 +44,10 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 		t.Fatalf("seed scoring workflow instance: %v", err)
 	}
 
-	target := events.RouteIdentity{FlowID: "scoring", FlowInstance: flowInstance, EntityID: entityID}
+	target := events.RouteIdentity{FlowID: "account", FlowInstance: flowInstance, EntityID: entityID}
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
-		events.EventType("producer/validation.requested"),
+		events.EventType("producer/account.ready"),
 		"producer",
 		"",
 		json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
@@ -58,14 +58,14 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 		time.Now().UTC(),
 	)
 	seedTemplateFlowPilotPipelineEvent(t, db, ctx, evt)
-	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), "scoring-handler", target)
+	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), "account-node", target)
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
 	if err != nil {
 		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
 	}
 	if !handled {
-		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want scoring handler delivery")
+		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want account handler delivery")
 	}
 	loaded, ok, err := workflowStore.Load(ctx, entityID)
 	if err != nil {
@@ -74,13 +74,13 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	if !ok {
 		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
 	}
-	if loaded.WorkflowName != "scoring" || loaded.CurrentState != "done" {
-		t.Fatalf("loaded scoring instance = storage:%q workflow:%q state:%q, want scoring/done", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
+	if loaded.WorkflowName != "account" || loaded.CurrentState != "done" {
+		t.Fatalf("loaded account instance = storage:%q workflow:%q state:%q, want account/done", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
 	}
 	if loaded.Metadata["account_id"] != "acct-1" || loaded.Metadata["score"] != "91" || loaded.Metadata["decision"] != "approved" {
-		t.Fatalf("loaded scoring metadata = %#v, want account_id/score/decision from routed payload", loaded.Metadata)
+		t.Fatalf("loaded account metadata = %#v, want account_id/score/decision from routed payload", loaded.Metadata)
 	}
-	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), "scoring-handler", "delivered")
+	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), "account-node", "delivered")
 }
 
 func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *WorkflowInstanceStore) {

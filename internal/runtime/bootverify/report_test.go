@@ -19,6 +19,8 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	"gopkg.in/yaml.v3"
 )
 
@@ -605,6 +607,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=bootverify.active_role_carrier proof=TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier
 	t.Parallel()
 
 	cases := []struct {
@@ -4504,10 +4507,10 @@ func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "event_producer_exists", "consumer/ticket.ready") {
+	if reportContains(report.Warnings(), "event_producer_exists", "consumer/work.ready") {
 		t.Fatalf("unexpected event_producer_exists warning for localized flow input, got %#v", report.Warnings())
 	}
-	if reportContains(report.Warnings(), "event_consumer_exists", "producer/ticket.ready") {
+	if reportContains(report.Warnings(), "event_consumer_exists", "producer/work.ready") {
 		t.Fatalf("unexpected event_consumer_exists warning for localized producer output, got %#v", report.Warnings())
 	}
 }
@@ -4536,12 +4539,12 @@ func TestRun_DoesNotWarnForImportedWildcardConsumer(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-required-agents-child"))
+	bundle := requiredagentsparentconnect.LoadBundle(t)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "event_consumer_exists", "analysis.done") {
-		t.Fatalf("unexpected event_consumer_exists warning for analysis.done flow output, got %#v", report.Warnings())
+	if reportContains(report.Warnings(), "event_consumer_exists", "work.ready") {
+		t.Fatalf("unexpected event_consumer_exists warning for work.ready flow output, got %#v", report.Warnings())
 	}
 }
 
@@ -6965,6 +6968,7 @@ type rootDefaultStaticInputPinFixtureOptions struct {
 }
 
 func writeRootDefaultStaticInputPinFixtureWithOptions(t *testing.T, opts rootDefaultStaticInputPinFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.root_primary_entity_validation proof=TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7247,6 +7251,7 @@ type timerStateCancelReachabilityFixtureOptions struct {
 }
 
 func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCancelReachabilityFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.timer_reachability proof=TestTimerReachabilityConsumesAccumulatorTransitionCarriers
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7366,6 +7371,7 @@ support-node:
 }
 
 func timerValidationEventEntry(eventType string, externalSource bool, swarmLines string) string {
+	// routing-example-census: parser-only issue=none owner=bootverify.timer_validation_fixture proof=TestTimerReachabilityConsumesAccumulatorTransitionCarriers
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return ""
@@ -7512,6 +7518,7 @@ consumer-node:
 }
 
 func writeInputPinExternalScopeFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_scope proof=TestRun_ConstrainsExternalInputProducerPathToConsumingScope
 	t.Helper()
 	root := t.TempDir()
 
@@ -7565,95 +7572,7 @@ pins:
 
 func writeLocalizedEventRoutingFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: localized-event-routing
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - from: producer.ticket_ready
-    to: consumer.ticket_ready
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: localized-event-routing\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events:
-      - name: ticket_ready
-        event: ticket.ready
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-ticket.ready:
-  entity_id: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
-producer-node:
-  id: producer-node
-  execution_type: system_node
-  subscribes_to:
-    - start
-  produces:
-    - ticket.ready
-  event_handlers:
-    start:
-      emit: ticket.ready
-`)
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, done]
-pins:
-  inputs:
-    events:
-      - name: ticket_ready
-        event: ticket.ready
-  outputs:
-    events: []
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-ticket.ready:
-  entity_id: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
-consumer-node:
-  id: consumer-node
-  execution_type: system_node
-  subscribes_to:
-    - ticket.ready
-  event_handlers:
-    ticket.ready:
-      create_entity: true
-      advances_to: done
-`)
-
-	return root
+	return canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect)
 }
 
 func writeStateReachabilityFixture(t *testing.T) string {

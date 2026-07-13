@@ -26,7 +26,7 @@ func TestCatalogRequiredSmoke(t *testing.T) {
 	t.Run("assertions_ignore_top_level_non_success_preview", TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof)
 	t.Run("assertions_cross_flow_emitted_events", TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission)
 	t.Run("tier1_emits_single_runtime", func(t *testing.T) {
-		runCatalogRequiredSmokeFixture(t, filepath.Join(repoRootFromCatalogE2E(t), "tests", "tier1-primitives", "test-emits-single"), false)
+		runCatalogRequiredSmokeFixture(t, filepath.Join(repoRootFromCatalogE2E(t), "examples", "routing", "root-ingress"), false)
 	})
 }
 

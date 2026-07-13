@@ -1,9 +1,0 @@
-name: flow-a
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [flow-b/order.completed]
-  outputs:
-    events: [invoice.created]

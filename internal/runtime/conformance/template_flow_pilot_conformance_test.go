@@ -33,29 +33,26 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if !ok {
 		t.Fatal("template-flow pilot source did not expose bundle")
 	}
-	primary, err := bundle.ResolveFlowPrimaryEntity("scoring")
+	primary, err := bundle.ResolveFlowPrimaryEntity("account")
 	if err != nil {
-		t.Fatalf("ResolveFlowPrimaryEntity(scoring): %v", err)
+		t.Fatalf("ResolveFlowPrimaryEntity(account): %v", err)
 	}
-	if primary.EntityType != "validation" {
-		t.Fatalf("scoring primary entity = %q, want validation", primary.EntityType)
+	if primary.EntityType != "account_state" {
+		t.Fatalf("account primary entity = %q, want account_state", primary.EntityType)
 	}
-	instance, err := bundle.ResolveFlowTemplateInstance("scoring")
+	instance, err := bundle.ResolveFlowTemplateInstance("account")
 	if err != nil {
-		t.Fatalf("ResolveFlowTemplateInstance(scoring): %v", err)
+		t.Fatalf("ResolveFlowTemplateInstance(account): %v", err)
 	}
 	if got := strings.Join(instance.By, ","); got != "account_id" {
-		t.Fatalf("scoring instance fields = %q, want account_id", got)
+		t.Fatalf("account instance fields = %q, want account_id", got)
 	}
-	if instance.OnMissing != "create" || instance.OnConflict != "reuse" {
-		t.Fatalf("scoring lifecycle policy = %s/%s, want create/reuse", instance.OnMissing, instance.OnConflict)
-	}
-	output, ok := bundle.FlowOutputEventPin("producer", "validation_requested")
+	output, ok := bundle.FlowOutputEventPin("producer", "account_ready")
 	if !ok {
-		t.Fatal("producer validation_requested output pin missing")
+		t.Fatal("producer account_ready output pin missing")
 	}
-	if output.Key != "account_id" || strings.Join(output.Carries, ",") != "account_id,score,decision" {
-		t.Fatalf("producer output pin key/carries = %q/%#v, want account_id/[account_id score decision]", output.Key, output.Carries)
+	if output.Event != "account.ready" {
+		t.Fatalf("producer output event = %q, want account.ready", output.Event)
 	}
 
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
@@ -67,19 +64,19 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	}
 	plan := plans[0]
 	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
-		t.Fatalf("route plan resolution = %s runtime=%v, want instance_key runtime resolution", plan.ResolutionKind, plan.RequiresRuntimeResolution)
+		t.Fatalf("route plan resolution = %s runtime=%v, want select-or-create runtime resolution", plan.ResolutionKind, plan.RequiresRuntimeResolution)
 	}
-	if plan.Source.FlowID != "producer" || plan.Source.Pin != "validation_requested" || plan.Source.Key != "account_id" {
-		t.Fatalf("route plan source = %#v, want producer.validation_requested keyed by account_id", plan.Source)
+	if plan.Source.FlowID != "producer" || plan.Source.Pin != "account_ready" {
+		t.Fatalf("route plan source = %#v, want producer.account_ready", plan.Source)
 	}
-	if plan.Receiver.FlowID != "scoring" || plan.Receiver.Pin != "validation_requested" || plan.Receiver.Mode != "template" {
-		t.Fatalf("route plan receiver = %#v, want template scoring.validation_requested", plan.Receiver)
+	if plan.Receiver.FlowID != "account" || plan.Receiver.Pin != "account_ready" || plan.Receiver.Mode != "template" {
+		t.Fatalf("route plan receiver = %#v, want template account.account_ready", plan.Receiver)
 	}
-	if plan.InstanceKey == nil || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
-		t.Fatalf("route plan instance key = %#v, want account_id", plan.InstanceKey)
+	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select-or-create" || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
+		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route plan instance key mappings = %#v, want implicit account_id -> account_id", plan.InstanceKey.Mappings)
+	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || !plan.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route plan instance key mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
 	}
 }
 
@@ -100,7 +97,7 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 			name:        "bad connect instance key mapping",
 			opts:        templateflowpilot.Options{BadConnectMapping: true},
 			checkID:     "composition_connect_validation",
-			wantMessage: "connect_key_adapter_source_missing",
+			wantMessage: "connect.using.instance is incompatible with input pin resolution",
 		},
 		{
 			name:        "producer target cannot rescue common composition",
@@ -137,10 +134,15 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one select route plan", plans)
+	var plan runtimepinrouting.ConnectRoutePlan
+	for _, candidate := range plans {
+		if candidate.InstanceKey != nil && candidate.InstanceKey.Mode == "select" {
+			plan = candidate
+		}
 	}
-	plan := plans[0]
+	if plan.InstanceKey == nil {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want select route plan", plans)
+	}
 	if plan.Source.FlowID != templateselectexisting.ProducerFlowID || plan.Source.Pin != templateselectexisting.ProducerOutputPin {
 		t.Fatalf("route plan source = %#v, want %s.%s", plan.Source, templateselectexisting.ProducerFlowID, templateselectexisting.ProducerOutputPin)
 	}

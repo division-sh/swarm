@@ -1,0 +1,8 @@
+account.setup.requested:
+  account_id: text
+account.setup:
+  account_id: text
+account.work.requested:
+  account_id: text
+account.ready:
+  account_id: text

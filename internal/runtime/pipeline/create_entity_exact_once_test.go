@@ -175,6 +175,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 }
 
 func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceStore) *PipelineCoordinator {
+	// routing-example-census: different-concept issue=none owner=pipeline.create_entity_exact_once proof=TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations
 	t.Helper()
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `

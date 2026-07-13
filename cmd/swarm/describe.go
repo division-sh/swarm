@@ -433,6 +433,7 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 }
 
 func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) {
+	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=TestDescribeRoutesHumanAndJSONAreDeterministic
 	if out == nil {
 		return
 	}
