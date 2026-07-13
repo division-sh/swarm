@@ -121,6 +121,9 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("created cards/transaction = %#v/%#v", cards.created, cards.createTx)
 			}
+			if schema := cards.created[0].Snapshot.Outcomes["approve"].EmitSchema; len(schema) == 0 {
+				t.Fatalf("created card did not freeze the resolved outcome event schema: %#v", cards.created[0].Snapshot)
+			}
 			loaded, ok, err := workflowStore.Load(ctx, entityID)
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
@@ -438,6 +441,9 @@ func gateLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 	}}
 	return &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"launch.approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "gate-test", Version: "1", InitialStage: "drafting", Gates: gates,
 		},

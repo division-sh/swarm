@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -29,9 +30,6 @@ func TestWorkflowGateInputTypeOwnerAdmitsCanonicalScalarsEndToEnd(t *testing.T) 
 			}
 			if !WorkflowGateInputValueMatches(field.Type, tc.value) {
 				t.Fatalf("canonical value %#v does not match %s", tc.value, tc.kind)
-			}
-			if !WorkflowGateInputTypeCompatible(field.Type, tc.kind) {
-				t.Fatalf("canonical event type %s is incompatible", tc.kind)
 			}
 		})
 	}
@@ -63,5 +61,40 @@ func TestWorkflowGateInputTypeOwnerRejectsMalformedFormattedValues(t *testing.T)
 		if WorkflowGateInputValueMatches(tc.kind, tc.value) {
 			t.Fatalf("%s accepted malformed value %#v", tc.kind, tc.value)
 		}
+	}
+}
+
+func TestWorkflowGateInputTypeOwnerConsumesResolvedFieldSchema(t *testing.T) {
+	for _, tc := range []struct {
+		input  string
+		schema map[string]any
+	}{
+		{input: "text", schema: map[string]any{"type": "string", "pattern": "^[a-z]+$"}},
+		{input: "text", schema: map[string]any{"type": "string", "enum": []any{"fast", "deep"}}},
+		{input: "integer", schema: map[string]any{"type": "integer", "minimum": 0}},
+		{input: "numeric", schema: map[string]any{"type": "number", "maximum": 1}},
+		{input: "boolean", schema: map[string]any{"type": "boolean"}},
+		{input: "timestamp", schema: map[string]any{"type": "string", "format": "date-time"}},
+		{input: "uuid", schema: map[string]any{"type": "string", "format": "uuid"}},
+	} {
+		if !WorkflowGateInputTypeCompatibleWithResolvedSchema(tc.input, tc.schema) {
+			t.Fatalf("input %s is incompatible with resolved schema %#v", tc.input, tc.schema)
+		}
+	}
+	if WorkflowGateInputTypeCompatibleWithResolvedSchema("text", map[string]any{"type": "string", "format": "uuid"}) {
+		t.Fatal("plain text input was accepted for UUID field schema")
+	}
+}
+
+func TestCanonicalWorkflowGateIdentityRejectsNormalizedDuplicateKeys(t *testing.T) {
+	err := ValidateCanonicalWorkflowGatePlanIdentity(WorkflowGatePlan{
+		Decision: "launch_review",
+		Outcomes: map[string]WorkflowGateOutcomePlan{
+			"approve":   {AdvancesTo: "operating"},
+			" approve ": {AdvancesTo: "operating"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate normalized key") {
+		t.Fatalf("ValidateCanonicalWorkflowGatePlanIdentity error = %v, want normalized-duplicate rejection", err)
 	}
 }

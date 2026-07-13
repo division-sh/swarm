@@ -161,3 +161,135 @@ func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
 		t.Fatalf("noncanonical card was hashed before rejection: %#v", card)
 	}
 }
+
+func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan
+	}{
+		{name: "verdict", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{" approve ": {AdvancesTo: "operating"}}},
+		{name: "input", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
+			AdvancesTo: "operating", Input: map[string]runtimecontracts.WorkflowGateInputField{" note ": {Type: "text"}},
+		}}},
+		{name: "emit", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
+			AdvancesTo: "operating",
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				" note ": runtimecontracts.LiteralExpression("ready"),
+			}},
+			EmitSchema: textEventSchema(map[string]map[string]any{"note": {"type": "string"}}, []string{"note"}),
+		}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			card, err := New(baseTestDecisionCard(tc.outcomes))
+			if err == nil || !strings.Contains(err.Error(), "is not canonical") {
+				t.Fatalf("New error = %v, want canonical map-identity rejection", err)
+			}
+			if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
+				t.Fatalf("noncanonical card was hashed before rejection: %#v", card)
+			}
+		})
+	}
+}
+
+func TestValidateDecisionConsumesFrozenEmitSchemaBeforeSettlement(t *testing.T) {
+	patternSchema := textEventSchema(map[string]map[string]any{
+		"code": {"type": "string", "pattern": "^[a-z]+$"},
+	}, []string{"code"})
+	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{"code": {Type: "text", Required: true}},
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"code": runtimecontracts.CELExpression("decision.code"),
+			}},
+			EmitSchema: patternSchema,
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateDecision(card, "approve", map[string]any{"code": "NOT-LOWER"}); err == nil || !strings.Contains(err.Error(), "pattern") {
+		t.Fatalf("ValidateDecision error = %v, want frozen pattern rejection", err)
+	}
+	if err := ValidateDecision(card, "approve", map[string]any{"code": "ready"}); err != nil {
+		t.Fatalf("valid refined decision rejected: %v", err)
+	}
+}
+
+func TestNewRejectsOptionalEmittedDecisionInputBeforeHashing(t *testing.T) {
+	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{"note": {Type: "text", Required: false}},
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"note": runtimecontracts.CELExpression("decision.note"),
+			}},
+			EmitSchema: textEventSchema(map[string]map[string]any{"note": {"type": "string"}}, []string{"note"}),
+		},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "reads optional decision.note") {
+		t.Fatalf("New error = %v, want optional emitted input rejection", err)
+	}
+	if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
+		t.Fatalf("invalid optional-input card was hashed: %#v", card)
+	}
+}
+
+func TestNewAndValidateDecisionConsumeRelationalEmitSchema(t *testing.T) {
+	relational := textEventSchema(map[string]map[string]any{
+		"component": {"type": "string"},
+		"owner":     {"type": "string", "x-swarm-equalTo": "component"},
+	}, []string{"component", "owner"})
+	staticCard, staticErr := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"component": runtimecontracts.LiteralExpression("api"),
+				"owner":     runtimecontracts.LiteralExpression("worker"),
+			}},
+			EmitSchema: relational,
+		},
+	}))
+	if staticErr == nil || !strings.Contains(staticErr.Error(), "must equal") || staticCard.CardContentHash != "" {
+		t.Fatalf("static relational card = %#v, error = %v, want pre-hash rejection", staticCard, staticErr)
+	}
+
+	dynamic, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{
+				"component": {Type: "text", Required: true},
+				"owner":     {Type: "text", Required: true},
+			},
+			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+				"component": runtimecontracts.CELExpression("decision.component"),
+				"owner":     runtimecontracts.CELExpression("decision.owner"),
+			}},
+			EmitSchema: relational,
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateDecision(dynamic, "approve", map[string]any{"component": "api", "owner": "worker"}); err == nil || !strings.Contains(err.Error(), "must equal") {
+		t.Fatalf("dynamic relational decision error = %v, want pre-settlement rejection", err)
+	}
+}
+
+func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) Card {
+	return Card{
+		CardID: uuid.NewString(), RunID: "run-1", FlowInstance: "root", EntityID: "entity-1",
+		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: time.Date(2026, time.July, 13, 5, 0, 0, 0, time.UTC),
+		Snapshot: Snapshot{Outcomes: outcomes},
+	}
+}
+
+func textEventSchema(properties map[string]map[string]any, required []string) map[string]any {
+	rawProperties := make(map[string]any, len(properties))
+	for name, schema := range properties {
+		rawProperties[name] = schema
+	}
+	return map[string]any{"type": "object", "properties": rawProperties, "required": required, "additionalProperties": false}
+}

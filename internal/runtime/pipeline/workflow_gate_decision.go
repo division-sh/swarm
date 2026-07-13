@@ -132,13 +132,9 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outco
 	if outcome.Emit.Empty() || strings.TrimSpace(outcome.Emit.Event) == "" {
 		return nil, nil
 	}
-	payload := map[string]any{}
-	for field, expression := range outcome.Emit.Fields {
-		value, err := decisionCardEmissionValue(expression, card.Fields)
-		if err != nil {
-			return nil, fmt.Errorf("gate outcome field %s: %w", field, err)
-		}
-		payload[field] = value
+	payload, err := decisioncard.BuildOutcomePayload(outcome, card.Fields)
+	if err != nil {
+		return nil, err
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -153,20 +149,4 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outco
 	}
 	produced := events.NewChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), runtimeWorkflowID, "", raw, parent.ChainDepth()+1, parent, envelope, createdAt.UTC())
 	return &produced, nil
-}
-
-func decisionCardEmissionValue(expression runtimecontracts.ExpressionValue, fields map[string]any) (any, error) {
-	if expression.HasLiteralValue() {
-		return expression.Literal, nil
-	}
-	raw := strings.TrimSpace(firstNonEmptyString(expression.Ref, expression.CEL))
-	if !strings.HasPrefix(raw, "decision.") || strings.Count(raw, ".") != 1 {
-		return nil, fmt.Errorf("only exact decision.<field> references are supported")
-	}
-	field := strings.TrimPrefix(raw, "decision.")
-	value, ok := fields[field]
-	if !ok {
-		return nil, fmt.Errorf("decision field %s is absent", field)
-	}
-	return value, nil
 }

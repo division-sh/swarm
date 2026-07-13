@@ -90,6 +90,61 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 	}
 }
 
+func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
+			properties := map[string]any{
+				"code":      map[string]any{"type": "string", "pattern": "^[a-z]+$"},
+				"component": map[string]any{"type": "string"},
+				"owner":     map[string]any{"type": "string", "x-swarm-equalTo": "component"},
+			}
+			card, err := decisioncard.New(decisioncard.Card{
+				CardID: uuid.NewString(), RunID: runID, FlowInstance: "root", FlowID: "launch", EntityID: uuid.NewString(),
+				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				Snapshot: decisioncard.Snapshot{Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {
+						Verdict: "approve", AdvancesTo: "operating",
+						Input: map[string]runtimecontracts.WorkflowGateInputField{
+							"code": {Type: "text", Required: true}, "component": {Type: "text", Required: true}, "owner": {Type: "text", Required: true},
+						},
+						Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+							"code": runtimecontracts.CELExpression("decision.code"), "component": runtimecontracts.CELExpression("decision.component"), "owner": runtimecontracts.CELExpression("decision.owner"),
+						}},
+						EmitSchema: map[string]any{"type": "object", "properties": properties, "required": []string{"code", "component", "owner"}, "additionalProperties": false},
+					},
+				}},
+				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			_, err = cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", Fields: map[string]any{"code": "NOT-LOWER", "component": "api", "owner": "worker"},
+				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
+			})
+			if !errors.Is(err, decisioncard.ErrInvalidFields) {
+				t.Fatalf("invalid frozen outcome error = %v, want ErrInvalidFields", err)
+			}
+			loaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
+			if err != nil || loaded.Status != decisioncard.StatusPending || loaded.Verdict != "" || !loaded.DecidedAt.IsZero() {
+				t.Fatalf("card after rejected settlement = %#v, %v", loaded, err)
+			}
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10})
+			if err != nil || len(changes) != 1 || changes[0].ChangeType != decisioncard.ChangeCreated {
+				t.Fatalf("changes after rejected settlement = %#v, %v", changes, err)
+			}
+		})
+	}
+}
+
 func TestDecisionCardStorePaginationUsesCreationOrderOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend

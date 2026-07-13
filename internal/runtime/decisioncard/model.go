@@ -10,6 +10,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
 
@@ -337,8 +339,13 @@ func (c Card) Validate() error {
 	if len(c.Snapshot.Outcomes) == 0 {
 		return fmt.Errorf("decision card has no authored outcomes")
 	}
-	if err := validateCanonicalInputTypes(c.Snapshot); err != nil {
+	if err := validateSnapshotContract(c.Snapshot); err != nil {
 		return err
+	}
+	if c.Status == StatusDecided {
+		if err := ValidateDecision(c, c.Verdict, c.Fields); err != nil {
+			return fmt.Errorf("decided card outcome evidence is invalid: %w", err)
+		}
 	}
 	draftTTL, err := time.ParseDuration(strings.TrimSpace(c.EffectiveCadence.InputDraftTTL))
 	if err != nil || draftTTL <= 0 {
@@ -360,15 +367,94 @@ func (c Card) Validate() error {
 	return nil
 }
 
-func validateCanonicalInputTypes(snapshot Snapshot) error {
+func validateSnapshotContract(snapshot Snapshot) error {
+	contextKeys := make([]string, 0, len(snapshot.Context))
+	for name := range snapshot.Context {
+		contextKeys = append(contextKeys, name)
+	}
+	if err := runtimecontracts.ValidateCanonicalWorkflowGateSnapshotIdentity(snapshot.Decision, contextKeys, snapshot.Outcomes); err != nil {
+		return err
+	}
 	for verdict, outcome := range snapshot.Outcomes {
 		for name, declaration := range outcome.Input {
 			if _, err := runtimecontracts.ValidateCanonicalWorkflowGateInputType(declaration.Type); err != nil {
 				return fmt.Errorf("decision card outcome %s input %s: %w", strings.TrimSpace(verdict), strings.TrimSpace(name), err)
 			}
 		}
+		if err := validateFrozenOutcomeContract(verdict, outcome); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateFrozenOutcomeContract(verdict string, outcome runtimecontracts.WorkflowGateOutcomePlan) error {
+	if outcome.Emit.Empty() {
+		if len(outcome.EmitSchema) != 0 {
+			return fmt.Errorf("decision card outcome %s carries an event schema without an emit", verdict)
+		}
+		return nil
+	}
+	if len(outcome.EmitSchema) == 0 {
+		return fmt.Errorf("decision card outcome %s emit is missing its frozen resolved event schema", verdict)
+	}
+	properties := runtimesharedjson.SchemaProperties(outcome.EmitSchema["properties"])
+	literalPayload := make(map[string]any, len(outcome.Emit.Fields))
+	allLiteral := true
+	for field, expression := range outcome.Emit.Fields {
+		fieldSchema, ok := properties[field]
+		if !ok {
+			return fmt.Errorf("decision card outcome %s emit field %s is absent from its frozen event schema", verdict, field)
+		}
+		if expression.HasLiteralValue() {
+			literalPayload[field] = expression.Literal
+			if err := runtimeeventschema.ValidateValueAgainstSchema(fieldSchema, expression.Literal); err != nil {
+				return fmt.Errorf("decision card outcome %s literal emit field %s: %w", verdict, field, err)
+			}
+			continue
+		}
+		allLiteral = false
+		inputName, err := outcomeDecisionField(expression)
+		if err != nil {
+			return fmt.Errorf("decision card outcome %s emit field %s: %w", verdict, field, err)
+		}
+		input, ok := outcome.Input[inputName]
+		if !ok {
+			return fmt.Errorf("decision card outcome %s emit field %s reads undeclared decision.%s", verdict, field, inputName)
+		}
+		if !input.Required {
+			return fmt.Errorf("decision card outcome %s emit field %s reads optional decision.%s", verdict, field, inputName)
+		}
+		if !runtimecontracts.WorkflowGateInputTypeCompatibleWithResolvedSchema(input.Type, fieldSchema) {
+			return fmt.Errorf("decision card outcome %s decision.%s type %s is incompatible with emit field %s frozen schema", verdict, inputName, input.Type, field)
+		}
+	}
+	for _, required := range runtimesharedjson.RequiredList(outcome.EmitSchema["required"]) {
+		if _, ok := outcome.Emit.Fields[required]; !ok {
+			return fmt.Errorf("decision card outcome %s emit is missing required field %s from its frozen event schema", verdict, required)
+		}
+	}
+	if allLiteral {
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(outcome.EmitSchema, literalPayload); err != nil {
+			return fmt.Errorf("decision card outcome %s assembled literal payload: %w", verdict, err)
+		}
+	}
+	return nil
+}
+
+func outcomeDecisionField(expression runtimecontracts.ExpressionValue) (string, error) {
+	raw := strings.TrimSpace(expression.Ref)
+	if raw == "" {
+		raw = strings.TrimSpace(expression.CEL)
+	}
+	if !strings.HasPrefix(raw, "decision.") || strings.Count(raw, ".") != 1 {
+		return "", fmt.Errorf("only exact decision.<field> references are supported")
+	}
+	field := strings.TrimPrefix(raw, "decision.")
+	if field == "" || field != strings.TrimSpace(field) {
+		return "", fmt.Errorf("decision field reference %q is not canonical", raw)
+	}
+	return field, nil
 }
 
 func New(card Card) (Card, error) {
@@ -401,7 +487,7 @@ func New(card Card) (Card, error) {
 	if card.EffectiveCadence.UrgencyAt.IsZero() {
 		card.EffectiveCadence.UrgencyAt = now.Add(DefaultUrgency)
 	}
-	if err := validateCanonicalInputTypes(card.Snapshot); err != nil {
+	if err := validateSnapshotContract(card.Snapshot); err != nil {
 		return Card{}, err
 	}
 	schema := map[string]any{}
@@ -424,7 +510,11 @@ func New(card Card) (Card, error) {
 }
 
 func ValidateDecision(card Card, verdict string, fields map[string]any) error {
+	rawVerdict := verdict
 	verdict = strings.TrimSpace(verdict)
+	if rawVerdict != verdict {
+		return fmt.Errorf("%w: verdict %q is not canonical; use %q", ErrInvalidVerdict, rawVerdict, verdict)
+	}
 	outcome, ok := card.Snapshot.Outcomes[verdict]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrInvalidVerdict, verdict)
@@ -432,7 +522,16 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 	if fields == nil {
 		fields = map[string]any{}
 	}
+	seenFields := map[string]string{}
 	for name := range fields {
+		canonical := strings.TrimSpace(name)
+		if canonical == "" || canonical != name {
+			return fmt.Errorf("%w: field %q is not canonical", ErrInvalidFields, name)
+		}
+		if previous, exists := seenFields[canonical]; exists {
+			return fmt.Errorf("%w: fields %q and %q have the same normalized identity", ErrInvalidFields, previous, name)
+		}
+		seenFields[canonical] = name
 		if _, declared := outcome.Input[name]; !declared {
 			return fmt.Errorf("%w: undeclared field %s", ErrInvalidFields, name)
 		}
@@ -449,7 +548,38 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 			return fmt.Errorf("%w: field %s must be %s", ErrInvalidFields, name, declaration.Type)
 		}
 	}
+	if !outcome.Emit.Empty() {
+		payload, err := BuildOutcomePayload(outcome, fields)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidFields, err)
+		}
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(outcome.EmitSchema, payload); err != nil {
+			return fmt.Errorf("%w: emitted payload does not satisfy the frozen event schema: %v", ErrInvalidFields, err)
+		}
+	}
 	return nil
+}
+
+// BuildOutcomePayload resolves the frozen gate outcome using only authored
+// literals and exact decision fields. Settlement and routing share this owner.
+func BuildOutcomePayload(outcome runtimecontracts.WorkflowGateOutcomePlan, fields map[string]any) (map[string]any, error) {
+	payload := make(map[string]any, len(outcome.Emit.Fields))
+	for field, expression := range outcome.Emit.Fields {
+		if expression.HasLiteralValue() {
+			payload[field] = expression.Literal
+			continue
+		}
+		inputName, err := outcomeDecisionField(expression)
+		if err != nil {
+			return nil, fmt.Errorf("gate outcome field %s: %w", field, err)
+		}
+		value, ok := fields[inputName]
+		if !ok || value == nil {
+			return nil, fmt.Errorf("gate outcome field %s: decision field %s is absent", field, inputName)
+		}
+		payload[field] = value
+	}
+	return payload, nil
 }
 
 func SnapshotJSON(card Card) ([]byte, error) {
