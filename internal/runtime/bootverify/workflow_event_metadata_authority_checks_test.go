@@ -12,6 +12,7 @@ import (
 )
 
 func TestEventMetadataAuthorityRejectsInternalSwarmRestatements(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityRejectsInternalSwarmRestatements"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:writeEventMetadataAuthorityFixture"))
 	for _, tc := range []struct {
 		name    string
 		opts    eventMetadataAuthorityFixtureOptions
@@ -172,6 +173,7 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:eventMetadataAuthorityEventsYAML"))
 	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{
 		externalRequestedSwarm: `
     source: external webhook

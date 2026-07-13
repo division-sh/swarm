@@ -17,10 +17,12 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:ambiguousReceiverInputYAML"), canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:deliveryYAML"), canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:legacyMapYAML"), canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:writeOperating"), canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:writePortfolio"), canonicalrouting.SourceID("internal/runtime/testfixtures/templatefanin/fixture.go:writeRoot"))
 	ctx := context.Background()
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})

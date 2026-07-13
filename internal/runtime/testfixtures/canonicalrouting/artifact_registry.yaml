@@ -230,6 +230,23 @@ groups:
     proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCatalogFixtures_RealRuntime
     roots:
       - tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow
+file_scopes:
+  - {file: cmd/swarm/bundle_test.go, disposition: different-concept, owner: cli.bundle_registration, proof: cmd/swarm/bundle_test.go:TestBundleBuildMaterializesContractsAndJSONReport}
+  - {file: cmd/swarm/describe_test.go, disposition: different-concept, owner: cli.describe_fixture, proof: cmd/swarm/describe_test.go:TestDescribeCommandRendersDefaultedTemplateInstancePolicies}
+  - {file: internal/apiv1/handler_test.go, disposition: different-concept, owner: api.bundle_registration, proof: internal/apiv1/handler_test.go:TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}
+  - {file: internal/runtime/authoringview/view_test.go, disposition: different-concept, owner: authoring_view_fixture, proof: internal/runtime/authoringview/view_test.go:TestBuildShowsDefaultedTemplateInstancePolicies}
+  - {file: internal/runtime/bootverify/workflow_pin_routing_checks_test.go, disposition: different-concept, owner: bootverify.pin_routing_fixture, proof: internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism}
+  - {file: internal/runtime/bootverify/workflow_primary_entity_checks_test.go, disposition: different-concept, owner: bootverify.primary_entity_fixture, proof: internal/runtime/bootverify/workflow_primary_entity_checks_test.go:TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow}
+  - {file: internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go, disposition: different-concept, owner: bootverify.singleton_coordinator_fixture, proof: internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_ValidatesSingletonCoordinatorWithContainedState}
+  - {file: internal/runtime/bus/eventbus_target_routes_test.go, disposition: different-concept, owner: eventbus.target_route_fixture, proof: internal/runtime/bus/eventbus_target_routes_test.go:TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute}
+  - {file: internal/runtime/conformance/primary_entity_conformance_test.go, disposition: different-concept, owner: conformance.primary_entity_fixture, proof: internal/runtime/conformance/primary_entity_conformance_test.go:TestPrimaryEntityConformance}
+  - {file: internal/runtime/conformance/session_scope_conformance_test.go, disposition: different-concept, owner: conformance.session_scope_fixture, proof: internal/runtime/conformance/session_scope_conformance_test.go:TestSessionScopeConformance}
+  - {file: internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go, disposition: different-concept, owner: legacy.static_multi_entity_retirement, proof: internal/runtime/conformance/static_multi_entity_retirement_conformance_test.go:TestStaticMultiEntityRetirementConformance, issue: 1738}
+  - {file: internal/runtime/contracts/bundle_hash_test.go, disposition: different-concept, owner: contracts.bundle_hash_fixture, proof: internal/runtime/contracts/bundle_hash_test.go:TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner}
+  - {file: internal/runtime/template_instance_delivery_test.go, disposition: different-concept, owner: legacy.template_instance_delivery, proof: internal/runtime/template_instance_delivery_test.go:TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately, issue: 1738}
+  - {file: internal/runtime/testfixtures/notifyallchildren/fixture.go, disposition: different-concept, owner: examples.routing.notify_all_children, proof: internal/runtime/conformance/template_flow_pilot_conformance_test.go:TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority}
+  - {file: internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go, disposition: different-concept, owner: legacy.singleton_coordinator_authoring, proof: internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go:TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners, issue: 1738}
+  - {file: internal/runtime/tools/emit_test.go, disposition: different-concept, owner: tools.emit_fixture, proof: internal/runtime/tools/emit_test.go:TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode}
 go_groups:
   - file: cmd/swarm/describe.go
     disposition: different-concept
@@ -614,19 +631,6 @@ go_groups:
       - TestSystemNodeHandlerDecodeJoinCanonicalShape
       - TestWorkflowDataWriteDecode_PreservesContainedOperationForms
       - TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape
-  - file: internal/runtime/contracts/workflow_contracts_tree_test.go
-    disposition: parser-only
-    owner: internal.runtime.contracts.workflow-contracts-tree
-    proofs: [internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules, internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler]
-    functions:
-      - TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules
-      - TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler
-  - file: internal/runtime/contracts/workflow_contracts_tree_test.go
-    disposition: parser-only
-    owner: internal.runtime.contracts.workflow-contracts-tree
-    proofs: [internal/runtime/contracts/load_validation_test.go:TestLoadWorkflowContractBundle_PreservesEvidenceTarget]
-    functions:
-      - currentWorkflowContractsDirForTest
   - file: internal/runtime/core/pinrouting/connect_route_plan_test.go
     disposition: different-concept
     owner: internal.runtime.core.pinrouting.connect-route-plan
@@ -785,18 +789,6 @@ go_groups:
       - templateInstanceActivationConfigSubscriberFixtureFiles
       - templateInstanceDeliveryFixtureFiles
       - templateInstanceEmpireStyleFixtureFiles
-  - file: internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go
-    disposition: negative-mutation
-    owner: canonicalrouting.structural_go_provenance
-    proofs: [internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go:TestCanonicalRoutingGoProvenanceUsesStructuralRoutingOwner]
-    functions:
-      - TestCanonicalRoutingGoProvenanceUsesStructuralRoutingOwner
-  - file: internal/runtime/testfixtures/sealedpackage/fixture.go
-    disposition: different-concept
-    owner: internal.runtime.testfixtures.sealedpackage.fixture
-    proofs: [internal/runtime/conformance/sealed_flow_package_conformance_test.go:TestSealedFlowPackageConformance_CoversBoundaryOwners]
-    functions:
-      - Write
   - file: internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go
     disposition: different-concept
     owner: legacy.singleton_coordinator_authoring

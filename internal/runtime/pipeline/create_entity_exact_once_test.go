@@ -12,11 +12,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/create_entity_exact_once_test.go:newExactOnceCoordinator"))
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer)

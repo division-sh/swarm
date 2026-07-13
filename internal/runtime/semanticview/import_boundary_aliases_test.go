@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/import_boundary_aliases_test.go:writeImportBoundaryAliasFixture"))
 	source := loadImportBoundaryAliasFixture(t, importBoundaryAliasFixtureOptions{})
 
 	resolution := source.ResolveFlowInputAutoWire("worker", "work.requested")

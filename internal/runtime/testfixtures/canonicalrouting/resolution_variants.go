@@ -33,6 +33,54 @@ type TemplateSelectResolutionOptions struct {
 	Invalidity SelectResolutionInvalidity
 }
 
+// CopyTemplateSelectOrCreateFinalAuthoring returns the fixed stateful
+// authoring variant used by the final-flow conformance surface.
+func CopyTemplateSelectOrCreateFinalAuthoring(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateSelectOrCreate)
+	applyTemplateSelectOrCreateAccumulation(t, root, "reviewed")
+	return root
+}
+
+// CopyTemplateSelectOrCreatePilot returns the fixed stateful pilot variant.
+func CopyTemplateSelectOrCreatePilot(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateSelectOrCreate)
+	applyTemplateSelectOrCreateAccumulation(t, root, "done")
+	return root
+}
+
+func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState string) {
+	t.Helper()
+	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
+	for _, event := range []string{"account.requested", "account.ready"} {
+		applyClosedReplacement(t, producerEvents,
+			event+":\n  account_id: text\n",
+			event+":\n  account_id: text\n  score: text\n  decision: text\n")
+	}
+	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"),
+		"          account_id: payload.account_id\n",
+		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "events.yaml"),
+		"  account_id: text\n",
+		"  account_id: text\n  score: text\n  decision: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"),
+		"    _unused_reason: receiver instance identity\n",
+		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
+		"    account.ready: {}\n",
+		`    account.ready:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: score
+            target_field: score
+          - source_field: decision
+            target_field: decision
+      advances_to: `+terminalState+"\n")
+}
+
 // CopyTemplateSelectResolution derives the closed select validation/lowering
 // matrix from the checked-in select-existing artifact.
 func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOptions) string {

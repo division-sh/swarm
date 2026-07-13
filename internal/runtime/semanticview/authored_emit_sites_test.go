@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/authored_emit_sites_test.go:authoredEmitSiteNodeYAML"), canonicalrouting.SourceID("internal/runtime/semanticview/authored_emit_sites_test.go:authoredEmitSiteNodeYAMLWithGuardObject"), canonicalrouting.SourceID("internal/runtime/semanticview/authored_emit_sites_test.go:authoredEmitSiteRulesSuccessNodeYAML"))
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:    "root-node",
 		rootEmit:      "root.ready",
@@ -114,6 +116,7 @@ func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
 }
 
 func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/authored_emit_sites_test.go:authoredEmitSiteRulesSuccessNodeYAML"))
 	source := loadAuthoredEmitSiteLoweringFixture(t)
 
 	sites := AuthoredEmitSites(source)

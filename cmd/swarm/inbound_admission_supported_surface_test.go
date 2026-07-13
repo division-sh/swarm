@@ -23,12 +23,14 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/inbound_admission_supported_surface_test.go:runInboundAdmissionSupportedSurfacePolicyMatrix"), canonicalrouting.SourceID("cmd/swarm/provider_trigger_packs_test.go:copyProviderTriggerPackFixture"))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runInboundAdmissionSupportedSurfacePolicyMatrix(t, backend)

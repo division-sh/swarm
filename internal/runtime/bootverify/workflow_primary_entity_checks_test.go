@@ -8,9 +8,12 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_primary_entity_checks_test.go:file-scope"))
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_primary_entity_checks_test.go:TestRun_AllowsStatelessFlowWithoutPrimaryEntity"))
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 initial_state: pending
@@ -34,6 +37,7 @@ vertical:
 }
 
 func TestRun_RejectsMissingPrimaryEntityForStatefulNormalFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_primary_entity_checks_test.go:TestRun_AllowsStatelessFlowWithoutPrimaryEntity"))
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 initial_state: pending
@@ -54,6 +58,7 @@ pins:
 }
 
 func TestRun_RejectsMissingPrimaryEntityForStagedStatefulNormalFlow(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_primary_entity_checks_test.go:TestRun_AllowsStatelessFlowWithoutPrimaryEntity"))
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 stages:
@@ -76,6 +81,7 @@ pins:
 }
 
 func TestRun_AllowsStatelessFlowWithoutPrimaryEntity(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_primary_entity_checks_test.go:TestRun_AllowsStatelessFlowWithoutPrimaryEntity"))
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 pins:

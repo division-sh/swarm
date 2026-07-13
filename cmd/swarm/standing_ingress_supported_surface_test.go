@@ -18,6 +18,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -78,6 +79,7 @@ func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, 
 }
 
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/standing_ingress_supported_surface_test.go:writeStandingTelegramServeFixture"))
 	isolateCLIAPIConfigEnv(t)
 	calls := make(chan map[string]any, 4)
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

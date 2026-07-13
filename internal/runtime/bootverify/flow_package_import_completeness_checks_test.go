@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_FlowPackageImportCompletenessAcceptsFullyBoundFlowPackage(t *testing.T) {
@@ -196,6 +197,7 @@ func TestRun_FlowPackageImportCompletenessIgnoresImportsWithoutRequires(t *testi
 }
 
 func TestRun_FlowPackagePinBindAliasValidationAcceptsValidAliases(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/flow_package_import_completeness_checks_test.go:writeFlowPackageAliasValidationFixture"))
 	source := loadFlowPackageAliasValidationSource(t, flowPackageAliasValidationOptions{})
 
 	report := Run(context.Background(), source, Options{})

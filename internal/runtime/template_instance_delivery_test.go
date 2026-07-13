@@ -26,6 +26,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -35,6 +36,8 @@ import (
 const templateInstanceDeliveryRunID = "99999999-9999-4999-8999-999999999901"
 
 func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:file-scope"))
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -160,6 +163,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireStyleFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -251,6 +255,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 }
 
 func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceActivationConfigSubscriberFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -325,6 +330,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 }
 
 func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceConnectLifecycleRollbackFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceConnectLifecycleRollbackFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -405,6 +411,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceEmpireOutboxFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -899,6 +906,7 @@ pins:
 }
 
 func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:providerRollbackFixtureFiles"))
 	checkpoints := []struct {
 		name           string
 		mutation       providerRollbackMutationCheckpoint

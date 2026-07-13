@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
@@ -110,6 +111,7 @@ func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 }
 
 func TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/platform_entity_namespace_test.go:TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority"), canonicalrouting.SourceID("internal/runtime/bootverify/report_test.go:writeCrossFlowPinAmbiguityFixture"))
 	for _, acquisition := range []string{"select_entity", "select_or_create_entity"} {
 		t.Run(acquisition, func(t *testing.T) {
 			root := writeSelectEntityInputPinFixture(t, `

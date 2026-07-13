@@ -3997,6 +3997,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServedJoinProofFixture"))
 	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
@@ -4129,6 +4130,8 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=runtime.run_fork_identity proof=cmd/swarm/main_test.go:TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity"))
+
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -4451,6 +4454,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -4566,6 +4570,7 @@ func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
 }
 
 func TestServedParityHarnessAgentDirectiveOutcomeLifecycle(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle)
 	servedparity.Run(t, scenario, runServedAgentDirectiveBackendProof)
 }
@@ -4590,6 +4595,7 @@ func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
 }
 
 func TestServedParityHarnessTestSetupEntitiesLifecycle(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServedTestSetupFixture"))
 	scenario := servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle)
 	servedparity.Run(t, scenario, runServedTestSetupEntitiesBackendProof)
 }
@@ -9380,6 +9386,7 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 }
 
 func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeArtifactRepoCommitServeFixture"))
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -9685,6 +9692,7 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 }
 
 func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeServeRuntimeAgentSlugFixtureWithKey"))
 	isolateCLIAPIConfigEnv(t)
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -12230,6 +12238,7 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 }
 
 func TestRunVerifyCommandFormatsPreBootLoaderDiagnostics(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommandFormatsPreBootLoaderDiagnostics"))
 	tests := []struct {
 		name     string
 		write    func(t *testing.T, root string)
@@ -12639,6 +12648,7 @@ func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
 }
 
 func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyLintEvidenceFixture"))
 	root := writeVerifyLintEvidenceFixture(t)
 
 	var stdout, stderr bytes.Buffer
@@ -12679,6 +12689,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 }
 
 func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootFindings(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 
@@ -12986,6 +12997,8 @@ support-node:
 
 func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=cli.tutorial_lint proof=cmd/swarm/main_test.go:TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence"))
+
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: ticket-flow
@@ -13071,6 +13084,7 @@ assignee:
 }
 
 func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyModelAliasFixture"))
 	root := t.TempDir()
 	writeVerifyModelAliasFixture(t, root, "not_configured")
 
@@ -13118,6 +13132,7 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 }
 
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommandFormatsPreBootLoaderDiagnostics"))
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-prompt-writer-coverage
@@ -13230,6 +13245,8 @@ accumulator:
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=contracts.state_schema proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat"))
+
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-state-schema-float
@@ -13286,6 +13303,8 @@ accumulator:
 
 func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 	// routing-example-census: different-concept issue=none owner=engine.accumulation_projection proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsAccumulatorEntityProjection
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsAccumulatorEntityProjection"))
+
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
 	root := t.TempDir()
@@ -13397,6 +13416,7 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 }
 
 func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyAccumulatorSafetyCommandFixture"))
 	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
 		eventSource: "external (verify accumulator safety proof)",
 		completion:  "timeout",
@@ -15676,6 +15696,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 }
 
 func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/main_test.go:writeVerifyMissingPinWarningFixture"))
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))))

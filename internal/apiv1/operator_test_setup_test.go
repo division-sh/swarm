@@ -11,6 +11,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -18,6 +19,7 @@ import (
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/apiv1/operator_test_setup_test.go:testSetupValidationBundle"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(testSetupValidationBundle(t))

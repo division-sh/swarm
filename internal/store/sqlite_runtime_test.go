@@ -28,6 +28,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -1262,6 +1263,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 }
 
 func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/sqlite_runtime_test.go:TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics"))
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()

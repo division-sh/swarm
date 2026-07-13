@@ -135,6 +135,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 }
 
 func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:writeScenarioSetupFixture"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioSetupFixture(t)
@@ -253,6 +254,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 }
 
 func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:writeScenarioRootSetupFixture"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioRootSetupFixture(t)
@@ -1079,6 +1081,7 @@ steps:
 }
 
 func TestSwarmTestRejectsInvalidSetupBeforeRPC(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:TestScenarioSetupParserRejectsAmbiguousSetupForms"))
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioSetupFixture(t)
@@ -1122,6 +1125,7 @@ steps:
 }
 
 func TestScenarioSetupParserRejectsAmbiguousSetupForms(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/test_command_test.go:TestScenarioSetupParserRejectsAmbiguousSetupForms"))
 	for _, raw := range []string{
 		`
 setup:

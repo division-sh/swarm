@@ -11,12 +11,14 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_smoke_test.go:TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	const runID = "66666666-6666-6666-6666-666666666666"

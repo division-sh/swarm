@@ -9,9 +9,11 @@ import (
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestCatalogRejectsStaticCreateEntityHandlerFixture(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/cataloge2e/create_entity_exact_once_test.go:writeCreateEntityExactOnceFixture"))
 	fixtureRoot := writeCreateEntityExactOnceFixture(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
 	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})

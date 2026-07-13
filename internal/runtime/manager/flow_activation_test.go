@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -1661,6 +1662,7 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 }
 
 func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/manager/flow_activation_test.go:loadAgentPlatformDefaultsMaterializationSource"))
 	source := loadPackageBackedStaticAgentSource(t)
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestStore{}
@@ -1694,6 +1696,7 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 }
 
 func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/manager/flow_activation_test.go:loadAgentPlatformDefaultsMaterializationSource"))
 	source := loadSoleParentFlowStaticAgentSource(t)
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestStore{}
@@ -1906,6 +1909,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 }
 
 func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t *testing.T) {
+	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/manager/flow_activation_test.go:loadAgentPlatformDefaultsMaterializationSource"))
 	source := loadAgentPlatformDefaultsMaterializationSource(t)
 
 	staticScope, ok := source.FlowScopeByID("static_support")
