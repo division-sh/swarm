@@ -425,7 +425,12 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 		return nil
 	}
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
-		eb.completeCommittedPublishDispatch(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)), evt, inboundPlan)
+		dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx))
+		if acknowledgedInboundMutation(txctx) {
+			eb.dispatchCommittedPublishAsync(dispatchCtx, evt, inboundPlan)
+			return
+		}
+		eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
 	}) {
 		return errors.New("event mutation post-commit actions are required")
 	}

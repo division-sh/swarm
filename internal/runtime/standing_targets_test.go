@@ -196,7 +196,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	}
 }
 
-func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
+func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -219,23 +219,22 @@ func TestInboundGatewayRejectsMappedEventBeforeMarkerOrPublish(t *testing.T) {
 		SigningSecret: "telegram-secret",
 		AdmissionPlan: plan,
 	}, source)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "no exact external input pin") {
-		t.Fatalf("response = %d %q, want exact-pin rejection", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("response = %d %q, want compiled-plan acceptance", rec.Code, rec.Body.String())
 	}
-	if store.recorded || len(eventStore.events) != 0 {
-		t.Fatalf("rejected mapped event persisted marker=%v events=%d", store.recorded, len(eventStore.events))
+	if !eventStore.recorded || len(eventStore.events) != 1 {
+		t.Fatalf("compiled mapped event persisted marker=%v events=%d", eventStore.recorded, len(eventStore.events))
 	}
 }
 
-func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *testing.T) {
+func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
 	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.issues")
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	store := &recordingInboundStore{inserted: true}
-	gateway := NewInboundGateway(bus, nil, nil, store)
+	gateway := NewInboundGateway(bus, nil, nil)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	body := []byte(`{"action":"created","issue":{"number":7}}`)
 	mac := hmac.New(sha256.New, []byte("github-secret"))
@@ -256,11 +255,11 @@ func TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish(t *
 		SigningSecret: "github-secret",
 		AdmissionPlan: plan,
 	}, source)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `resolved event "inbound.github.issue_comment"`) || !strings.Contains(rec.Body.String(), "has no exact external input pin") {
-		t.Fatalf("response = %d %q, want exact mapped dynamic-event rejection", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("response = %d %q, want compiled-plan acceptance", rec.Code, rec.Body.String())
 	}
-	if store.recorded || len(eventStore.events) != 0 {
-		t.Fatalf("rejected dynamic event persisted marker=%v events=%d", store.recorded, len(eventStore.events))
+	if !eventStore.recorded || len(eventStore.events) != 1 {
+		t.Fatalf("compiled dynamic event persisted marker=%v events=%d", eventStore.recorded, len(eventStore.events))
 	}
 }
 

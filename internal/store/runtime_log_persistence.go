@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -46,8 +47,12 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
+	queryer := rowQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := queryer.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM events
@@ -82,9 +87,16 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 		return err
 	}
 	if strings.TrimSpace(record.RunID) != "" {
+		if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+			return s.AppendEventTx(ctx, tx, evt)
+		}
 		return s.AppendEvent(ctx, evt)
 	}
-	_, err = s.DB.ExecContext(ctx, `
+	execer := execQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		execer = tx
+	}
+	_, err = execer.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, source_event_id, created_at
@@ -116,8 +128,12 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
+	queryer := rowQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := queryer.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM events

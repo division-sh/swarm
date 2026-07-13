@@ -2,7 +2,7 @@ id: provider.telegram
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: trigger
-manifest_hash: sha256:5e3c264b31da7a2d2cba83ab97d9f9af6005c8f35f1fcc25e538e1c9bd5fb638
+manifest_hash: sha256:bd52afaa81475c451b41de343c8c70b6f5f397cfaec6423f0cab8cae410eeeec
 provenance:
     source: platform
 capabilities:
@@ -11,6 +11,7 @@ capabilities:
         verify_secret: webhook_signing.telegram
         emit_events:
             - inbound.telegram
+            - inbound.telegram.text_message
         persist_dedupe_markers: true
     cannot:
         - emit_undeclared_events

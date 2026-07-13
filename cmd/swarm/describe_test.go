@@ -66,10 +66,16 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatalf("decode standing describe json: %v\n%s", err, stdout.String())
 	}
-	if len(view.Flows) != 1 {
+	if len(view.Flows) != 2 {
 		t.Fatalf("standing describe flows = %#v", view.Flows)
 	}
-	flow := view.Flows[0]
+	var flow authoringview.FlowView
+	for _, candidate := range view.Flows {
+		if candidate.ID == "telegram-ingress" {
+			flow = candidate
+			break
+		}
+	}
 	if flow.Activation != "standing" || flow.Ingress == nil || flow.Ingress.Alias != "chat" || len(flow.Ingress.Providers) != 1 {
 		t.Fatalf("standing describe flow = %#v", flow)
 	}
@@ -81,7 +87,7 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 		t.Fatalf("standing root input sources = %#v", view.RoutingTopology.RootInputSources)
 	}
 	source := view.RoutingTopology.RootInputSources[0]
-	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-chat" || source.Target.FlowPath != "telegram-chat" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
+	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-ingress" || source.Target.FlowPath != "telegram-ingress" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
 		t.Fatalf("standing root input source = %#v", source)
 	}
 	for _, edge := range view.RoutingTopology.Edges {
@@ -109,7 +115,7 @@ func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T)
 	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
 	}
-	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-chat admission=pack-required"} {
+	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-ingress admission=pack-required"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("standing routes human output missing %q:\n%s", want, humanOut.String())
 		}

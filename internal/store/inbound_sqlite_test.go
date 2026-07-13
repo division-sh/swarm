@@ -44,24 +44,6 @@ func TestSQLiteRuntimeStore_RecordInboundEvent_DedupesWithCanonicalMarker(t *tes
 	}
 }
 
-func TestSQLiteRuntimeStore_DeleteInboundEventRemovesRollbackMarker(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
-	runID := uuid.NewString()
-	entityID := uuid.NewString()
-	seedSQLiteInboundRunAndEntity(t, ctx, sqliteStore, runID, entityID, "customer-a")
-
-	if inserted, err := sqliteStore.RecordInboundEvent(ctx, "delivery-123", entityID, "github"); err != nil || !inserted {
-		t.Fatalf("RecordInboundEvent inserted=%v err=%v, want first insert", inserted, err)
-	}
-	if err := sqliteStore.DeleteInboundEvent(ctx, "delivery-123", entityID, "github"); err != nil {
-		t.Fatalf("DeleteInboundEvent: %v", err)
-	}
-	if inserted, err := sqliteStore.RecordInboundEvent(ctx, "delivery-123", entityID, "github"); err != nil || !inserted {
-		t.Fatalf("RecordInboundEvent after delete inserted=%v err=%v, want fresh insert", inserted, err)
-	}
-}
-
 func seedSQLiteInboundRunAndEntity(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, entityID, slug string) {
 	t.Helper()
 	now := time.Now().UTC()

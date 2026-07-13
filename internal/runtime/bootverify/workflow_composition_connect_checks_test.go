@@ -119,6 +119,28 @@ func TestRun_AllowsSelectOrCreateInputResolutionCompositionConnect(t *testing.T)
 	}
 }
 
+func TestRunRejectsProviderOnlyProjectionOptionsOnFlowInputCarries(t *testing.T) {
+	root := writeSelectResolutionCompositionConnectFixture(t, selectResolutionCompositionFixtureOptions{})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	pins := bundle.Semantics.FlowInputEventPins["account"]
+	if len(pins) == 0 {
+		t.Fatal("account input pin fixture is unavailable")
+	}
+	pin := &pins[0]
+	for name, carry := range pin.Carries {
+		carry.Optional = true
+		carry.Convert = runtimecontracts.FieldProjectionConvertNumberToText
+		pin.Carries[name] = carry
+		break
+	}
+	bundle.Semantics.FlowInputEventPins["account"] = pins
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "composition_connect_validation", "reserved for provider normalized-event projections") {
+		t.Fatalf("expected flow carry projection blocker, got %#v", report.Errors())
+	}
+}
+
 func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 	tests := []struct {
 		name string

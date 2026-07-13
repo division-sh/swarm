@@ -1450,8 +1450,10 @@ type FlowOutputEventPin struct {
 }
 type FlowInputPinCarries map[string]FlowInputPinCarry
 type FlowInputPinCarry struct {
-	From string `yaml:"from"`
-	Type string `yaml:"type"`
+	From     string `yaml:"from"`
+	Type     string `yaml:"type"`
+	Optional bool   `yaml:"optional,omitempty"`
+	Convert  string `yaml:"convert,omitempty"`
 }
 type FlowInputPinAddress struct {
 	By          string `yaml:"by"`

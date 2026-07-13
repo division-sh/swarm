@@ -61,20 +61,34 @@ const (
 )
 
 type Subject struct {
-	ID               string            `json:"id"`
-	Kind             SubjectKind       `json:"kind"`
-	Provider         string            `json:"provider"`
-	Action           string            `json:"action,omitempty"`
-	Source           string            `json:"source"`
-	Provenance       string            `json:"provenance,omitempty"`
-	SourcePath       string            `json:"source_path,omitempty"`
-	Applicability    string            `json:"applicability"`
-	Status           SubjectStatus     `json:"status"`
-	Capabilities     []Capability      `json:"capabilities,omitempty"`
-	Guarantees       []Guarantee       `json:"guarantees,omitempty"`
-	Requirements     []Requirement     `json:"requirements,omitempty"`
-	Evidence         []Evidence        `json:"evidence,omitempty"`
-	TriggerAdmission *TriggerAdmission `json:"trigger_admission,omitempty"`
+	ID               string                   `json:"id"`
+	Kind             SubjectKind              `json:"kind"`
+	Provider         string                   `json:"provider"`
+	Action           string                   `json:"action,omitempty"`
+	Source           string                   `json:"source"`
+	Provenance       string                   `json:"provenance,omitempty"`
+	SourcePath       string                   `json:"source_path,omitempty"`
+	Applicability    string                   `json:"applicability"`
+	Status           SubjectStatus            `json:"status"`
+	Capabilities     []Capability             `json:"capabilities,omitempty"`
+	Guarantees       []Guarantee              `json:"guarantees,omitempty"`
+	Requirements     []Requirement            `json:"requirements,omitempty"`
+	Evidence         []Evidence               `json:"evidence,omitempty"`
+	TriggerAdmission *TriggerAdmission        `json:"trigger_admission,omitempty"`
+	TriggerEvents    []TriggerEventDescriptor `json:"trigger_events,omitempty"`
+}
+
+type TriggerEventDescriptor struct {
+	Event  string                        `json:"event"`
+	Kind   string                        `json:"kind"`
+	Fields []TriggerEventFieldDescriptor `json:"fields,omitempty"`
+}
+
+type TriggerEventFieldDescriptor struct {
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Required      bool   `json:"required"`
+	CarryEligible bool   `json:"carry_eligible"`
 }
 
 type TriggerAdmission struct {
@@ -302,6 +316,11 @@ func CloneSubjects(subjects []Subject) []Subject {
 			out[i].Evidence[j] = evidence
 			out[i].Evidence[j].Fields = cloneStringMap(evidence.Fields)
 		}
+		out[i].TriggerEvents = make([]TriggerEventDescriptor, len(subject.TriggerEvents))
+		for j, descriptor := range subject.TriggerEvents {
+			out[i].TriggerEvents[j] = descriptor
+			out[i].TriggerEvents[j].Fields = append([]TriggerEventFieldDescriptor(nil), descriptor.Fields...)
+		}
 		if subject.TriggerAdmission != nil {
 			admission := *subject.TriggerAdmission
 			if subject.TriggerAdmission.Pack != nil {
@@ -432,6 +451,34 @@ func normalizeSubject(subject *Subject) error {
 }
 
 func normalizeProviderTriggerSubject(subject *Subject) error {
+	for i := range subject.TriggerEvents {
+		descriptor := &subject.TriggerEvents[i]
+		descriptor.Event = strings.TrimSpace(descriptor.Event)
+		descriptor.Kind = strings.TrimSpace(descriptor.Kind)
+		if descriptor.Event == "" || (descriptor.Kind != "raw" && descriptor.Kind != "normalized") {
+			return fmt.Errorf("provider trigger subject %q has invalid trigger event descriptor", subject.ID)
+		}
+		for j := range descriptor.Fields {
+			field := &descriptor.Fields[j]
+			field.Name = strings.TrimSpace(field.Name)
+			field.Type = strings.TrimSpace(field.Type)
+			if field.Name == "" || field.Type == "" {
+				return fmt.Errorf("provider trigger subject %q event %q has incomplete field descriptor", subject.ID, descriptor.Event)
+			}
+		}
+		sort.SliceStable(descriptor.Fields, func(a, b int) bool { return descriptor.Fields[a].Name < descriptor.Fields[b].Name })
+	}
+	sort.SliceStable(subject.TriggerEvents, func(i, j int) bool {
+		if subject.TriggerEvents[i].Event != subject.TriggerEvents[j].Event {
+			return subject.TriggerEvents[i].Event < subject.TriggerEvents[j].Event
+		}
+		return subject.TriggerEvents[i].Kind < subject.TriggerEvents[j].Kind
+	})
+	for i := 1; i < len(subject.TriggerEvents); i++ {
+		if subject.TriggerEvents[i-1].Event == subject.TriggerEvents[i].Event {
+			return fmt.Errorf("provider trigger subject %q has duplicate event descriptor %q", subject.ID, subject.TriggerEvents[i].Event)
+		}
+	}
 	switch subject.Applicability {
 	case "installed":
 		if subject.Source != "trigger_pack" || subject.TriggerAdmission != nil {
@@ -563,6 +610,25 @@ func RenderSubject(subject Subject, verbose bool) string {
 			phrase += " " + capability.Target
 		}
 		parts = append(parts, "CAN "+phrase)
+	}
+	for _, descriptor := range subject.TriggerEvents {
+		fields := make([]string, 0, len(descriptor.Fields))
+		for _, field := range descriptor.Fields {
+			required := "optional"
+			if field.Required {
+				required = "required"
+			}
+			carry := "not-carry-eligible"
+			if field.CarryEligible {
+				carry = "carry-eligible"
+			}
+			fields = append(fields, field.Name+":"+field.Type+":"+required+":"+carry)
+		}
+		text := "event_descriptor=" + descriptor.Event + " kind=" + descriptor.Kind
+		if len(fields) > 0 {
+			text += " fields=" + strings.Join(fields, ",")
+		}
+		parts = append(parts, text)
 	}
 	for _, guarantee := range subject.Guarantees {
 		phrase := userfacing.ProjectHumanCode(userfacing.HumanCodeProviderGuarantee, guarantee.Code)

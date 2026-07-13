@@ -33,6 +33,10 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "external"},
 		},
 		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+		TriggerEvents: []TriggerEventDescriptor{
+			{Event: "inbound.acme", Kind: "raw", Fields: []TriggerEventFieldDescriptor{{Name: "payload", Type: "json", Required: true}}},
+			{Event: "inbound.acme.record_created", Kind: "normalized", Fields: []TriggerEventFieldDescriptor{{Name: "record_id", Type: "text", Required: true, CarryEligible: true}}},
+		},
 	}
 	normalized, err := NormalizeSubjects([]Subject{base})
 	if err != nil {
@@ -216,6 +220,10 @@ func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.2.3", ManifestHash: "sha256:" + strings.Repeat("f", 64), Provenance: "external"},
 		},
 		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+		TriggerEvents: []TriggerEventDescriptor{
+			{Event: "inbound.acme", Kind: "raw", Fields: []TriggerEventFieldDescriptor{{Name: "payload", Type: "json", Required: true}}},
+			{Event: "inbound.acme.record_created", Kind: "normalized", Fields: []TriggerEventFieldDescriptor{{Name: "record_id", Type: "text", Required: true, CarryEligible: true}}},
+		},
 	}
 	normalized, err := NormalizeSubjects([]Subject{subject})
 	if err != nil {
@@ -226,9 +234,12 @@ func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := RenderSubject(normalized[0], false)
-	for _, value := range []string{"chat", "verified_pack", "HMAC_SHA256", "inbound.acme", strings.Repeat("e", 64), "provider.acme", "1.2.3", "webhook_signing.acme"} {
+	for _, value := range []string{"chat", "verified_pack", "HMAC_SHA256", "inbound.acme", "inbound.acme.record_created", "record_id", strings.Repeat("e", 64), "provider.acme", "1.2.3", "webhook_signing.acme"} {
 		if !strings.Contains(string(body), value) || !strings.Contains(text, value) {
 			t.Fatalf("typed fact %q missing from JSON or text\njson=%s\ntext=%s", value, body, text)
 		}
+	}
+	if !strings.Contains(string(body), `"carry_eligible":true`) || !strings.Contains(text, "record_id:text:required:carry-eligible") {
+		t.Fatalf("normalized carry descriptor missing from JSON or text\njson=%s\ntext=%s", body, text)
 	}
 }

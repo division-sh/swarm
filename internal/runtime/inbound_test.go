@@ -26,7 +26,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -108,7 +112,7 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 	if err != nil {
 		t.Fatalf("load provider trigger registry: %v", err)
 	}
-	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
+	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	var resolver testInboundTargetResolver
 	if len(stores) > 0 {
@@ -140,8 +144,18 @@ func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, str
 	return []string{}, nil
 }
 
+func (s failingInboundEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	return runInboundTestMutation(ctx, s.AppendEvent, nil, fn)
+}
+
 type capturingInboundEventStore struct {
-	events []events.Event
+	events          []events.Event
+	seen            map[string]struct{}
+	duplicate       bool
+	recorded        bool
+	providerEventID string
+	entityID        string
+	provider        string
 }
 
 func (s *capturingInboundEventStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -157,6 +171,76 @@ func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, 
 	return []string{}, nil
 }
 
+func (s *capturingInboundEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	if s.seen == nil {
+		s.seen = map[string]struct{}{}
+	}
+	return runInboundTestMutation(ctx, s.AppendEvent, s, fn)
+}
+
+type inboundTestMutation struct {
+	ctx        context.Context
+	append     func(context.Context, events.Event) error
+	sink       *capturingInboundEventStore
+	pendingKey string
+	claim      runtimebus.InboundDeliveryClaim
+}
+
+func runInboundTestMutation(ctx context.Context, appendEvent func(context.Context, events.Event) error, sink *capturingInboundEventStore, fn func(runtimebus.EventMutation) error) error {
+	postCommit := make([]func(), 0, 4)
+	mutation := &inboundTestMutation{append: appendEvent, sink: sink}
+	mutation.ctx = runtimebus.WithEventMutationContext(runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit), mutation)
+	if err := fn(mutation); err != nil {
+		return err
+	}
+	if mutation.pendingKey != "" && mutation.sink != nil {
+		mutation.sink.seen[mutation.pendingKey] = struct{}{}
+		mutation.sink.recorded = true
+		mutation.sink.providerEventID = mutation.claim.ProviderEventID
+		mutation.sink.entityID = mutation.claim.EntityID
+		mutation.sink.provider = mutation.claim.Provider
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+func (m *inboundTestMutation) Context() context.Context { return m.ctx }
+func (m *inboundTestMutation) AppendEvent(ctx context.Context, event events.Event) error {
+	return m.append(ctx, event)
+}
+func (*inboundTestMutation) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (*inboundTestMutation) InsertEventDeliveriesWithTargets(context.Context, string, []string, map[string]events.RouteIdentity) error {
+	return nil
+}
+func (*inboundTestMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
+	return nil
+}
+func (*inboundTestMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+func (*inboundTestMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
+	return nil
+}
+func (*inboundTestMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
+	return nil
+}
+func (m *inboundTestMutation) ClaimInboundEvent(_ context.Context, providerEventID, entityID, provider string) (bool, error) {
+	key := provider + "\x00" + entityID + "\x00" + providerEventID
+	if m.sink != nil && m.sink.duplicate {
+		return false, nil
+	}
+	if m.sink != nil {
+		if _, exists := m.sink.seen[key]; exists {
+			return false, nil
+		}
+	}
+	m.pendingKey = key
+	m.claim = runtimebus.InboundDeliveryClaim{ProviderEventID: providerEventID, EntityID: entityID, Provider: provider}
+	return true, nil
+}
+
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -165,7 +249,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	}
 	store := &recordingInboundStore{inserted: true}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	body := []byte(`{"update_id":123,"message":{"chat":{"id":42},"text":"hello"}}`)
+	body := []byte(`{"update_id":123,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(string(body)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
@@ -178,8 +262,8 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
 	}
-	if len(eventStore.events) != 1 {
-		t.Fatalf("persisted events = %d, want 1", len(eventStore.events))
+	if len(eventStore.events) != 2 {
+		t.Fatalf("persisted events = %d, want raw plus normalized", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
 	if evt.RunID() != "41000000-0000-0000-0000-000000000001" || evt.FlowInstance() != "chat-flow/a" || evt.EntityID() != "41000000-0000-0000-0000-000000000002" {
@@ -189,7 +273,6 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 
 type rollbackTrackingInboundStore struct {
 	recorded bool
-	rolled   bool
 }
 
 func (s *rollbackTrackingInboundStore) RecordInboundEvent(context.Context, string, string, string) (bool, error) {
@@ -203,11 +286,6 @@ func (s *rollbackTrackingInboundStore) ResolveInboundTarget(context.Context, str
 
 func (s *rollbackTrackingInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
 	return 0, nil
-}
-
-func (s *rollbackTrackingInboundStore) DeleteInboundEvent(context.Context, string, string, string) error {
-	s.rolled = true
-	return nil
 }
 
 type recordingInboundStore struct {
@@ -236,7 +314,7 @@ func (*recordingInboundStore) PurgeInboundEventsBefore(context.Context, time.Tim
 	return 0, nil
 }
 
-func TestInboundGateway_Returns503AndRollsBackMarkerWhenPublishFails(t *testing.T) {
+func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t *testing.T) {
 	bus, err := runtimebus.NewEventBus(failingInboundEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -251,11 +329,8 @@ func TestInboundGateway_Returns503AndRollsBackMarkerWhenPublishFails(t *testing.
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
-	if !store.recorded {
-		t.Fatal("expected inbound event to be recorded before publish attempt")
-	}
-	if !store.rolled {
-		t.Fatal("expected inbound event marker rollback on publish failure")
+	if store.recorded {
+		t.Fatal("legacy marker recorder was called outside the event mutation")
 	}
 }
 
@@ -305,7 +380,8 @@ func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) 
 }
 
 func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -329,16 +405,14 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected inbound event to be recorded while paused")
-	}
-	if store.rolled {
-		t.Fatal("did not expect inbound marker rollback for queued paused ingress")
 	}
 }
 
 func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -373,11 +447,11 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected GitHub delivery to record inbound marker while paused")
 	}
-	if store.providerEventID != "delivery-123" {
-		t.Fatalf("providerEventID = %q, want delivery-123", store.providerEventID)
+	if eventStore.providerEventID != "delivery-123" {
+		t.Fatalf("providerEventID = %q, want delivery-123", eventStore.providerEventID)
 	}
 }
 
@@ -408,11 +482,11 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected GitHub delivery to record inbound marker")
 	}
-	if store.providerEventID != "delivery-123" {
-		t.Fatalf("providerEventID = %q, want delivery-123", store.providerEventID)
+	if eventStore.providerEventID != "delivery-123" {
+		t.Fatalf("providerEventID = %q, want delivery-123", eventStore.providerEventID)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -469,7 +543,7 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 }
 
 func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -715,14 +789,14 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Slack callback to record inbound marker")
 	}
-	if store.providerEventID != "Ev123ABC456" {
-		t.Fatalf("providerEventID = %q, want Ev123ABC456", store.providerEventID)
+	if eventStore.providerEventID != "Ev123ABC456" {
+		t.Fatalf("providerEventID = %q, want Ev123ABC456", eventStore.providerEventID)
 	}
-	if store.provider != "slack" {
-		t.Fatalf("provider = %q, want slack", store.provider)
+	if eventStore.provider != "slack" {
+		t.Fatalf("provider = %q, want slack", eventStore.provider)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -798,7 +872,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Slack callback response waited for post-commit dispatch completion")
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Slack callback to record inbound marker before acknowledgement")
 	}
 	if len(eventStore.events) != 1 {
@@ -846,7 +920,7 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 }
 
 func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -930,11 +1004,11 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Stripe callback response waited for post-commit dispatch completion")
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Stripe callback to record inbound marker")
 	}
-	if store.providerEventID != "evt_123" {
-		t.Fatalf("providerEventID = %q, want evt_123", store.providerEventID)
+	if eventStore.providerEventID != "evt_123" {
+		t.Fatalf("providerEventID = %q, want evt_123", eventStore.providerEventID)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
@@ -1092,7 +1166,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 }
 
 func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1156,14 +1230,14 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Twilio delivery to record inbound marker")
 	}
-	if store.providerEventID != "SM1234567890abcdef" {
-		t.Fatalf("providerEventID = %q, want MessageSid", store.providerEventID)
+	if eventStore.providerEventID != "SM1234567890abcdef" {
+		t.Fatalf("providerEventID = %q, want MessageSid", eventStore.providerEventID)
 	}
-	if store.provider != "twilio" {
-		t.Fatalf("provider = %q, want twilio", store.provider)
+	if eventStore.provider != "twilio" {
+		t.Fatalf("provider = %q, want twilio", eventStore.provider)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -1286,7 +1360,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 }
 
 func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1344,14 +1418,14 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Shopify delivery to record inbound marker")
 	}
-	if store.providerEventID != "webhook-123" {
-		t.Fatalf("providerEventID = %q, want webhook-123", store.providerEventID)
+	if eventStore.providerEventID != "webhook-123" {
+		t.Fatalf("providerEventID = %q, want webhook-123", eventStore.providerEventID)
 	}
-	if store.provider != "shopify" {
-		t.Fatalf("provider = %q, want shopify", store.provider)
+	if eventStore.provider != "shopify" {
+		t.Fatalf("provider = %q, want shopify", eventStore.provider)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -1467,7 +1541,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 }
 
 func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1561,14 +1635,14 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 			}
-			if !store.recorded {
+			if !eventStore.recorded {
 				t.Fatalf("expected %s delivery to record inbound marker", tc.provider)
 			}
-			if store.providerEventID != tc.wantProviderID {
-				t.Fatalf("providerEventID = %q, want %s", store.providerEventID, tc.wantProviderID)
+			if eventStore.providerEventID != tc.wantProviderID {
+				t.Fatalf("providerEventID = %q, want %s", eventStore.providerEventID, tc.wantProviderID)
 			}
-			if store.provider != tc.provider {
-				t.Fatalf("provider = %q, want %s", store.provider, tc.provider)
+			if eventStore.provider != tc.provider {
+				t.Fatalf("provider = %q, want %s", eventStore.provider, tc.provider)
 			}
 			if len(eventStore.events) != 1 {
 				t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -1781,7 +1855,7 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 		},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
-			eventStore := &capturingInboundEventStore{}
+			eventStore := &capturingInboundEventStore{duplicate: true}
 			bus, err := runtimebus.NewEventBus(eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
@@ -1867,17 +1941,17 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Telegram callback response waited for post-commit dispatch completion")
 	}
-	if !store.recorded {
+	if !eventStore.recorded {
 		t.Fatal("expected Telegram delivery to record inbound marker")
 	}
-	if store.providerEventID != "123456789" {
-		t.Fatalf("providerEventID = %q, want 123456789", store.providerEventID)
+	if eventStore.providerEventID != "123456789" {
+		t.Fatalf("providerEventID = %q, want 123456789", eventStore.providerEventID)
 	}
-	if store.provider != "telegram" {
-		t.Fatalf("provider = %q, want telegram", store.provider)
+	if eventStore.provider != "telegram" {
+		t.Fatalf("provider = %q, want telegram", eventStore.provider)
 	}
-	if len(eventStore.events) != 1 {
-		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
+	if len(eventStore.events) != 2 {
+		t.Fatalf("published events = %d, want atomic raw plus normalized before dispatch release", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
 	if evt.Type() != events.EventType("inbound.telegram") {
@@ -1999,7 +2073,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 }
 
 func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &capturingInboundEventStore{duplicate: true}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -2220,8 +2294,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			store := &recordingInboundStore{inserted: true}
-			gateway := NewInboundGateway(bus, nil, nil, store)
+			gateway := NewInboundGateway(bus, nil, nil)
 			gateway.SetCredentialStore(identityInboundCredentialStore{})
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", strings.NewReader(string(body)))
 			req.Header.Set("X-Partner-Signature", tc.signature)
@@ -2238,12 +2311,12 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
 			}
-			if store.recorded != tc.wantRecorded {
-				t.Fatalf("marker recorded=%t, want %t", store.recorded, tc.wantRecorded)
+			if eventStore.recorded != tc.wantRecorded {
+				t.Fatalf("marker recorded=%t, want %t", eventStore.recorded, tc.wantRecorded)
 			}
 			if tc.wantRecorded {
-				if store.providerEventID != "declared-delivery" || len(eventStore.events) != 1 || eventStore.events[0].Type() != "inbound.partner" {
-					t.Fatalf("accepted raw delivery marker=%q events=%#v", store.providerEventID, eventStore.events)
+				if eventStore.providerEventID != "declared-delivery" || len(eventStore.events) != 1 || eventStore.events[0].Type() != "inbound.partner" {
+					t.Fatalf("accepted raw delivery marker=%q events=%#v", eventStore.providerEventID, eventStore.events)
 				}
 			} else if len(eventStore.events) != 0 {
 				t.Fatalf("rejected raw delivery published %d events", len(eventStore.events))
@@ -2275,8 +2348,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &recordingInboundStore{inserted: true}
-	gateway := NewInboundGateway(bus, nil, nil, store)
+	gateway := NewInboundGateway(bus, nil, nil)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
 	req.Header.Set("X-Partner-Signature", signature)
@@ -2290,8 +2362,8 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	wantID := hex.EncodeToString(sha256.New().Sum(nil))
-	if store.providerEventID != wantID {
-		t.Fatalf("body_sha256 delivery id = %q, want exact empty-body hash %q", store.providerEventID, wantID)
+	if eventStore.providerEventID != wantID {
+		t.Fatalf("body_sha256 delivery id = %q, want exact empty-body hash %q", eventStore.providerEventID, wantID)
 	}
 	if len(eventStore.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
@@ -2309,8 +2381,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonStore := &recordingInboundStore{inserted: true}
-	jsonGateway := NewInboundGateway(bus, nil, nil, jsonStore)
+	jsonGateway := NewInboundGateway(bus, nil, nil)
 	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
@@ -2321,8 +2392,8 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	if jsonRec.Code != http.StatusBadRequest || !strings.Contains(jsonRec.Body.String(), "must be valid JSON") {
 		t.Fatalf("empty JSON body response = %d %q", jsonRec.Code, jsonRec.Body.String())
 	}
-	if jsonStore.recorded {
-		t.Fatal("empty JSON body reached marker persistence")
+	if eventStore.providerEventID != wantID || len(eventStore.events) != 1 {
+		t.Fatal("empty JSON body mutated the previously recorded marker or events")
 	}
 }
 

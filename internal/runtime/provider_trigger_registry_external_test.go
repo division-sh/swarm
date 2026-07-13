@@ -52,7 +52,7 @@ func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot 
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runtimepkg.RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {
 	t.Helper()
-	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
+	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed)
 	gateway.SetCredentialStore(boundedProviderCredentialStore{})
 	return gateway
 }
@@ -105,23 +105,33 @@ func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGate
 		_, _ = w.Write(delivery.Response.Body)
 		return
 	}
-	if store != nil {
-		inserted, err := store.RecordInboundEvent(r.Context(), delivery.ProviderEventID, entityID, provider)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	_ = store
+	batchEvents := make([]events.Event, 0, len(delivery.Events))
+	for _, output := range delivery.Events {
+		envelope := events.EventEnvelope{}
+		if output.Kind == providertriggers.OutputKindRaw {
+			envelope = events.EventEnvelope{EntityID: entityID}
 		}
-		if !inserted {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		batchEvents = append(batchEvents, eventtest.RootIngress(
+			"", output.Name, "bounded-provider-integration", "",
+			mustBoundedJSON(t, output.Payload), 0, runID, "", envelope, time.Now().UTC(),
+		))
 	}
-	event := eventtest.RootIngress(
-		"", delivery.EventName, "bounded-provider-integration", "",
-		mustBoundedJSON(t, delivery.Payload), 0, runID, "", events.EventEnvelope{EntityID: entityID}, time.Now().UTC(),
-	)
-	if err := bus.Publish(r.Context(), event); err != nil {
+	result, err := bus.PublishInboundDelivery(r.Context(), runtimebus.InboundDeliveryBatch{
+		Claim: runtimebus.InboundDeliveryClaim{
+			ProviderEventID: delivery.ProviderEventID,
+			EntityID:        entityID,
+			Provider:        provider,
+		},
+		Events:                    batchEvents,
+		AcknowledgeBeforeDispatch: delivery.AcknowledgeBeforeDispatch,
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if result.Duplicate {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)

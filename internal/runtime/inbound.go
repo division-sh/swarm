@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,12 +25,7 @@ import (
 const inboundWebhookMaxBodyBytes = 1 << 20
 
 type InboundPersistence interface {
-	RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error)
 	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
-}
-
-type InboundFailureRollback interface {
-	DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error
 }
 
 type InboundTarget struct {
@@ -65,7 +61,6 @@ func (t *InboundTarget) NormalizeEntity() {
 
 type InboundGateway struct {
 	bus                     *runtimebus.EventBus
-	store                   InboundPersistence
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
 	beginAdmission          func(context.Context) (context.Context, func(), bool)
@@ -79,14 +74,9 @@ func (g *InboundGateway) SetAdmissionGuard(begin func(context.Context) (context.
 	}
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
-	var store InboundPersistence
-	if len(stores) > 0 {
-		store = stores[0]
-	}
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool) *InboundGateway {
 	g := &InboundGateway{
 		bus:                     bus,
-		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
 	}
@@ -186,7 +176,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	target.NormalizeEntity()
 	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
 		payload = map[string]any{"raw": string(body)}
 	}
 	entityID := target.EffectiveEntityID()
@@ -235,68 +227,51 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		_, _ = w.Write(delivery.Response.Body)
 		return
 	}
-	if source != nil && !standingInputPinAdmitted(source, target.FlowID, string(delivery.EventName)) {
-		http.Error(w, fmt.Sprintf("ingress target %q provider %q resolved event %q, but flow %q in bundle %s has no exact external input pin; add that pin", target.Alias, provider, delivery.EventName, target.FlowID, target.BundleHash), http.StatusUnprocessableEntity)
-		return
-	}
 	providerEventID := delivery.ProviderEventID
 	requestCtx := r.Context()
 	if strings.TrimSpace(target.RunID) != "" {
 		requestCtx = runtimecorrelation.WithRunID(requestCtx, target.RunID)
 	}
 
-	if g.store != nil {
-		inserted, err := g.store.RecordInboundEvent(requestCtx, providerEventID, entityID, provider)
-		if err != nil {
-			http.Error(w, "record inbound failed", http.StatusInternalServerError)
-			return
-		}
-		if !inserted {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status":              "duplicate",
-				"provider":            provider,
-				"provider_event_id":   providerEventID,
-				"provider_event_type": delivery.ProviderEventType,
-				"event_name":          string(delivery.EventName),
-			})
-			return
-		}
+	if g.bus == nil {
+		http.Error(w, "publish inbound unavailable", http.StatusServiceUnavailable)
+		return
 	}
-
-	pubType, pubPayload := delivery.EventName, delivery.Payload
-	envelopeBytes := mustJSON(pubPayload)
-	if g.bus != nil {
-		pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
-		envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: entityID, FlowInstance: target.FlowInstance})
-		published := events.NewRootIngressEvent(uuid.NewString(), pubType, "inbound-gateway", "", envelopeBytes, 0, target.RunID, "", envelope, now)
-		var err error
-		if delivery.AcknowledgeBeforeDispatch {
-			err = g.bus.PublishAcknowledged(pubCtx, published)
-		} else {
-			err = g.bus.Publish(pubCtx, published)
+	pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
+	published := make([]events.Event, 0, len(delivery.Events))
+	eventNames := make([]string, 0, len(delivery.Events))
+	for _, output := range delivery.Events {
+		envelope := events.EventEnvelope{}
+		if output.Kind == providertriggers.OutputKindRaw {
+			envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: entityID, FlowInstance: target.FlowInstance})
 		}
-		if err != nil {
-			if g.logger != nil {
-				handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
-					"provider":          provider,
-					"entity_id":         entityID,
-					"provider_event_id": providerEventID,
-				}, err))
-			}
-			if rollback, ok := g.store.(InboundFailureRollback); ok && rollback != nil {
-				if rollbackErr := rollback.DeleteInboundEvent(requestCtx, providerEventID, entityID, provider); rollbackErr != nil {
-					if g.logger != nil {
-						handleRuntimeLogPersistenceError("inbound-gateway", "rollback_failed", g.logger.Error(requestCtx, "inbound-gateway", "rollback_failed", map[string]any{
-							"provider":          provider,
-							"entity_id":         entityID,
-							"provider_event_id": providerEventID,
-						}, rollbackErr))
-					}
-				}
-			}
-			http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
-			return
+		published = append(published, events.NewRootIngressEvent(
+			uuid.NewString(), output.Name, "inbound-gateway", "", mustJSON(output.Payload), 0,
+			target.RunID, "", envelope, now,
+		))
+		eventNames = append(eventNames, string(output.Name))
+	}
+	result, err := g.bus.PublishInboundDelivery(pubCtx, runtimebus.InboundDeliveryBatch{
+		Claim: runtimebus.InboundDeliveryClaim{
+			ProviderEventID: providerEventID, EntityID: entityID, Provider: provider,
+		},
+		Events: published, AcknowledgeBeforeDispatch: delivery.AcknowledgeBeforeDispatch,
+	})
+	if err != nil {
+		if g.logger != nil {
+			handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
+				"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
+			}, err))
 		}
+		http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+		return
+	}
+	if result.Duplicate {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "duplicate", "provider": provider, "provider_event_id": providerEventID,
+			"provider_event_type": delivery.ProviderEventType, "event_names": eventNames,
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -306,7 +281,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		"provider":            provider,
 		"provider_event_id":   providerEventID,
 		"provider_event_type": delivery.ProviderEventType,
-		"event_name":          string(delivery.EventName),
+		"event_names":         eventNames,
 	})
 }
 

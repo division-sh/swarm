@@ -69,21 +69,18 @@ type runtimeShutdownInboundStore struct {
 	recorded bool
 }
 
-type cancellationBlockingInboundStore struct {
+type cancellationBlockingInboundEventStore struct {
+	*capturingInboundEventStore
 	entered chan struct{}
 }
 
-func (s *cancellationBlockingInboundStore) RecordInboundEvent(ctx context.Context, _, _, _ string) (bool, error) {
+func (s *cancellationBlockingInboundEventStore) RunEventMutation(ctx context.Context, _ func(runtimebus.EventMutation) error) error {
 	select {
 	case s.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
-	return false, ctx.Err()
-}
-
-func (*cancellationBlockingInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
-	return 0, nil
+	return ctx.Err()
 }
 
 func (s *runtimeShutdownInboundStore) RecordInboundEvent(context.Context, string, string, string) (bool, error) {
@@ -262,14 +259,16 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 }
 
 func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
+	eventStore := &cancellationBlockingInboundEventStore{
+		capturingInboundEventStore: &capturingInboundEventStore{},
+		entered:                    make(chan struct{}, 1),
+	}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	store := &cancellationBlockingInboundStore{entered: make(chan struct{}, 1)}
 	rt := &Runtime{Bus: bus}
-	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, store)
+	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed)
 	gateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 	rt.InboundGateway = gateway.InboundGateway
 	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
@@ -293,7 +292,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		response <- rec
 	}()
 	select {
-	case <-store.entered:
+	case <-eventStore.entered:
 	case <-time.After(time.Second):
 		t.Fatal("webhook did not enter blocking persistence")
 	}

@@ -1822,6 +1822,134 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	}
 }
 
+func TestPublishInboundDeliveryRollsBackMarkerAndAllDerivedEvents(t *testing.T) {
+	testCases := []struct {
+		name  string
+		setup func(*testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner)
+		count func(*testing.T, context.Context, *sql.DB, string, string) (int, int)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				ctx := eventBusTestRunContext(t, db)
+				pg := &store.PostgresStore{DB: db}
+				return ctx, db, pg, pg
+			},
+			count: countPostgresInboundBatchRows,
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (context.Context, *sql.DB, runtimebus.EventStore, runtimebus.EventMutationRunner) {
+				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+				ctx := runtimecorrelation.WithRunID(context.Background(), eventBusTestRunID)
+				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, eventBusTestRunID); err != nil {
+					t.Fatalf("seed SQLite event bus test run: %v", err)
+				}
+				return ctx, sqliteStore.DB, sqliteStore, sqliteStore
+			},
+			count: countSQLiteInboundBatchRows,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, db, eventStore, runner := tc.setup(t)
+			proofStore := &failingInboundBatchStore{EventStore: eventStore, runner: runner, failAppend: 2}
+			eb, err := runtimebus.NewEventBus(proofStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			rawID := uuid.NewString()
+			normalizedID := uuid.NewString()
+			entityID := uuid.NewString()
+			providerEventID := "provider-delivery-rollback"
+			batch := runtimebus.InboundDeliveryBatch{
+				Claim: runtimebus.InboundDeliveryClaim{
+					ProviderEventID: providerEventID,
+					EntityID:        entityID,
+					Provider:        "proof-provider",
+				},
+				Events: []events.Event{
+					eventtest.RootIngress(rawID, events.EventType("inbound.proof"), "inbound-gateway", "", []byte(`{"raw":true}`), 0, eventBusTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
+					eventtest.RootIngress(normalizedID, events.EventType("inbound.proof.normalized"), "inbound-gateway", "", []byte(`{"normalized":true}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
+				},
+			}
+
+			if _, err := eb.PublishInboundDelivery(ctx, batch); err == nil || !strings.Contains(err.Error(), "injected normalized append failure") {
+				t.Fatalf("PublishInboundDelivery error = %v, want injected normalized append failure", err)
+			}
+			eventsCount, markerCount := tc.count(t, ctx, db, rawID, normalizedID)
+			if eventsCount != 0 || markerCount != 0 {
+				t.Fatalf("rolled-back provider batch retained events=%d markers=%d, want zero", eventsCount, markerCount)
+			}
+		})
+	}
+}
+
+type failingInboundBatchStore struct {
+	runtimebus.EventStore
+	runner     runtimebus.EventMutationRunner
+	failAppend int
+}
+
+func (s *failingInboundBatchStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	return s.runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		return fn(&failingInboundBatchMutation{EventMutation: mutation, failAppend: s.failAppend})
+	})
+}
+
+type failingInboundBatchMutation struct {
+	runtimebus.EventMutation
+	appendCount int
+	failAppend  int
+}
+
+func (m *failingInboundBatchMutation) Context() context.Context {
+	return runtimebus.WithEventMutationContext(m.EventMutation.Context(), m)
+}
+
+func (m *failingInboundBatchMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	m.appendCount++
+	if m.appendCount == m.failAppend {
+		return errors.New("injected normalized append failure")
+	}
+	return m.EventMutation.AppendEvent(ctx, evt)
+}
+
+func (m *failingInboundBatchMutation) ClaimInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
+	inbound, ok := m.EventMutation.(runtimebus.InboundDeliveryMutation)
+	if !ok {
+		return false, errors.New("selected-store mutation does not support inbound claims")
+	}
+	return inbound.ClaimInboundEvent(ctx, providerEventID, entityID, provider)
+}
+
+func countPostgresInboundBatchRows(t *testing.T, ctx context.Context, db *sql.DB, rawID, normalizedID string) (int, int) {
+	t.Helper()
+	var eventsCount, markerCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id IN ($1::uuid, $2::uuid)`, rawID, normalizedID).Scan(&eventsCount); err != nil {
+		t.Fatalf("count Postgres provider events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'platform.inbound_recorded'`).Scan(&markerCount); err != nil {
+		t.Fatalf("count Postgres provider marker: %v", err)
+	}
+	return eventsCount, markerCount
+}
+
+func countSQLiteInboundBatchRows(t *testing.T, ctx context.Context, db *sql.DB, rawID, normalizedID string) (int, int) {
+	t.Helper()
+	var eventsCount, markerCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id IN (?, ?)`, rawID, normalizedID).Scan(&eventsCount); err != nil {
+		t.Fatalf("count SQLite provider events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'platform.inbound_recorded'`).Scan(&markerCount); err != nil {
+		t.Fatalf("count SQLite provider marker: %v", err)
+	}
+	return eventsCount, markerCount
+}
+
 func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := runtimebus.NewEventBus(store)

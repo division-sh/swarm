@@ -49,6 +49,11 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	if targetFree, ok := source.(interface{ ProviderTriggerTargetFreeEvents() []string }); ok {
+		directPlans, directIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, targetFree.ProviderTriggerTargetFreeEvents())
+		plans = append(plans, directPlans...)
+		issues = append(issues, directIssues...)
+	}
 	return connectRoutePlanResolver{
 		source:          source,
 		routeTable:      routeTable,

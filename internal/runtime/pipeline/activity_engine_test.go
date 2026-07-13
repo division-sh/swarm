@@ -692,7 +692,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 	defer server.Close()
 
 	delivery, inboundEvent := acceptedTelegramInboundDeliveryEvent(t, entityID, runID)
-	chatID, incomingText := telegramInboundChatAndText(t, delivery.Payload)
+	chatID, incomingText := telegramInboundChatAndText(t, delivery.Events[0].Payload)
 	credentialStore := testActivityCredentialStore(t, "telegram_bot_token", "provider-secret")
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
@@ -1352,16 +1352,16 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	if err != nil {
 		t.Fatalf("Accept Telegram inbound delivery: %v", err)
 	}
-	if delivery.EventName != "inbound.telegram" || delivery.ProviderEventID != "123456789" {
+	if delivery.Events[0].Name != "inbound.telegram" || delivery.ProviderEventID != "123456789" {
 		t.Fatalf("delivery = %+v, want inbound.telegram update", delivery)
 	}
-	raw, err := json.Marshal(delivery.Payload)
+	raw, err := json.Marshal(delivery.Events[0].Payload)
 	if err != nil {
 		t.Fatalf("marshal inbound delivery payload: %v", err)
 	}
 	evt := eventtest.RootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:telegram-inbound:"+delivery.ProviderEventID)).String(),
-		delivery.EventName,
+		delivery.Events[0].Name,
 		"telegram",
 		"telegram-update-7",
 		raw,

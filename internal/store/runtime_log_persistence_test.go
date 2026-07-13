@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -364,5 +365,45 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	}
 	if sourceEventID != subjectEventID {
 		t.Fatalf("postgres source_event_id = %q, want %q", sourceEventID, subjectEventID)
+	}
+}
+
+func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &PostgresStore{DB: db}
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	runID := uuid.NewString()
+	subjectEventID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	logger := runtimepkg.NewRuntimeLogger(pg)
+
+	if err := pg.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := pg.AppendEventTx(txctx, tx, eventtest.PersistedProjection(
+			subjectEventID, events.EventType("validation/validation.package_ready"),
+			"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+			return err
+		}
+		return logger.Log(txctx, runtimepkg.RuntimeLogEntry{
+			Level: "warn", Message: "transactional diagnostic", Component: "eventbus",
+			Action: "ambient_transaction", EventID: subjectEventID, EventType: "validation/validation.package_ready",
+		})
+	}); err != nil {
+		t.Fatalf("RunEventTransaction: %v", err)
+	}
+
+	var sourceEventID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(source_event_id::text, '')
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+	`).Scan(&sourceEventID); err != nil {
+		t.Fatalf("load transactional runtime log: %v", err)
+	}
+	if sourceEventID != subjectEventID {
+		t.Fatalf("transactional runtime log source_event_id = %q, want %q", sourceEventID, subjectEventID)
 	}
 }

@@ -295,10 +295,25 @@ func validateInputPinResolutions(source semanticview.Source) []Finding {
 			continue
 		}
 		for _, pin := range source.FlowInputEventPins(flowID) {
+			findings = append(findings, validateFlowInputCarryProjectionPolicy(flowID, pin)...)
 			if pin.Resolution.Empty() {
 				continue
 			}
 			findings = append(findings, validateInputPinResolution(source, flowID, pin)...)
+		}
+	}
+	return findings
+}
+
+func validateFlowInputCarryProjectionPolicy(flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+	var findings []Finding
+	for name, carry := range pin.Carries {
+		name = strings.TrimSpace(name)
+		if carry.Optional {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "carry_projection_unsupported", fmt.Sprintf("carry %s optional is reserved for provider normalized-event projections and is not supported on flow input carries", name), flowID))
+		}
+		if conversion := strings.TrimSpace(carry.Convert); conversion != "" {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "carry_projection_unsupported", fmt.Sprintf("carry %s conversion %q is reserved for provider normalized-event projections and is not supported on flow input carries", name, conversion), flowID))
 		}
 	}
 	return findings

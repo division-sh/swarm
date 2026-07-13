@@ -64,7 +64,8 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 		if err != nil {
 			t.Fatalf("capability subject %s: %v", dir, err)
 		}
-		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider || len(subject.Capabilities) != 4 || len(subject.Guarantees) != 3 {
+		wantCapabilityCount := 3 + len(DerivedCapabilities(pack.Manifest).Can.EmitEvents)
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider || len(subject.Capabilities) != wantCapabilityCount || len(subject.Guarantees) != 3 {
 			t.Fatalf("capability subject %s = %#v", dir, subject)
 		}
 		wantRoute := "/webhooks/{alias}/" + pack.Manifest.Provider
@@ -405,7 +406,7 @@ func TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier(t *tes
 	if err != nil {
 		t.Fatalf("Accept external Telegram webhook: %v", err)
 	}
-	if delivery.ProviderEventID != "123456789" || delivery.ProviderEventType != "update" || delivery.EventName != "inbound.telegram" {
+	if delivery.ProviderEventID != "123456789" || delivery.ProviderEventType != "update" || delivery.Events[0].Name != "inbound.telegram" {
 		t.Fatalf("delivery = %+v, want Telegram manifest identity", delivery)
 	}
 }
@@ -431,8 +432,8 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		if delivery.ProviderEventType != "safe_event" {
 			t.Fatalf("provider event type = %q, want manifest json path source", delivery.ProviderEventType)
 		}
-		if delivery.Payload["provider_event_id"] != "delivery-header" || delivery.Payload["provider_event_type"] != "safe_event" {
-			t.Fatalf("payload identity = %+v, want manifest-derived fields", delivery.Payload)
+		if delivery.Events[0].Payload["provider_event_id"] != "delivery-header" || delivery.Events[0].Payload["provider_event_type"] != "safe_event" {
+			t.Fatalf("payload identity = %+v, want manifest-derived fields", delivery.Events[0].Payload)
 		}
 	})
 
@@ -606,8 +607,8 @@ func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
 	if delivery.ProviderEventType != "event" {
 		t.Fatalf("ProviderEventType = %q, want event", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.stripe" {
-		t.Fatalf("EventName = %q, want inbound.stripe", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.stripe" {
+		t.Fatalf("EventName = %q, want inbound.stripe", delivery.Events[0].Name)
 	}
 }
 
@@ -651,27 +652,27 @@ func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
 	if delivery.ProviderEventType != "message_received" {
 		t.Fatalf("ProviderEventType = %q, want message_received", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.twilio" {
-		t.Fatalf("EventName = %q, want inbound.twilio", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.twilio" {
+		t.Fatalf("EventName = %q, want inbound.twilio", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
 		t.Fatal("Twilio delivery did not request durable_before_dispatch acknowledgement")
 	}
-	payload, ok := delivery.Payload["payload"].(map[string]any)
+	payload, ok := delivery.Events[0].Payload["payload"].(map[string]any)
 	if !ok {
-		t.Fatalf("payload = %T, want form payload map", delivery.Payload["payload"])
+		t.Fatalf("payload = %T, want form payload map", delivery.Events[0].Payload["payload"])
 	}
 	if payload["Body"] != "hello from twilio" || payload["UnexpectedNew"] != "still signed" {
 		t.Fatalf("form payload = %+v, want Twilio form parameters without allowlist loss", payload)
 	}
-	headers, ok := delivery.Payload["headers"].(map[string]any)
+	headers, ok := delivery.Events[0].Payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+		t.Fatalf("headers = %T, want metadata map", delivery.Events[0].Payload["headers"])
 	}
 	if headers["twilio_message_sid"] != "SM1234567890abcdef" || headers["twilio_event_type"] != "message_received" {
 		t.Fatalf("headers = %+v, want Twilio manifest metadata", headers)
 	}
-	encoded := fmtPayload(delivery.Payload)
+	encoded := fmtPayload(delivery.Events[0].Payload)
 	if strings.Contains(encoded, "twilio-secret") {
 		t.Fatal("Twilio signing secret leaked into delivery payload")
 	}
@@ -809,20 +810,20 @@ func TestShopifyManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	if delivery.ProviderEventType != "orders_create" {
 		t.Fatalf("ProviderEventType = %q, want orders_create", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.shopify" {
-		t.Fatalf("EventName = %q, want inbound.shopify", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.shopify" {
+		t.Fatalf("EventName = %q, want inbound.shopify", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
 		t.Fatal("Shopify delivery did not request durable_before_dispatch acknowledgement")
 	}
-	headers, ok := delivery.Payload["headers"].(map[string]any)
+	headers, ok := delivery.Events[0].Payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+		t.Fatalf("headers = %T, want metadata map", delivery.Events[0].Payload["headers"])
 	}
 	if headers["shopify_webhook_id"] != "webhook-123" || headers["shopify_topic"] != "orders_create" {
 		t.Fatalf("headers = %+v, want Shopify manifest metadata", headers)
 	}
-	encoded := fmtPayload(delivery.Payload)
+	encoded := fmtPayload(delivery.Events[0].Payload)
 	if strings.Contains(encoded, "shopify-secret") {
 		t.Fatal("Shopify signing secret leaked into delivery payload")
 	}
@@ -939,20 +940,20 @@ func TestTypeformManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	if delivery.ProviderEventType != "form_response" {
 		t.Fatalf("ProviderEventType = %q, want form_response", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.typeform" {
-		t.Fatalf("EventName = %q, want inbound.typeform", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.typeform" {
+		t.Fatalf("EventName = %q, want inbound.typeform", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
 		t.Fatal("Typeform delivery did not request durable_before_dispatch acknowledgement")
 	}
-	headers, ok := delivery.Payload["headers"].(map[string]any)
+	headers, ok := delivery.Events[0].Payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+		t.Fatalf("headers = %T, want metadata map", delivery.Events[0].Payload["headers"])
 	}
 	if headers["typeform_event_id"] != "tf-evt-123" || headers["typeform_event_type"] != "form_response" {
 		t.Fatalf("headers = %+v, want Typeform manifest metadata", headers)
 	}
-	encoded := fmtPayload(delivery.Payload)
+	encoded := fmtPayload(delivery.Events[0].Payload)
 	if strings.Contains(encoded, "typeform-secret") {
 		t.Fatal("Typeform signing secret leaked into delivery payload")
 	}
@@ -1072,20 +1073,20 @@ func TestIntercomManifestAcceptsRawBodySHA1Signature(t *testing.T) {
 	if delivery.ProviderEventType != "conversation_user_created" {
 		t.Fatalf("ProviderEventType = %q, want conversation_user_created", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.intercom" {
-		t.Fatalf("EventName = %q, want inbound.intercom", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.intercom" {
+		t.Fatalf("EventName = %q, want inbound.intercom", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
 		t.Fatal("Intercom delivery did not request durable_before_dispatch acknowledgement")
 	}
-	headers, ok := delivery.Payload["headers"].(map[string]any)
+	headers, ok := delivery.Events[0].Payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+		t.Fatalf("headers = %T, want metadata map", delivery.Events[0].Payload["headers"])
 	}
 	if headers["intercom_notification_id"] != "notif_123" || headers["intercom_topic"] != "conversation_user_created" {
 		t.Fatalf("headers = %+v, want Intercom manifest metadata", headers)
 	}
-	encoded := fmtPayload(delivery.Payload)
+	encoded := fmtPayload(delivery.Events[0].Payload)
 	if strings.Contains(encoded, "intercom-secret") {
 		t.Fatal("Intercom signing secret leaked into delivery payload")
 	}
@@ -1195,20 +1196,20 @@ func TestTelegramManifestAcceptsHeaderTokenUpdate(t *testing.T) {
 	if delivery.ProviderEventType != "update" {
 		t.Fatalf("ProviderEventType = %q, want update", delivery.ProviderEventType)
 	}
-	if delivery.EventName != "inbound.telegram" {
-		t.Fatalf("EventName = %q, want inbound.telegram", delivery.EventName)
+	if delivery.Events[0].Name != "inbound.telegram" {
+		t.Fatalf("EventName = %q, want inbound.telegram", delivery.Events[0].Name)
 	}
 	if !delivery.AcknowledgeBeforeDispatch {
 		t.Fatal("Telegram delivery did not request durable_before_dispatch acknowledgement")
 	}
-	headers, ok := delivery.Payload["headers"].(map[string]any)
+	headers, ok := delivery.Events[0].Payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+		t.Fatalf("headers = %T, want metadata map", delivery.Events[0].Payload["headers"])
 	}
 	if headers["telegram_update_id"] != "123456789" || headers["telegram_update_type"] != "update" {
 		t.Fatalf("headers = %+v, want Telegram manifest metadata", headers)
 	}
-	encoded := fmtPayload(delivery.Payload)
+	encoded := fmtPayload(delivery.Events[0].Payload)
 	if strings.Contains(encoded, "telegram-secret") {
 		t.Fatal("Telegram secret token leaked into delivery payload")
 	}
