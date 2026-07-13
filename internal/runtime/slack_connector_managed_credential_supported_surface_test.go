@@ -283,7 +283,7 @@ func newFakeSlackManagedConnectorServer(t *testing.T) *fakeSlackManagedConnector
 
 func (f *fakeSlackManagedConnectorServer) requireSideEffectCall(t *testing.T, backend, context string) slackManagedConnectorCall {
 	t.Helper()
-	timer := time.NewTimer(15 * time.Second)
+	timer := time.NewTimer(connectorSupportedSurfaceAsyncTimeout)
 	defer timer.Stop()
 	select {
 	case call := <-f.sideEffects:
@@ -508,7 +508,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 	go pc.Run(runCtx)
 	select {
 	case <-subscribed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(connectorSupportedSurfaceAsyncTimeout):
 		t.Fatal("pipeline coordinator did not subscribe")
 	}
 	return bus, pc
@@ -566,7 +566,7 @@ func loadSlackManagedConnectorInboundEventID(t *testing.T, backend slackManagedC
 
 func waitForSlackManagedConnectorTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {
@@ -709,7 +709,7 @@ func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slac
 
 func requireSlackManagedConnectorResultEventEventually(t *testing.T, backend slackManagedConnectorBackend, eventID, eventType string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	for {
 		if slackManagedConnectorEventExists(t, backend, eventID, eventType) {
 			return
@@ -723,7 +723,7 @@ func requireSlackManagedConnectorResultEventEventually(t *testing.T, backend sla
 
 func requireManagedConnectorFailureEventCountEventually(t *testing.T, backend slackManagedConnectorBackend, label, sourceEventID string, countFn func(*testing.T, slackManagedConnectorBackend, string) int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var got int
 	for {
 		got = countFn(t, backend, sourceEventID)

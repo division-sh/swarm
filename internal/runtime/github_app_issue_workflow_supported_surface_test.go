@@ -380,7 +380,7 @@ func (f *fakeGitHubAppIssueWorkflowServer) requireSideEffectCall(t *testing.T, b
 func (f *fakeGitHubAppIssueWorkflowServer) requireSideEffectCalls(t *testing.T, backend, context string, want int) []githubAppIssueWorkflowCall {
 	t.Helper()
 	calls := make([]githubAppIssueWorkflowCall, 0, want)
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(connectorSupportedSurfaceAsyncTimeout)
 	for len(calls) < want {
 		select {
 		case call := <-f.sideEffects:
@@ -699,7 +699,7 @@ func loadGitHubInboundEventID(t *testing.T, backend slackManagedConnectorBackend
 
 func waitForGitHubTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, toolID, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {
@@ -790,7 +790,7 @@ func countGitHubActivityAttemptsForSource(t *testing.T, backend slackManagedConn
 
 func requireGitHubFailureEventEventually(t *testing.T, backend slackManagedConnectorBackend, label, eventName, sourceEventID string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(connectorSupportedSurfaceAsyncTimeout)
 	for {
 		if got := countGitHubFailureEventsForSource(t, backend, eventName, sourceEventID); got == 1 {
 			return
