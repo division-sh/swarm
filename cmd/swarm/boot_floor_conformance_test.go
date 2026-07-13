@@ -131,12 +131,15 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 
 	t.Run("serve", func(t *testing.T) {
 		var out lockedBuffer
+		swarmDir := t.TempDir()
 		code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
 			ConfigPath:           configPath,
 			ContractsPath:        contractsPath,
 			DataSource:           t.TempDir(),
 			PlatformSpecPath:     defaultPlatformSpecPath,
 			StoreMode:            storebackend.ActiveDefaultBackend().String(),
+			SwarmDir:             swarmDir,
+			SwarmDirSet:          true,
 			APIListenAddr:        "127.0.0.1:0",
 			MCPListenAddr:        "127.0.0.1:0",
 			SelfCheck:            true,

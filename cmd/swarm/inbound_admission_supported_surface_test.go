@@ -376,6 +376,13 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
+	readbackDeadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(process.outputString(), ":matrix:telegram AVAILABLE") {
+		if time.Now().After(readbackDeadline) {
+			t.Fatalf("timed out waiting for complete standing ingress readback:\n%s", process.outputString())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	serveOutput := process.outputString()
 	var unsignedWarningLine string
 	for _, line := range strings.Split(serveOutput, "\n") {
@@ -577,7 +584,7 @@ pins:
 
 func inboundAdmissionMatrixEventsYAML() string {
 	var out strings.Builder
-	for _, event := range []string{"inbound.telegram", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
+	for _, event := range []string{"inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
 		fmt.Fprintf(&out, "%s:\n  entity_id: text\n  provider: text\n  event_type: text\n  provider_event_type: text\n  provider_event_id: text\n  provider_delivery_id: text\n  headers: json\n  received_at: text\n", event)
 	}
 	return out.String()

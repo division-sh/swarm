@@ -202,7 +202,7 @@ func TestRawAdmissionConsumesOnlyDeclaredAuthenticationAndDeliverySources(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if delivery.ProviderEventID != "declared-id" || delivery.EventName != "inbound.partner" {
+	if delivery.ProviderEventID != "declared-id" || delivery.Events[0].Name != "inbound.partner" {
 		t.Fatalf("delivery = %+v", delivery)
 	}
 	headers["X-Partner-Delivery"] = []string{"one", "two"}
@@ -281,9 +281,9 @@ func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *test
 	if delivery.ProviderEventID != "evt-raw-json-path" {
 		t.Fatalf("delivery id = %q", delivery.ProviderEventID)
 	}
-	data, ok := delivery.Payload["data"].(string)
+	data, ok := delivery.Events[0].Payload["data"].(string)
 	if !ok || data != string(body) {
-		t.Fatalf("raw emitted payload = %#v, want exact body string", delivery.Payload["data"])
+		t.Fatalf("raw emitted payload = %#v, want exact body string", delivery.Events[0].Payload["data"])
 	}
 	if _, err := plan.Accept(Request{Provider: "partner-events", Body: []byte("not-json")}); err == nil || !strings.Contains(err.Error(), "requires a valid JSON request body") {
 		t.Fatalf("invalid JSON error = %v", err)

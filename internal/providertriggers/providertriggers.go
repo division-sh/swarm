@@ -22,6 +22,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,10 +67,15 @@ type Request struct {
 type Delivery struct {
 	ProviderEventID           string
 	ProviderEventType         string
-	EventName                 events.EventType
-	Payload                   map[string]any
+	Events                    []DeliveryEvent
 	Response                  *Response
 	AcknowledgeBeforeDispatch bool
+}
+
+type DeliveryEvent struct {
+	Name    events.EventType
+	Kind    OutputKind
+	Payload map[string]any
 }
 
 type Response struct {
@@ -407,10 +413,20 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 
 func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 	provider := NormalizeProviderName(manifest.Provider)
-	eventName := strings.TrimSpace(manifest.EventName.Literal)
-	if eventName == "" {
-		eventName = strings.TrimSpace(manifest.EventName.Template)
+	eventNames := make([]string, 0, 1+len(manifest.NormalizedEvents))
+	for _, output := range manifest.OutputManifest() {
+		name := strings.TrimSpace(output.Event)
+		if output.Kind == OutputKindRaw {
+			name = strings.TrimSpace(output.EventName.Literal)
+			if name == "" {
+				name = strings.TrimSpace(output.EventName.Template)
+			}
+		}
+		if name != "" {
+			eventNames = append(eventNames, name)
+		}
 	}
+	sort.Strings(eventNames)
 	verifySecret := ""
 	if manifest.Secret.Required {
 		verifySecret = "webhook_signing." + provider
@@ -419,7 +435,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 		Can: packs.CanCapabilities{
 			ReceiveHTTPSRoute:    "/webhooks/{alias}/" + provider,
 			VerifySecret:         verifySecret,
-			EmitEvents:           []string{eventName},
+			EmitEvents:           eventNames,
 			PersistDedupeMarkers: true,
 		},
 		Cannot: []string{
@@ -448,6 +464,7 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
 		SourcePath:    strings.TrimSpace(p.SourcePath),
 		Applicability: "installed",
+		TriggerEvents: triggerEventDescriptors(p.Manifest),
 	}
 	if route := strings.TrimSpace(capabilities.Can.ReceiveHTTPSRoute); route != "" {
 		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: route})
@@ -476,6 +493,36 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 		return packs.Subject{}, err
 	}
 	return normalized[0], nil
+}
+
+func triggerEventDescriptors(manifest Manifest) []packs.TriggerEventDescriptor {
+	entries := manifest.EventCatalogEntries()
+	out := make([]packs.TriggerEventDescriptor, 0, len(entries))
+	for _, output := range manifest.OutputManifest() {
+		name := strings.TrimSpace(output.Event)
+		if output.Kind == OutputKindRaw {
+			name = strings.TrimSpace(output.EventName.Literal)
+			if name == "" {
+				name = strings.TrimSpace(output.EventName.Template)
+			}
+		}
+		descriptor := packs.TriggerEventDescriptor{Event: name, Kind: string(output.Kind)}
+		if entry, ok := entries[name]; ok {
+			required := map[string]struct{}{}
+			for _, field := range entry.Required {
+				required[field] = struct{}{}
+			}
+			for fieldName, field := range entry.Payload.Properties {
+				_, isRequired := required[fieldName]
+				descriptor.Fields = append(descriptor.Fields, packs.TriggerEventFieldDescriptor{
+					Name: fieldName, Type: field.Type, Required: isRequired,
+					CarryEligible: output.Kind == OutputKindNormalized && isRequired,
+				})
+			}
+		}
+		out = append(out, descriptor)
+	}
+	return out
 }
 
 func (s *CatalogSnapshot) GenerationID() string {
@@ -563,20 +610,21 @@ func (req Request) withProvider(provider string) Request {
 }
 
 type Manifest struct {
-	Provider              string             `yaml:"provider"`
-	PayloadObjectRequired bool               `yaml:"payload_object_required"`
-	PayloadObjectError    string             `yaml:"payload_object_error"`
-	PayloadSource         string             `yaml:"payload_source"`
-	Secret                SecretManifest     `yaml:"secret"`
-	Signature             SignatureManifest  `yaml:"signature"`
-	Challenge             *ChallengeManifest `yaml:"challenge"`
-	DeliveryCondition     *ConditionManifest `yaml:"delivery_condition"`
-	DeliveryID            ValueSource        `yaml:"delivery_id"`
-	EventType             ValueSource        `yaml:"event_type"`
-	EventName             EventNameManifest  `yaml:"event_name"`
-	Ack                   AckManifest        `yaml:"ack"`
-	RedactKeys            []string           `yaml:"redact_keys"`
-	Metadata              map[string]string  `yaml:"metadata"`
+	Provider              string                    `yaml:"provider"`
+	PayloadObjectRequired bool                      `yaml:"payload_object_required"`
+	PayloadObjectError    string                    `yaml:"payload_object_error"`
+	PayloadSource         string                    `yaml:"payload_source"`
+	Secret                SecretManifest            `yaml:"secret"`
+	Signature             SignatureManifest         `yaml:"signature"`
+	Challenge             *ChallengeManifest        `yaml:"challenge"`
+	DeliveryCondition     *ConditionManifest        `yaml:"delivery_condition"`
+	DeliveryID            ValueSource               `yaml:"delivery_id"`
+	EventType             ValueSource               `yaml:"event_type"`
+	EventName             EventNameManifest         `yaml:"event_name"`
+	NormalizedEvents      []NormalizedEventManifest `yaml:"normalized_events,omitempty"`
+	Ack                   AckManifest               `yaml:"ack"`
+	RedactKeys            []string                  `yaml:"redact_keys"`
+	Metadata              map[string]string         `yaml:"metadata"`
 }
 
 type SecretManifest struct {
@@ -803,6 +851,9 @@ func (m Manifest) Validate() error {
 			return fmt.Errorf("%s manifest metadata %q has unsupported source %q", provider, key, source)
 		}
 	}
+	if err := m.validateNormalizedEvents(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -860,13 +911,25 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 	eventType := NormalizeEventToken(rawEventType)
 	entityID := req.Target.EffectiveEntityID()
 	payload := m.buildPublishPayload(provider, entityID, deliveryID, eventType, req)
+	normalized, err := m.normalizedDeliveryEvents(req.Payload)
+	if err != nil {
+		return Delivery{}, err
+	}
+	outputs := make([]DeliveryEvent, 0, 1+len(normalized))
+	outputs = append(outputs, DeliveryEvent{
+		Name: events.EventType(m.resolveEventName(eventType)), Kind: OutputKindRaw, Payload: payload,
+	})
+	outputs = append(outputs, normalized...)
 	return Delivery{
 		ProviderEventID:           deliveryID,
 		ProviderEventType:         eventType,
-		EventName:                 events.EventType(m.resolveEventName(eventType)),
-		Payload:                   payload,
+		Events:                    outputs,
 		AcknowledgeBeforeDispatch: strings.TrimSpace(m.Ack.Mode) == "durable_before_dispatch",
 	}, nil
+}
+
+func (m Manifest) EventCatalogEntries() map[string]runtimecontracts.EventCatalogEntry {
+	return m.eventCatalogEntries()
 }
 
 func (m Manifest) verifySignature(secret string, req Request) error {

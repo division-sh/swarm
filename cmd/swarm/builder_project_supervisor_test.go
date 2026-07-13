@@ -23,10 +23,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -220,16 +223,21 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+	for _, flow := range bundle.FlowTree.ByID {
+		if flow != nil {
+			flow.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+		}
+	}
 	source := semanticview.Wrap(bundle)
 	catalog := testProviderTriggerCatalog(t)
-	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore) {
-		persistence := &processIngressProofStore{}
+	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressEventStore) {
 		eventsStore := &processIngressEventStore{}
 		bus, err := runtimebus.NewEventBus(eventsStore)
 		if err != nil {
 			t.Fatalf("NewEventBus(%s): %v", alias, err)
 		}
-		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, persistence)
+		gateway := runtimepkg.NewInboundGateway(bus, nil, nil)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {
@@ -242,12 +250,12 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
 				EntityID: entityID, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
-		}, persistence, eventsStore
+		}, eventsStore
 	}
 	hashA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-	contextA, persistenceA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
-	contextB, persistenceB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
+	contextA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
+	contextB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
 	installed, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
@@ -257,18 +265,18 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(`{"update_id":99,"message":{"chat":{"id":42},"text":"hello"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(`{"update_id":99,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("selected-context response = %d %q, want 202", rec.Code, rec.Body.String())
 	}
-	if persistenceA.recorded || len(eventsA.events) != 0 {
-		t.Fatalf("non-selected context A was touched: marker=%v events=%d", persistenceA.recorded, len(eventsA.events))
+	if eventsA.recorded || len(eventsA.events) != 0 {
+		t.Fatalf("non-selected context A was touched: marker=%v events=%d", eventsA.recorded, len(eventsA.events))
 	}
-	if !persistenceB.recorded || len(eventsB.events) != 1 {
-		t.Fatalf("selected context B marker/events = %v/%d, want true/1", persistenceB.recorded, len(eventsB.events))
+	if !eventsB.recorded || len(eventsB.events) != 2 {
+		t.Fatalf("selected context B marker/events = %v/%d, want true and raw plus normalized", eventsB.recorded, len(eventsB.events))
 	}
 	if got := eventsB.events[0].RunID(); got != contextB.StandingTargets[0].RunID {
 		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
@@ -1038,20 +1046,11 @@ func (processIngressCredentialStore) Set(context.Context, string, string) error 
 func (processIngressCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (processIngressCredentialStore) Delete(context.Context, string) error      { return nil }
 
-type processIngressProofStore struct{ recorded bool }
-
-func (s *processIngressProofStore) RecordInboundEvent(context.Context, string, string, string) (bool, error) {
-	s.recorded = true
-	return true, nil
+type processIngressEventStore struct {
+	events   []events.Event
+	seen     map[string]struct{}
+	recorded bool
 }
-func (*processIngressProofStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
-	return 0, nil
-}
-func (*processIngressProofStore) DeleteInboundEvent(context.Context, string, string, string) error {
-	return nil
-}
-
-type processIngressEventStore struct{ events []events.Event }
 
 func (s *processIngressEventStore) AppendEvent(_ context.Context, event events.Event) error {
 	s.events = append(s.events, event)
@@ -1062,6 +1061,61 @@ func (*processIngressEventStore) InsertEventDeliveries(context.Context, string, 
 }
 func (*processIngressEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
+}
+
+func (s *processIngressEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	if s.seen == nil {
+		s.seen = map[string]struct{}{}
+	}
+	postCommit := make([]func(), 0, 4)
+	mutation := &processIngressEventMutation{store: s}
+	mutation.ctx = runtimebus.WithEventMutationContext(runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit), mutation)
+	if err := fn(mutation); err != nil {
+		return err
+	}
+	if mutation.pendingKey != "" {
+		s.seen[mutation.pendingKey] = struct{}{}
+		s.recorded = true
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+type processIngressEventMutation struct {
+	ctx        context.Context
+	store      *processIngressEventStore
+	pendingKey string
+}
+
+func (m *processIngressEventMutation) Context() context.Context { return m.ctx }
+func (m *processIngressEventMutation) AppendEvent(ctx context.Context, event events.Event) error {
+	return m.store.AppendEvent(ctx, event)
+}
+func (*processIngressEventMutation) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (*processIngressEventMutation) InsertEventDeliveriesWithTargets(context.Context, string, []string, map[string]events.RouteIdentity) error {
+	return nil
+}
+func (*processIngressEventMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
+	return nil
+}
+func (*processIngressEventMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+func (*processIngressEventMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
+	return nil
+}
+func (*processIngressEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
+	return nil
+}
+func (m *processIngressEventMutation) ClaimInboundEvent(_ context.Context, providerEventID, entityID, provider string) (bool, error) {
+	key := provider + "\x00" + entityID + "\x00" + providerEventID
+	if _, exists := m.store.seen[key]; exists {
+		return false, nil
+	}
+	m.pendingKey = key
+	return true, nil
 }
 
 func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGrace(t *testing.T) {

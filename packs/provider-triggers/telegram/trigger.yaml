@@ -17,6 +17,23 @@ event_type:
   required: true
 event_name:
   literal: inbound.telegram
+normalized_events:
+  - event: inbound.telegram.text_message
+    fields:
+      chat_id:
+        from: message.chat.id
+        type: text
+        convert: number_to_text
+      text:
+        from: message.text
+        type: text
+      message_id:
+        from: message.message_id
+        type: integer
+      raw:
+        from: message
+        type: json
+        optional: true
 ack:
   mode: durable_before_dispatch
 metadata:

@@ -115,7 +115,19 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
-	if err := am.installFlowInstanceRuntime(ctx, req, schema, scope); err != nil {
+	if _, inMutation := runtimepipeline.PipelineSQLTxFromContext(ctx); inMutation {
+		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
+			return err
+		}
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			if err := am.installFlowInstanceAgents(postCommitCtx, req, schema, scope); err != nil {
+				am.logFlowInstanceActivationSideEffectFailure(req, err)
+			}
+		}) {
+			return fmt.Errorf("flow instance %s requires post-commit agent activation", flowPath)
+		}
+	} else if err := am.installFlowInstanceRuntime(ctx, req, schema, scope); err != nil {
 		return err
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
@@ -180,6 +192,13 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 }
 
 func (am *AgentManager) installFlowInstanceRuntime(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) error {
+	if err := am.installFlowInstanceAgents(ctx, req, schema, scope); err != nil {
+		return err
+	}
+	return am.installFlowInstanceRoute(ctx, req)
+}
+
+func (am *AgentManager) installFlowInstanceAgents(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) error {
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	localEvents := flowLocalEventSet(schema, scope)
@@ -206,6 +225,12 @@ func (am *AgentManager) installFlowInstanceRuntime(ctx context.Context, req runt
 			return err
 		}
 	}
+	return nil
+}
+
+func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	instance := req.Instance
+	vars := flowActivationVars(req)
 	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instance.Route(), ActivationVariables: vars}
 	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
 		return installer.AddFlowInstanceRouteContext(ctx, request)
@@ -214,6 +239,19 @@ func (am *AgentManager) installFlowInstanceRuntime(ctx context.Context, req runt
 		return installer.AddFlowInstanceRoute(request)
 	}
 	return fmt.Errorf("event bus does not support derived flow-instance routing for %s", instance.InstancePath)
+}
+
+func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepipeline.FlowInstanceActivationRequest, err error) {
+	if am == nil || am.bus == nil || err == nil {
+		return
+	}
+	_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+		Level: "error", Message: "Flow instance agent activation failed after commit",
+		Component: "flow_activation", Action: "agent_activation_failed",
+		EntityID: strings.TrimSpace(req.Instance.EntityID),
+		Detail:   map[string]any{"flow_path": strings.TrimSpace(req.Instance.InstancePath)},
+		Failure:  failureEnvelope(err, "flow_activation", "install_agents"),
+	})
 }
 
 func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowEntityID, instanceID, flowPath, parentEntityID string) map[string]any {

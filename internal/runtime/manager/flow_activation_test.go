@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -435,6 +436,33 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	cfg, _ := am.GetAgentConfig("reviewer-inst-1")
 	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
+	}
+}
+
+func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle("")
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+
+	if err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
+		t.Fatalf("transactional route materialization = %#v, want review/inst-1", bus.addedPaths)
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("flow agent started before the activation transaction committed")
+	}
+	if len(postCommit) != 1 {
+		t.Fatalf("post-commit actions = %d, want deferred agent startup", len(postCommit))
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+		t.Fatal("flow agent did not start after activation commit")
 	}
 }
 

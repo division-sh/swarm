@@ -2,36 +2,29 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return false, err
-	}
-	if strings.TrimSpace(providerEventID) == "" {
-		return false, fmt.Errorf("provider_event_id is required")
-	}
-	if strings.TrimSpace(entityID) == "" {
-		return false, fmt.Errorf("entity_id is required")
-	}
-	if strings.TrimSpace(provider) == "" {
-		return false, fmt.Errorf("provider is required")
-	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogIdempotencyKey {
-		if caps.Events.Log != SchemaFlavorCanonical {
-			return false, unsupportedSchemaCapability("events", caps.Events.Log)
+	inserted := false
+	err := s.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		inbound, ok := mutation.(runtimebus.InboundDeliveryMutation)
+		if !ok {
+			return fmt.Errorf("selected-store event mutation does not support inbound delivery claims")
 		}
-		return false, fmt.Errorf("store: inbound event recording requires canonical events.idempotency_key support")
-	}
-	return s.recordInboundEventSpec(ctx, providerEventID, entityID, provider)
+		var err error
+		inserted, err = inbound.ClaimInboundEvent(mutation.Context(), providerEventID, entityID, provider)
+		return err
+	})
+	return inserted, err
 }
 
 func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error) {
@@ -48,55 +41,29 @@ func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before tim
 	return s.purgeInboundEventsSpec(ctx, before, limit)
 }
 
-func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(providerEventID) == "" {
-		return fmt.Errorf("provider_event_id is required")
-	}
-	if strings.TrimSpace(entityID) == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	if strings.TrimSpace(provider) == "" {
-		return fmt.Errorf("provider is required")
-	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogIdempotencyKey {
-		if caps.Events.Log != SchemaFlavorCanonical {
-			return unsupportedSchemaCapability("events", caps.Events.Log)
-		}
-		return fmt.Errorf("store: inbound event deletion requires canonical events.idempotency_key support")
-	}
-	idempotencyKey := inboundEventIdempotencyKey(providerEventID, entityID, provider)
-	_, err = s.DB.ExecContext(ctx, `
-		DELETE FROM events
-		WHERE idempotency_key = $1
-		  AND event_name = 'platform.inbound_recorded'
-		  AND entity_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
-	`, idempotencyKey, entityID)
-	if err != nil {
-		return fmt.Errorf("delete inbound event marker: %w", err)
-	}
-	return nil
-}
-
-func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
+func (s *PostgresStore) ClaimInboundEventTx(ctx context.Context, tx *sql.Tx, providerEventID, entityID, provider string) (bool, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return false, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("begin inbound event tx: %w", err)
+	if tx == nil {
+		return false, fmt.Errorf("inbound delivery claim transaction is required")
 	}
-	committed := false
-	defer func() {
-		if committed {
-			return
+	if strings.TrimSpace(providerEventID) == "" {
+		return false, fmt.Errorf("provider_event_id is required")
+	}
+	if strings.TrimSpace(entityID) == "" {
+		return false, fmt.Errorf("entity_id is required")
+	}
+	if strings.TrimSpace(provider) == "" {
+		return false, fmt.Errorf("provider is required")
+	}
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogIdempotencyKey {
+		if caps.Events.Log != SchemaFlavorCanonical {
+			return false, unsupportedSchemaCapability("events", caps.Events.Log)
 		}
-		_ = tx.Rollback()
-	}()
+		return false, fmt.Errorf("store: inbound event recording requires canonical events.idempotency_key support")
+	}
 
 	idempotencyKey := inboundEventIdempotencyKey(providerEventID, entityID, provider)
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, idempotencyKey); err != nil {
@@ -116,10 +83,6 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 		return false, fmt.Errorf("check inbound event dedupe: %w", err)
 	}
 	if exists {
-		if err := tx.Commit(); err != nil {
-			return false, fmt.Errorf("commit inbound event dedupe tx: %w", err)
-		}
-		committed = true
 		return false, nil
 	}
 
@@ -183,10 +146,6 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 	if _, err := tx.ExecContext(ctx, insertQ, args...); err != nil {
 		return false, fmt.Errorf("record inbound event in events: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit inbound event tx: %w", err)
-	}
-	committed = true
 	return true, nil
 }
 

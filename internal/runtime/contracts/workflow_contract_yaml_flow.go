@@ -265,8 +265,10 @@ var outputEventPinFieldOptions = map[string]struct{}{
 }
 
 var inputEventPinCarryFieldOptions = map[string]struct{}{
-	"from": {},
-	"type": {},
+	"from":     {},
+	"type":     {},
+	"optional": {},
+	"convert":  {},
 }
 
 var inputEventPinResolutionFieldOptions = map[string]struct{}{
@@ -491,6 +493,14 @@ func (c *FlowInputPinCarry) UnmarshalYAML(node *yaml.Node) error {
 		case "type":
 			if err := value.Decode(&out.Type); err != nil {
 				return fmt.Errorf("carry.type: %w", err)
+			}
+		case "optional":
+			if err := value.Decode(&out.Optional); err != nil {
+				return fmt.Errorf("carry.optional: %w", err)
+			}
+		case "convert":
+			if err := value.Decode(&out.Convert); err != nil {
+				return fmt.Errorf("carry.convert: %w", err)
 			}
 		default:
 			return NewUndefinedFieldDiagnostic("input event pin carry", key, inputEventPinCarryFieldOptions)

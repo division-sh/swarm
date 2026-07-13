@@ -445,11 +445,15 @@ func (m connectorPackWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
 }
 
-func workflowModuleWithConnectorPacks(module runtimepipeline.WorkflowModule) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
+func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, triggerCatalog *providertriggers.CatalogSnapshot) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
 	if module == nil {
 		return nil, nil, nil
 	}
 	source, err := providerconnectors.SourceWithConnectorPackImports(module.SemanticSource())
+	if err != nil {
+		return nil, nil, err
+	}
+	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -509,7 +513,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	var source semanticview.Source
 	if opts.WorkflowModule != nil {
-		workflowModule, wrappedSource, err := workflowModuleWithConnectorPacks(opts.WorkflowModule)
+		workflowModule, wrappedSource, err := workflowModuleWithProviderPacks(opts.WorkflowModule, opts.ProviderTriggerCatalog)
 		if err != nil {
 			return validatedRuntimeDeps{}, fmt.Errorf("provider connector pack import failed: %w", err)
 		}
@@ -855,7 +859,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)

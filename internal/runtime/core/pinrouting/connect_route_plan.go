@@ -204,6 +204,77 @@ func LowerCompositionConnectRoutePlans(source semanticview.Source) ([]ConnectRou
 	return plans, issues
 }
 
+// LowerTargetFreeInputRoutePlans lowers exact external input pins for the
+// explicitly authorized target-free event set. It reuses the same instance-key
+// materialization model as composition connect routes without inventing a
+// synthetic producer output pin.
+func LowerTargetFreeInputRoutePlans(source semanticview.Source, eventNames []string) ([]ConnectRoutePlan, []ConnectRoutePlanIssue) {
+	if source == nil || len(eventNames) == 0 {
+		return nil, nil
+	}
+	allowed := map[string]struct{}{}
+	for _, name := range eventNames {
+		if normalized := eventidentity.Normalize(name); normalized != "" {
+			allowed[normalized] = struct{}{}
+		}
+	}
+	plans := make([]ConnectRoutePlan, 0)
+	issues := make([]ConnectRoutePlanIssue, 0)
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		for _, inputPin := range source.FlowInputEventPins(flowID) {
+			if strings.TrimSpace(inputPin.Source) != "external" {
+				continue
+			}
+			resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
+			if _, ok := allowed[resolved]; !ok {
+				continue
+			}
+			connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName(), Delivery: string(ConnectDeliveryOne)}
+			var instanceKey *ConnectRoutePlanInstanceKey
+			if receiverRequiresRuntimeResolution(scope) {
+				var issue ConnectRoutePlanIssue
+				instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, ConnectDeliveryOne, flowID)
+				if issue.Failure != "" {
+					issue.AuthoredLocation = flowID + "." + inputPin.PinName()
+					issues = append(issues, issue)
+					continue
+				}
+			}
+			plan := ConnectRoutePlan{
+				AuthoredLocation: flowID + "." + inputPin.PinName(),
+				Source: ConnectRoutePlanEndpoint{
+					Root: true, Pin: inputPin.PinName(), Event: resolved, ResolvedEvent: resolved, Mode: "external",
+				},
+				Receiver: ConnectRoutePlanEndpoint{
+					FlowID: flowID, FlowPath: strings.Trim(strings.TrimSpace(scope.Path), "/"), Mode: strings.TrimSpace(scope.Mode),
+					Pin: inputPin.PinName(), Event: eventidentity.Normalize(inputPin.EventType()), ResolvedEvent: resolved,
+				},
+				Delivery: ConnectDeliveryOne, TargetKind: ConnectTargetKindTarget,
+				ResolutionKind: connectResolutionKind(scope, ConnectDeliveryOne, nil, instanceKey),
+				InstanceKey:    instanceKey,
+			}
+			if receiverRequiresRuntimeResolution(scope) {
+				if instanceKey == nil {
+					issues = append(issues, ConnectRoutePlanIssue{Connect: connect, AuthoredLocation: plan.AuthoredLocation, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: flowID})
+					continue
+				}
+				plan.RequiresRuntimeResolution = true
+			} else {
+				plan.Target = staticConnectRoute(source, flowID)
+			}
+			plans = append(plans, plan)
+		}
+	}
+	sort.SliceStable(plans, func(i, j int) bool {
+		if plans[i].Receiver.FlowID != plans[j].Receiver.FlowID {
+			return plans[i].Receiver.FlowID < plans[j].Receiver.FlowID
+		}
+		return plans[i].Receiver.Pin < plans[j].Receiver.Pin
+	})
+	return plans, issues
+}
+
 func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	plan, issue := lowerCompositionConnectRoutePlan(source, connect)
 	authoredLocation := connect.AuthoredLocation()

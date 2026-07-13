@@ -16,11 +16,66 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+type telegramPhraseBotLLMRuntime struct{}
+
+func (telegramPhraseBotLLMRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{
+		ID: agentID + "-session", AgentID: agentID, SystemPrompt: systemPrompt,
+		Tools: append([]runtimellm.ToolDefinition(nil), tools...),
+	}, nil
+}
+
+func (telegramPhraseBotLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	if message.Role == "tool" {
+		return &runtimellm.Response{
+			Message:   runtimellm.Message{Role: "assistant", Content: "Telegram reply sent."},
+			SessionID: session.ID,
+		}, nil
+	}
+	const payloadPrefix = "- payload: "
+	start := strings.Index(message.Content, payloadPrefix)
+	if start < 0 {
+		return nil, fmt.Errorf("phrase-bot input has no event payload")
+	}
+	raw := message.Content[start+len(payloadPrefix):]
+	if end := strings.IndexByte(raw, '\n'); end >= 0 {
+		raw = raw[:end]
+	}
+	var payload map[string]any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode phrase-bot event payload: %w", err)
+	}
+	chatID := strings.TrimSpace(fmt.Sprint(payload["chat_id"]))
+	messageText := strings.TrimSpace(fmt.Sprint(payload["text"]))
+	if chatID == "" || messageText == "" {
+		return nil, fmt.Errorf("phrase-bot requires chat_id and text")
+	}
+	call := runtimellm.ToolCall{
+		ID:   "reply-" + chatID,
+		Name: "emit_telegram_reply_requested",
+		Arguments: map[string]any{
+			"chat_id": chatID,
+			"text":    "Swarm heard: " + messageText,
+		},
+	}
+	return &runtimellm.Response{
+		Message:   runtimellm.Message{Role: "assistant", ToolCalls: []runtimellm.ToolCall{call}},
+		ToolCalls: []runtimellm.ToolCall{call}, SessionID: session.ID,
+	}, nil
+}
+
+func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *runtimellm.Session) error {
+	return nil
+}
 
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
@@ -56,18 +111,18 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	firstEntity := sendStandingTelegramUpdate(t, firstURL, 101)
-	secondEntity := sendStandingTelegramUpdate(t, firstURL, 102)
+	firstEntity := sendStandingTelegramUpdate(t, firstURL, 101, 42)
+	secondEntity := sendStandingTelegramUpdate(t, firstURL, 102, 42)
 	if firstEntity == "" || firstEntity != secondEntity {
 		t.Fatalf("delivery entities = %q and %q, want one standing entity", firstEntity, secondEntity)
 	}
-	requireStandingTelegramCalls(t, calls, 2, sqlitePath)
+	requireStandingTelegramCalls(t, calls, sqlitePath, 42, 42)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -101,11 +156,11 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	restartedEntity := sendStandingTelegramUpdate(t, secondURL, 103)
+	restartedEntity := sendStandingTelegramUpdate(t, secondURL, 103, 84)
 	if restartedEntity != firstEntity {
 		t.Fatalf("restart entity = %q, want %q", restartedEntity, firstEntity)
 	}
-	requireStandingTelegramCalls(t, calls, 1, sqlitePath)
+	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -124,7 +179,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 		JOIN runs r ON r.run_id = es.run_id
 		WHERE es.entity_id = ?
-		  AND fi.flow_template = 'telegram-chat'
+		  AND fi.flow_template = 'telegram-ingress'
 		  AND json_extract(es.fields, '$.activation') = 'standing'
 		  AND r.status = 'running'
 		  AND r.bundle_hash IS NOT NULL
@@ -135,12 +190,12 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		SELECT COUNT(DISTINCT es.run_id)
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = 'telegram-chat'
+		WHERE fi.flow_template = 'telegram-ingress'
 		  AND json_extract(es.fields, '$.activation') = 'standing'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&instances); err != nil {
+	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
 	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
@@ -148,6 +203,19 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	}
+	var chatInstances, normalizedEvents, wrongNormalizedRuns int
+	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+		t.Fatalf("count per-chat instances: %v", err)
+	}
+	if err := sqliteStore.DB.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
+		FROM events WHERE event_name = 'inbound.telegram.text_message'
+	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
+		t.Fatalf("inspect normalized event lineage: %v", err)
+	}
+	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
+		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var entityEvents, wrongRunEvents int
 	if err := sqliteStore.DB.QueryRow(`
@@ -249,16 +317,16 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	entity := sendStandingTelegramUpdate(t, baseURL, 201)
-	if got := sendStandingTelegramUpdate(t, baseURL, 202); got != entity {
+	entity := sendStandingTelegramUpdate(t, baseURL, 201, 42)
+	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42); got != entity {
 		t.Fatalf("second entity = %q, want %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, calls, 2, "postgres:"+dsn)
+	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -268,10 +336,10 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
-	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203); got != entity {
+	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != entity {
 		t.Fatalf("restart entity = %q, want %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, calls, 1, "postgres:"+dsn)
+	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -296,7 +364,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 		JOIN runs r ON r.run_id = es.run_id
 		WHERE es.entity_id = $1::uuid
-		  AND fi.flow_template = 'telegram-chat'
+		  AND fi.flow_template = 'telegram-ingress'
 		  AND es.fields->>'activation' = 'standing'
 		  AND r.status = 'running'
 		  AND r.bundle_hash IS NOT NULL
@@ -307,12 +375,12 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		SELECT COUNT(DISTINCT es.run_id)
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = 'telegram-chat'
+		WHERE fi.flow_template = 'telegram-ingress'
 		  AND es.fields->>'activation' = 'standing'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&instances); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = $1::uuid`, entity).Scan(&entities); err != nil {
@@ -320,6 +388,19 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
+	}
+	var chatInstances, normalizedEvents, wrongNormalizedRuns int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+		t.Fatalf("count per-chat instances: %v", err)
+	}
+	if err := db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0)
+		FROM events WHERE event_name = 'inbound.telegram.text_message'
+	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
+		t.Fatalf("inspect normalized event lineage: %v", err)
+	}
+	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
+		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var entityEvents, wrongRunEvents int
 	if err := db.QueryRow(`
@@ -341,16 +422,11 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 	if err != nil {
 		t.Fatalf("read standing package: %v", err)
 	}
-	flowDir := filepath.Join(contractsRoot, "flows", "telegram-chat")
+	flowDir := filepath.Join(contractsRoot, "flows", "telegram-ingress")
 	flowSchemaPath := filepath.Join(flowDir, "schema.yaml")
 	baseFlowSchema, err := os.ReadFile(flowSchemaPath)
 	if err != nil {
 		t.Fatalf("read standing flow schema: %v", err)
-	}
-	nodesPath := filepath.Join(flowDir, "nodes.yaml")
-	baseNodes, err := os.ReadFile(nodesPath)
-	if err != nil {
-		t.Fatalf("read standing flow nodes: %v", err)
 	}
 	type candidateMutation struct {
 		name  string
@@ -368,29 +444,8 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 			}
 			writeStandingCandidateFile(t, packagePath, before[:start]+"flows: []\n")
 		}},
-		{name: "standing changed to non-standing", apply: func(t *testing.T) {
-			before := string(basePackage)
-			standingBlock := `    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-`
-			changed := strings.Replace(before, standingBlock, "", 1)
-			if changed == before {
-				t.Fatal("standing activation block not found")
-			}
-			writeStandingCandidateFile(t, packagePath, changed)
-			changedNodes := strings.Replace(string(baseNodes), "    inbound.telegram:\n      activity:", "    inbound.telegram:\n      select_or_create_entity:\n        by:\n          service_id: payload.provider\n      activity:", 1)
-			if changedNodes == string(baseNodes) {
-				t.Fatal("standing handler marker not found")
-			}
-			writeStandingCandidateFile(t, nodesPath, changedNodes)
-			t.Cleanup(func() { _ = os.WriteFile(nodesPath, baseNodes, 0o600) })
-		}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
-			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-chat-v2")
+			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-ingress-v2")
 			if err := os.Rename(flowDir, renamedDir); err != nil {
 				t.Fatalf("rename flow directory: %v", err)
 			}
@@ -398,9 +453,8 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 				_ = os.Rename(renamedDir, flowDir)
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-chat", "name: telegram-chat-v2", 1))
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "nodes.yaml"), strings.ReplaceAll(string(baseNodes), "telegram-chat.telegram_send_message", "telegram-chat-v2.telegram_send_message"))
-			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-chat", "telegram-chat-v2"))
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
+			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-ingress", "telegram-ingress-v2"))
 		}},
 	}
 	for _, mutation := range mutations {
@@ -442,9 +496,9 @@ func requireChangedStandingColdStartRejected(t *testing.T, opts serveOptions) {
 	}
 }
 
-func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID int) string {
+func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int) string {
 	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"chat":{"id":42},"text":"hello %d"}}`, updateID, updateID, updateID))
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"chat":{"id":%d},"text":"hello %d"}}`, updateID, updateID, chatID, updateID))
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new webhook request: %v", err)
@@ -466,13 +520,13 @@ func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID int) stri
 	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
 }
 
-func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, count int, sqlitePath string) {
+func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sqlitePath string, chatIDs ...int) {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for i, chatID := range chatIDs {
 		select {
 		case call := <-calls:
-			if strings.TrimSpace(fmt.Sprint(call["chat_id"])) != "42" {
-				t.Fatalf("Telegram chat_id = %v", call["chat_id"])
+			if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != fmt.Sprint(chatID) {
+				t.Fatalf("Telegram chat_id = %v, want %d", call["chat_id"], chatID)
 			}
 		case <-time.After(5 * time.Second):
 			diagnostics := "unavailable"
@@ -481,7 +535,7 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, cou
 			} else if strings.TrimSpace(sqlitePath) != "" {
 				diagnostics = standingSQLiteDiagnostics(sqlitePath)
 			}
-			t.Fatalf("timed out waiting for Telegram reply %d/%d; diagnostics: %s", i+1, count, diagnostics)
+			t.Fatalf("timed out waiting for Telegram reply %d/%d; diagnostics: %s", i+1, len(chatIDs), diagnostics)
 		}
 	}
 }
@@ -599,8 +653,8 @@ func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) str
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 flows:
-  - id: telegram-chat
-    flow: telegram-chat
+  - id: telegram-ingress
+    flow: telegram-ingress
     mode: singleton
     activation: standing
     ingress:
@@ -608,6 +662,9 @@ flows:
       providers:
         - provider: telegram
           signing_secret: webhook_signing.telegram
+  - id: telegram-chat
+    flow: telegram-chat
+    mode: template
 `,
 		"schema.yaml": "name: standing-telegram-proof\n",
 		"policy.yaml": "{}\n",
@@ -615,7 +672,7 @@ flows:
 		"agents.yaml": "{}\n",
 		"events.yaml": "{}\n",
 		"nodes.yaml":  "{}\n",
-		"flows/telegram-chat/schema.yaml": `name: telegram-chat
+		"flows/telegram-ingress/schema.yaml": `name: telegram-ingress
 mode: singleton
 initial_state: active
 states: [active]
@@ -628,50 +685,75 @@ pins:
   outputs:
     events: []
 `,
-		"flows/telegram-chat/types.yaml": "{}\n",
-		"flows/telegram-chat/entities.yaml": `chat_service:
+		"flows/telegram-ingress/types.yaml": "{}\n",
+		"flows/telegram-ingress/entities.yaml": `telegram_service:
   service_id:
     type: text
     initial: standing
-  chats:
+  active_chats:
     type: map[text]json
     initial: {}
 `,
-		"flows/telegram-chat/events.yaml": `inbound.telegram:
-  entity_id: text
-  provider: text
-  event_type: text
-  provider_event_type: text
-  provider_event_id: text
-  provider_delivery_id: text
-  headers: json
-  received_at: text
+		"flows/telegram-ingress/events.yaml": "{}\n",
+		"flows/telegram-ingress/nodes.yaml":  "{}\n",
+		"flows/telegram-ingress/tools.yaml":  "{}\n",
+		"flows/telegram-ingress/policy.yaml": "{}\n",
+		"flows/telegram-ingress/agents.yaml": "{}\n",
+		"flows/telegram-chat/schema.yaml": `name: telegram-chat
+mode: template
+instance:
+  by: chat_id
+  on_missing: create
+  on_conflict: reuse
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: telegram_text_message
+        event: inbound.telegram.text_message
+        source: external
+        resolution:
+          mode: select-or-create
+          instance_key: chat_id
+        carries:
+          chat_id:
+            from: payload.chat_id
+            type: text
+  outputs:
+    events: []
+`,
+		"flows/telegram-chat/types.yaml": "{}\n",
+		"flows/telegram-chat/entities.yaml": `chat:
+  chat_id:
+    type: text
+    indexed: true
+    _unused_reason: populated from the normalized input resolution carry
+  last_message:
+    type: text
+    initial: ""
+`,
+		"flows/telegram-chat/events.yaml": `telegram.reply_requested:
+  chat_id: text
+  text: text
 `,
 		"flows/telegram-chat/nodes.yaml": `telegram-responder:
   id: telegram-responder
   execution_type: system_node
-  subscribes_to: [inbound.telegram]
+  subscribes_to: [telegram.reply_requested]
   event_handlers:
-    inbound.telegram:
+    telegram.reply_requested:
       activity:
         id: telegram_send_message
         tool: telegram.send_message
         input:
           chat_id:
-            cel: payload.payload.message.chat.id
+            cel: payload.chat_id
           text:
-            cel: payload.payload.message.text
-telegram-outcome-observer:
-  id: telegram-outcome-observer
-  execution_type: system_node
-  subscribes_to: [telegram-chat.telegram_send_message.succeeded, telegram-chat.telegram_send_message.failed]
-  event_handlers:
-    telegram-chat.telegram_send_message.succeeded:
-      advances_to: active
-    telegram-chat.telegram_send_message.failed:
-      advances_to: active
+            cel: payload.text
 `,
 		"flows/telegram-chat/tools.yaml": fmt.Sprintf(`telegram.send_message:
+  category: provider_connector
   description: send Telegram messages
   handler_type: http
   effect_class: non_idempotent_write
@@ -692,7 +774,19 @@ telegram-outcome-observer:
       text: "{{input.text}}"
 `, strings.TrimRight(telegramBaseURL, "/")),
 		"flows/telegram-chat/policy.yaml": "{}\n",
-		"flows/telegram-chat/agents.yaml": "{}\n",
+		"flows/telegram-chat/agents.yaml": `phrase-bot:
+  id: phrase-bot-{instance_id}
+  role: phrase_bot
+  prompt_ref: phrase-bot
+  model: regular
+  mode: session_per_entity
+  subscriptions:
+    - inbound.telegram.text_message
+  emit_events:
+    - telegram.reply_requested
+`,
+		"flows/telegram-chat/prompts/phrase-bot.md": `Reply to each Telegram message by emitting telegram.reply_requested with the same chat_id.
+`,
 	}
 	for name, contents := range files {
 		path := filepath.Join(root, name)

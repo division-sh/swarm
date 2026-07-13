@@ -16,11 +16,11 @@ import (
 )
 
 type StandingIngressBinding struct {
-	Provider      string
-	SigningSecret string
-	EventLiteral  string
-	EventTemplate string
-	AdmissionPlan providertriggers.InboundAdmissionPlan
+	Provider         string
+	SigningSecret    string
+	RawEventLiteral  string
+	RawEventTemplate string
+	AdmissionPlan    providertriggers.InboundAdmissionPlan
 }
 
 type StandingTargetDeclaration struct {
@@ -173,14 +173,17 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 					if err != nil {
 						return nil, fmt.Errorf("%s: %w", location, err)
 					}
-					eventNames := plan.EventNames()
-					literal := strings.TrimSpace(eventNames.Literal)
-					template := strings.TrimSpace(eventNames.Template)
-					if err := validateStandingIngressPins(source, flowID, provider, eventNames); err != nil {
+					rawOutput, ok := plan.RawOutput()
+					if !ok {
+						return nil, fmt.Errorf("%s: ingress provider %q compiled no raw output", location, provider)
+					}
+					literal := strings.TrimSpace(rawOutput.EventName.Literal)
+					template := strings.TrimSpace(rawOutput.EventName.Template)
+					if err := validateStandingIngressRawPin(source, flowID, provider, rawOutput.EventName); err != nil {
 						return nil, fmt.Errorf("%s: %w", location, err)
 					}
 					decl.Ingress = append(decl.Ingress, StandingIngressBinding{
-						Provider: provider, SigningSecret: secret, EventLiteral: literal, EventTemplate: template, AdmissionPlan: plan,
+						Provider: provider, SigningSecret: secret, RawEventLiteral: literal, RawEventTemplate: template, AdmissionPlan: plan,
 					})
 				}
 			}
@@ -313,7 +316,7 @@ func standingDeclarationLocation(pkg runtimecontracts.LoadedProjectPackage, flow
 	return fmt.Sprintf("%s flows[%s]", path, firstNonEmpty(flowID, "<missing>"))
 }
 
-func validateStandingIngressPins(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {
+func validateStandingIngressRawPin(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {
 	literal := strings.TrimSpace(eventNames.Literal)
 	template := strings.TrimSpace(eventNames.Template)
 	if literal != "" {

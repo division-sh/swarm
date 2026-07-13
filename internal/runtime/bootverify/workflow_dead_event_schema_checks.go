@@ -96,6 +96,9 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 			continue
 		}
 		for eventName, entry := range scope.Events {
+			if strings.TrimSpace(entry.Source) == "provider_trigger_pack_raw" {
+				continue
+			}
 			canonical := eventidentity.Normalize(eventName)
 			if canonical == "" {
 				continue

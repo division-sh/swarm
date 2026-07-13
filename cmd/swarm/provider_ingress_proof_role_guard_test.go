@@ -50,7 +50,7 @@ func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProo
 			"TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias",
 		},
 		"internal/runtime/standing_targets_test.go": {
-			"TestInboundGatewayRejectsUnboundGitHubDynamicEventBeforeMarkerOrPublish",
+			"TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins",
 		},
 	}
 	for path, tests := range supported {

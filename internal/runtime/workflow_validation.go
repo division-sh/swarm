@@ -65,6 +65,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
+	source, err = SourceWithProviderTriggerEvents(source, opts.ProviderTriggerCatalog)
+	if err != nil {
+		return result, fmt.Errorf("provider trigger event import failed: %w", err)
+	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		Credentials:             opts.Credentials,

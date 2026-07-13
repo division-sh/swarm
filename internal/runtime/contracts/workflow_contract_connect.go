@@ -51,7 +51,7 @@ func (c FlowInputPinCarries) normalized() FlowInputPinCarries {
 			continue
 		}
 		carry := c[key].normalized()
-		if carry.From == "" && carry.Type == "" {
+		if carry.From == "" && carry.Type == "" && !carry.Optional && carry.Convert == "" {
 			continue
 		}
 		out[name] = carry
@@ -63,9 +63,12 @@ func (c FlowInputPinCarries) normalized() FlowInputPinCarries {
 }
 
 func (c FlowInputPinCarry) normalized() FlowInputPinCarry {
+	projection := (FieldProjection{
+		From: c.From, Type: c.Type, Optional: c.Optional, Convert: c.Convert,
+	}).Normalized()
 	return FlowInputPinCarry{
-		From: strings.TrimSpace(c.From),
-		Type: strings.TrimSpace(c.Type),
+		From: projection.From, Type: projection.Type,
+		Optional: projection.Optional, Convert: projection.Convert,
 	}
 }
 

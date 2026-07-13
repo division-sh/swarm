@@ -6,12 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 type AdmissionKind string
@@ -86,7 +88,7 @@ type InboundAdmissionPlan struct {
 	manifest              *Manifest
 	raw                   *RawAdmissionPolicy
 	requiresSecret        bool
-	eventNames            EventNameManifest
+	outputs               []OutputManifest
 	acknowledgedUnsigned  bool
 }
 
@@ -162,7 +164,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	return InboundAdmissionPlan{
 		generationID: s.GenerationID(), provider: provider, policySource: PolicySourceVerifiedPack,
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
-		requiresSecret: requiresSecret, eventNames: manifest.EventName,
+		requiresSecret: requiresSecret, outputs: manifest.OutputManifest(),
 		acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
 }
@@ -198,7 +200,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	return InboundAdmissionPlan{
 		generationID: generationID, provider: provider, policySource: PolicySourceRawDeclaration,
 		requestAuthentication: auth, raw: &policy, requiresSecret: requiresSecret,
-		eventNames: EventNameManifest{Literal: policy.Event}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
+		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
 }
 
@@ -315,8 +317,29 @@ func (p InboundAdmissionPlan) PolicySource() PolicySource { return p.policySourc
 func (p InboundAdmissionPlan) RequestAuthentication() RequestAuthentication {
 	return p.requestAuthentication
 }
-func (p InboundAdmissionPlan) RequiresSecret() bool          { return p.requiresSecret }
-func (p InboundAdmissionPlan) EventNames() EventNameManifest { return p.eventNames }
+func (p InboundAdmissionPlan) RequiresSecret() bool { return p.requiresSecret }
+func (p InboundAdmissionPlan) Outputs() []OutputManifest {
+	out := make([]OutputManifest, 0, len(p.outputs))
+	for _, output := range p.outputs {
+		fields := make(map[string]runtimecontracts.FieldProjection, len(output.Fields))
+		for name, field := range output.Fields {
+			fields[name] = field
+		}
+		output.Fields = fields
+		output.When.Exists = append([]string{}, output.When.Exists...)
+		output.When.Absent = append([]string{}, output.When.Absent...)
+		out = append(out, output)
+	}
+	return out
+}
+func (p InboundAdmissionPlan) RawOutput() (OutputManifest, bool) {
+	for _, output := range p.Outputs() {
+		if output.Kind == OutputKindRaw {
+			return output, true
+		}
+	}
+	return OutputManifest{}, false
+}
 func (p InboundAdmissionPlan) PackIdentity() (PackIdentity, bool) {
 	if p.packIdentity == nil {
 		return PackIdentity{}, false
@@ -361,10 +384,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	if bundleHash == "" || alias == "" {
 		return packs.Subject{}, fmt.Errorf("effective inbound admission subject requires bundle_hash and alias")
 	}
-	eventName := strings.TrimSpace(p.eventNames.Literal)
-	if eventName == "" {
-		eventName = strings.TrimSpace(p.eventNames.Template)
-	}
+	eventName := rawOutputName(p.outputs)
 	source := "raw_declaration"
 	provenance := "project"
 	admission := &packs.TriggerAdmission{
@@ -397,6 +417,23 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 			{Code: packs.CapabilityEmitEvent, Target: eventName},
 			{Code: packs.CapabilityPersistDedupeMarkers},
 		},
+	}
+	if p.manifest != nil {
+		subject.TriggerEvents = triggerEventDescriptors(*p.manifest)
+	} else {
+		subject.TriggerEvents = []packs.TriggerEventDescriptor{{Event: eventName, Kind: string(OutputKindRaw)}}
+	}
+	for _, output := range p.outputs {
+		name := strings.TrimSpace(output.Event)
+		if output.Kind == OutputKindRaw {
+			name = strings.TrimSpace(output.EventName.Literal)
+			if name == "" {
+				name = strings.TrimSpace(output.EventName.Template)
+			}
+		}
+		if name != "" && name != eventName {
+			subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityEmitEvent, Target: name})
+		}
 	}
 	if p.requiresSecret {
 		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityVerifySecret, Target: strings.TrimSpace(req.SigningSecret)})
@@ -432,7 +469,15 @@ func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
 		return Delivery{}, unauthorized(provider + " webhook signing secret is required")
 	}
 	if p.manifest != nil {
-		return p.manifest.Accept(req)
+		delivery, err := p.manifest.Accept(req)
+		if err != nil {
+			var normalizationErr NormalizationError
+			if errors.As(err, &normalizationErr) && p.packIdentity != nil {
+				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID, p.packIdentity.Version, p.packIdentity.ManifestHash, normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
+			}
+			return Delivery{}, err
+		}
+		return delivery, nil
 	}
 	return p.acceptExplicitRaw(req)
 }
@@ -469,8 +514,21 @@ func (p InboundAdmissionPlan) acceptExplicitRaw(req Request) (Delivery, error) {
 	}
 	return Delivery{
 		ProviderEventID: deliveryID, ProviderEventType: NormalizeEventToken(policy.Event),
-		EventName: events.EventType(policy.Event), Payload: payload,
+		Events: []DeliveryEvent{{Name: events.EventType(policy.Event), Kind: OutputKindRaw, Payload: payload}},
 	}, nil
+}
+
+func rawOutputName(outputs []OutputManifest) string {
+	for _, output := range outputs {
+		if output.Kind != OutputKindRaw {
+			continue
+		}
+		if literal := strings.TrimSpace(output.EventName.Literal); literal != "" {
+			return literal
+		}
+		return strings.TrimSpace(output.EventName.Template)
+	}
+	return ""
 }
 
 func verifyRawAuthentication(auth RawAuthenticationDeclaration, secret string, headers http.Header, body []byte) error {
