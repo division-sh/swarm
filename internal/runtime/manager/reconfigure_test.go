@@ -130,6 +130,75 @@ func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 	}
 }
 
+func TestReconfigureAgent_ReplaySessionToTaskIsNoOp(t *testing.T) {
+	registry := sessions.NewInMemoryRegistry(0)
+	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{Sessions: registry})
+
+	cfg := models.AgentConfig{
+		ID:               "session-to-task-replay-agent",
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "support/inst-1",
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
+	if _, err := registry.Acquire(seedCtx, cfg.ID, sessions.RuntimeModeSession, sessions.SessionScopeFlow, "reconfigure", cfg.CanonicalFlowPath()); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	target := models.AgentConfig{ConversationMode: sessions.RuntimeModeTask.String()}
+	if err := am.ReconfigureAgent(cfg.ID, target); err != nil {
+		t.Fatalf("first ReconfigureAgent(task): %v", err)
+	}
+	generation := lifecycleGenerationForTest(t, am, cfg.ID)
+	if err := am.ReconfigureAgent(cfg.ID, target); err != nil {
+		t.Fatalf("replayed ReconfigureAgent(task): %v", err)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != generation {
+		t.Fatalf("replayed generation = %d, want unchanged %d", got, generation)
+	}
+}
+
+func TestReconfigureAgent_ReplayTaskToSessionIsNoOp(t *testing.T) {
+	registry := sessions.NewInMemoryRegistry(0)
+	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{Sessions: registry})
+
+	cfg := models.AgentConfig{ID: "task-to-session-replay-agent", ConversationMode: sessions.RuntimeModeTask.String(), FlowPath: "support/inst-1"}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	target := models.AgentConfig{
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+	}
+	if err := am.ReconfigureAgent(cfg.ID, target); err != nil {
+		t.Fatalf("first ReconfigureAgent(session): %v", err)
+	}
+	generation := lifecycleGenerationForTest(t, am, cfg.ID)
+	if err := am.ReconfigureAgent(cfg.ID, target); err != nil {
+		t.Fatalf("replayed ReconfigureAgent(session): %v", err)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != generation {
+		t.Fatalf("replayed generation = %d, want unchanged %d", got, generation)
+	}
+}
+
+func lifecycleGenerationForTest(t *testing.T, am *AgentManager, agentID string) uint64 {
+	t.Helper()
+	am.lifecycle.mu.Lock()
+	defer am.lifecycle.mu.Unlock()
+	cell := am.lifecycle.cells[agentID]
+	if cell == nil {
+		t.Fatalf("lifecycle cell %q is absent", agentID)
+	}
+	return cell.generation
+}
+
 func TestReconfigureAgent_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
 		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
