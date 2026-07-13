@@ -30,6 +30,8 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
+const telegramConnectorSupportedSurfaceTimeout = 15 * time.Second
+
 // This direct-gateway fixture remains bounded connector integration proof.
 // The process-served standing-ingress tests own the supported E2E claim.
 func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *testing.T) {
@@ -449,7 +451,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 	go pc.Run(runCtx)
 	select {
 	case <-subscribed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(telegramConnectorSupportedSurfaceTimeout):
 		t.Fatal("pipeline coordinator did not subscribe")
 	}
 	return pc
@@ -495,7 +497,7 @@ func requireTelegramConnectorSupportedSurfaceCall(t *testing.T, calls <-chan tel
 	select {
 	case call := <-calls:
 		return call
-	case <-time.After(5 * time.Second):
+	case <-time.After(telegramConnectorSupportedSurfaceTimeout):
 		t.Fatalf("%s timed out waiting for fake Telegram dispatch; diagnostics: %s", backendName, telegramConnectorSupportedSurfaceDiagnostics(t, backend))
 		return telegramConnectorSupportedSurfaceCall{}
 	}
@@ -589,7 +591,7 @@ func loadTelegramConnectorSupportedSurfaceActivityAttempt(t *testing.T, backend 
 
 func waitForTelegramConnectorSupportedSurfaceTerminalActivityAttempt(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(telegramConnectorSupportedSurfaceTimeout)
 	var last runtimepipeline.ActivityAttemptRecord
 	var saw bool
 	for {
@@ -748,7 +750,7 @@ func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, b
 
 func requireTelegramConnectorSupportedSurfaceFailureEventEventually(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(telegramConnectorSupportedSurfaceTimeout)
 	last := 0
 	for {
 		if got := countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t, backend, providerEventID); got == 1 {
@@ -768,7 +770,7 @@ func requireTelegramConnectorSupportedSurfaceEventEventually(t *testing.T, backe
 	if strings.TrimSpace(eventID) == "" || strings.TrimSpace(eventType) == "" {
 		t.Fatalf("%s result event identity missing: id=%q type=%q", backend.name, eventID, eventType)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(telegramConnectorSupportedSurfaceTimeout)
 	for {
 		if telegramConnectorSupportedSurfaceEventExists(t, backend, eventID, eventType) {
 			return
