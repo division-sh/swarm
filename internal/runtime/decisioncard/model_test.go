@@ -140,3 +140,24 @@ func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
 		t.Fatalf("New error = %v, want noncanonical gate input rejection", err)
 	}
 }
+
+func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
+	card, err := New(Card{
+		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
+		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
+		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"reject": {
+				AdvancesTo: "building",
+				Input: map[string]runtimecontracts.WorkflowGateInputField{
+					"feedback": {Type: " TEXT ", Required: true},
+				},
+			},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "is not canonical") {
+		t.Fatalf("New error = %v, want exact canonical-spelling rejection", err)
+	}
+	if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
+		t.Fatalf("noncanonical card was hashed before rejection: %#v", card)
+	}
+}

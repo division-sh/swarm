@@ -337,12 +337,8 @@ func (c Card) Validate() error {
 	if len(c.Snapshot.Outcomes) == 0 {
 		return fmt.Errorf("decision card has no authored outcomes")
 	}
-	for verdict, outcome := range c.Snapshot.Outcomes {
-		for name, declaration := range outcome.Input {
-			if _, err := runtimecontracts.NormalizeWorkflowGateInputType(declaration.Type); err != nil {
-				return fmt.Errorf("decision card outcome %s input %s: %w", strings.TrimSpace(verdict), strings.TrimSpace(name), err)
-			}
-		}
+	if err := validateCanonicalInputTypes(c.Snapshot); err != nil {
+		return err
 	}
 	draftTTL, err := time.ParseDuration(strings.TrimSpace(c.EffectiveCadence.InputDraftTTL))
 	if err != nil || draftTTL <= 0 {
@@ -360,6 +356,17 @@ func (c Card) Validate() error {
 	}
 	if c.EffectiveCadence.FirstReminderAt.Before(c.CreatedAt) || c.EffectiveCadence.UrgencyAt.Before(c.EffectiveCadence.FirstReminderAt) {
 		return fmt.Errorf("decision card cadence deadlines are invalid")
+	}
+	return nil
+}
+
+func validateCanonicalInputTypes(snapshot Snapshot) error {
+	for verdict, outcome := range snapshot.Outcomes {
+		for name, declaration := range outcome.Input {
+			if _, err := runtimecontracts.ValidateCanonicalWorkflowGateInputType(declaration.Type); err != nil {
+				return fmt.Errorf("decision card outcome %s input %s: %w", strings.TrimSpace(verdict), strings.TrimSpace(name), err)
+			}
+		}
 	}
 	return nil
 }
@@ -393,6 +400,9 @@ func New(card Card) (Card, error) {
 	}
 	if card.EffectiveCadence.UrgencyAt.IsZero() {
 		card.EffectiveCadence.UrgencyAt = now.Add(DefaultUrgency)
+	}
+	if err := validateCanonicalInputTypes(card.Snapshot); err != nil {
+		return Card{}, err
 	}
 	schema := map[string]any{}
 	for verdict, outcome := range card.Snapshot.Outcomes {

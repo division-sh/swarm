@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -56,7 +59,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		for _, verdict := range verdicts {
 			outcome := plan.Outcomes[verdict]
 			for inputName, input := range outcome.Input {
-				if _, err := runtimecontracts.NormalizeWorkflowGateInputType(input.Type); err != nil {
+				if _, err := runtimecontracts.ValidateCanonicalWorkflowGateInputType(input.Type); err != nil {
 					findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s decision.%s has invalid type: %v", verdict, strings.TrimSpace(inputName), err)))
 				}
 			}
@@ -104,6 +107,16 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s emits unknown event %s", verdict, eventType))}
 	}
 	findings := make([]Finding, 0)
+	resolution := semanticview.ResolveEventSchema(c.source, plan.FlowID, eventType)
+	resolvedFields := map[string]map[string]any{}
+	var literalSchemaErr error
+	if !resolution.HasSchema {
+		literalSchemaErr = fmt.Errorf("event %s has no resolvable payload schema", eventType)
+	} else if err := resolution.UnresolvedTypeError(); err != nil {
+		literalSchemaErr = err
+	} else {
+		resolvedFields = runtimesharedjson.SchemaProperties(resolution.Schema.Schema["properties"])
+	}
 	for field, expression := range outcome.Emit.Fields {
 		field = strings.TrimSpace(field)
 		fieldSpec, declared := entry.Payload.Properties[field]
@@ -112,6 +125,18 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 			continue
 		}
 		if expression.HasLiteralValue() {
+			if literalSchemaErr != nil {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s cannot be validated: %v", verdict, field, literalSchemaErr)))
+				continue
+			}
+			fieldSchema, ok := resolvedFields[field]
+			if !ok {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s has no resolved schema for event %s", verdict, field, eventType)))
+				continue
+			}
+			if err := runtimeeventschema.ValidateValueAgainstSchema(fieldSchema, expression.Literal); err != nil {
+				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s literal emit field %s is incompatible with event %s schema: %v", verdict, field, eventType, err)))
+			}
 			continue
 		}
 		text := stageGateExpressionText(expression)
