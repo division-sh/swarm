@@ -8,7 +8,6 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 )
 
@@ -79,7 +78,6 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 }
 
 func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go:applyRoutingMutation"))
 	tests := []struct {
 		name        string
 		opts        finalflowinstanceauthoring.Options

@@ -1,14 +1,12 @@
 package swarmflowtest
 
 import (
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"slices"
 	"strings"
 	"testing"
 )
 
 func TestCatalogRunner_GuardOnFailRejectPreservesStateAndSuppressesEmit(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_phase5_conformance_test.go:TestCatalogRunner_GuardOnFailRejectPreservesStateAndSuppressesEmit"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: guard-reject\n")
 	writeCatalogCaseFixture(t, dir,
@@ -100,7 +98,6 @@ func TestDiscoveredCatalogCaseDirs_ReturnsSortedSwarmCatalogPackages(t *testing.
 }
 
 func TestCatalogRunner_SequenceOnlyTriggerUsesTrimmedSwarmEventName(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_phase5_conformance_test.go:TestCatalogRunner_GuardOnFailRejectPreservesStateAndSuppressesEmit"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: sequence-only\n")
 	writeCatalogCaseFixture(t, dir,

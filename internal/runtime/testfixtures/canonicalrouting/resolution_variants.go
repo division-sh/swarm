@@ -31,6 +31,8 @@ const (
 type TemplateSelectResolutionOptions struct {
 	Mode       SelectResolutionMode
 	Invalidity SelectResolutionInvalidity
+	Missing    LegacyInstancePolicy
+	Conflict   LegacyInstancePolicy
 }
 
 // CopyTemplateSelectOrCreateFinalAuthoring returns the fixed stateful
@@ -97,6 +99,20 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	root := CopyExample(t, TemplateSelectExisting)
 	packageFile := filepath.Join(root, "package.yaml")
 	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
+		"  id: account-node\n", "  id: account-node-{instance_id}\n")
+	missing := legacyInstancePolicy(t, opts.Missing)
+	conflict := legacyInstancePolicy(t, opts.Conflict)
+	if missing != "" || conflict != "" {
+		policy := "instance:\n  by: account_id\n"
+		if missing != "" {
+			policy += "  on_missing: " + missing + "\n"
+		}
+		if conflict != "" {
+			policy += "  on_conflict: " + conflict + "\n"
+		}
+		applyClosedReplacement(t, accountSchema, "instance:\n  by: account_id\n", policy)
+	}
 	applyClosedReplacement(t, packageFile, "  - from: producer.account_setup\n    to: account.account_setup\n", "")
 	// The historical lowering matrix deliberately exercises the accepted
 	// string/text alias while keeping the checked example's entity type.

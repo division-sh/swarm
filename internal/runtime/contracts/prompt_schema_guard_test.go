@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,7 +9,6 @@ import (
 )
 
 func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/prompt_schema_guard_test.go:writePromptTestBundle"))
 	repoRoot := repoRoot(t)
 	if err := ValidatePromptSchemaGuardsForBundle(loadPromptTestBundle(t, repoRoot)); err != nil {
 		t.Fatal(err)
@@ -25,7 +23,6 @@ func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemasForBundle(t *testing.T
 }
 
 func TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/prompt_schema_guard_test.go:TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution"))
 	repoRoot := repoRoot(t)
 	root := writePromptTestBundle(t, repoRoot)
 

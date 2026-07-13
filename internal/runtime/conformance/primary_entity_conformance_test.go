@@ -10,12 +10,9 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPrimaryEntityConformance(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/conformance/primary_entity_conformance_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/conformance/primary_entity_conformance_test.go:primaryEntityConformanceSchema"))
 	tests := []struct {
 		name          string
 		flowSchema    string

@@ -10,13 +10,11 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/manager_error_branches_test.go:TestPostgresStore_Manager_ErrorBranches"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	const runID = "44444444-4444-4444-4444-444444444444"

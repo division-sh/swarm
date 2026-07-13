@@ -23,7 +23,6 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"time"
 )
@@ -247,7 +246,6 @@ func TestFilterTools_RetainsRoleScopedEntityToolsOnNonPrecomposedPath(t *testing
 }
 
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/agents/agent_llm_test.go:writeAgentPromptTestBundle"))
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

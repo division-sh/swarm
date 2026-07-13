@@ -6,11 +6,9 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_ValidatesTemplateInstanceSingleAndCompositeKeys(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_template_instance_checks_test.go:TestRun_ValidatesTemplateInstanceSingleAndCompositeKeys"))
 	tests := []struct {
 		name       string
 		instanceBy string
@@ -72,8 +70,6 @@ func TestRun_RejectsRootTemplateInstanceDeclaration(t *testing.T) {
 }
 
 func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_validation proof=internal/runtime/bootverify/workflow_template_instance_checks_test.go:TestRun_RejectsInvalidTemplateInstanceDeclarations
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_template_instance_checks_test.go:TestRun_RejectsInvalidTemplateInstanceDeclarations"))
 
 	tests := []struct {
 		name         string

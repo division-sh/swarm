@@ -11,17 +11,14 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/runtime_session_scope_startup_test.go:loadPackageBackedRuntimeSessionScopeSource"))
 	source := loadPackageBackedRuntimeSessionScopeSource(t)
 	assertRuntimeStartCarriesFlowPath(t, source)
 }
 
 func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/runtime_session_scope_startup_test.go:loadSoleParentFlowRuntimeSessionScopeSource"))
 	source := loadSoleParentFlowRuntimeSessionScopeSource(t)
 	assertRuntimeStartCarriesFlowPath(t, source)
 }
@@ -58,7 +55,6 @@ func assertRuntimeStartCarriesFlowPath(t *testing.T, source semanticview.Source)
 }
 
 func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
-	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=internal/runtime/runtime_session_scope_startup_test.go:TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
@@ -127,7 +123,6 @@ backend:
 }
 
 func loadSoleParentFlowRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
-	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=internal/runtime/runtime_session_scope_startup_test.go:TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()

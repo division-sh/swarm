@@ -12,13 +12,12 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/pipeline/create_entity_exact_once_test.go:newExactOnceCoordinator"))
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer)
@@ -177,102 +176,14 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 }
 
 func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceStore) *PipelineCoordinator {
-	// routing-example-census: different-concept issue=none owner=pipeline.create_entity_exact_once proof=internal/runtime/pipeline/create_entity_exact_once_test.go:TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations
 	t.Helper()
-	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: exact-once-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
-		"schema.yaml": "name: exact-once-test\n",
-		"flows/validation/schema.yaml": `
-name: validation
-mode: static
-initial_state: new
-terminal_states: [done]
-states: [new, done]
-pins:
-  inputs:
-    events: [thing.created, timer.check]
-  outputs:
-    events: [thing.emitted]
-`,
-		"flows/validation/entities.yaml": `
-widget:
-  amount:
-    type: integer
-    initial: 0
-  who:
-    type: text
-    initial: ""
-  counter:
-    type: integer
-    initial: 0
-`,
-		"flows/validation/events.yaml": `
-thing.created:
-  swarm:
-    source: external
-  amount: integer
-  who: text
-thing.emitted:
-  amount: integer
-  who: text
-timer.check: {}
-`,
-		"flows/validation/nodes.yaml": `
-w-node:
-  id: w-node
-  execution_type: system_node
-  subscribes_to: [thing.created, timer.check]
-  produces: [thing.emitted, timer.check]
-  timers:
-    - id: check_timer
-      event: timer.check
-      delay: 1h
-      start_on: event:thing.created
-  event_handlers:
-    thing.created:
-      create_entity: true
-      data_accumulation:
-        source_event: thing.created
-        writes:
-          - source_field: amount
-            target_field: amount
-          - source_field: who
-            target_field: who
-          - target_field: counter
-            value:
-              cel: entity.counter + 1
-      sets_gate: ready
-      advances_to: done
-      emit:
-        event: thing.emitted
-        broadcast: true
-        fields:
-          amount:
-            cel: entity.amount
-          who:
-            cel: entity.who
-      action:
-        id: mailbox_write
-        mailbox:
-          item_type:
-            literal: approval
-          severity:
-            literal: normal
-          summary:
-            literal: created
-          payload:
-            amount:
-              ref: payload.amount
-`,
-	})
+	root := canonicalrouting.CopyLegacyStaticCreate(t, true)
+	repoRoot := contractComplianceRepoRoot(t)
+	loadedBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load exact-once canonical fixture: %v", err)
+	}
+	source := semanticview.Wrap(loadedBundle)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("expected exact-once workflow bundle")

@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -371,7 +370,6 @@ func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
 }
 
 func TestBundleBuildMaterializesContractsAndJSONReport(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/bundle_test.go:file-scope"))
 	contractsDir := writeBundleBuildCLIContractsFixture(t)
 	outputRoot := filepath.Join(t.TempDir(), "build-output")
 	var stdout, stderr bytes.Buffer

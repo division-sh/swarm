@@ -10,13 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 )
 
 func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go:firstMapWriteYAML"), canonicalrouting.SourceID("internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go:writeCoordinator"))
 	source := singletoncoordinatorpilot.LoadSource(t, singletoncoordinatorpilot.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {

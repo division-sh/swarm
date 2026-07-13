@@ -24,7 +24,6 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -2886,7 +2885,6 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 }
 
 func TestExtractSubscriptions(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	if got := extractSubscriptions(nil); got != nil {
 		t.Fatalf("expected nil")
 	}
@@ -5879,7 +5877,6 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 }
 
 func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -6196,7 +6193,6 @@ func TestManagerStore_UpsertAgent_FailsClosedWithoutHotPathSchemaRepair(t *testi
 }
 
 func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -6372,7 +6368,6 @@ func TestManagerStore_LoadAgents_FailsClosedWithoutHotPathSchemaRepair(t *testin
 }
 
 func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
@@ -6708,7 +6703,6 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColum
 }
 
 func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -6801,7 +6795,6 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 }
 
 func TestManagerHelpers_MatchingAndRedaction(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/store/postgres_store_additional_test.go:TestExtractSubscriptions"))
 	got := extractSubscriptions([]byte(`{"subscriptions":["a","b"," "],"tools":[]}`))
 
 	hasA, hasB := false, false

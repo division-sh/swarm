@@ -6,12 +6,10 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/platform"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
 func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/apispec/platform_spec_composition_routing_test.go:TestPlatformSpecCompositionRoutingSourceAuthority"))
 	root := loadPlatformSpecYAMLNode(t)
 	composition := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing")
 

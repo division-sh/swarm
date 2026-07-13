@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -467,8 +466,6 @@ func TestBundleHashV1RejectsSymlinksWhenSupported(t *testing.T) {
 }
 
 func TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/bundle_hash_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/bundle_hash_test.go:TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner"))
 	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: projected\nversion: \"1.0.0\"\nflows: []\n")
 	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), `
 researcher:

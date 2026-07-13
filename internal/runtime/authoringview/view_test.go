@@ -12,7 +12,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
@@ -118,8 +117,6 @@ func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
 }
 
 func TestBuildShowsDefaultedTemplateInstancePolicies(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/authoringview/view_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/authoringview/view_test.go:loadDefaultedTemplatePolicySource"))
 	source := loadDefaultedTemplatePolicySource(t)
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
@@ -685,7 +682,6 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 }
 
 func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/authoringview/view_test.go:loadDefaultedTemplatePolicySource"))
 	source := loadDuplicateNodeIDContainedOpsSource(t)
 	view := mustBuild(t, source, nil)
 

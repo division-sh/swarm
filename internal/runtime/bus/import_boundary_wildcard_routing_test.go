@@ -18,11 +18,9 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/import_boundary_wildcard_routing_test.go:writeBusImportBoundaryWildcardFixture"))
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{})
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
@@ -745,7 +743,6 @@ func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildca
 }
 
 func writeBusImportBoundaryWildcardFixture(t *testing.T, opts importBoundaryWildcardFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=flow_package.wildcard_observation_boundary proof=internal/runtime/bus/import_boundary_wildcard_routing_test.go:TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault
 	t.Helper()
 	root := t.TempDir()
 	mode := strings.TrimSpace(opts.WorkerMode)

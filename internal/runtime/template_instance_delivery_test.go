@@ -26,7 +26,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -36,8 +36,6 @@ import (
 const templateInstanceDeliveryRunID = "99999999-9999-4999-8999-999999999901"
 
 func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -163,7 +161,6 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireStyleFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -255,7 +252,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 }
 
 func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceActivationConfigSubscriberFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceActivationConfigSubscriberFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -330,8 +326,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 }
 
 func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceConnectLifecycleRollbackFixtureFiles"))
-	bundle := loadRuntimeTempBundle(t, templateInstanceConnectLifecycleRollbackFixtureFiles())
+	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateConnectRollback(t))
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -411,7 +406,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:templateInstanceEmpireOutboxFixtureFiles"))
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -697,6 +691,20 @@ func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontra
 	return bundle
 }
 
+func loadRuntimeBundleRoot(t *testing.T, root string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load canonical routing bundle: %v", err)
+	}
+	return bundle
+}
+
 func templateInstanceDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
 		"package.yaml": `name: test
@@ -833,80 +841,7 @@ auto_emit_on_create:
 	}
 }
 
-func templateInstanceConnectLifecycleRollbackFixtureFiles() map[string]string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_transaction proof=internal/runtime/template_instance_delivery_test.go:TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute
-	return map[string]string{
-		"package.yaml": `name: test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one
-  - from: producer.deploy_done
-    to: consumer.deploy_audited
-    delivery: one
-`,
-		"schema.yaml": "name: test\n",
-		"policy.yaml": "{}\n",
-		"tools.yaml":  "{}\n",
-		"agents.yaml": "{}\n",
-		"events.yaml": "{}\n",
-		"nodes.yaml":  "{}\n",
-		"flows/producer/schema.yaml": `name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id]
-`,
-		"flows/producer/policy.yaml":   "{}\n",
-		"flows/producer/agents.yaml":   "{}\n",
-		"flows/producer/events.yaml":   "deploy.done:\n  vertical_id: string\n",
-		"flows/producer/entities.yaml": "{}\n",
-		"flows/producer/nodes.yaml":    "{}\n",
-		"flows/consumer/schema.yaml": `name: consumer
-mode: template
-instance:
-  by: vertical_id
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-      - name: deploy_audited
-        event: deploy.done
-`,
-		"flows/consumer/policy.yaml": "{}\n",
-		"flows/consumer/agents.yaml": "{}\n",
-		"flows/consumer/events.yaml": "deploy.done:\n  vertical_id: string\n",
-		"flows/consumer/entities.yaml": `deployment:
-  vertical_id:
-    type: string
-`,
-		"flows/consumer/nodes.yaml": `consumer-node:
-  id: consumer-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    deploy.done: {}
-`,
-	}
-}
-
 func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/template_instance_delivery_test.go:providerRollbackFixtureFiles"))
 	checkpoints := []struct {
 		name           string
 		mutation       providerRollbackMutationCheckpoint
@@ -1224,7 +1159,7 @@ func (s providerRollbackSource) BaseSemanticSource() semanticview.Source {
 
 func providerRollbackSemanticSource(t *testing.T, withCarrier bool) semanticview.Source {
 	t.Helper()
-	bundle := loadRuntimeTempBundle(t, providerRollbackFixtureFiles(withCarrier))
+	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyProviderRollback(t, withCarrier))
 	return providerRollbackSource{Source: semanticview.Wrap(bundle), authorization: providerRollbackAuthorization()}
 }
 
@@ -1292,68 +1227,6 @@ func assertProviderRollbackRetryCommitted(t *testing.T, ctx context.Context, db 
 	}
 }
 
-func providerRollbackFixtureFiles(withCarrier bool) map[string]string {
-	// routing-example-census: provider-ingress issue=none owner=provider_normalized_lifecycle_transaction proof=internal/runtime/template_instance_delivery_test.go:TestProviderNormalizedLifecycleRollbackMatrix
-	nodes := "{}\n"
-	if withCarrier {
-		nodes = `consumer-node:
-  id: consumer-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    inbound.telegram.text_message: {}
-`
-	}
-	return map[string]string{
-		"package.yaml": `name: provider-rollback-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: template
-`,
-		"schema.yaml": "name: provider-rollback-proof\n",
-		"policy.yaml": "{}\n",
-		"tools.yaml":  "{}\n",
-		"agents.yaml": "{}\n",
-		"events.yaml": `inbound.telegram:
-  raw: boolean
-inbound.telegram.text_message:
-  chat_id: text
-`,
-		"nodes.yaml": "{}\n",
-		"flows/consumer/schema.yaml": `name: consumer
-mode: template
-instance:
-  by: chat_id
-  on_missing: create
-  on_conflict: reuse
-pins:
-  inputs:
-    events:
-      - name: telegram_text
-        event: inbound.telegram.text_message
-        source: external
-        resolution:
-          mode: select-or-create
-          instance_key: chat_id
-        carries:
-          chat_id:
-            from: payload.chat_id
-            type: text
-`,
-		"flows/consumer/policy.yaml": "{}\n",
-		"flows/consumer/agents.yaml": "{}\n",
-		"flows/consumer/events.yaml": "{}\n",
-		"flows/consumer/entities.yaml": `chat:
-  chat_id:
-    type: text
-    indexed: true
-`,
-		"flows/consumer/nodes.yaml": nodes,
-	}
-}
-
 type failingDeliveryRouteStore struct {
 	*store.PostgresStore
 	failDeliveryRoutes            bool
@@ -1365,10 +1238,7 @@ func (s *failingDeliveryRouteStore) RunEventMutation(ctx context.Context, fn fun
 		return errors.New("postgres store is required")
 	}
 	return s.PostgresStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		return fn(&failingDeliveryRouteMutation{
-			EventMutation: mutation,
-			store:         s,
-		})
+		return fn(&failingDeliveryRouteMutation{EventMutation: mutation, store: s})
 	})
 }
 
@@ -1456,7 +1326,6 @@ func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Con
 }
 
 func templateInstanceEmpireOutboxFixtureFiles() map[string]string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_outbox proof=internal/runtime/template_instance_delivery_test.go:TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect
 	return map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0

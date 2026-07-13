@@ -8,12 +8,9 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator"))
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton
@@ -32,7 +29,6 @@ pins:
 }
 
 func TestRun_RejectsSingletonCoordinatorBackedOnlyByAgentMemory(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator"))
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton
@@ -61,8 +57,6 @@ memory-agent:
 }
 
 func TestRun_RejectsSingletonCoordinatorTemplateInstanceMix(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_RejectsSingletonCoordinatorTemplateInstanceMix
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_RejectsSingletonCoordinatorTemplateInstanceMix"))
 
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
@@ -86,7 +80,6 @@ pins:
 }
 
 func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator"))
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton
@@ -108,7 +101,6 @@ coordinator_state:
 }
 
 func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator"))
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: static
@@ -130,7 +122,6 @@ coordinator_state:
 }
 
 func TestRun_SingletonCoordinatorRejectsDynamicContainedTargetPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator"))
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton

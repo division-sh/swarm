@@ -27,10 +27,22 @@ const (
 // accepts only IDs declared in artifact_registry.yaml.
 type ArtifactID string
 
-// SourceID identifies one explicitly classified raw fixture source. Unlike an
-// ArtifactID, it cannot materialize a bundle; it only binds a source owner to
-// the exact executable test that proves its distinct semantics.
+// SourceID identifies one explicitly classified non-bundle source constructor.
+// Complete routing bundles are owned by ArtifactID and cannot use SourceID as
+// an exception from that boundary.
 type SourceID string
+
+// SourceToken proves that ExecuteSource ran inside a classified source
+// constructor. Its fields are private so a test cannot replace execution with
+// a bare ID claim.
+type SourceToken struct {
+	id   SourceID
+	seal *sourceTokenSeal
+}
+
+type sourceTokenSeal struct{}
+
+var executedSourceTokenSeal = &sourceTokenSeal{}
 
 // RetiredStaticMutation identifies one deliberately invalid legacy routing
 // shape. The closed set prevents negative tests from becoming an arbitrary
@@ -102,17 +114,32 @@ func Prove(t testing.TB, ids ...ArtifactID) {
 	}
 }
 
-// ProveSource declares direct execution evidence for classified raw fixture
-// sources. The ownership guard accepts this call only as a top-level statement
-// in the exact registered TestXxx body.
-func ProveSource(t testing.TB, ids ...SourceID) {
+// ExecuteSource runs a classified non-bundle source constructor body and
+// returns its sealed token. The source function must return this token; proof
+// tests directly execute that source function before calling ProveSource.
+func ExecuteSource(t testing.TB, id SourceID, constructor func()) SourceToken {
 	t.Helper()
-	if len(ids) == 0 {
+	if strings.TrimSpace(string(id)) == "" {
+		t.Fatal("canonical routing source ID must not be empty")
+	}
+	if constructor == nil {
+		t.Fatal("canonical routing source constructor must not be nil")
+	}
+	constructor()
+	return SourceToken{id: id, seal: executedSourceTokenSeal}
+}
+
+// ProveSource accepts only tokens returned by executed source constructors.
+// The ownership guard binds each token to one exact source function and one
+// direct executable TestXxx consumer.
+func ProveSource(t testing.TB, tokens ...SourceToken) {
+	t.Helper()
+	if len(tokens) == 0 {
 		t.Fatal("canonical routing source proof must name at least one source")
 	}
-	for _, id := range ids {
-		if strings.TrimSpace(string(id)) == "" {
-			t.Fatal("canonical routing source proof must not contain an empty source ID")
+	for _, token := range tokens {
+		if token.seal != executedSourceTokenSeal || strings.TrimSpace(string(token.id)) == "" {
+			t.Fatal("canonical routing source proof requires an executed source token")
 		}
 	}
 }

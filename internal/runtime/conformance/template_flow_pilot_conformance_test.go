@@ -82,7 +82,6 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 }
 
 func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/templateflowpilot/fixture.go:applyNegativeMutation"))
 	tests := []struct {
 		name        string
 		opts        templateflowpilot.Options
@@ -228,8 +227,6 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 }
 
 func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/notifyallchildren/fixture.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/testfixtures/notifyallchildren/fixture.go:WriteVariant"))
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/notify-all-children"))
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})

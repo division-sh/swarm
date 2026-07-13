@@ -1,13 +1,11 @@
 package swarmflowtest
 
 import (
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"path/filepath"
 	"testing"
 )
 
 func TestCatalogRunner_GuardOnFailDiscardPreventsStateAdvanceAndEmit(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/swarmflowtest/catalog_runner_guardrails_test.go:TestCatalogRunner_GuardOnFailDiscardPreventsStateAdvanceAndEmit"))
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: guard-discard\n")
 	writeCatalogCaseFixture(t, dir,

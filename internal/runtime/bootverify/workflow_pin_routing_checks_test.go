@@ -9,13 +9,11 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 )
 
 func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:file-scope"))
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingVerifyBundle(t, "emit:\n        event: result.ready\n")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
@@ -24,8 +22,6 @@ func TestPinTargetResolution_FailsClosedForPinOutputWithoutTargetMechanism(t *te
 }
 
 func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitBroadcastOptOut
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitBroadcastOptOut"))
 
 	bundle := loadPinRoutingVerifyBundle(t, "emit:\n        event: result.ready\n        broadcast: true\n")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -35,7 +31,6 @@ func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -54,8 +49,6 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t
 }
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath(t *testing.T) {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath"))
 
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
@@ -144,11 +137,9 @@ func TestPinTargetResolution_FanOutEmitRejectsProducerTargetAndBroadcastCommonPa
 }
 
 func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadSelectEntityDemotionBundle"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:writeSelectEntityDemotionConsumerFlow"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:writeSelectEntityDemotionProducerFlow"))
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode: "static",
-		acquisition:  "select_entity",
-		withProducer: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		Acquisition:  canonicalrouting.SelectEntityAcquire,
+		WithProducer: true,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -162,11 +153,10 @@ func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T
 }
 
 func TestRedundantInTopologySelectEntityFailsClosedForRenamedConnectEvents(t *testing.T) {
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode:      "static",
-		acquisition:       "select_entity",
-		withProducer:      true,
-		renameReceiverPin: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		Acquisition:       canonicalrouting.SelectEntityAcquire,
+		WithProducer:      true,
+		RenameReceiverPin: true,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -177,10 +167,9 @@ func TestRedundantInTopologySelectEntityFailsClosedForRenamedConnectEvents(t *te
 }
 
 func TestRedundantInTopologySelectEntityFailsClosedForStagedParentConnect(t *testing.T) {
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode: "static",
-		acquisition:  "select_entity",
-		withProducer: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		Acquisition:  canonicalrouting.SelectEntityAcquire,
+		WithProducer: true,
 	})
 	useStagedLifecycleForFlow(t, bundle, "consumer", "pending", []string{"pending", "done"}, []string{"done"})
 
@@ -195,10 +184,9 @@ func TestRedundantInTopologySelectEntityFailsClosedForStagedParentConnect(t *tes
 }
 
 func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *testing.T) {
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode: "static",
-		acquisition:  "select_or_create_entity",
-		withProducer: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		Acquisition:  canonicalrouting.SelectOrCreateEntityAcquire,
+		WithProducer: true,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -210,10 +198,9 @@ func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *t
 }
 
 func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode: "template",
-		withProducer: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		TemplateReceiver: true,
+		WithProducer:     true,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -229,21 +216,20 @@ func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement
 func TestRedundantInTopologySelectEntityRejectsExternalAndMixedStaticAcquisitionByRetirement(t *testing.T) {
 	tests := []struct {
 		name         string
-		acquisition  string
+		acquisition  canonicalrouting.SelectEntityAcquisition
 		withProducer bool
 	}{
-		{name: "external select_entity", acquisition: "select_entity"},
-		{name: "external select_or_create_entity", acquisition: "select_or_create_entity"},
-		{name: "mixed select_entity", acquisition: "select_entity", withProducer: true},
-		{name: "mixed select_or_create_entity", acquisition: "select_or_create_entity", withProducer: true},
+		{name: "external select_entity", acquisition: canonicalrouting.SelectEntityAcquire},
+		{name: "external select_or_create_entity", acquisition: canonicalrouting.SelectOrCreateEntityAcquire},
+		{name: "mixed select_entity", acquisition: canonicalrouting.SelectEntityAcquire, withProducer: true},
+		{name: "mixed select_or_create_entity", acquisition: canonicalrouting.SelectOrCreateEntityAcquire, withProducer: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-				consumerMode: "static",
-				acquisition:  tc.acquisition,
-				external:     true,
-				withProducer: tc.withProducer,
+			bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+				Acquisition:  tc.acquisition,
+				External:     true,
+				WithProducer: tc.withProducer,
 			})
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -260,11 +246,10 @@ func TestRedundantInTopologySelectEntityRejectsExternalAndMixedStaticAcquisition
 }
 
 func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherReceiver(t *testing.T) {
-	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
-		consumerMode:           "static",
-		acquisition:            "select_entity",
-		withProducer:           true,
-		connectProducerToOther: true,
+	bundle := loadSelectEntityDemotionBundle(t, canonicalrouting.SelectEntityDemotionOptions{
+		Acquisition:            canonicalrouting.SelectEntityAcquire,
+		WithProducer:           true,
+		ConnectProducerToOther: true,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -279,7 +264,6 @@ func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherRecei
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingProducerRouteAdaptedConnect"))
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
         event: shared.ready
@@ -298,8 +282,6 @@ func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPat
 }
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath"))
 
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
@@ -316,7 +298,6 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommon
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -335,7 +316,6 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParen
 }
 
 func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -354,7 +334,6 @@ func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithPare
 }
 
 func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingProducerRouteConnect"))
 	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready", pinRoutingProducerRouteConnect())
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -386,7 +365,6 @@ func TestPinTargetResolution_FailsClosedForFlowScopedAgentEmitEventsWithoutRoute
 }
 
 func TestPinTargetResolution_ChecksProjectScopeAgentUnderOwningFlow(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		extrasAgents: `
 extras-agent:
@@ -405,7 +383,6 @@ extras-agent:
 }
 
 func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	for _, tt := range []struct {
 		name      string
 		emitBlock string
@@ -430,7 +407,6 @@ func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
 }
 
 func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposition(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
         event: shared.ready
@@ -449,8 +425,6 @@ func TestPinTargetResolution_AllowsSingularDynamicFlowMatchWhenNotPackageComposi
 }
 
 func TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_event_identity proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents"))
 
 	for _, tt := range []struct {
 		name string
@@ -501,7 +475,6 @@ func TestPinTargetResolution_FailsClosedForRootPinOutputWithoutTargetMechanism(t
 }
 
 func TestPinTargetResolution_FailsClosedForNestedRootPinOutputWithoutTargetMechanism(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingVerifyRuleNodeYAML"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyRuleNodeYAML("root-node", "root.start", "root.ready", false),
 	})
@@ -512,7 +485,6 @@ func TestPinTargetResolution_FailsClosedForNestedRootPinOutputWithoutTargetMecha
 }
 
 func TestPinTargetResolution_FailsClosedForRootGuardEscalationPinOutput(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyGuardNodeYAML("root-node", "root.start", "root.ready"),
 	})
@@ -523,7 +495,6 @@ func TestPinTargetResolution_FailsClosedForRootGuardEscalationPinOutput(t *testi
 }
 
 func TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingProducerAgentRouteBundleWithRootOutputs"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:pinRoutingVerifyNodeYAML"))
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyNodeYAML("root-node", "root.start", "root.ready", true),
 	})
@@ -534,7 +505,6 @@ func TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut(t *testing.T) {
 }
 
 func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:loadPinRoutingRootConnectBundle"))
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready
@@ -548,8 +518,6 @@ func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T)
 }
 
 func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *testing.T) {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath"))
 
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
@@ -565,7 +533,6 @@ func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *te
 }
 
 func TestPinTargetResolution_FailsClosedForRootProducerTargetCommonPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsExplicitTargetEscapeHatches"))
 	bundle := loadPinRoutingRootConnectBundle(t, `
       emit:
         event: root.ready
@@ -885,7 +852,6 @@ consumer:
 }
 
 func pinRoutingProducerRouteConnect() string {
-	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_resolution proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect
 	return `
 connect:
   - from: producer.shared.ready
@@ -894,7 +860,6 @@ connect:
 }
 
 func pinRoutingProducerRouteAdaptedConnect() string {
-	// routing-example-census: parser-only issue=none owner=bootverify.pin_target_resolution proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath
 	return `
 connect:
   - from: producer.shared.ready
@@ -903,271 +868,18 @@ connect:
 `
 }
 
-type selectEntityDemotionFixtureOptions struct {
-	consumerMode           string
-	acquisition            string
-	external               bool
-	withProducer           bool
-	connectProducerToOther bool
-	renameReceiverPin      bool
-}
-
-func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtureOptions) *runtimecontracts.WorkflowContractBundle {
-	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestRedundantInTopologySelectEntityFailsClosedForParentConnect
+func loadSelectEntityDemotionBundle(t *testing.T, opts canonicalrouting.SelectEntityDemotionOptions) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
-	consumerMode := opts.consumerMode
-	if strings.TrimSpace(consumerMode) == "" {
-		consumerMode = "static"
-	}
-	flows := `
-  - id: consumer
-    flow: consumer
-    mode: ` + consumerMode
-	if opts.withProducer {
-		flows = `
-  - id: producer
-    flow: producer` + flows
-		if opts.connectProducerToOther {
-			flows += `
-  - id: other_consumer
-    flow: other_consumer
-    mode: static`
-		}
-	}
-	connectBlock := ""
-	if opts.withProducer {
-		targetFlow := "consumer"
-		targetPin := "deploy_done"
-		if opts.connectProducerToOther {
-			targetFlow = "other_consumer"
-		}
-		if opts.renameReceiverPin && targetFlow == "consumer" {
-			targetPin = "deploy_completed"
-		}
-		connectBlock = `
-connect:
-  - from: producer.deploy_done
-    to: ` + targetFlow + `.` + targetPin + `
-    delivery: one`
-		if consumerMode == "static" {
-			connectBlock += `
-    map:
-      vertical_id:
-        source: payload.vertical_id
-        target: entity.vertical_id`
-		}
-	}
-	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
-name: select-entity-demotion
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:`+flows+connectBlock+`
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-demotion\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
-	if opts.withProducer {
-		writeSelectEntityDemotionProducerFlow(t, root)
-		if opts.connectProducerToOther {
-			writeSelectEntityDemotionOtherConsumerFlow(t, root)
-		}
-	}
-	writeSelectEntityDemotionConsumerFlow(t, root, opts)
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.CopySelectEntityDemotion(t, opts),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	return bundle
-}
-
-func writeSelectEntityDemotionProducerFlow(t *testing.T, root string) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestRedundantInTopologySelectEntityFailsClosedForParentConnect
-	t.Helper()
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events:
-      - name: deploy_requested
-        event: deploy.requested
-        source: external
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id]
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), `
-producer_request:
-  vertical_id:
-    type: string
-    _unused_reason: select_entity demotion producer proof field
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-deploy.requested:
-  vertical_id: string
-deploy.done:
-  vertical_id: string
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
-producer-node:
-  id: producer-node
-  execution_type: system_node
-  event_handlers:
-    deploy.requested:
-      emit:
-        event: deploy.done
-        fields:
-          vertical_id: payload.vertical_id
-      advances_to: done
-`)
-}
-
-func writeSelectEntityDemotionOtherConsumerFlow(t *testing.T, root string) {
-	t.Helper()
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "schema.yaml"), `
-name: other-consumer
-mode: static
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        address:
-          by: vertical_id
-          source: payload.vertical_id
-          target: entity.vertical_id
-          cardinality: one
-  outputs:
-    events: []
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "events.yaml"), `
-deploy.done:
-  vertical_id: string
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-    indexed: true
-    _unused_reason: select_entity demotion other receiver route-key proof field
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "nodes.yaml"), `
-other-consumer-node:
-  id: other-consumer-node
-  execution_type: system_node
-  subscribes_to: [deploy.done]
-  event_handlers:
-    deploy.done:
-      advances_to: done
-`)
-}
-
-func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selectEntityDemotionFixtureOptions) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_select_entity_retirement proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestRedundantInTopologySelectEntityFailsClosedForParentConnect
-	t.Helper()
-	consumerMode := opts.consumerMode
-	if strings.TrimSpace(consumerMode) == "" {
-		consumerMode = "static"
-	}
-	instanceBlock := ""
-	inputPinName := "deploy_done"
-	inputEvent := "deploy.done"
-	if opts.renameReceiverPin {
-		inputPinName = "deploy_completed"
-		inputEvent = "deploy.completed"
-	}
-	inputPin := `
-      - name: ` + inputPinName + `
-        event: ` + inputEvent + `
-        address:
-          by: vertical_id
-          source: payload.vertical_id
-          target: entity.vertical_id
-          cardinality: one
-`
-	if consumerMode == "template" {
-		instanceBlock = `instance:
-  by: vertical_id
-  on_missing: reject
-  on_conflict: reject
-`
-		inputPin = `
-      - name: ` + inputPinName + `
-        event: ` + inputEvent + `
-`
-	}
-	if opts.external {
-		inputPin = strings.Replace(inputPin, "        event: "+inputEvent+"\n", "        event: "+inputEvent+"\n        source: external\n", 1)
-	}
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: `+consumerMode+`
-`+instanceBlock+`initial_state: pending
-states: [pending, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events:`+inputPin+`  outputs:
-    events: []
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-`+inputEvent+`:
-  vertical_id: string
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-    indexed: true
-    _unused_reason: select_entity demotion route-key proof field
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), selectEntityDemotionConsumerNodes(opts.acquisition, inputEvent))
-}
-
-func selectEntityDemotionConsumerNodes(acquisition, inputEvent string) string {
-	acquisition = strings.TrimSpace(acquisition)
-	inputEvent = strings.TrimSpace(inputEvent)
-	acquisitionBlock := ""
-	switch acquisition {
-	case "select_entity":
-		acquisitionBlock = `      select_entity:
-        by:
-          vertical_id: payload.vertical_id
-`
-	case "select_or_create_entity":
-		acquisitionBlock = `      select_or_create_entity:
-        by:
-          vertical_id: payload.vertical_id
-`
-	}
-	return `
-consumer-node:
-  id: consumer-node
-  execution_type: system_node
-  subscribes_to: [` + inputEvent + `]
-  event_handlers:
-    ` + inputEvent + `:
-` + acquisitionBlock + `      advances_to: done
-`
 }
 
 func useStagedLifecycleForFlow(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, initial string, states, terminals []string) {
@@ -1305,67 +1017,16 @@ flows: []
 }
 
 func loadPinRoutingRootConnectBundle(t *testing.T, emitBlock string) *runtimecontracts.WorkflowContractBundle {
-	// routing-example-census: different-concept issue=none owner=bootverify.root_output_connect_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect
 	t.Helper()
-	root := t.TempDir()
-	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
-name: pin-routing-root-connect
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - from: .root_ready
-    to: consumer.ready
-    delivery: one
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), `
-name: pin-routing-root-connect
-pins:
-  inputs:
-    events: [root.start]
-  outputs:
-    events:
-      - name: root_ready
-        event: root.ready
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), `
-root.start:
-  entity_id: text
-root.ready:
-  entity_id: text
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "nodes.yaml"), `
-root-node:
-  id: root-node
-  execution_type: system_node
-  event_handlers:
-    root.start:
-`+emitBlock+`
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: static
-pins:
-  inputs:
-    events:
-      - name: ready
-        event: root.ready
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-root.ready:
-  entity_id: text
-`)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	emit := canonicalrouting.RootConnectCanonicalEmit
+	if strings.Contains(emitBlock, "broadcast: true") {
+		emit = canonicalrouting.RootConnectBroadcastEmit
+	} else if strings.Contains(emitBlock, "target:") {
+		emit = canonicalrouting.RootConnectTargetEmit
+	} else if !strings.Contains(emitBlock, "event: root.ready") {
+		t.Fatalf("unsupported root connect emit shape %q", emitBlock)
+	}
+	root := canonicalrouting.CopyRootOutputConnect(t, emit)
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -1375,7 +1036,6 @@ root.ready:
 }
 
 func pinRoutingVerifyNodeYAML(nodeID, trigger, eventType string, broadcast bool) string {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut
 	if strings.TrimSpace(nodeID) == "" {
 		return "{}\n"
 	}
@@ -1412,7 +1072,6 @@ func pinRoutingVerifyGuardNodeYAML(nodeID, trigger, eventType string) string {
 }
 
 func pinRoutingVerifyRuleNodeYAML(nodeID, trigger, eventType string, broadcast bool) string {
-	// routing-example-census: parser-only issue=1738 owner=legacy_producer_broadcast_validation proof=internal/runtime/bootverify/workflow_pin_routing_checks_test.go:TestPinTargetResolution_FailsClosedForNestedRootPinOutputWithoutTargetMechanism
 	if strings.TrimSpace(nodeID) == "" {
 		return "{}\n"
 	}

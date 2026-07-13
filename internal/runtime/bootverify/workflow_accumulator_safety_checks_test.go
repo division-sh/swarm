@@ -9,11 +9,10 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorAgentsFile"))
 	root := writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
 		eventSource: "external",
 		completion:  "all",
@@ -141,7 +140,6 @@ func TestRun_FailsClosedForAccumulatorInputWithoutProducerPath(t *testing.T) {
 }
 
 func TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorAgentsFile"), canonicalrouting.SourceID("internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:writeAccumulatorCrossFlowFixture"))
 	cases := []struct {
 		name string
 		root func(*testing.T) string
@@ -525,86 +523,6 @@ producer.start:
 }
 
 func writeAccumulatorCrossFlowFixture(t *testing.T, withConnect bool) string {
-	// routing-example-census: different-concept issue=none owner=engine.accumulation proof=internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths
 	t.Helper()
-	root := t.TempDir()
-	connectBlock := ""
-	if withConnect {
-		connectBlock = `
-connect:
-  - from: producer.item.arrived
-    to: consumer.item.arrived
-`
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: accumulator-cross-flow
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-`+connectBlock)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: accumulator-cross-flow\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-pins:
-  outputs:
-    events: [item.arrived]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-item.arrived:
-  expected_count: integer
-producer.start:
-  {}
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
-producer-node:
-  id: producer-node
-  execution_type: system_node
-  subscribes_to: [producer.start]
-  event_handlers:
-    producer.start:
-      emit:
-        event: item.arrived
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-initial_state: collecting
-terminal_states: [done]
-states: [collecting, done]
-pins:
-  inputs:
-    events: [item.arrived]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-item.arrived:
-  expected_count: integer
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
-consumer-node:
-  id: consumer-node
-  execution_type: system_node
-  subscribes_to: [item.arrived]
-  event_handlers:
-    item.arrived:
-      accumulate:
-        expected_from: entity.expected_count
-        completion: timeout
-        timeout_ms: 5000
-      advances_to: done
-`)
-	return root
+	return canonicalrouting.CopyAccumulatorCrossFlow(t, withConnect)
 }

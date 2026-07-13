@@ -21,8 +21,6 @@ func containsString(values []string, target string) bool {
 }
 
 func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.project_package_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds"))
 
 	var doc ProjectPackageDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -194,7 +192,6 @@ stages:
 }
 
 func TestFlowSchemaDocumentDecodeStageTimersUseCanonicalSyntax(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: validation
@@ -418,7 +415,6 @@ stages:
 }
 
 func TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`
 name: validation
@@ -436,7 +432,6 @@ stages:
 }
 
 func TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`
 name: validation
@@ -476,7 +471,6 @@ stages: []
 }
 
 func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var nodes map[string]SystemNodeContract
 	err := yaml.Unmarshal([]byte(`
 coordinator:
@@ -732,8 +726,6 @@ extra:
 }
 
 func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.project_package_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape"))
 
 	tests := []struct {
 		name    string
@@ -817,7 +809,6 @@ connect:
 }
 
 func TestFlowSchemaDocumentDecode_PreservesAddressedInputPins(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: addressed-pins
@@ -876,7 +867,6 @@ pins:
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`
 name: invalid-pins
@@ -895,8 +885,6 @@ pins:
 }
 
 func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes"))
 
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -990,8 +978,6 @@ pins:
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields"))
 
 	tests := []struct {
 		name string
@@ -1056,7 +1042,6 @@ pins:
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`
 name: invalid-output-pins
@@ -1119,8 +1104,6 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 }
 
 func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration"))
 
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -1154,7 +1137,6 @@ instance:
 }
 
 func TestFlowSchemaDocumentDecode_PreservesOmittedTemplateInstancePolicyPresence(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: template-flow
@@ -1179,8 +1161,6 @@ instance:
 }
 
 func TestFlowSchemaDocumentDecode_PreservesExplicitEmptyTemplateInstancePolicies(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesExplicitEmptyTemplateInstancePolicies
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesExplicitEmptyTemplateInstancePolicies"))
 
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -1215,8 +1195,6 @@ mode: singleton
 }
 
 func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver"))
 
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -1235,7 +1213,6 @@ instance:
 }
 
 func TestFlowSchemaDocumentDecode_PreservesEmptyTemplateInstancePresence(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: template-flow
@@ -1253,8 +1230,6 @@ instance: {}
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.flow_schema_decoder proof=internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields"))
 
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`
@@ -1312,7 +1287,6 @@ action:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRuleEmit(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 emit: root.done
@@ -1347,7 +1321,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredPayloadTransform(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 payload_transform:
@@ -1361,7 +1334,6 @@ emit: score.ready
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredBranch(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 branch:
@@ -1379,7 +1351,6 @@ branch:
 }
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 rules:
@@ -1454,7 +1425,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetLookupValueRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 rules:
@@ -1514,7 +1484,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetValidateValueRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 rules:
@@ -1565,7 +1534,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_LowersPolicySheetComputeModuleValueRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 rules:
@@ -1618,7 +1586,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 rules:
@@ -1649,7 +1616,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsInvalidPolicySheetRows(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	tests := []struct {
 		name     string
 		body     string
@@ -1996,7 +1962,6 @@ switch:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 clear:
@@ -2099,7 +2064,6 @@ compute:
 }
 
 func TestFlowPinsDecode_AcceptsStructuredEventEntries(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var schema FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 states:
@@ -2148,7 +2112,6 @@ pins:
 }
 
 func TestFlowPinsDecode_PreservesLegacyStringEventEntries(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var schema FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 states:
@@ -2174,7 +2137,6 @@ pins:
 }
 
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var node SystemNodeContract
 	if err := yaml.Unmarshal([]byte(`
 id: worker
@@ -2293,7 +2255,6 @@ delay: 7d
 }
 
 func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var schema FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: worker
@@ -2457,7 +2418,6 @@ emit_per_item: routed.item
 }
 
 func TestFanOutSpecDecode_RejectsRetiredTarget(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := yaml.Unmarshal([]byte(`
 items_from: payload.items
@@ -2471,7 +2431,6 @@ emit:
 }
 
 func TestFanOutSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := yaml.Unmarshal([]byte(`
 items_from: payload.items
@@ -2495,7 +2454,6 @@ emit:
 }
 
 func TestFanOutSpecDecode_RejectsExplicitZeroMaxItems(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := yaml.Unmarshal([]byte(`
 items_from: payload.items
@@ -2513,7 +2471,6 @@ emit:
 }
 
 func TestFanOutSpecDecode_RejectsExplicitNullMaxItems(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := yaml.Unmarshal([]byte(`
 items_from: payload.items
@@ -2531,7 +2488,6 @@ emit:
 }
 
 func TestFanOutSpecDecode_RejectsNestedItemsSource(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := yaml.Unmarshal([]byte(`
 items_from: payload.items.missing
@@ -2548,7 +2504,6 @@ emit:
 }
 
 func TestFanOutSpecDecode_DistinguishesOmittedMaxItems(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	if err := yaml.Unmarshal([]byte(`
 items_from: payload.items
@@ -2648,7 +2603,6 @@ writes:
 }
 
 func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec WorkflowDataAccumulation
 	if err := yaml.Unmarshal([]byte(`
 writes:
@@ -2694,7 +2648,6 @@ writes:
 }
 
 func TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec WorkflowDataAccumulation
 	err := yaml.Unmarshal([]byte(`
 writes:
@@ -2792,7 +2745,6 @@ source: payload.value
 }
 
 func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 create_entity: true
@@ -2809,7 +2761,6 @@ emit: scoring.requested
 }
 
 func TestSystemNodeEventHandlerDecode_PreservesSelectEntity(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 select_entity:
@@ -2835,7 +2786,6 @@ emit: treasury.spend_approved
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectEntityField(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 select_entity:
@@ -2848,7 +2798,6 @@ select_entity:
 }
 
 func TestSystemNodeEventHandlerDecode_PreservesSelectOrCreateEntity(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 select_or_create_entity:
@@ -2874,7 +2823,6 @@ emit: spec_repo.ready
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectOrCreateEntityField(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 select_or_create_entity:
@@ -2887,7 +2835,6 @@ select_or_create_entity:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
 rules:
@@ -3196,7 +3143,6 @@ fields:
 }
 
 func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`
 condition: "payload.mode == 'parallel'"
@@ -3276,7 +3222,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_AllowsOnSuccessEmitWithRules(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 on_success:
@@ -3307,7 +3252,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 emit:
@@ -3358,7 +3302,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsInvalidRulesEmitTemplateSpecialization(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	cases := []struct {
 		name     string
 		raw      string
@@ -3492,7 +3435,6 @@ rules:
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsUnsupportedOnSuccessEmitShapes(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	cases := []struct {
 		name     string
 		raw      string
@@ -4007,7 +3949,6 @@ legacy_buffer: dimensions_received
 }
 
 func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	tests := []struct {
 		name string
 		yaml string
@@ -4033,7 +3974,6 @@ func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
 }
 
 func TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_yaml_test.go:TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence"))
 	var spec FanOutSpec
 	err := canonicalrouting.NewParserSnippet(t, `
 items_from: entity.account_ids

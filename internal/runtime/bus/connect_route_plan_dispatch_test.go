@@ -802,7 +802,6 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines"))
 	source := connectRoutePlanInstanceKeySource(t)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1127,7 +1126,6 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy"))
 	source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1597,7 +1595,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 }
 
 func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy"))
 	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1637,7 +1634,6 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForL
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommittedReplay(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:connectRoutePlanInstanceKeySourceWithPolicy"))
 	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1724,7 +1720,6 @@ func TestEventBusPublish_ConnectRoutePlanDefaultedPoliciesMatchCreateReject(t *t
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy"))
 	source := connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -2048,7 +2043,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 }
 
 func TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/bus/connect_route_plan_dispatch_test.go:connectRoutePlanInstanceKeySourceWithPolicy"))
 	source := connectRoutePlanInstanceKeyBroadcastSource(t)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2853,85 +2847,18 @@ func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMiss
 }
 
 func writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t testing.TB, mode, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=resolution_vs_legacy_instance_policy_precedence proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute
 	t.Helper()
-	root := t.TempDir()
-	mode = strings.TrimSpace(mode)
-	if mode == "" {
-		mode = runtimecontracts.FlowInputResolutionModeSelect
+	resolutionMode := canonicalrouting.SelectResolutionSelect
+	if strings.TrimSpace(mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+		resolutionMode = canonicalrouting.SelectResolutionSelectOrCreate
+	} else if strings.TrimSpace(mode) != "" && strings.TrimSpace(mode) != runtimecontracts.FlowInputResolutionModeSelect {
+		t.Fatalf("unsupported select resolution mode %q", mode)
 	}
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: select-resolution-connect-route-plan-bus
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: account
-    flow: account
-    mode: template
-connect:
-  - from: producer.account_ready
-    to: account.account_ready
-    delivery: one
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-connect-route-plan-bus\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: account_ready
-        event: account.ready
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  account_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
-name: account
-mode: template
-instance:
-  by: account_id
-  on_missing: `+onMissing+`
-  on_conflict: `+onConflict+`
-pins:
-  inputs:
-    events:
-      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: account_id
-        carries:
-          account_id:
-            from: payload.account_id
-            type: string
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n  account_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
-account_state:
-  account_id:
-    type: string
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), `
-account-node:
-  id: account-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    account.ready: {}
-`)
-	return root
+	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{
+		Mode:     resolutionMode,
+		Missing:  legacyInstancePolicy(t, onMissing),
+		Conflict: legacyInstancePolicy(t, onConflict),
+	})
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
@@ -2939,80 +2866,13 @@ func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_instance_key_adapter proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: renamed-instance-key-connect-route-plan-bus
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one
-    using:
-      instance:
-        source: source_vertical_id
-        target: vertical_id
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: renamed-instance-key-connect-route-plan-bus\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: source_vertical_id
-        carries: [source_vertical_id]
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "deploy.done:\n  source_vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: vertical_id
-  on_missing: `+onMissing+`
-  on_conflict: `+onConflict+`
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  source_vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
-consumer-node:
-  id: consumer-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    deploy.done: {}
-`)
-	return root
+	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
+		Delivery: canonicalrouting.LegacyInstanceDeliveryOne,
+		Missing:  legacyInstancePolicy(t, onMissing),
+		Conflict: legacyInstancePolicy(t, onConflict),
+		Adapter:  canonicalrouting.LegacyInstanceAdapterRenamed,
+	})
 }
 
 func writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t testing.TB, delivery string) string {
@@ -3025,152 +2885,59 @@ func writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t testing.TB, delivery, o
 }
 
 func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, delivery, policyLines string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: instance-key-connect-route-plan-bus
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: `+delivery+`
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-bus\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id]
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: vertical_id
-`+policyLines+`pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
-consumer-node:
-  id: consumer-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    deploy.done: {}
-`)
-	return root
+	missing, conflict := legacyInstancePolicyLines(t, policyLines)
+	deliveryMode := canonicalrouting.LegacyInstanceDeliveryOne
+	if strings.TrimSpace(delivery) == "broadcast" {
+		deliveryMode = canonicalrouting.LegacyInstanceDeliveryBroadcast
+	} else if strings.TrimSpace(delivery) != "one" {
+		t.Fatalf("unsupported legacy delivery %q", delivery)
+	}
+	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
+		Delivery: deliveryMode,
+		Missing:  missing,
+		Conflict: conflict,
+	})
 }
 
 func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: instance-key-connect-route-plan-bus
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one
-  - from: producer.deploy_done
-    to: consumer.deploy_audited
-    delivery: one
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-bus\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id]
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: vertical_id
-  on_missing: `+onMissing+`
-  on_conflict: `+onConflict+`
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-      - name: deploy_audited
-        event: deploy.done
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-`)
-	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
-consumer-node:
-  id: consumer-node-{instance_id}
-  execution_type: system_node
-  event_handlers:
-    deploy.done: {}
-`)
-	return root
+	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
+		Delivery: canonicalrouting.LegacyInstanceDeliveryOne,
+		Missing:  legacyInstancePolicy(t, onMissing),
+		Conflict: legacyInstancePolicy(t, onConflict),
+		MultiPin: true,
+	})
+}
+
+func legacyInstancePolicy(t testing.TB, value string) canonicalrouting.LegacyInstancePolicy {
+	t.Helper()
+	switch strings.TrimSpace(value) {
+	case "":
+		return canonicalrouting.LegacyInstancePolicyDefault
+	case "reject":
+		return canonicalrouting.LegacyInstancePolicyReject
+	case "create":
+		return canonicalrouting.LegacyInstancePolicyCreate
+	case "reuse":
+		return canonicalrouting.LegacyInstancePolicyReuse
+	default:
+		t.Fatalf("unsupported legacy instance policy %q", value)
+		return canonicalrouting.LegacyInstancePolicyDefault
+	}
+}
+
+func legacyInstancePolicyLines(t testing.TB, lines string) (canonicalrouting.LegacyInstancePolicy, canonicalrouting.LegacyInstancePolicy) {
+	t.Helper()
+	trimmed := strings.TrimSpace(lines)
+	if trimmed == "" {
+		return canonicalrouting.LegacyInstancePolicyDefault, canonicalrouting.LegacyInstancePolicyDefault
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) != 4 || fields[0] != "on_missing:" || fields[2] != "on_conflict:" {
+		t.Fatalf("unsupported legacy instance policy block %q", lines)
+	}
+	return legacyInstancePolicy(t, fields[1]), legacyInstancePolicy(t, fields[3])
 }
 
 func writeConnectRoutePlanBusFixtureFile(t testing.TB, path, content string) {

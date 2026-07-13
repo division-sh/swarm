@@ -7,11 +7,9 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/scopes_test.go:TestProjectScopes_PackageBackedScopeCarriesOwningFlowID"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -84,7 +82,6 @@ flow-agent:
 }
 
 func TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/scopes_test.go:TestProjectScopes_PackageBackedScopeCarriesOwningFlowID"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -160,7 +157,6 @@ flow-agent:
 }
 
 func TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/scopes_test.go:TestProjectScopes_PackageBackedScopeCarriesOwningFlowID"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -228,7 +224,6 @@ backend:
 }
 
 func TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/semanticview/scopes_test.go:TestProjectScopes_PackageBackedScopeCarriesOwningFlowID"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)

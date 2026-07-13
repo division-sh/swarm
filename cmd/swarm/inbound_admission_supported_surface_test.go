@@ -23,14 +23,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("cmd/swarm/inbound_admission_supported_surface_test.go:runInboundAdmissionSupportedSurfacePolicyMatrix"), canonicalrouting.SourceID("cmd/swarm/provider_trigger_packs_test.go:copyProviderTriggerPackFixture"))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runInboundAdmissionSupportedSurfacePolicyMatrix(t, backend)
@@ -513,112 +512,7 @@ func sendInboundAdmissionSupportedRequest(t testing.TB, baseURL, provider string
 
 func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-		"package.yaml": `name: inbound-admission-policy-matrix
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: matrix
-    flow: matrix
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: matrix
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-          admission:
-            pack: {id: provider.telegram}
-        - provider: intercom
-          admission:
-            pack: {id: provider.intercom}
-            acknowledge: unsigned_webhook
-        - provider: acme_public
-          admission:
-            pack: {id: provider.acme_public}
-            acknowledge: unsigned_webhook
-        - provider: partner_auth
-          signing_secret: webhook_signing.partner
-          admission:
-            kind: raw
-            authentication: {kind: hmac_sha256, header: X-Partner-Signature, encoding: hex}
-            event: inbound.partner_auth
-            delivery_id: {source: header, header: X-Partner-Delivery}
-            payload: json
-        - provider: partner_open
-          admission:
-            kind: raw
-            authentication: {kind: none}
-            event: inbound.partner_open
-            delivery_id: {source: json_path, json_path: $.delivery.id}
-            payload: raw
-        - provider: partner_ack
-          admission:
-            kind: raw
-            acknowledge: unsigned_webhook
-            authentication: {kind: none}
-            event: inbound.partner_ack
-            delivery_id: {source: body_sha256}
-            payload: raw
-`,
-		"schema.yaml": "name: inbound-admission-policy-matrix\n",
-		"policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
-		"flows/matrix/schema.yaml": `name: matrix
-mode: singleton
-initial_state: active
-states: [active]
-pins:
-  inputs:
-    events:
-      - {name: telegram, event: inbound.telegram, source: external}
-      - {name: intercom, event: inbound.intercom, source: external}
-      - {name: acme_public, event: inbound.acme_public, source: external}
-      - {name: partner_auth, event: inbound.partner_auth, source: external}
-      - {name: partner_open, event: inbound.partner_open, source: external}
-      - {name: partner_ack, event: inbound.partner_ack, source: external}
-  outputs: {events: []}
-`,
-		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n  records:\n    type: map[text]json\n    initial: {}\n",
-		"flows/matrix/types.yaml":    "{}\n", "flows/matrix/policy.yaml": "{}\n", "flows/matrix/tools.yaml": "{}\n", "flows/matrix/agents.yaml": "{}\n",
-		"flows/matrix/events.yaml": inboundAdmissionMatrixEventsYAML(),
-		"flows/matrix/nodes.yaml":  inboundAdmissionMatrixNodesYAML(),
-	}
-	for name, body := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
-}
-
-func inboundAdmissionMatrixEventsYAML() string {
-	var out strings.Builder
-	for _, event := range []string{"inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
-		fmt.Fprintf(&out, "%s:\n  entity_id: text\n  provider: text\n  event_type: text\n  provider_event_type: text\n  provider_event_id: text\n  provider_delivery_id: text\n  headers: json\n  received_at: text\n", event)
-	}
-	return out.String()
-}
-
-func inboundAdmissionMatrixNodesYAML() string {
-	events := []string{"inbound.telegram", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
-	var out strings.Builder
-	out.WriteString("matrix-sink:\n  id: matrix-sink\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
-	for _, event := range events {
-		fmt.Fprintf(&out, `    %s:
-      data_accumulation:
-        writes:
-          - op: set
-            target: entity.records
-            key: {ref: payload.provider_event_id}
-            value: {ref: payload.provider_event_id}
-`, event)
-	}
-	return out.String()
+	return canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
 }
 
 func writeInboundAdmissionPackInventory(t *testing.T) ([]string, []string) {

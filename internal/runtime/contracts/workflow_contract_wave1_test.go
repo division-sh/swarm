@@ -4,12 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	canonicalrouting "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
 func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_wave1_test.go:TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments"))
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -686,7 +684,6 @@ func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 }
 
 func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_wave1_test.go:TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments"))
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -754,7 +751,6 @@ campaign:
 }
 
 func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_wave1_test.go:TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments"))
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -820,7 +816,6 @@ vertical:
 }
 
 func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/contracts/workflow_contract_wave1_test.go:TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments"))
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 

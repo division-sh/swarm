@@ -258,7 +258,6 @@ func rewriteProviderTriggerPackFixtureAsExternalAcme(t *testing.T, dir string) {
 }
 
 func copyProviderTriggerPackFixture(t *testing.T, provider, target string, external bool) {
-	// routing-example-census: provider-ingress issue=none owner=provider_trigger_pack proof=cmd/swarm/inbound_admission_supported_surface_test.go:TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres
 	t.Helper()
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("mkdir pack fixture: %v", err)

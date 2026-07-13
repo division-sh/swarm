@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
@@ -844,7 +843,6 @@ func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 }
 
 func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/apiv1/handler_test.go:file-scope"))
 	catalog := &fakeBundleCatalogReadStore{
 		details: map[string]store.BundleCatalogDetail{},
 		agents:  map[string]store.BundleCatalogAgentsResult{},

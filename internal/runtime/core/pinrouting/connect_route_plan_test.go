@@ -15,7 +15,6 @@ import (
 )
 
 func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -159,7 +158,6 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 }
 
 func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -435,7 +433,6 @@ func TestLowerCompositionConnectRoutePlansUsesSelectOrCreateInputResolution(t *t
 }
 
 func TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -515,7 +512,6 @@ func TestLowerCompositionConnectRoutePlansRejectsSelectOrCreateCarryTypeMismatch
 }
 
 func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter"), canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeInstanceKeyAdapterConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -594,7 +590,6 @@ func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testi
 }
 
 func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -621,7 +616,6 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKe
 }
 
 func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *testing.T) {
-	canonicalrouting.ProveSource(t, canonicalrouting.SourceID("internal/runtime/core/pinrouting/connect_route_plan_test.go:writeAddressedTemplateConnectRoutePlanPackageFixture"))
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -1328,7 +1322,6 @@ type selectResolutionConnectRoutePlanFixtureOptions struct {
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=pinrouting.select_resolution_lowering_matrix proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields
 	t.Helper()
 	mode := canonicalrouting.SelectResolutionSelect
 	if strings.TrimSpace(options.mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
@@ -1347,127 +1340,40 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: instance-key-connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: `+delivery+`
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id]
-`, "deploy.done:\n  vertical_id: string\n", "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: vertical_id
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-`)
-	return root
+	mode := canonicalrouting.LegacyInstanceDeliveryOne
+	if strings.TrimSpace(delivery) == "broadcast" {
+		mode = canonicalrouting.LegacyInstanceDeliveryBroadcast
+	} else if strings.TrimSpace(delivery) != "one" {
+		t.Fatalf("unsupported legacy delivery %q", delivery)
+	}
+	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
+		Delivery: mode,
+		Missing:  canonicalrouting.LegacyInstancePolicyReject,
+		Conflict: canonicalrouting.LegacyInstancePolicyReject,
+	})
 }
 
 func writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t *testing.T, usingBlock, outputKey, outputCarries, instanceBy string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter
 	t.Helper()
-	root := t.TempDir()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: instance-key-adapter-connect-route-plan-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
-connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
-    delivery: one`+usingBlock+`
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-adapter-connect-route-plan-package\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFlowFixture(t, root, "producer", `
-pins:
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: `+outputKey+`
-        carries: `+outputCarries+`
-`, "deploy.done:\n  source_vertical_id: string\n", "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
-name: consumer
-mode: template
-instance:
-  by: `+instanceBy+`
-  on_missing: reject
-  on_conflict: reject
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.done
-`)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  source_vertical_id: string\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
-deployment:
-  vertical_id:
-    type: string
-`)
-	return root
+	if outputKey != "source_vertical_id" || outputCarries != "[source_vertical_id]" || instanceBy != "vertical_id" {
+		t.Fatalf("unsupported legacy instance adapter shape")
+	}
+	adapter := canonicalrouting.LegacyInstanceAdapterRenamed
+	if strings.Contains(usingBlock, "target: missing_vertical_id") {
+		adapter = canonicalrouting.LegacyInstanceAdapterInvalidTarget
+	} else if !strings.Contains(usingBlock, "target: vertical_id") {
+		t.Fatalf("unsupported legacy instance adapter %q", usingBlock)
+	}
+	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
+		Delivery: canonicalrouting.LegacyInstanceDeliveryOne,
+		Missing:  canonicalrouting.LegacyInstancePolicyReject,
+		Conflict: canonicalrouting.LegacyInstancePolicyReject,
+		Adapter:  adapter,
+	})
 }
 
 func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_addressed_template_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute
 	t.Helper()
 	return canonicalrouting.CopyLegacyAddressedTemplateSelect(t)
 }
