@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -46,10 +47,10 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 		DDL         string `yaml:"ddl"`
 	}{
 		"agent_sessions": {
-			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
 		},
 		"agent_turns": {
-			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -63,7 +64,9 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 
 func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
 	t.Helper()
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	registry := &PostgresStore{DB: db}
+	registry.SetSessionLockTTL(30 * time.Second)
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, agentID, runtimeMode, sessionScope, "test-owner", scopeKey)
 	if err != nil {
 		t.Fatalf("Acquire(%s,%s,%s): %v", agentID, runtimeMode, scopeKey, err)
@@ -72,6 +75,38 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 		t.Fatalf("Release(%s,%s): %v", agentID, lease.SessionID, err)
 	}
 	return lease.SessionID
+}
+
+func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *PostgresStore, agentID string) runtimemanager.AgentLifecycleTransitionResult {
+	t.Helper()
+	var epoch int64
+	var generation uint64
+	var phase runtimemanager.AgentLifecyclePhase
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+		FROM agents
+		WHERE agent_id = $1
+	`, agentID).Scan(&epoch, &generation, &phase); err != nil {
+		t.Fatalf("load lifecycle cell for %s: %v", agentID, err)
+	}
+	targetEpoch := epoch
+	if targetEpoch == 0 {
+		targetEpoch = 1
+	}
+	result, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "test-terminate-" + agentID,
+		AgentID: agentID, Trigger: "test", ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
+		TargetEpoch: targetEpoch, TargetGeneration: generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
+		ConfigRevision: "test", RunMode: runtimemanager.AgentRunModeStopped,
+		Subordinate: runtimesessions.LifecycleMutationPlan{
+			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonCancelled,
+		},
+		Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("terminate %s through lifecycle authority: %v", agentID, err)
+	}
+	return result
 }
 
 func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRows(t *testing.T) {
@@ -1305,8 +1340,7 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurns
 		t.Fatalf("EnsureSchemaTables(agent_sessions): %v", err)
 	}
 
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	summary, err := registry.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{})
+	summary, err := pg.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{})
 	if err != nil {
 		t.Fatalf("ResetAll after agent_sessions-only migration: %v", err)
 	}
@@ -1393,8 +1427,8 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 		t.Fatalf("insert suspended session: %v", err)
 	}
 
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	if _, err := registry.Acquire(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global"); err != runtimesessions.ErrSessionSuspended {
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+	if _, err := pg.Acquire(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global"); err != runtimesessions.ErrSessionSuspended {
 		t.Fatalf("Acquire error = %v, want ErrSessionSuspended", err)
 	}
 }
@@ -1407,8 +1441,7 @@ func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	summary, err := registry.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{Source: "builder_api"})
+	summary, err := pg.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{Source: "builder_api"})
 	if err != nil {
 		t.Fatalf("ResetAll: %v", err)
 	}
@@ -3951,8 +3984,8 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected entity_id required")
 	}
 
-	if err := pg.MarkAgentTerminated(ctx, " "); err == nil {
-		t.Fatalf("expected agent_id required")
+	if _, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{}); err == nil {
+		t.Fatalf("expected lifecycle transition fields required")
 	}
 
 	if err := pg.CancelSchedule(ctx, "sub", "timer.recurring_digest"); err != nil {
@@ -4065,7 +4098,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -4095,7 +4128,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{AgentID: "a1", RuntimeMode: "session", SessionID: uuid.NewString()}); err == nil {
-		t.Fatalf("expected missing session row error")
+		t.Fatal("expected missing session row error")
 	}
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
@@ -4134,7 +4167,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	baseCtx := context.Background()
+	baseCtx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, baseCtx, pg)
 	entityID := uuid.NewString()
 	seedSpecAgent(t, baseCtx, pg, "entity-agent", entityID, "")
@@ -4183,7 +4216,7 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -4238,7 +4271,7 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
@@ -4275,12 +4308,13 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
-	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	lease, err := registry.Acquire(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global")
+	registry := pg
+	sessionCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+	lease, err := registry.Acquire(sessionCtx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	rotated, err := registry.Rotate(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", runtimesessions.RotationMetadata{
+	rotated, err := registry.Rotate(sessionCtx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", runtimesessions.RotationMetadata{
 		CheckpointSummary: "rotation_reason=session not found",
 		RetryReason:       "session not found",
 	}, "global")
@@ -4416,7 +4450,7 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalWatchdogRun
 func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConversation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -4493,7 +4527,7 @@ func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.
 func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -4719,7 +4753,7 @@ func TestManagerStore_AppendAgentTurn_CanonicalizesTurnBlocksThroughSingleStoreA
 func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwnershipAndPersistsTurnRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -4777,7 +4811,7 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
@@ -5001,7 +5035,7 @@ func TestManagerStore_TaskAppendTurnFailsClosedWithoutAuditCapabilityAndDoesNotC
 func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	if err := pg.ensureConversationAuditTable(ctx); err != nil {
 		t.Fatalf("ensureConversationAuditTable: %v", err)
@@ -5421,6 +5455,7 @@ func TestPostgresStore_EnsureConversationAuditTable_DoesNotMigrateLegacyTaskSess
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE agent_sessions (
 			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID,
 			agent_id TEXT NOT NULL,
 			entity_id UUID,
 			flow_instance TEXT,
@@ -5496,6 +5531,7 @@ func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBefore
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE agent_sessions (
 			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID,
 			agent_id TEXT NOT NULL,
 			entity_id UUID,
 			flow_instance TEXT,
@@ -5518,6 +5554,7 @@ func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBefore
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE agent_turns (
 			turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID,
 			agent_id TEXT NOT NULL,
 			session_id UUID NOT NULL,
 			runtime_mode TEXT NOT NULL DEFAULT 'task',
@@ -5571,10 +5608,10 @@ func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBefore
 		DDL         string `yaml:"ddl"`
 	}{
 		"agent_sessions": {
-			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'global',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'global',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 		"agent_turns": {
-			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -6371,6 +6408,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	entityID := uuid.NewString()
@@ -6396,9 +6434,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	if err := pg.MarkAgentTerminated(ctx, "a1"); err != nil {
-		t.Fatalf("MarkAgentTerminated: %v", err)
-	}
+	terminateSpecAgentViaLifecycle(t, ctx, pg, "a1")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:       "ephemeral-shard-1",
@@ -6702,10 +6738,10 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColum
 	}
 }
 
-func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
+func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -6751,9 +6787,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed task audit: %v", err)
 	}
-	if err := pg.MarkAgentTerminated(ctx, "agent-cleanup-1"); err != nil {
-		t.Fatalf("MarkAgentTerminated: %v", err)
-	}
+	terminateSpecAgentViaLifecycle(t, ctx, pg, "agent-cleanup-1")
 
 	var (
 		agentStatus      string
@@ -6789,8 +6823,8 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if sessTerminatedAt.IsZero() {
 		t.Fatal("expected non-zero session terminated_at")
 	}
-	if auditStatus != "terminated" {
-		t.Fatalf("expected terminated audit status, got %q", auditStatus)
+	if auditStatus != "active" {
+		t.Fatalf("expected immutable task audit evidence to survive termination unchanged, got %q", auditStatus)
 	}
 }
 

@@ -100,7 +100,6 @@ const (
 type AgentPersistence interface {
 	UpsertAgent(ctx context.Context, rec PersistedAgent) error
 	LoadAgents(ctx context.Context) ([]PersistedAgent, error)
-	MarkAgentTerminated(ctx context.Context, agentID string) error
 }
 
 type AgentLifecyclePhase string
@@ -135,22 +134,24 @@ type AgentLifecycleTransition struct {
 	ConfigRevision     string
 	RunMode            AgentRunMode
 	Agent              *PersistedAgent
+	Subordinate        sessions.LifecycleMutationPlan
 	Now                time.Time
 }
 
 type AgentLifecycleTransitionResult struct {
-	OperationID        string              `json:"operation_id"`
-	TransitionID       string              `json:"transition_id"`
-	AgentID            string              `json:"agent_id"`
-	PreviousEpoch      int64               `json:"previous_epoch"`
-	RuntimeEpoch       int64               `json:"runtime_epoch"`
-	PreviousGeneration uint64              `json:"previous_generation"`
-	Generation         uint64              `json:"generation"`
-	PreviousPhase      AgentLifecyclePhase `json:"previous_phase"`
-	Phase              AgentLifecyclePhase `json:"phase"`
-	ConfigRevision     string              `json:"config_revision"`
-	RunMode            AgentRunMode        `json:"run_mode"`
-	Replayed           bool                `json:"-"`
+	OperationID        string                            `json:"operation_id"`
+	TransitionID       string                            `json:"transition_id"`
+	AgentID            string                            `json:"agent_id"`
+	PreviousEpoch      int64                             `json:"previous_epoch"`
+	RuntimeEpoch       int64                             `json:"runtime_epoch"`
+	PreviousGeneration uint64                            `json:"previous_generation"`
+	Generation         uint64                            `json:"generation"`
+	PreviousPhase      AgentLifecyclePhase               `json:"previous_phase"`
+	Phase              AgentLifecyclePhase               `json:"phase"`
+	ConfigRevision     string                            `json:"config_revision"`
+	RunMode            AgentRunMode                      `json:"run_mode"`
+	Subordinate        sessions.LifecycleMutationOutcome `json:"subordinate"`
+	Replayed           bool                              `json:"-"`
 }
 
 type AgentLifecyclePersistence interface {

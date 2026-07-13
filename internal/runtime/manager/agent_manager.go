@@ -12,7 +12,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -135,7 +134,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
-		lifecycle:                       newAgentLifecycleCoordinator(opts.LifecycleStore),
+		lifecycle:                       newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions),
 		poisonPanicCounts:               make(map[string]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
@@ -440,30 +439,8 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	}
 	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"reconfigure", agentID, revision}, "\x00"))).String()
 
-	// Spec v2.0: reconfigure triggers session rotation so the agent restarts on a
-	// clean session with the new prompt/tool set. Fail fast if rotation fails.
-	am.mu.RLock()
-	sessionRegistry := am.sessions
-	am.mu.RUnlock()
-	conversationMode := strings.TrimSpace(updated.ConversationMode)
-	if sessionRegistry != nil && conversationMode != "" && sessions.IsLiveSessionRuntimeMode(conversationMode) {
-		runtimeMode := sessions.NormalizeConversationRuntimeMode(conversationMode)
-		scopeKey, err := sessions.DeclaredScopeKey(updated)
-		if err != nil {
-			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
-		}
-		rotationCtx := models.WithActor(am.runtimeContext(), updated)
-		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, runtimeMode, sessions.NormalizeSessionScope(updated.SessionScope), "reconfigure", sessions.RotationMetadata{
-			CheckpointSummary: "agent reconfigured",
-			OperationID:       operationID,
-		}, scopeKey)
-		if err != nil {
-			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
-		} else if rotated != nil {
-			llm.LogSessionRotatedForRun(am.runtimeContext(), am.bus, agentID, conversationMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
-		}
-	}
-	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", operationID, &rec); err != nil {
+	subordinate := reconfigureSessionMutationPlan(current, updated)
+	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", operationID, &rec, subordinate); err != nil {
 		return err
 	}
 	if am.lifecycle.store == nil && am.store != nil {
@@ -502,10 +479,29 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	if am.bus != nil {
 		am.bus.Unsubscribe(agentID)
 	}
-	if am.lifecycle.store == nil && am.store != nil {
-		if err := am.store.MarkAgentTerminated(am.runtimeContext(), agentID); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {
+	if !sessions.IsLiveSessionRuntimeMode(strings.TrimSpace(current.ConversationMode)) {
+		return sessions.LifecycleMutationPlan{Action: sessions.LifecycleMutationNone}
+	}
+	plan := sessions.LifecycleMutationPlan{
+		Action:            sessions.LifecycleMutationTerminateCurrentSet,
+		TerminationReason: sessions.TerminationReasonNormal,
+		TerminationDetail: "agent_reconfigured_identity_changed",
+	}
+	if !sessions.IsLiveSessionRuntimeMode(strings.TrimSpace(updated.ConversationMode)) {
+		return plan
+	}
+	if sessions.NormalizeConversationRuntimeMode(current.ConversationMode) != sessions.NormalizeConversationRuntimeMode(updated.ConversationMode) ||
+		sessions.NormalizeSessionScope(current.SessionScope) != sessions.NormalizeSessionScope(updated.SessionScope) {
+		return plan
+	}
+	return sessions.LifecycleMutationPlan{
+		Action:            sessions.LifecycleMutationRotateCurrentSet,
+		TerminationReason: sessions.TerminationReasonNormal,
+		TerminationDetail: "agent_reconfigured",
+		CheckpointSummary: "agent reconfigured",
+	}
 }

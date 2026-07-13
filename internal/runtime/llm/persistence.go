@@ -9,6 +9,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type AgentTurnRecord struct {
@@ -172,6 +173,9 @@ type ConversationWatchdogUpdate struct {
 
 type ConversationPersistence interface {
 	UpsertConversation(ctx context.Context, rec ConversationRecord) error
-	LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (ConversationRecord, bool, error)
 	UpdateLiveSessionWatchdog(ctx context.Context, update ConversationWatchdogUpdate) error
+}
+
+type LiveSessionAcquirer interface {
+	AcquireLiveSession(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, scopeKey string) (*runtimesessions.Lease, ConversationRecord, error)
 }

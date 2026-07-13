@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -110,18 +109,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 		}
 		return nil, fmt.Errorf("decode runtime.nuke response: %w", err)
 	}
-	deactivateRuntimeContextsAfterRuntimeNuke(opts, stored)
 	return stored, nil
-}
-
-func deactivateRuntimeContextsAfterRuntimeNuke(opts OperatorReadOptions, result runtimeNukeResult) {
-	if opts.RuntimeContexts == nil || result.DryRun || !result.IncludeBundles {
-		return
-	}
-	if result.Status != "completed" && !result.PartialFailure {
-		return
-	}
-	opts.RuntimeContexts.DeactivateAll(swruntime.RuntimeContextCauseUnloaded)
 }
 
 func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptions, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
@@ -137,6 +125,11 @@ func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 		RequestedAt:       now,
 	}, func(ctx context.Context, planResult destructivereset.Result) error {
 		var err error
+		if !dryRun && opts.RuntimeContexts != nil {
+			if err := opts.RuntimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {
+				return err
+			}
+		}
 		quiescence, err = opts.ResetQuiescer.Apply(ctx, destructivereset.QuiescenceRequest{
 			Result:       planResult,
 			ActorTokenID: req.ActorTokenID,

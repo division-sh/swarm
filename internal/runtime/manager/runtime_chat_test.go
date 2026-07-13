@@ -55,8 +55,7 @@ func (s *chatTestStore) UpsertAgent(context.Context, PersistedAgent) error { ret
 func (s *chatTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
-func (s *chatTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (s *chatTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (s *chatTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (s *chatTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }

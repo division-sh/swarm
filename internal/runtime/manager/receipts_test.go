@@ -96,8 +96,7 @@ func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { r
 func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
-func (*receiptReaderStub) MarkAgentTerminated(context.Context, string) error { return nil }
-func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error { return nil }
 func (s *receiptReaderStub) UpsertEventReceipt(_ context.Context, _, _ string, status ReceiptStatus, failure *runtimefailures.Envelope) error {
 	s.upsertCalls++
 	s.lastStatus = status

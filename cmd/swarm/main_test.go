@@ -4076,6 +4076,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "delivered", 1)
+	waitServedJoinSourceTimer(t, db, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
 
 	var fork apiv1.RunForkExecutionResult
@@ -4125,6 +4126,28 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		handle.Join.Stage != "awaiting" || handle.Join.JoinID != "awaiting" {
 		t.Fatalf("fork join timer = event:%q count:%d handle:%#v parsed:%v", fireEvent, reconstructed, handle, ok)
 	}
+}
+
+func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var count int
+	for time.Now().Before(deadline) {
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM timers
+			WHERE run_id = $1::uuid
+			  AND fire_event = 'platform.join_timeout'
+			  AND status = 'active'
+		`, runID).Scan(&count); err != nil {
+			t.Fatalf("load served join source timer: %v", err)
+		}
+		if count == 1 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
@@ -7306,7 +7329,10 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	}
 	eventID := uuid.NewString()
 	deliveryID := uuid.NewString()
-	createdAt := time.Now().UTC()
+	var createdAt time.Time
+	if err := db.QueryRowContext(context.Background(), `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
+		t.Fatalf("load served join fork frontier timestamp: %v", err)
+	}
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, scope, source_event_id,

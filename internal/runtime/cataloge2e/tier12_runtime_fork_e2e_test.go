@@ -20,7 +20,6 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -86,7 +85,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 			Config:            cfg,
 			EntityStore:       h.pg,
 			HumanTaskStore:    h.pg,
-			SessionRegistry:   sessions.NewPostgresRegistry(h.db, cfg.LLM.Session.LockTTL),
+			SessionRegistry:   h.pg,
 			ConversationStore: h.pg,
 			ScheduleStore:     h.pg,
 			MailboxStore:      h.pg,

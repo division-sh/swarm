@@ -772,6 +772,14 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required for live session conversation persistence")
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin live conversation projection: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, rec.AgentID, "upsert_conversation", false); err != nil {
+		return err
+	}
 
 	q := `
 		UPDATE agent_sessions
@@ -795,7 +803,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		mode.String(),
 	}
 	if caps.Conversations.SessionRunID {
-		if err := s.ensureRunRow(ctx, caps, nil, runID, "", "", true); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
 			return err
 		}
 		q = `
@@ -822,14 +830,14 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			mode.String(),
 		}
 	}
-	res, err := s.DB.ExecContext(ctx, q, args...)
+	res, err := tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("update live conversation: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", rec.AgentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func nullUUIDString(raw string) string {
@@ -1005,7 +1013,15 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if err != nil {
 		return fmt.Errorf("marshal live session watchdog patch: %w", err)
 	}
-	res, err := s.DB.ExecContext(ctx, `
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin live session watchdog projection: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, agentID, "update_watchdog", false); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || $1::jsonb,
 		    updated_at = now()
@@ -1021,5 +1037,5 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", agentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
-	return nil
+	return tx.Commit()
 }

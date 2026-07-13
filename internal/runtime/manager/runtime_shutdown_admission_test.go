@@ -25,10 +25,6 @@ func (*shutdownAdmissionManagerStore) LoadAgents(context.Context) ([]PersistedAg
 	return nil, nil
 }
 
-func (*shutdownAdmissionManagerStore) MarkAgentTerminated(context.Context, string) error {
-	return nil
-}
-
 func (*shutdownAdmissionManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }

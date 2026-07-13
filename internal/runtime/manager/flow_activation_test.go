@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type flowActivationRouteStore interface {
@@ -61,8 +62,13 @@ type flowActivationTestStore struct {
 }
 
 func newFlowActivationManager(bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
+	var lifecycleStore AgentLifecyclePersistence
+	if len(stores) > 0 {
+		lifecycleStore, _ = stores[0].(AgentLifecyclePersistence)
+	}
 	return NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
 		WorkflowInstances: instances,
+		LifecycleStore:    lifecycleStore,
 	}, stores...)
 }
 
@@ -143,9 +149,23 @@ func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAg
 func (*flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
-func (s *flowActivationTestStore) MarkAgentTerminated(_ context.Context, agentID string) error {
-	s.terminated = append(s.terminated, strings.TrimSpace(agentID))
-	return s.terminateErr
+func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	if req.TargetPhase == AgentLifecycleTerminated {
+		if s.terminateErr != nil {
+			return AgentLifecycleTransitionResult{}, s.terminateErr
+		}
+		s.terminated = append(s.terminated, strings.TrimSpace(req.AgentID))
+	} else if req.Agent != nil {
+		s.upserts = append(s.upserts, *req.Agent)
+	}
+	return AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: uuid.NewString(), AgentID: req.AgentID,
+		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
+		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+		Subordinate: sessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
+	}, nil
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {

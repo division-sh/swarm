@@ -47,6 +47,8 @@ type captureManagerStub struct {
 	reconfiguredID    string
 	reconfiguredPatch models.AgentConfig
 	reconfigureCalled bool
+	tornDownID        string
+	teardownCalled    bool
 }
 
 func (m *captureManagerStub) GetAgentConfig(agentID string) (models.AgentConfig, bool) {
@@ -65,7 +67,12 @@ func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.Age
 	return nil
 }
 
-func (m *captureManagerStub) TeardownAgent(string) error { return nil }
+func (m *captureManagerStub) TeardownAgent(agentID string) error {
+	m.tornDownID = agentID
+	m.teardownCalled = true
+	delete(m.agents, agentID)
+	return nil
+}
 
 func (m *captureManagerStub) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {
 	m.reconfiguredID = agentID
@@ -128,6 +135,66 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 
 	if err := authorizeManage(provider, actor, target, manager); err != nil {
 		t.Fatalf("expected ancestor manager to be allowed, got %v", err)
+	}
+}
+
+func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+		"worker-1": {ID: "worker-1", Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1"},
+	}}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
+	})
+
+	result, err := exec.ExecAgentFireDirect(models.AgentConfig{
+		ID: "manager-1", Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-1",
+	}, map[string]any{"agent_id": "worker-1"})
+	if err != nil {
+		t.Fatalf("ExecAgentFireDirect: %v", err)
+	}
+	if !manager.teardownCalled || manager.tornDownID != "worker-1" {
+		t.Fatalf("teardown called=%v agent=%q, want worker-1", manager.teardownCalled, manager.tornDownID)
+	}
+	if got := result.(map[string]any)["status"]; got != "fired" {
+		t.Fatalf("status = %v, want fired", got)
+	}
+}
+
+func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+		"worker-1": {ID: "worker-1", Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1"},
+	}}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
+	})
+
+	result, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
+		ID: "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+	}, map[string]any{"agent_id": "worker-1", "model": "fast"})
+	if err != nil {
+		t.Fatalf("ExecAgentReconfigureDirect: %v", err)
+	}
+	if !manager.reconfigureCalled || manager.reconfiguredID != "worker-1" || manager.reconfiguredPatch.Model != "fast" {
+		t.Fatalf("reconfigure called=%v agent=%q patch=%+v", manager.reconfigureCalled, manager.reconfiguredID, manager.reconfiguredPatch)
+	}
+	if got := result.(map[string]any)["status"]; got != "reconfigured" {
+		t.Fatalf("status = %v, want reconfigured", got)
 	}
 }
 

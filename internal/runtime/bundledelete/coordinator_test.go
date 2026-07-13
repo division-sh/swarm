@@ -29,7 +29,7 @@ func TestCoordinatorExecutesForceDeleteOwnerChain(t *testing.T) {
 	if !result.OK || result.Status != "completed" || !result.Deleted || result.ActiveRunsStopped != 1 || result.DeliveriesCancelled != 1 || result.ContainersStopped != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if got, want := owner.calls, []string{"lock", "plan", "inventory", "cleanup", "containers", "final"}; !stringSlicesEqual(got, want) {
+	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers", "final"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("calls = %#v, want %#v", got, want)
 	}
 	if owner.cleanupRequest.Targets[0].ReasonCode != preservationcleanup.BundleForceDeletedReason {
@@ -79,8 +79,23 @@ func TestCoordinatorPhaseFailureStopsBeforeFinalMutation(t *testing.T) {
 	if result.OK || result.Status != "partial_failure" || !result.PartialFailure || result.Deleted {
 		t.Fatalf("partial result = %#v", result)
 	}
-	if got, want := owner.calls, []string{"lock", "plan", "inventory", "cleanup", "containers"}; !stringSlicesEqual(got, want) {
+	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("partial calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestCoordinatorShutdownFailureBlocksCleanupAndFinalMutation(t *testing.T) {
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	owner := newFakeOwners("00000000-0000-0000-0000-000000000101")
+	owner.quiesceErr = errors.New("shutdown failed")
+	_, err := owner.coordinator(now).Execute(context.Background(), Request{
+		ActorTokenID: "token", RequestHash: "hash", BundleHash: testBundleHash, Force: true, RequestedAt: now,
+	})
+	if !errors.Is(err, owner.quiesceErr) {
+		t.Fatalf("Execute error = %v, want shutdown failure", err)
+	}
+	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce"}; !stringSlicesEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
 	}
 }
 
@@ -107,6 +122,7 @@ type fakeOwners struct {
 	runID           string
 	cleanupRequest  preservationcleanup.Request
 	containerFailed bool
+	quiesceErr      error
 }
 
 func newFakeOwners(runID string) *fakeOwners {
@@ -121,8 +137,14 @@ func (o *fakeOwners) coordinator(now time.Time) *Coordinator {
 		Locks:              o,
 		ContainerInventory: o,
 		Containers:         o,
+		RuntimeQuiescer:    o,
 		Now:                func() time.Time { return now },
 	}
+}
+
+func (o *fakeOwners) QuiesceBundleRuntime(_ context.Context, _ string) error {
+	o.calls = append(o.calls, "quiesce")
+	return o.quiesceErr
 }
 
 func (o *fakeOwners) TryAcquire(_ context.Context, lockKey string) (destructivereset.LockLease, bool, error) {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -64,9 +65,11 @@ func (c BundleContext) normalized() BundleContext {
 }
 
 type runtimeContextEntry struct {
-	context *BundleContext
-	state   RuntimeContextState
-	cause   string
+	context          *BundleContext
+	state            RuntimeContextState
+	cause            string
+	shutdownMu       sync.Mutex
+	shutdownComplete bool
 }
 
 type runtimeContextAgentSlugCollision struct {
@@ -1052,9 +1055,12 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 	if m == nil || result.BundleHash == "" {
 		return result
 	}
-	var runtimeToShutdown *Runtime
+	var (
+		entry             *runtimeContextEntry
+		runtimeToShutdown *Runtime
+	)
 	m.mu.Lock()
-	entry := m.contexts[result.BundleHash]
+	entry = m.contexts[result.BundleHash]
 	if entry == nil {
 		m.mu.Unlock()
 		return result
@@ -1069,23 +1075,52 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 		if strings.TrimSpace(entry.cause) != "" {
 			result.Cause = strings.TrimSpace(entry.cause)
 		}
-		m.mu.Unlock()
-		return result
-	}
-	entry.state = RuntimeContextStateUnloaded
-	entry.cause = result.Cause
-	result.Changed = true
-	if entry.context != nil {
-		runtimeToShutdown = entry.context.Runtime
-		if runtimeToShutdown != nil {
-			runtimeToShutdown.CloseAdmission()
+	} else {
+		entry.state = RuntimeContextStateUnloaded
+		entry.cause = result.Cause
+		result.Changed = true
+		if entry.context != nil {
+			runtimeToShutdown = entry.context.Runtime
+			if runtimeToShutdown != nil {
+				runtimeToShutdown.CloseAdmission()
+			}
 		}
 	}
+	if runtimeToShutdown == nil && entry.context != nil {
+		runtimeToShutdown = entry.context.Runtime
+	}
 	m.mu.Unlock()
-	if runtimeToShutdown != nil {
-		result.ShutdownErr = runtimeToShutdown.ShutdownWithOptions(opts)
+	if runtimeToShutdown == nil {
+		return result
+	}
+	entry.shutdownMu.Lock()
+	defer entry.shutdownMu.Unlock()
+	if entry.shutdownComplete {
+		return result
+	}
+	result.ShutdownErr = runtimeToShutdown.ShutdownWithOptions(opts)
+	if result.ShutdownErr == nil {
+		entry.shutdownComplete = true
 	}
 	return result
+}
+
+func (m *RuntimeContextManager) QuiesceBundleRuntime(_ context.Context, bundleHash string) error {
+	result := m.DeactivateBundleHash(bundleHash, RuntimeContextCauseUnloaded)
+	if result.ShutdownErr != nil {
+		return fmt.Errorf("shutdown runtime context for bundle %s: %w", strings.TrimSpace(bundleHash), result.ShutdownErr)
+	}
+	return nil
+}
+
+func (m *RuntimeContextManager) QuiesceAllRuntimeContexts(_ context.Context) error {
+	var quiesceErr error
+	for _, result := range m.DeactivateAll(RuntimeContextCauseUnloaded) {
+		if result.ShutdownErr != nil {
+			quiesceErr = errors.Join(quiesceErr, fmt.Errorf("shutdown runtime context for bundle %s: %w", result.BundleHash, result.ShutdownErr))
+		}
+	}
+	return quiesceErr
 }
 
 func (m *RuntimeContextManager) DeactivateAll(cause string) []RuntimeContextDeactivationResult {

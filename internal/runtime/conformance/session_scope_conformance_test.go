@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -179,6 +180,7 @@ func assertSessionAcquisitionBoundary(t *testing.T, tc sessionScopeConformanceCa
 
 func assertConversationPersistenceBoundary(t *testing.T, ctx context.Context, pg *store.PostgresStore, tc sessionScopeConformanceCase) {
 	t.Helper()
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	ctx = runtimeactors.WithActor(ctx, tc.actor)
 	if strings.TrimSpace(tc.persistErrContains) == "" {
 		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -191,7 +193,8 @@ func assertConversationPersistenceBoundary(t *testing.T, ctx context.Context, pg
 	}
 	sessionID := uuid.NewString()
 	if strings.TrimSpace(tc.persistErrContains) == "" && !conversationModeOrTask(tc.actor).IsStateless() {
-		registry := runtimesessions.NewPostgresRegistry(pg.DB, 30*time.Second)
+		pg.SetSessionLockTTL(30 * time.Second)
+		registry := runtimesessions.Registry(pg)
 		lease, err := registry.Acquire(ctx, tc.actor.ID, conversationModeOrTask(tc.actor), runtimesessions.NormalizeSessionScope(tc.actor.SessionScope), "conformance", tc.scopeKey())
 		if err != nil {
 			t.Fatalf("seed live session lease: %v", err)
@@ -454,8 +457,7 @@ func (s *conformanceRecoveryStore) UpsertAgent(context.Context, runtimemanager.P
 func (s *conformanceRecoveryStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
-func (*conformanceRecoveryStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (*conformanceRecoveryStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (*conformanceRecoveryStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (*conformanceRecoveryStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }

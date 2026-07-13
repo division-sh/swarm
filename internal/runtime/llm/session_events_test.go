@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -74,7 +75,77 @@ type captureConversationStore struct {
 	record         ConversationRecord
 	load           ConversationRecord
 	loadOK         bool
+	watchdogMu     sync.Mutex
 	watchdogUpdate ConversationWatchdogUpdate
+}
+
+type atomicLiveSessionTestRegistry struct {
+	sessions.Registry
+	hydrated ConversationRecord
+}
+
+func (r atomicLiveSessionTestRegistry) AcquireLiveSession(ctx context.Context, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, scopeKey string) (*sessions.Lease, ConversationRecord, error) {
+	lease, err := r.Registry.Acquire(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
+	if err != nil {
+		return nil, ConversationRecord{}, err
+	}
+	record := r.hydrated
+	record.SessionID = lease.SessionID
+	record.AgentID = agentID
+	record.Mode = runtimeMode.String()
+	record.SessionScope = sessionScope.String()
+	record.ScopeKey = lease.ScopeKey
+	record.Status = "active"
+	return lease, record, nil
+}
+
+type exactAcquireFailureRegistry struct {
+	*sessions.InMemoryRegistry
+	err error
+}
+
+func (r exactAcquireFailureRegistry) AcquireLiveSession(context.Context, string, sessions.RuntimeMode, sessions.SessionScope, string, string) (*sessions.Lease, ConversationRecord, error) {
+	return nil, ConversationRecord{}, r.err
+}
+
+type sessionStarter interface {
+	StartSession(context.Context, string, string, []ToolDefinition) (*Session, error)
+}
+
+func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *testing.T) {
+	wantErr := errors.New("exact acquire-hydrate failed")
+	constructors := map[string]func(sessions.Registry, EventPublisher) sessionStarter{
+		"anthropic_api": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
+			return NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+		},
+		"claude_cli": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
+			return NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, nil, publisher)
+		},
+		"openai_compatible": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
+			return NewOpenAICompatibleRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+		},
+		"openai_responses": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
+			return NewOpenAIResponsesRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+		},
+	}
+	for name, construct := range constructors {
+		t.Run(name, func(t *testing.T) {
+			publisher := &eventPublisherStub{}
+			registry := exactAcquireFailureRegistry{InMemoryRegistry: sessions.NewInMemoryRegistry(0), err: wantErr}
+			runtime := construct(registry, publisher)
+			ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/instance-1")
+			ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
+				ID: "agent-1", Model: "regular", ConversationMode: sessions.RuntimeModeSession.String(),
+				SessionScope: sessions.SessionScopeFlow.String(), FlowPath: "support/instance-1",
+			})
+			if _, err := runtime.StartSession(ctx, "agent-1", "system", nil); !errors.Is(err, wantErr) {
+				t.Fatalf("StartSession error = %v, want exact acquire-hydrate failure", err)
+			}
+			if len(publisher.events) != 0 || len(publisher.marks) != 0 {
+				t.Fatalf("failed acquire published startup surface: events=%d marks=%d", len(publisher.events), len(publisher.marks))
+			}
+		})
+	}
 }
 
 func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
@@ -87,8 +158,16 @@ func (s *captureConversationStore) LoadActiveConversation(context.Context, strin
 }
 
 func (s *captureConversationStore) UpdateLiveSessionWatchdog(_ context.Context, update ConversationWatchdogUpdate) error {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
 	s.watchdogUpdate = update
 	return nil
+}
+
+func (s *captureConversationStore) capturedWatchdogUpdate() ConversationWatchdogUpdate {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	return s.watchdogUpdate
 }
 
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
@@ -654,7 +733,7 @@ func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.
 
 func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
 	store := &captureConversationStore{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:               "session-4",
@@ -702,7 +781,7 @@ func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 		},
 		loadOK: true,
 	}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil)
+	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
 	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global")
 
 	s, err := runtime.StartSession(ctx, "agent-4", "system", nil)

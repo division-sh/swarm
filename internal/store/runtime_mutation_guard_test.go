@@ -911,6 +911,14 @@ func runtimeWriterRules() []runtimeWriterRule {
 			reason:         "decision-card obligation due/pending scans are read-only recovery surfaces",
 		},
 		{
+			name:           "sqlite lifecycle subordinate transaction helper",
+			path:           rx(`^internal/store/agent_lifecycle\.go$`),
+			function:       rx(`^applySQLiteLifecycleSubordinate$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classActiveTxHelper,
+			reason:         "subordinate session mutation consumes the lifecycle transition's active SQLite transaction",
+		},
+		{
 			name:           "managed external effect attempt admission",
 			path:           rx(`^internal/runtime/(llm/(api_runtime|openai_compatible_runtime|openai_responses_runtime|cli_runtime|cli_runtime_process|cli_tool_result_relay)|managedcredentials/store|mcp/client|tools/(executor_http|executor_native|tool_result_relay))\.go$`),
 			function:       rx(`.*`),

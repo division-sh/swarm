@@ -10,6 +10,7 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -91,7 +92,9 @@ func requireSingleLifecycleDiagnosticProjection(res sql.Result, err error) error
 }
 
 func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	if err := validateLifecycleTransition(req); err != nil {
+	var err error
+	req, err = normalizeLifecycleTransition(req)
+	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -113,6 +116,10 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
+	result.Subordinate, err = applyPostgresLifecycleSubordinate(ctx, tx, req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := applyPostgresLifecycleCell(ctx, tx, req, result); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -126,11 +133,13 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 }
 
 func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	if err := validateLifecycleTransition(req); err != nil {
+	var err error
+	req, err = normalizeLifecycleTransition(req)
+	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err := s.runRuntimeMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runRuntimeMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
 		var ok bool
 		var err error
 		result, ok, err = loadSQLiteLifecycleOperationResult(txctx, tx, req)
@@ -145,6 +154,10 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 			return err
 		}
 		result = lifecycleResult(req, previous, exists)
+		result.Subordinate, err = applySQLiteLifecycleSubordinate(txctx, tx, req)
+		if err != nil {
+			return err
+		}
 		if err := applySQLiteLifecycleCellTx(txctx, tx, req, result); err != nil {
 			return err
 		}
@@ -157,6 +170,18 @@ type lifecycleCell struct {
 	Epoch      int64
 	Generation uint64
 	Phase      runtimemanager.AgentLifecyclePhase
+}
+
+func normalizeLifecycleTransition(req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransition, error) {
+	plan, err := req.Subordinate.Normalize()
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransition{}, err
+	}
+	req.Subordinate = plan
+	if err := validateLifecycleTransition(req); err != nil {
+		return runtimemanager.AgentLifecycleTransition{}, err
+	}
+	return req, nil
 }
 
 func validateLifecycleTransition(req runtimemanager.AgentLifecycleTransition) error {
@@ -211,7 +236,174 @@ func lifecycleResult(req runtimemanager.AgentLifecycleTransition, previous lifec
 		PreviousEpoch: previous.Epoch, RuntimeEpoch: req.TargetEpoch,
 		PreviousGeneration: previous.Generation, Generation: req.TargetGeneration,
 		PreviousPhase: previousPhase, Phase: req.TargetPhase, ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
 	}
+}
+
+type lifecycleSessionRow struct {
+	SessionID    string
+	RunID        string
+	EntityID     string
+	FlowInstance string
+	ScopeKey     string
+	Scope        string
+	RuntimeMode  string
+	Status       string
+}
+
+func applyPostgresLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimesessions.LifecycleMutationOutcome, error) {
+	outcome := runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action}
+	if req.Subordinate.Action == runtimesessions.LifecycleMutationNone {
+		return outcome, nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT session_id::text, COALESCE(run_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
+		       scope_key, scope, runtime_mode, status
+		FROM agent_sessions
+		WHERE agent_id = $1 AND status IN ('active', 'suspended')
+		ORDER BY session_id
+		FOR UPDATE
+	`, req.AgentID)
+	if err != nil {
+		return outcome, fmt.Errorf("lock lifecycle subordinate session set: %w", err)
+	}
+	defer rows.Close()
+	var selected []lifecycleSessionRow
+	for rows.Next() {
+		var row lifecycleSessionRow
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.EntityID, &row.FlowInstance, &row.ScopeKey, &row.Scope, &row.RuntimeMode, &row.Status); err != nil {
+			return outcome, err
+		}
+		selected = append(selected, row)
+	}
+	if err := rows.Err(); err != nil {
+		return outcome, err
+	}
+	if err := rows.Close(); err != nil {
+		return outcome, err
+	}
+	for _, row := range selected {
+		mutation, err := applyPostgresLifecycleSessionMutation(ctx, tx, req, row)
+		if err != nil {
+			return outcome, err
+		}
+		outcome.Sessions = append(outcome.Sessions, mutation)
+	}
+	return outcome, nil
+}
+
+func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, row lifecycleSessionRow) (runtimesessions.LifecycleSessionMutation, error) {
+	mutation := runtimesessions.LifecycleSessionMutation{
+		PreviousSessionID: row.SessionID, ScopeKey: row.ScopeKey, RuntimeMode: row.RuntimeMode, PreviousStatus: row.Status,
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated', termination_reason = $2, termination_detail = NULLIF($3, ''),
+		    successor_session_id = NULL, terminated_at = $4, lease_holder = NULL, lease_expires_at = NULL, updated_at = $4
+		WHERE session_id = $1::uuid AND status IN ('active', 'suspended')
+	`, row.SessionID, req.Subordinate.TerminationReason.String(), req.Subordinate.TerminationDetail, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("terminate lifecycle subordinate session %s: %w", row.SessionID, err)
+	}
+	if req.Subordinate.Action != runtimesessions.LifecycleMutationRotateCurrentSet {
+		return mutation, nil
+	}
+	mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
+	mutation.SuccessorStatus = row.Status
+	runtimeState, err := json.Marshal(map[string]any{
+		"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
+		"rotation_operation_id": req.OperationID,
+	})
+	if err != nil {
+		return mutation, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, lease_holder, lease_expires_at,
+			status, created_at, updated_at
+		) VALUES (
+			$1::uuid, NULLIF($2, '')::uuid, $3, NULLIF($4, '')::uuid, NULLIF($5, ''), $6, $7,
+			'[]'::jsonb, 0, $8, $9::jsonb, NULL, NULL, $10, $11, $11
+		)
+	`, mutation.SuccessorSessionID, row.RunID, req.AgentID, row.EntityID, row.FlowInstance, row.ScopeKey, row.Scope, row.RuntimeMode, string(runtimeState), row.Status, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("insert lifecycle subordinate successor for %s: %w", row.SessionID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = $2::uuid, updated_at = $3 WHERE session_id = $1::uuid AND status = 'terminated'`, row.SessionID, mutation.SuccessorSessionID, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("link lifecycle subordinate successor for %s: %w", row.SessionID, err)
+	}
+	return mutation, nil
+}
+
+func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimesessions.LifecycleMutationOutcome, error) {
+	outcome := runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action}
+	if req.Subordinate.Action == runtimesessions.LifecycleMutationNone {
+		return outcome, nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT session_id, COALESCE(run_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
+		       scope_key, scope, runtime_mode, status
+		FROM agent_sessions
+		WHERE agent_id = ? AND status IN ('active', 'suspended')
+		ORDER BY session_id
+	`, req.AgentID)
+	if err != nil {
+		return outcome, fmt.Errorf("lock sqlite lifecycle subordinate session set: %w", err)
+	}
+	var selected []lifecycleSessionRow
+	for rows.Next() {
+		var row lifecycleSessionRow
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.EntityID, &row.FlowInstance, &row.ScopeKey, &row.Scope, &row.RuntimeMode, &row.Status); err != nil {
+			_ = rows.Close()
+			return outcome, err
+		}
+		selected = append(selected, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return outcome, err
+	}
+	if err := rows.Close(); err != nil {
+		return outcome, err
+	}
+	for _, row := range selected {
+		mutation := runtimesessions.LifecycleSessionMutation{
+			PreviousSessionID: row.SessionID, ScopeKey: row.ScopeKey, RuntimeMode: row.RuntimeMode, PreviousStatus: row.Status,
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE agent_sessions
+			SET status = 'terminated', termination_reason = ?, termination_detail = ?, successor_session_id = NULL,
+			    terminated_at = ?, lease_holder = NULL, lease_expires_at = NULL, updated_at = ?
+			WHERE session_id = ? AND status IN ('active', 'suspended')
+		`, req.Subordinate.TerminationReason.String(), sqliteNullString(req.Subordinate.TerminationDetail), req.Now.UTC(), req.Now.UTC(), row.SessionID); err != nil {
+			return outcome, fmt.Errorf("terminate sqlite lifecycle subordinate session %s: %w", row.SessionID, err)
+		}
+		if req.Subordinate.Action == runtimesessions.LifecycleMutationRotateCurrentSet {
+			mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
+			mutation.SuccessorStatus = row.Status
+			runtimeState, err := json.Marshal(map[string]any{
+				"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
+				"rotation_operation_id": req.OperationID,
+			})
+			if err != nil {
+				return outcome, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO agent_sessions (
+					session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+					conversation, turn_count, runtime_mode, runtime_state, lease_holder, lease_expires_at,
+					status, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, NULL, NULL, ?, ?, ?)
+			`, mutation.SuccessorSessionID, sqliteNullUUID(row.RunID), req.AgentID, sqliteNullUUID(row.EntityID), sqliteNullString(row.FlowInstance),
+				row.ScopeKey, row.Scope, row.RuntimeMode, string(runtimeState), row.Status, req.Now.UTC(), req.Now.UTC()); err != nil {
+				return outcome, fmt.Errorf("insert sqlite lifecycle subordinate successor for %s: %w", row.SessionID, err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = ?, updated_at = ? WHERE session_id = ? AND status = 'terminated'`, mutation.SuccessorSessionID, req.Now.UTC(), row.SessionID); err != nil {
+				return outcome, fmt.Errorf("link sqlite lifecycle subordinate successor for %s: %w", row.SessionID, err)
+			}
+		}
+		outcome.Sessions = append(outcome.Sessions, mutation)
+	}
+	return outcome, nil
 }
 
 func loadPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, agentID string) (lifecycleCell, bool, error) {

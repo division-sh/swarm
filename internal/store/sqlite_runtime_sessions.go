@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -48,25 +49,38 @@ func (l *sqliteRuntimeStartupLease) Release(context.Context) error {
 }
 
 func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, scopeKey string) (*runtimesessions.Lease, error) {
+	lease, _, err := s.acquireSQLiteLiveSession(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
+	return lease, err
+}
+
+func (s *SQLiteRuntimeStore) AcquireLiveSession(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, scopeKey string) (*runtimesessions.Lease, runtimellm.ConversationRecord, error) {
+	return s.acquireSQLiteLiveSession(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
+}
+
+func (s *SQLiteRuntimeStore) acquireSQLiteLiveSession(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, scopeKey string) (*runtimesessions.Lease, runtimellm.ConversationRecord, error) {
 	if strings.TrimSpace(agentID) == "" || runtimeMode == "" || strings.TrimSpace(lockOwner) == "" {
-		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
+		return nil, runtimellm.ConversationRecord{}, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	resolved, err := runtimesessions.ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
-		return nil, err
+		return nil, runtimellm.ConversationRecord{}, err
 	}
 	if resolved.Stateless {
-		return nil, errors.New("task-scoped sessions are stateless")
+		return nil, runtimellm.ConversationRecord{}, errors.New("task-scoped sessions are stateless")
 	}
 
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
 	var lease *runtimesessions.Lease
+	var conversation runtimellm.ConversationRecord
 	if err := s.runRuntimeMutation(ctx, "sqlite session acquire", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, strings.TrimSpace(agentID), "acquire_hydrate", false); err != nil {
+			return err
+		}
 		rec, found, err := sqliteLoadLiveSession(txctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
 		if err != nil {
 			return err
@@ -95,7 +109,9 @@ func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, agentID string, runtim
 				ScopeKey:     resolved.ScopeKey,
 				ExpiresAt:    expires,
 			}
-			return nil
+			var decodeErr error
+			conversation, decodeErr = loadSQLiteExactConversationTx(txctx, tx, strings.TrimSpace(agentID), resolved, sessionID)
+			return decodeErr
 		}
 		if strings.TrimSpace(rec.status) == "suspended" {
 			return runtimesessions.ErrSessionSuspended
@@ -122,11 +138,27 @@ func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, agentID string, runtim
 			ScopeKey:             resolved.ScopeKey,
 			ExpiresAt:            expires,
 		}
-		return nil
+		var decodeErr error
+		conversation, decodeErr = loadSQLiteExactConversationTx(txctx, tx, strings.TrimSpace(agentID), resolved, rec.sessionID)
+		return decodeErr
 	}); err != nil {
-		return nil, err
+		return nil, runtimellm.ConversationRecord{}, err
 	}
-	return lease, nil
+	return lease, conversation, nil
+}
+
+func loadSQLiteExactConversationTx(ctx context.Context, tx *sql.Tx, agentID string, resolved runtimesessions.ResolvedScope, sessionID string) (runtimellm.ConversationRecord, error) {
+	var rawMessages, runtimeState any
+	var scopeKey, status, runID string
+	var turnCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT scope_key, status, COALESCE(run_id, ''), COALESCE(conversation, '[]'), COALESCE(runtime_state, '{}'), COALESCE(turn_count, 0)
+		FROM agent_sessions
+		WHERE session_id = ? AND agent_id = ? AND runtime_mode = ? AND scope_key = ? AND status = 'active'
+	`, sessionID, agentID, resolved.RuntimeMode.String(), resolved.ScopeKey).Scan(&scopeKey, &status, &runID, &rawMessages, &runtimeState, &turnCount); err != nil {
+		return runtimellm.ConversationRecord{}, fmt.Errorf("load exact sqlite live session conversation: %w", err)
+	}
+	return decodeLiveConversationRecord(agentID, resolved.RuntimeMode.String(), resolved.Scope.String(), sessionID, scopeKey, status, runID, sqliteJSONRawMessage(rawMessages), sqliteJSONRawMessage(runtimeState), turnCount)
 }
 
 func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *runtimesessions.Lease) error {
@@ -186,6 +218,9 @@ func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, agentID string, runtime
 
 	var lease *runtimesessions.Lease
 	if err := s.runRuntimeMutation(ctx, "sqlite session rotate", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, strings.TrimSpace(agentID), "rotate", false); err != nil {
+			return err
+		}
 		rec, found, err := sqliteLoadActiveSession(txctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
 		if err != nil {
 			return err
@@ -268,6 +303,9 @@ func (s *SQLiteRuntimeStore) IncrementTurn(ctx context.Context, agentID string, 
 	}
 	var rows int64
 	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, strings.TrimSpace(agentID), "increment_turn", false); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions
 			SET turn_count = turn_count + 1,
@@ -313,6 +351,9 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, agentID string,
 	defer s.sessionMu.Unlock()
 
 	return s.runRuntimeMutation(ctx, "sqlite adopt session id", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, agentID, "adopt_provider_session", false); err != nil {
+			return err
+		}
 		rec, found, err := sqliteLoadActiveSession(txctx, tx, agentID, resolved.RuntimeMode, resolved.ScopeKey)
 		if err != nil {
 			return err

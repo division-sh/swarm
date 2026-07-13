@@ -11062,6 +11062,9 @@ platform_tables:
         entity_id. session + session_scope flow → scope_key = flow_instance. session + session_scope global
         → scope_key = "global" only for platform-owned/internal system-service runtime state and historical/read-only
         rows. No actor-shape inference.'
+      lifecycle_authority: 'The agents lifecycle cell/token is the sole admission and mutable-projection authority for live sessions. Lifecycle replace/destroy transitions own the complete active+suspended exact-agent set in the same selected-store transaction as the lifecycle cell and durable outcome. Standalone registry termination is non-authoritative.'
+      exact_acquire_hydrate: 'Persistent provider startup must lease and hydrate one exact session_id atomically under the current lifecycle token. A separate latest-active conversation read, hydration fallback to empty history, or provider start after hydration failure is forbidden.'
+      mutable_projection: 'Every live-session mutation revalidates the current lifecycle token in the same transaction. Superseded AppendAgentTurn stores append-only agent_turns evidence but returns stale_projection_refused and does not change this table.'
       live_owner_query: 'Live session ownership MUST query status = ''active'' only.'
       resumable_owner_query: 'Resume/supersession ownership MUST query status IN (''active'', ''suspended'').'
       status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are
@@ -28699,6 +28702,25 @@ agent_lifecycle_authority:
       - Persistence failure leaves the prior process-local owner unchanged and cannot be acknowledged as success.
     replay: Repeating one operation_id returns its stored outcome and never cancels, restarts, rotates, or advances generation again.
     generation: A new create/replace/destroy transition advances exactly one generation; self-release conditionally changes phase without advancing generation.
+    subordinate_resource_transaction:
+      owner: the selected SQLite/Postgres lifecycle transition transaction, or the in-memory lifecycle projection under the coordinator lock
+      plan:
+        actions: [none, rotate_current_set, terminate_current_set]
+        identity: The normalized subordinate plan is part of the lifecycle request hash. Unknown actions or changed-plan replay under one operation_id fail closed.
+      current_set: The complete exact-agent agent_sessions set with status active or suspended is selected and locked inside the lifecycle transition. A session acquisition committed before selection is included; an old-token acquisition after transition commit is rejected.
+      atomicity: The lifecycle cell, candidate config, complete subordinate mutation set, immutable transition fact, durable operation outcome including exact affected and successor session IDs, and diagnostic outbox commit or roll back together.
+      rotation: Every selected live or suspended row is terminated and linked to a deterministic successor derived from operation_id plus predecessor session_id. Successors preserve scope, runtime mode, run/entity/flow identity, and prior active/suspended status while clearing conversation, provider-session, turn-count, watchdog, lease, and other mutable execution state.
+      termination: Every selected live or suspended row is terminated with no successor. No separately committing registry transaction or manager-side MarkAgentTerminated fallback may interpret lifecycle teardown.
+      replay: Exact operation replay returns the stored action, affected rows, and successor mapping byte-for-byte and performs no subordinate mutation.
+  exact_live_session_acquire_hydrate:
+    owner: the selected live-session store capability
+    rule: Persistent provider startup acquires the exact session lease and decodes that same session's conversation/runtime state in one lifecycle-cell-validated SQLite/Postgres transaction. Separate Acquire followed by standalone LoadActiveConversation, latest-active lookup, empty-history fallback, or swallowed hydration error is forbidden.
+    failure: Missing or stale lifecycle authority, lease conflict, suspended state, row/decode failure, or transaction failure returns an error before provider execution and before platform.agent_started is published.
+    adapters: [anthropic_api, claude_cli, openai_compatible, openai_responses]
+  live_session_mutable_projection:
+    rule: Acquire/hydrate, rotate, turn-count increment, provider-head adoption, conversation upsert, watchdog update, and the mutable half of turn persistence lock and revalidate the agents lifecycle cell in the same selected-store transaction as their mutation. An earlier current-generation check is not authority for a later write.
+    release: Exact stale lease release is monotonic cleanup only. It may clear only the named predecessor lease and cannot mutate current conversation, provider head, lifecycle state, or successor ownership.
+    turn_evidence_split: AppendAgentTurn returns a typed result separating evidence_stored from current_projection_applied or stale_projection_refused. A same-agent superseded completion stores immutable agent_turns evidence but cannot update agent_sessions run_id, timestamps, conversation, provider state, watchdog, or other mutable projection. Evidence failure rolls back both evidence and any current projection; current-generation evidence and projection commit together.
   public_restart:
     idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
     diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
@@ -28707,11 +28729,18 @@ agent_lifecycle_authority:
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
+  destructive_cleanup_quiescence:
+    bundle_force: bundle.delete force closes admission for the selected loaded bundle runtime and awaits successful AgentManager shutdown before preservation/session cleanup. Shutdown failure blocks cleanup; dry-run and non-force remain non-destructive at this boundary.
+    runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when bundle catalog rows are retained. Idempotent response replay does not repeat runtime shutdown.
+    other_ordering: Startup preservation cleanup completes before runtime contexts start; manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Compatibility migration/backfill remains test-only unless separately reclassified.
   forbidden:
     - direct lifecycle map writes outside the coordinator
     - memory-only fallback for a selected persistent runtime store
     - best-effort lifecycle persistence or diagnostic ownership
     - tolerant dual lifecycle readers or compatibility aliases
+    - lifecycle-cell commit separated from its declared complete-set session rotation or termination
+    - provider startup through separate session acquire and live-conversation lookup
+    - destructive session cleanup while its loaded runtime still admits or executes work
 
 managed_external_effect_authority:
   owner: runtime_external_effect_operations and runtime_external_effect_attempts in the selected store
@@ -28743,7 +28772,15 @@ managed_external_effect_authority:
     postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
       adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
-    mutable_projection: Successor-facing session, conversation, watchdog, and rotation projection is generation-predicated; old-generation turn, task-audit, spend, and effect evidence remains immutable.
+    mutable_projection: |
+      Successor-facing session, conversation, watchdog, provider-head,
+      turn-count, and rotation projection is lifecycle-token validated at the
+      same selected-store mutation boundary. AppendAgentTurn reports immutable
+      evidence storage separately from mutable projection: a superseded
+      same-agent completion stores its turn evidence and returns
+      stale_projection_refused without changing the live session; current
+      projection and evidence commit together. Old-generation turn,
+      task-audit, spend, and effect evidence remains immutable.
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
     launched_or_response_observed: Startup settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch.

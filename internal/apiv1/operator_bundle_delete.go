@@ -87,12 +87,14 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 		}
 		return nil, fmt.Errorf("decode bundle.delete response: %w", err)
 	}
-	deactivateRuntimeContextAfterBundleDelete(opts, stored)
+	if !replay {
+		deactivateRuntimeContextAfterBundleDelete(opts, stored)
+	}
 	return stored, nil
 }
 
 func deactivateRuntimeContextAfterBundleDelete(opts OperatorReadOptions, result bundledelete.Result) {
-	if opts.RuntimeContexts == nil || result.DryRun || strings.TrimSpace(result.BundleHash) == "" {
+	if opts.RuntimeContexts == nil || result.Force || result.DryRun || strings.TrimSpace(result.BundleHash) == "" {
 		return
 	}
 	if !bundleDeleteMadeRuntimeContextUnavailable(result) {

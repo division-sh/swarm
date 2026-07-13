@@ -21,6 +21,7 @@ type PostgresStore struct {
 	schemaCapsBound bool
 
 	eventPayloadValidator EventPayloadValidator
+	sessionLockTTL        time.Duration
 
 	scheduleClaimMu   sync.Mutex
 	scheduleClaimConn *sql.Conn
@@ -85,7 +86,17 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	return &PostgresStore{DB: db}, nil
+	return &PostgresStore{DB: db, sessionLockTTL: 120 * time.Second}, nil
+}
+
+func (s *PostgresStore) SetSessionLockTTL(ttl time.Duration) {
+	if s == nil {
+		return
+	}
+	if ttl <= 0 {
+		ttl = 120 * time.Second
+	}
+	s.sessionLockTTL = ttl
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
