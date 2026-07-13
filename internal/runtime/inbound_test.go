@@ -2033,6 +2033,18 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 		},
+		{
+			name:       "trailing junk after object",
+			body:       []byte(`{"update_id":123456789}junk`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "second JSON value after object",
+			body:       []byte(`{"update_id":123456789} {"update_id":2}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}

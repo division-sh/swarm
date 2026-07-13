@@ -1,15 +1,11 @@
 package bus
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
-
-var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
-var eventPathSegmentPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 func RouteMatches(pattern, eventType string) bool {
 	return eventidentity.MatchPattern(pattern, eventType)
@@ -28,34 +24,7 @@ func AppendUniqueEventType(in []events.EventType, v events.EventType) []events.E
 }
 
 func IsValidEventTypeName(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	segments := strings.Split(raw, "/")
-	for _, segment := range segments {
-		segment = strings.TrimSpace(segment)
-		if segment == "" || segment == "*" {
-			return false
-		}
-		if strings.Contains(segment, ".") {
-			parts := strings.Split(segment, ".")
-			if len(parts) == 0 {
-				return false
-			}
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p == "" || !eventTypeTokenPattern.MatchString(p) {
-					return false
-				}
-			}
-			continue
-		}
-		if !eventPathSegmentPattern.MatchString(segment) {
-			return false
-		}
-	}
-	return true
+	return eventidentity.IsValidName(raw)
 }
 
 func UniqueStrings(in []string) []string {

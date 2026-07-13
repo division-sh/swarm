@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -132,30 +133,32 @@ const (
 )
 
 type ConnectRoutePlan struct {
-	PackageKey                string
-	AuthoredLocation          string
-	Source                    ConnectRoutePlanEndpoint
-	Receiver                  ConnectRoutePlanEndpoint
-	Adapter                   string
-	Delivery                  ConnectRoutePlanDelivery
-	TargetKind                ConnectRoutePlanTargetKind
-	ResolutionKind            ConnectRoutePlanResolutionKind
-	Address                   *ConnectRoutePlanAddress
-	InstanceKey               *ConnectRoutePlanInstanceKey
-	FanIn                     *ConnectRoutePlanFanIn
-	ReplyResolution           *ConnectRoutePlanReplyResolution
-	Map                       []ConnectRoutePlanMapEntry
-	Reply                     map[string]string
-	Target                    events.RouteIdentity
-	TargetSet                 []events.RouteIdentity
-	RequiresRuntimeResolution bool
+	PackageKey                  string
+	AuthoredLocation            string
+	Source                      ConnectRoutePlanEndpoint
+	Receiver                    ConnectRoutePlanEndpoint
+	Adapter                     string
+	Delivery                    ConnectRoutePlanDelivery
+	TargetKind                  ConnectRoutePlanTargetKind
+	ResolutionKind              ConnectRoutePlanResolutionKind
+	Address                     *ConnectRoutePlanAddress
+	InstanceKey                 *ConnectRoutePlanInstanceKey
+	FanIn                       *ConnectRoutePlanFanIn
+	ReplyResolution             *ConnectRoutePlanReplyResolution
+	Map                         []ConnectRoutePlanMapEntry
+	Reply                       map[string]string
+	Target                      events.RouteIdentity
+	TargetSet                   []events.RouteIdentity
+	RequiresRuntimeResolution   bool
+	ProviderOutputAuthorization *runtimeprovideroutput.Authorization
 }
 
 type ConnectRoutePlanIssue struct {
-	Connect          runtimecontracts.FlowPackageConnect
-	AuthoredLocation string
-	Failure          ConnectRoutePlanFailure
-	Detail           string
+	Connect                     runtimecontracts.FlowPackageConnect
+	AuthoredLocation            string
+	Failure                     ConnectRoutePlanFailure
+	Detail                      string
+	ProviderOutputAuthorization *runtimeprovideroutput.Authorization
 }
 
 type ConnectRoutePlanMaterializationInput struct {
@@ -208,14 +211,15 @@ func LowerCompositionConnectRoutePlans(source semanticview.Source) ([]ConnectRou
 // explicitly authorized target-free event set. It reuses the same instance-key
 // materialization model as composition connect routes without inventing a
 // synthetic producer output pin.
-func LowerTargetFreeInputRoutePlans(source semanticview.Source, eventNames []string) ([]ConnectRoutePlan, []ConnectRoutePlanIssue) {
-	if source == nil || len(eventNames) == 0 {
+func LowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations []runtimeprovideroutput.Authorization) ([]ConnectRoutePlan, []ConnectRoutePlanIssue) {
+	if source == nil || len(authorizations) == 0 {
 		return nil, nil
 	}
-	allowed := map[string]struct{}{}
-	for _, name := range eventNames {
-		if normalized := eventidentity.Normalize(name); normalized != "" {
-			allowed[normalized] = struct{}{}
+	allowed := map[string]runtimeprovideroutput.Authorization{}
+	for _, authorization := range authorizations {
+		authorization = authorization.Normalized()
+		if authorization.Valid() {
+			allowed[eventidentity.Normalize(authorization.Event)] = authorization
 		}
 	}
 	plans := make([]ConnectRoutePlan, 0)
@@ -227,7 +231,8 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, eventNames []str
 				continue
 			}
 			resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
-			if _, ok := allowed[resolved]; !ok {
+			authorization, ok := allowed[resolved]
+			if !ok {
 				continue
 			}
 			connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName(), Delivery: string(ConnectDeliveryOne)}
@@ -237,6 +242,7 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, eventNames []str
 				instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, ConnectDeliveryOne, flowID)
 				if issue.Failure != "" {
 					issue.AuthoredLocation = flowID + "." + inputPin.PinName()
+					issue.ProviderOutputAuthorization = &authorization
 					issues = append(issues, issue)
 					continue
 				}
@@ -251,12 +257,13 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, eventNames []str
 					Pin: inputPin.PinName(), Event: eventidentity.Normalize(inputPin.EventType()), ResolvedEvent: resolved,
 				},
 				Delivery: ConnectDeliveryOne, TargetKind: ConnectTargetKindTarget,
-				ResolutionKind: connectResolutionKind(scope, ConnectDeliveryOne, nil, instanceKey),
-				InstanceKey:    instanceKey,
+				ResolutionKind:              connectResolutionKind(scope, ConnectDeliveryOne, nil, instanceKey),
+				InstanceKey:                 instanceKey,
+				ProviderOutputAuthorization: &authorization,
 			}
 			if receiverRequiresRuntimeResolution(scope) {
 				if instanceKey == nil {
-					issues = append(issues, ConnectRoutePlanIssue{Connect: connect, AuthoredLocation: plan.AuthoredLocation, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: flowID})
+					issues = append(issues, ConnectRoutePlanIssue{Connect: connect, AuthoredLocation: plan.AuthoredLocation, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: flowID, ProviderOutputAuthorization: &authorization})
 					continue
 				}
 				plan.RequiresRuntimeResolution = true

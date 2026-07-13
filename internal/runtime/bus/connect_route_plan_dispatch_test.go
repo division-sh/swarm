@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -34,6 +35,15 @@ type connectRoutePlanTestFlow struct {
 	outputs      []runtimecontracts.FlowOutputEventPin
 	nodes        map[string]runtimecontracts.SystemNodeContract
 	entityFields map[string]runtimecontracts.EntityFieldDecl
+}
+
+type providerOutputAuthorizedTestSource struct {
+	semanticview.Source
+	authorizations []runtimeprovideroutput.Authorization
+}
+
+func (s providerOutputAuthorizedTestSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
+	return append([]runtimeprovideroutput.Authorization(nil), s.authorizations...)
 }
 
 type connectRoutePlanDescriptorStore struct {
@@ -2630,6 +2640,38 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	}
 	if len(got.LiveRecipients) != 0 || len(got.DeliveryIntents) != 0 || len(got.DeliveryRoutes()) != 0 || len(got.PersistedRecipientIDs()) != 0 {
 		t.Fatalf("fail-closed plan exposed executable routes: live=%#v intents=%#v routes=%#v persisted=%#v", got.LiveRecipients, got.DeliveryIntents, got.DeliveryRoutes(), got.PersistedRecipientIDs())
+	}
+}
+
+func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventName(t *testing.T) {
+	const eventName = "inbound.telegram.text_message"
+	authorization := runtimeprovideroutput.Authorization{
+		Provider: "telegram", Event: eventName, PackID: "provider.telegram", PackVersion: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-1",
+	}
+	source := providerOutputAuthorizedTestSource{
+		Source: semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+			id: "consumer", mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name: "telegram_text", Event: eventName, Source: "external",
+			}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"consumer-node": {ID: "consumer-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}}},
+			},
+		}}, nil)),
+		authorizations: []runtimeprovideroutput.Authorization{authorization},
+	}
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil)
+	evt := eventtest.RootIngress(
+		uuid.NewString(), events.EventType(eventName), "operator-api", "", json.RawMessage(`{"chat_id":"42"}`),
+		0, "run-1", "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if matched := resolver.matchedPlans(context.Background(), evt); len(matched) != 0 {
+		t.Fatalf("ordinary operator event matched provider target-free plans = %#v", matched)
+	}
+	authorizedCtx := withProviderOutputAuthorization(context.Background(), authorization)
+	if matched := resolver.matchedPlans(authorizedCtx, evt); len(matched) != 1 {
+		t.Fatalf("verified provider output matched plans = %#v, want one", matched)
 	}
 }
 

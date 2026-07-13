@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -179,7 +180,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
-		payload = map[string]any{"raw": string(body)}
+		payload = string(body)
+	} else if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		payload = string(body)
 	}
 	entityID := target.EffectiveEntityID()
 	entitySlug := target.EffectiveEntitySlug()
@@ -238,17 +241,20 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
-	published := make([]events.Event, 0, len(delivery.Events))
+	published := make([]runtimebus.InboundDeliveryEvent, 0, len(delivery.Events))
 	eventNames := make([]string, 0, len(delivery.Events))
 	for _, output := range delivery.Events {
 		envelope := events.EventEnvelope{}
 		if output.Kind == providertriggers.OutputKindRaw {
 			envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: entityID, FlowInstance: target.FlowInstance})
 		}
-		published = append(published, events.NewRootIngressEvent(
+		event := events.NewRootIngressEvent(
 			uuid.NewString(), output.Name, "inbound-gateway", "", mustJSON(output.Payload), 0,
 			target.RunID, "", envelope, now,
-		))
+		)
+		published = append(published, runtimebus.InboundDeliveryEvent{
+			Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization,
+		})
 		eventNames = append(eventNames, string(output.Name))
 	}
 	result, err := g.bus.PublishInboundDelivery(pubCtx, runtimebus.InboundDeliveryBatch{

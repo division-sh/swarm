@@ -7966,8 +7966,10 @@ tool_model:
       normalized_events:
         shape: >
           Optional list entries use `{event, fields, when}`. `event` must be an exact `inbound.<provider>.*` literal.
-          `fields` is the same carry-style typed projection vocabulary: each field declares `from`, Wave-1 `type`, optional
-          `optional`, and optional closed conversion. The event payload schema, required set, extraction plan, carry
+          `fields` is the same carry-style typed projection vocabulary: each field declares `from`, a standalone-resolvable
+          Wave-1 `type`, optional `optional`, and optional closed conversion. Because trigger manifests do not declare a
+          type catalog, unresolved named types fail pack load; built-in, list, and map references are validated recursively.
+          The event payload schema, required set, extraction plan, carry
           eligibility, and capability descriptor derive mechanically from this one block.
         paths: >
           `from` and `when.exists/absent` use strict dotted paths relative to the decoded raw provider object. Empty
@@ -7986,8 +7988,11 @@ tool_model:
           text. There is no implicit coercion and unknown conversions fail pack load.
         output_route: >
           Raw and normalized outputs are explicit compiled kinds. Raw is exact-standing-target. Normalized is target-free
-          but inherits the standing run. Only composed pack-owned normalized events may enter the target-free external
-          input-plan lowering path; ordinary events cannot gain this authority by name or catalog presence.
+          but inherits the standing run. The provider-delivery batch carries the normalized kind plus the exact verified
+          pack id/version/manifest_hash/catalog-generation authorization into route planning, which must match the composed
+          plan authorization byte-for-byte. Missing, partial, stale, or mismatched authorization fails before mutation.
+          Only composed pack-owned normalized events may enter the target-free external input-plan lowering path; ordinary
+          events cannot gain this authority by event name, catalog presence, source-agent label, or payload shape.
         source_composition: >
           Before boot verification, packs selected by effective standing ingress bindings import raw and normalized schemas
           into the semantic source. These are imported facts, not authored declarations. Local redeclaration fails closed

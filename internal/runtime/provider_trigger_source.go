@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -17,7 +18,7 @@ type providerTriggerEventSourceMarker interface {
 }
 
 type providerTriggerTargetFreeEventSource interface {
-	ProviderTriggerTargetFreeEvents() []string
+	ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
 }
 
 func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (semanticview.Source, error) {
@@ -41,6 +42,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	imported := map[string]runtimecontracts.EventCatalogEntry{}
 	owners := map[string]string{}
 	byProject := map[string]map[string]runtimecontracts.EventCatalogEntry{}
+	targetFree := map[string]runtimeprovideroutput.Authorization{}
 	for _, pkg := range bundle.PackageTree {
 		for _, ref := range pkg.Manifest.Flows {
 			if ref.Ingress == nil {
@@ -96,6 +98,13 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 					}
 					imported[eventName] = eventEntry
 					owners[eventName] = owner
+					if strings.TrimSpace(eventEntry.Source) == "provider_trigger_pack_normalized" {
+						targetFree[eventName] = runtimeprovideroutput.Authorization{
+							Provider: providertriggers.NormalizeProviderName(binding.Provider), Event: eventName,
+							PackID: identity.ID, PackVersion: identity.Version, ManifestHash: identity.ManifestHash,
+							GenerationID: catalog.GenerationID(),
+						}.Normalized()
+					}
 					if byProject[strings.TrimSpace(pkg.Key)] == nil {
 						byProject[strings.TrimSpace(pkg.Key)] = map[string]runtimecontracts.EventCatalogEntry{}
 					}
@@ -107,7 +116,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if len(imported) == 0 {
 		return source, nil
 	}
-	return providerTriggerEventSource{Source: source, generation: catalog.GenerationID(), imported: imported, owners: owners, byProject: byProject}, nil
+	return providerTriggerEventSource{Source: source, generation: catalog.GenerationID(), imported: imported, owners: owners, byProject: byProject, targetFree: targetFree}, nil
 }
 
 type providerTriggerEventSource struct {
@@ -116,20 +125,23 @@ type providerTriggerEventSource struct {
 	imported   map[string]runtimecontracts.EventCatalogEntry
 	owners     map[string]string
 	byProject  map[string]map[string]runtimecontracts.EventCatalogEntry
+	targetFree map[string]runtimeprovideroutput.Authorization
 }
 
 func (s providerTriggerEventSource) BaseSemanticSource() semanticview.Source { return s.Source }
 func (s providerTriggerEventSource) ProviderTriggerEventsApplied() bool      { return true }
 func (s providerTriggerEventSource) ProviderTriggerEventGeneration() string  { return s.generation }
 
-func (s providerTriggerEventSource) ProviderTriggerTargetFreeEvents() []string {
-	out := make([]string, 0)
-	for name, entry := range s.imported {
-		if strings.TrimSpace(entry.Source) == "provider_trigger_pack_normalized" {
-			out = append(out, strings.TrimSpace(name))
-		}
+func (s providerTriggerEventSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
+	names := make([]string, 0, len(s.targetFree))
+	for name := range s.targetFree {
+		names = append(names, name)
 	}
-	sort.Strings(out)
+	sort.Strings(names)
+	out := make([]runtimeprovideroutput.Authorization, 0, len(names))
+	for _, name := range names {
+		out = append(out, s.targetFree[name].Normalized())
+	}
 	return out
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"gopkg.in/yaml.v3"
 )
 
@@ -73,9 +74,10 @@ type Delivery struct {
 }
 
 type DeliveryEvent struct {
-	Name    events.EventType
-	Kind    OutputKind
-	Payload map[string]any
+	Name          events.EventType
+	Kind          OutputKind
+	Payload       map[string]any
+	Authorization runtimeprovideroutput.Authorization
 }
 
 type Response struct {
@@ -151,7 +153,11 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 	for _, entry := range entries {
 		manifest := entry.Manifest
 		if err := manifest.Validate(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf(
+				"validate provider trigger pack %q version=%s manifest_hash=%s: %w",
+				strings.TrimSpace(entry.Identity.ID), strings.TrimSpace(entry.Identity.Version),
+				strings.TrimSpace(entry.Identity.ManifestHash), err,
+			)
 		}
 		provider := NormalizeProviderName(manifest.Provider)
 		entry.Manifest.Provider = provider

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
 type AdmissionKind string
@@ -476,6 +477,19 @@ func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
 				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID, p.packIdentity.Version, p.packIdentity.ManifestHash, normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
 			}
 			return Delivery{}, err
+		}
+		if p.packIdentity == nil {
+			return Delivery{}, badRequest("compiled pack admission requires verified pack identity")
+		}
+		for index := range delivery.Events {
+			if delivery.Events[index].Kind != OutputKindNormalized {
+				continue
+			}
+			delivery.Events[index].Authorization = runtimeprovideroutput.Authorization{
+				Provider: p.provider, Event: string(delivery.Events[index].Name),
+				PackID: p.packIdentity.ID, PackVersion: p.packIdentity.Version,
+				ManifestHash: p.packIdentity.ManifestHash, GenerationID: p.generationID,
+			}.Normalized()
 		}
 		return delivery, nil
 	}
