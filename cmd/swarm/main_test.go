@@ -10585,7 +10585,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if !strings.Contains(serve.outputString(), "unfinished work restored") {
+	if !strings.Contains(serve.outputString(), "unfinished work could not be resumed and was closed") {
 		t.Fatalf("concise recovery output omitted author outcome:\n%s", serve.outputString())
 	}
 	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
