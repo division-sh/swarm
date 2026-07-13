@@ -732,7 +732,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			MCPTurns:             rt.MCPTurns,
 			ToolGateway:          opts.ToolGatewayBinding,
 			Credentials:          boot.ProviderCredentialResolver.Store,
-			CompletionController: runtimeeffects.NewController(effectStore),
+			CompletionController: runtimeeffects.NewCompletionController(effectStore, rt.Budget),
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)

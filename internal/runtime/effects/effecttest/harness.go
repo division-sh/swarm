@@ -33,7 +33,7 @@ func New() *Harness {
 
 func (h *Harness) Context(identity string) context.Context {
 	ctx := runtimeeffects.WithLifecycleToken(context.Background(), h.Token)
-	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(h))
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewCompletionController(h, h))
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, identity)
 }
 
@@ -124,18 +124,23 @@ func (h *Harness) SettleExternalAttempt(_ context.Context, settlement runtimeeff
 	return nil
 }
 
-func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.SettleErr != nil {
-		return h.SettleErr
+		return runtimeeffects.CompletionSettlementResult{}, h.SettleErr
 	}
 	if _, ok := h.States[attempt.AttemptID]; !ok {
-		return fmt.Errorf("attempt %s is absent", attempt.AttemptID)
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("attempt %s is absent", attempt.AttemptID)
 	}
 	h.Completions[attempt.AttemptID] = settlement
 	h.States[attempt.AttemptID] = settlement.Settlement.State
-	return nil
+	return runtimeeffects.CompletionSettlementResult{
+		Committed: true, SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
+	}, nil
+}
+
+func (h *Harness) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
 }
 
 func (h *Harness) StateForAdapter(adapter string) (runtimeeffects.State, bool) {

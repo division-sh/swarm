@@ -111,13 +111,18 @@ type claudeAttemptProofBackend struct {
 	sessions runtimesessions.Registry
 }
 
+type claudeAttemptProofSpendProjection struct{}
+
+func (claudeAttemptProofSpendProjection) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
+}
+
 type claudeAttemptProofProviderHeadFaultStore struct {
 	claudeAttemptProofStore
 	err error
 }
 
-func (s claudeAttemptProofProviderHeadFaultStore) SettleCompletion(context.Context, runtimeeffects.Attempt, runtimeeffects.CompletionSettlement) error {
-	return s.err
+func (s claudeAttemptProofProviderHeadFaultStore) SettleCompletion(context.Context, runtimeeffects.Attempt, runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
+	return runtimeeffects.CompletionSettlementResult{}, s.err
 }
 
 func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
@@ -464,7 +469,7 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{
 			ProviderCredentials:  runtimellm.NewProviderCredentialResolver(runtimecredentials.NewEnvStore()),
-			CompletionController: runtimeeffects.NewController(backend.store),
+			CompletionController: runtimeeffects.NewCompletionController(backend.store, claudeAttemptProofSpendProjection{}),
 		},
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {

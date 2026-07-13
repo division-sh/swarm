@@ -53,6 +53,28 @@ type recordingCompletionReceiptBus struct {
 	normalCompletionEvents []string
 }
 
+type projectedEmergencyBudgetGuard struct{}
+
+func (projectedEmergencyBudgetGuard) IsEntityEmergency(string) bool { return true }
+func (projectedEmergencyBudgetGuard) IsEntityThrottle(string) bool  { return true }
+func (projectedEmergencyBudgetGuard) IsEmergency(string) bool       { return true }
+func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return true }
+
+func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
+	am := &AgentManager{
+		agentCfg: map[string]runtimeactors.AgentConfig{"agent-a": {ID: "agent-a", EntityID: "entity-a"}},
+		budget:   projectedEmergencyBudgetGuard{},
+	}
+	work := eventtest.RootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
+	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
+		t.Fatalf("projected emergency suppression=%v reason=%q", suppressed, reason)
+	}
+	threshold := eventtest.RootIngress("evt-budget", events.EventType("platform.budget_threshold_crossed"), "runtime", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
+	if suppressed, reason := am.shouldSuppressForBudget("agent-a", threshold); suppressed || reason != "" {
+		t.Fatalf("threshold event suppression=%v reason=%q, want exempt", suppressed, reason)
+	}
+}
+
 func (b *recordingCompletionReceiptBus) ConvergeNormalRunCompletionForEvent(_ context.Context, eventID string) error {
 	b.normalCompletionEvents = append(b.normalCompletionEvents, strings.TrimSpace(eventID))
 	return nil

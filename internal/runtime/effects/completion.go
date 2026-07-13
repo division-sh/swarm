@@ -1,6 +1,7 @@
 package effects
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -164,6 +165,27 @@ type CompletionSettlement struct {
 	Spend        CompletionSpend
 	ProviderHead *CompletionProviderHead
 	Now          time.Time
+}
+
+// CompletionSettlementResult is selected-store truth about a terminal
+// settlement. Committed may be true with a non-nil error when the transaction
+// deliberately committed an outcome-uncertain provider-head conflict.
+type CompletionSettlementResult struct {
+	Committed     bool
+	SpendRecorded bool
+	AttemptID     string
+	EntityID      string
+}
+
+type CompletionSpendProjection struct {
+	AttemptID string
+	EntityID  string
+}
+
+// CompletionSpendProjector refreshes runtime guardrail state from committed
+// spend. It is a projection consumer and must never write accounting facts.
+type CompletionSpendProjector interface {
+	ProjectCommittedCompletionSpend(context.Context, CompletionSpendProjection)
 }
 
 type CompletionProviderHead struct {

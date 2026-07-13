@@ -745,7 +745,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.httpClient = server.Client()
-	runtime.completionController = runtimeeffects.NewController(effects)
+	runtime.completionController = runtimeeffects.NewCompletionController(effects, effects)
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(

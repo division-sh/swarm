@@ -239,6 +239,8 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		}
 		managerOptions.LLMBackend = profile.ID
 	}
+	budget := swaruntime.NewBudgetTracker(req.Store, bus, options.Config, options.MailboxStore, nil, source)
+	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil
 	}
@@ -291,7 +293,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			MCPTurns:             mcpTurns,
 			ToolGateway:          binding,
 			Credentials:          options.ProviderCredentials,
-			CompletionController: runtimeeffects.NewController(req.Store),
+			CompletionController: runtimeeffects.NewCompletionController(req.Store, budget),
 		}.Build()
 		if err != nil {
 			if cleanup != nil {

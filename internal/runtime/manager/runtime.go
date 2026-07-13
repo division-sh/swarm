@@ -879,6 +879,9 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
 		}
 	}
+	if evaluator, ok := am.budget.(interface{ EvaluateAll(context.Context) }); ok {
+		evaluator.EvaluateAll(ctx)
+	}
 	if err := am.projectLifecycleDiagnostics(ctx); err != nil {
 		return summary, fmt.Errorf("project lifecycle diagnostics: %w", err)
 	}

@@ -299,19 +299,24 @@ func (s *PostgresStore) HeartbeatRunForkSelectedContractRuntimeExecution(ctx con
 	if lease <= 0 {
 		lease = selectedContractRuntimeExecutionLease
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("heartbeat selected-contract runtime begin: %w", err)
+	}
+	defer tx.Rollback()
+	if err := requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	res, err := s.DB.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE run_fork_selected_contract_runtime_executions
 		SET lease_expires_at=$2,updated_at=$3
-		WHERE execution_id=$1::uuid AND fork_run_id=$4::uuid AND generation=$5 AND state='running'
-		  AND execution_owner=$6 AND fence_generation=$7
-		  AND admission_fingerprint=$8 AND container_plan_fingerprint=$9
-		  AND actor_census_fingerprint=$10 AND effective_config_fingerprint=$11
-	`, authority.ID, now.Add(lease), now, authority.SelectedFork.ForkRunID, authority.SelectedFork.Generation,
-		authority.ExecutionOwner, authority.FenceGeneration, authority.SelectedFork.AdmissionFingerprint,
-		authority.SelectedFork.ContainerPlanFingerprint, authority.SelectedFork.ActorCensusFingerprint,
-		authority.SelectedFork.EffectiveConfigFingerprint)
-	return requireExactlyOneMutation(res, err, "heartbeat selected-contract runtime execution")
+		WHERE execution_id=$1::uuid AND state='running'
+	`, authority.ID, now.Add(lease), now)
+	if err := requireExactlyOneMutation(res, err, "heartbeat selected-contract runtime execution"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteRuntimeStore) HeartbeatRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority, lease time.Duration) error {
@@ -319,18 +324,15 @@ func (s *SQLiteRuntimeStore) HeartbeatRunForkSelectedContractRuntimeExecution(ct
 		lease = selectedContractRuntimeExecutionLease
 	}
 	return s.runRuntimeMutation(ctx, "sqlite selected-contract runtime heartbeat", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireCurrentExternalEffectAuthoritySQLite(txctx, tx, authority); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		res, err := tx.ExecContext(txctx, `
 			UPDATE run_fork_selected_contract_runtime_executions
 			SET lease_expires_at=?,updated_at=?
-			WHERE execution_id=? AND fork_run_id=? AND generation=? AND state='running'
-			  AND execution_owner=? AND fence_generation=?
-			  AND admission_fingerprint=? AND container_plan_fingerprint=?
-			  AND actor_census_fingerprint=? AND effective_config_fingerprint=?
-		`, now.Add(lease), now, authority.ID, authority.SelectedFork.ForkRunID, authority.SelectedFork.Generation,
-			authority.ExecutionOwner, authority.FenceGeneration, authority.SelectedFork.AdmissionFingerprint,
-			authority.SelectedFork.ContainerPlanFingerprint, authority.SelectedFork.ActorCensusFingerprint,
-			authority.SelectedFork.EffectiveConfigFingerprint)
+			WHERE execution_id=? AND state='running'
+		`, now.Add(lease), now, authority.ID)
 		return requireExactlyOneMutation(res, err, "heartbeat sqlite selected-contract runtime execution")
 	})
 }
@@ -344,11 +346,14 @@ func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx conte
 		return err
 	}
 	defer tx.Rollback()
+	if err := requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority); err != nil {
+		return err
+	}
 	if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, false, authority.ID); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=$2,updated_at=$2 WHERE execution_id=$1::uuid AND state='running' AND execution_owner=$3 AND fence_generation=$4`, authority.ID, now, authority.ExecutionOwner, authority.FenceGeneration)
+	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=$2,updated_at=$2 WHERE execution_id=$1::uuid AND state='running'`, authority.ID, now)
 	if err := requireExactlyOneMutation(res, err, "quiesce selected-contract runtime execution"); err != nil {
 		return err
 	}
@@ -357,28 +362,23 @@ func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx conte
 
 func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority) error {
 	return s.runRuntimeMutation(ctx, "sqlite selected-contract runtime quiesce", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireCurrentExternalEffectAuthoritySQLite(txctx, tx, authority); err != nil {
+			return err
+		}
 		if err := requireSelectedRuntimeNoLiveAttempts(txctx, tx, true, authority.ID); err != nil {
 			return err
 		}
 		now := time.Now().UTC()
-		res, err := tx.ExecContext(txctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=?,updated_at=? WHERE execution_id=? AND state='running' AND execution_owner=? AND fence_generation=?`, now, now, authority.ID, authority.ExecutionOwner, authority.FenceGeneration)
+		res, err := tx.ExecContext(txctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=?,updated_at=? WHERE execution_id=? AND state='running'`, now, now, authority.ID)
 		return requireExactlyOneMutation(res, err, "quiesce sqlite selected-contract runtime execution")
 	})
 }
 
 func requireSelectedRuntimeNoLiveAttempts(ctx context.Context, tx *sql.Tx, sqlite bool, executionID string) error {
-	query := `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1::uuid AND a.state IN ('authorized','launched','response_observed')`
-	if sqlite {
-		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=? AND a.state IN ('authorized','launched','response_observed')`
-	}
-	var count int
-	if err := tx.QueryRowContext(ctx, query, executionID).Scan(&count); err != nil {
-		return fmt.Errorf("count selected-contract live completion attempts: %w", err)
-	}
-	if count != 0 {
-		return fmt.Errorf("selected-contract runtime execution has %d non-terminal completion attempts", count)
-	}
-	return nil
+	return requireCompletionAuthorityNoLiveAttempts(ctx, tx, sqlite, runtimeeffects.Authority{
+		Kind:         runtimeeffects.AuthoritySelectedContractFork,
+		SelectedFork: runtimeeffects.SelectedContractForkAuthority{ExecutionID: executionID},
+	})
 }
 
 func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {

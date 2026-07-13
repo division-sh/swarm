@@ -47,6 +47,11 @@ type staticWorkspaceResolver struct {
 	err    error
 }
 
+type discardCompletionSpendProjection struct{}
+
+func (discardCompletionSpendProjection) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
+}
+
 func (s staticWorkspaceResolver) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*runtimeworkspace.Target, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -290,7 +295,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		LockOwner:            "worker-1",
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewController(pg),
+		CompletionController: runtimeeffects.NewCompletionController(pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
@@ -472,7 +477,7 @@ printf '{"result":"ok"}'
 		Conversations:        pg,
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewController(pg),
+		CompletionController: runtimeeffects.NewCompletionController(pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)

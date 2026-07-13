@@ -99,7 +99,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
-			CompletionController: runtimeeffects.NewController(effects),
+			CompletionController: runtimeeffects.NewCompletionController(effects, effects),
 			ToolGateway:          testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
 			ProviderCredentials:  testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{

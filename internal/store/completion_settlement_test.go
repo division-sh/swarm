@@ -277,7 +277,7 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 	stale := handle.Attempt()
 	stale.Authority.Normal.Generation++
 	stale.Authority.FenceGeneration++
-	if err := fixture.store.SettleCompletion(ctx, stale, settlement); err == nil {
+	if _, err := fixture.store.SettleCompletion(ctx, stale, settlement); err == nil {
 		t.Fatal("stale completion authority settled provider head")
 	}
 	requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-current")

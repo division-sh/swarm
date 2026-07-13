@@ -15,6 +15,7 @@ type conversationForkDialect uint8
 const (
 	conversationForkPostgres conversationForkDialect = iota
 	conversationForkSQLite
+	sqliteCurrentLeaseSQL = "datetime(substr(replace(CAST(lease_expires_at AS TEXT),'T',' '),1,19))>CURRENT_TIMESTAMP"
 )
 
 type conversationForkStore struct {
@@ -107,6 +108,13 @@ func (s conversationForkStore) forUpdate() string {
 		return " FOR UPDATE"
 	}
 	return ""
+}
+
+func (s conversationForkStore) currentLeaseSQL() string {
+	if s.dialect == conversationForkPostgres {
+		return "lease_expires_at>CURRENT_TIMESTAMP"
+	}
+	return sqliteCurrentLeaseSQL
 }
 
 func (s conversationForkStore) conversationQuerySources(caps StoreSchemaCapabilities) []string {
