@@ -900,14 +900,13 @@ pins:
 func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 	checkpoints := []struct {
 		name           string
-		databaseTable  string
 		mutation       providerRollbackMutationCheckpoint
 		withoutCarrier bool
 		retry          bool
 	}{
-		{name: "after receiver flow-instance creation", databaseTable: "flow_instances"},
-		{name: "after receiver entity creation", databaseTable: "entity_state"},
-		{name: "after receiver route materialization", databaseTable: "routing_rules"},
+		{name: "after receiver flow-instance creation", mutation: providerRollbackAfterFlowInstanceCreation},
+		{name: "after receiver entity creation", mutation: providerRollbackAfterEntityCreation},
+		{name: "after receiver route materialization", mutation: providerRollbackAfterRouteMaterialization},
 		{name: "after raw append", mutation: providerRollbackAfterRawAppend},
 		{name: "after raw replay before normalized append", mutation: providerRollbackBeforeNormalizedAppend},
 		{name: "after normalized append before delivery", mutation: providerRollbackBeforeDelivery},
@@ -952,9 +951,6 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 		for _, checkpoint := range checkpoints {
 			t.Run(backend.name+"/"+checkpoint.name, func(t *testing.T) {
 				ctx, db, eventStore := backend.setup(t, checkpoint.mutation)
-				if checkpoint.databaseTable != "" {
-					installProviderRollbackTrigger(t, ctx, db, backend.name, checkpoint.databaseTable)
-				}
 				source := providerRollbackSemanticSource(t, !checkpoint.withoutCarrier)
 				plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{providerRollbackAuthorization()})
 				if len(issues) != 0 || len(plans) != 1 {
@@ -966,7 +962,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				}
 				var manager *runtimemanager.AgentManager
 				bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
-					ContractBundle: source,
+					ContractBundle: source, ProviderOutputVerifier: source.(runtimebus.ProviderOutputAuthorizationVerifier),
 					TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 						if manager == nil {
 							return errors.New("agent manager is required")
@@ -1005,13 +1001,16 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 type providerRollbackMutationCheckpoint string
 
 const (
-	providerRollbackAfterRawAppend         providerRollbackMutationCheckpoint = "after_raw_append"
-	providerRollbackBeforeNormalizedAppend providerRollbackMutationCheckpoint = "before_normalized_append"
-	providerRollbackBeforeDelivery         providerRollbackMutationCheckpoint = "before_delivery"
-	providerRollbackBeforeNormalizedReplay providerRollbackMutationCheckpoint = "before_normalized_replay"
-	providerRollbackBeforeReceipt          providerRollbackMutationCheckpoint = "before_receipt"
-	providerRollbackBeforeDeadLetter       providerRollbackMutationCheckpoint = "before_dead_letter"
-	providerRollbackBeforeCommit           providerRollbackMutationCheckpoint = "before_commit"
+	providerRollbackAfterFlowInstanceCreation providerRollbackMutationCheckpoint = "after_flow_instance_creation"
+	providerRollbackAfterEntityCreation       providerRollbackMutationCheckpoint = "after_entity_creation"
+	providerRollbackAfterRouteMaterialization providerRollbackMutationCheckpoint = "after_route_materialization"
+	providerRollbackAfterRawAppend            providerRollbackMutationCheckpoint = "after_raw_append"
+	providerRollbackBeforeNormalizedAppend    providerRollbackMutationCheckpoint = "before_normalized_append"
+	providerRollbackBeforeDelivery            providerRollbackMutationCheckpoint = "before_delivery"
+	providerRollbackBeforeNormalizedReplay    providerRollbackMutationCheckpoint = "before_normalized_replay"
+	providerRollbackBeforeReceipt             providerRollbackMutationCheckpoint = "before_receipt"
+	providerRollbackBeforeDeadLetter          providerRollbackMutationCheckpoint = "before_dead_letter"
+	providerRollbackBeforeCommit              providerRollbackMutationCheckpoint = "before_commit"
 )
 
 type providerRollbackProof struct {
@@ -1034,6 +1033,10 @@ type providerRollbackPostgresStore struct {
 	proof *providerRollbackProof
 }
 
+func (s *providerRollbackPostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.PostgresStore.UpsertFlowInstanceRoute)
+}
+
 func (s *providerRollbackPostgresStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
 	return s.PostgresStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
@@ -1048,6 +1051,10 @@ type providerRollbackSQLiteStore struct {
 	proof *providerRollbackProof
 }
 
+func (s *providerRollbackSQLiteStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.SQLiteRuntimeStore.UpsertFlowInstanceRoute)
+}
+
 func (s *providerRollbackSQLiteStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
 	return s.SQLiteRuntimeStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
@@ -1055,6 +1062,54 @@ func (s *providerRollbackSQLiteStore) RunEventMutation(ctx context.Context, fn f
 		}
 		return s.proof.fail(providerRollbackBeforeCommit)
 	})
+}
+
+func upsertProviderRollbackFlowInstanceRoute(
+	ctx context.Context,
+	route runtimebus.FlowInstanceRouteRecord,
+	proof *providerRollbackProof,
+	upsert func(context.Context, runtimebus.FlowInstanceRouteRecord) error,
+) error {
+	switch proof.checkpoint {
+	case providerRollbackAfterFlowInstanceCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "flow_instances"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterFlowInstanceCreation)
+	case providerRollbackAfterEntityCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "entity_state"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterEntityCreation)
+	}
+	if err := upsert(ctx, route); err != nil {
+		return err
+	}
+	if proof.checkpoint == providerRollbackAfterRouteMaterialization {
+		if err := requireProviderRollbackRowVisible(ctx, "routing_rules"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterRouteMaterialization)
+	}
+	return nil
+}
+
+func requireProviderRollbackRowVisible(ctx context.Context, table string) error {
+	if table != "flow_instances" && table != "entity_state" && table != "routing_rules" {
+		return fmt.Errorf("unsupported provider rollback proof table %q", table)
+	}
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return fmt.Errorf("provider rollback proof requires ambient selected-store transaction")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+		return fmt.Errorf("inspect %s before injected later failure: %w", table, err)
+	}
+	if count == 0 {
+		return fmt.Errorf("%s row was not visible before injected later failure", table)
+	}
+	return nil
 }
 
 type providerRollbackMutation struct {
@@ -1147,6 +1202,13 @@ func (s providerRollbackSource) ProviderTriggerTargetFreeAuthorizations() []runt
 	return []runtimeprovideroutput.Authorization{s.authorization}
 }
 
+func (s providerRollbackSource) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
+	if !s.authorization.Matches(actual) {
+		return errors.New("authorization does not match rollback catalog owner")
+	}
+	return nil
+}
+
 func (s providerRollbackSource) BaseSemanticSource() semanticview.Source {
 	return s.Source
 }
@@ -1183,39 +1245,6 @@ func providerRollbackInboundBatch() runtimebus.InboundDeliveryBatch {
 			), Kind: runtimeprovideroutput.KindNormalized, Authorization: providerRollbackAuthorization()},
 		},
 		AcknowledgeBeforeDispatch: true,
-	}
-}
-
-func installProviderRollbackTrigger(t *testing.T, ctx context.Context, db *sql.DB, backend, table string) {
-	t.Helper()
-	if backend == "sqlite" {
-		statement := fmt.Sprintf(`
-			CREATE TRIGGER provider_rollback_checkpoint
-			AFTER INSERT ON %s
-			BEGIN
-				SELECT RAISE(ABORT, 'injected provider rollback checkpoint after %s creation');
-			END
-		`, table, table)
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			t.Fatalf("install SQLite rollback trigger on %s: %v", table, err)
-		}
-		return
-	}
-	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION provider_rollback_checkpoint() RETURNS trigger AS $$
-		BEGIN
-			RAISE EXCEPTION 'injected provider rollback checkpoint after creation';
-		END;
-		$$ LANGUAGE plpgsql
-	`); err != nil {
-		t.Fatalf("install Postgres rollback function: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf(`
-		CREATE TRIGGER provider_rollback_checkpoint
-		AFTER INSERT ON %s
-		FOR EACH ROW EXECUTE FUNCTION provider_rollback_checkpoint()
-	`, table)); err != nil {
-		t.Fatalf("install Postgres rollback trigger on %s: %v", table, err)
 	}
 }
 

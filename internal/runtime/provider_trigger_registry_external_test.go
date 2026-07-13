@@ -53,6 +53,9 @@ func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot 
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runtimepkg.RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {
 	t.Helper()
+	if bus != nil {
+		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
+	}
 	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed)
 	gateway.SetCredentialStore(boundedProviderCredentialStore{})
 	return gateway
