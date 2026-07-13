@@ -1,8 +1,13 @@
 package testcases
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+)
 
 func TestGenericBundle_E2EFrameworkShape(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/testdata/generic-swarm-bundle"))
 	bundle := loadGenericSwarmBundle(t)
 	if bundle.WorkflowName() != "test-platform" || bundle.WorkflowVersion() != "1.0.0" {
 		t.Fatalf("unexpected workflow identity: %s %s", bundle.WorkflowName(), bundle.WorkflowVersion())

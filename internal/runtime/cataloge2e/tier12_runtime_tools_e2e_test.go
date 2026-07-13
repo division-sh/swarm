@@ -10,6 +10,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 var tier12RuntimeToolsFixtures = []string{
@@ -17,6 +18,7 @@ var tier12RuntimeToolsFixtures = []string{
 }
 
 func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier12-runtime-tools/test-flow-data-access"))
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-tools", "test-flow-data-access")
 

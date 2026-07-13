@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
@@ -56,6 +58,25 @@ var tier11StaticMultiEntityRetiredFixtures = map[string]struct{}{
 }
 
 func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-absolute-path"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-loads"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-local-events"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-pin-wiring"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-policy-inherit"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-sibling-isolation"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-tool-inherit"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-data-pin-wiring"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-data-pin-write-conflict"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-gates-in-child-flow"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-multi-level-policy-inherit"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-nested-three-levels"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-sibling-both-instantiated-isolated"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-subject-id-cross-flow-inherit"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-subject-id-first-flow-seeds"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-tool-override"),
+		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-wildcard-deep-subscription"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier11FlowCompositionFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", fixtureName)
@@ -120,6 +141,7 @@ func TestTier11FlowCompositionCatalogFixtures_AreExplicitlyClassified(t *testing
 }
 
 func TestTier11DynamicFlowInstanceFlowMatchTarget_RealRuntime(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-dynamic-flow-instance"))
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-dynamic-flow-instance")
 	var expected catalogExpectedDocument

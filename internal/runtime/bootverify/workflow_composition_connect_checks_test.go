@@ -1288,130 +1288,50 @@ type selectResolutionCompositionFixtureOptions struct {
 func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
 	// routing-example-census: different-concept issue=none owner=bootverify.select_resolution_validation_matrix proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_FailsClosedForInvalidSelectInputResolution
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
-	receiverMode := strings.TrimSpace(opts.receiverMode)
-	if receiverMode == "" {
-		receiverMode = "template"
+	mode := canonicalrouting.SelectResolutionSelect
+	if strings.TrimSpace(opts.mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+		mode = canonicalrouting.SelectResolutionSelectOrCreate
 	}
-	delivery := strings.TrimSpace(opts.delivery)
-	if delivery == "" {
-		delivery = "one"
+	invalidity := canonicalrouting.SelectResolutionValid
+	switch {
+	case strings.TrimSpace(opts.instanceKey) == "missing_account_id":
+		invalidity = canonicalrouting.SelectResolutionUndeclaredCarry
+	case opts.compositeKey:
+		invalidity = canonicalrouting.SelectResolutionCompositeKey
+	case strings.TrimSpace(opts.carryType) == "integer":
+		invalidity = canonicalrouting.SelectResolutionCarryTypeMismatch
+	case opts.legacyAddress:
+		invalidity = canonicalrouting.SelectResolutionLegacyAddress
+	case opts.usingInstance:
+		invalidity = canonicalrouting.SelectResolutionLegacyUsingInstance
+	case opts.connectMap:
+		invalidity = canonicalrouting.SelectResolutionLegacyConnectMap
+	case strings.TrimSpace(opts.receiverMode) == "static":
+		invalidity = canonicalrouting.SelectResolutionStaticReceiver
+	case strings.TrimSpace(opts.delivery) == "many":
+		invalidity = canonicalrouting.SelectResolutionManyDelivery
 	}
-	instanceKey := strings.TrimSpace(opts.instanceKey)
-	if instanceKey == "" {
-		instanceKey = "account_id"
-	}
-	mode := strings.TrimSpace(opts.mode)
-	if mode == "" {
-		mode = runtimecontracts.FlowInputResolutionModeSelect
-	}
-	carryType := strings.TrimSpace(opts.carryType)
-	if carryType == "" {
-		carryType = "string"
-	}
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
-    to: account.account_setup
-`, "")
-	packageFile := filepath.Join(root, "package.yaml")
-	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
-	if receiverMode != "template" {
-		canonicalrouting.ReplaceFile(t, packageFile, "    mode: template\nconnect:\n", "    mode: "+receiverMode+"\nconnect:\n")
-		canonicalrouting.ReplaceFile(t, accountSchema, "mode: template\n", "mode: "+receiverMode+"\n")
-	}
-	connectSuffix := ""
-	if delivery != "one" {
-		connectSuffix += "    delivery: " + delivery + "\n"
-	}
-	if opts.usingInstance {
-		connectSuffix += `    using:
-      instance:
-        source: account_id
-        target: account_id
-`
-	}
-	if opts.connectMap {
-		connectSuffix += `    map:
-      account_id:
-        source: payload.account_id
-        target: entity.account_id
-`
-	}
-	if connectSuffix != "" {
-		canonicalrouting.ReplaceFile(t, packageFile, "    to: account.account_ready\n", "    to: account.account_ready\n"+connectSuffix)
-	}
-	canonicalrouting.ReplaceFile(t, accountSchema, `          mode: select
-          instance_key: account_id
-`, "          mode: "+mode+"\n          instance_key: "+instanceKey+"\n")
-	if carryType != "text" {
-		canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: `+instanceKey+`
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-`, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: `+instanceKey+`
-        carries:
-          account_id:
-            from: payload.account_id
-            type: `+carryType+`
-`)
-	}
-	if opts.legacyAddress {
-		canonicalrouting.ReplaceFile(t, accountSchema, "        resolution:\n          mode: "+mode+"\n", `        address:
-          by: account_id
-          source: payload.account_id
-          target: entity.account_id
-          cardinality: one
-        resolution:
-          mode: `+mode+`
-`)
-	}
-	if opts.compositeKey {
-		canonicalrouting.ReplaceFile(t, accountSchema, "  by: account_id\n", "  by: [account_id, region]\n")
-		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    _unused_reason: receiver instance identity\n", `    _unused_reason: receiver instance identity
-  region:
-    type: text
-    _unused_reason: composition select composite-key test field
-`)
-	}
-	return root
+	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: mode, Invalidity: invalidity})
 }
 
 func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {
 	// routing-example-census: different-concept issue=none owner=bootverify.create_resolution_validation_matrix proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_FailsClosedForInvalidCreateInputResolution
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
-	packageFile := filepath.Join(root, "package.yaml")
-	if opts.usingInstance {
-		canonicalrouting.ReplaceFile(t, packageFile, "    to: validator.validation_requested\n", `    to: validator.validation_requested
-    using:
-      instance:
-        source: validation_case_id
-        target: validation_case_id
-`)
+	invalidity := canonicalrouting.CreateResolutionValid
+	switch {
+	case opts.mode == runtimecontracts.FlowInputResolutionModeFanOut:
+		invalidity = canonicalrouting.CreateResolutionNonRunnableMode
+	case opts.mint == "random":
+		invalidity = canonicalrouting.CreateResolutionInvalidMint
+	case !opts.includeCarry:
+		invalidity = canonicalrouting.CreateResolutionMissingCarry
+	case opts.usingInstance:
+		invalidity = canonicalrouting.CreateResolutionLegacyUsingInstance
 	}
-	validatorSchema := filepath.Join(root, "flows", "validator", "schema.yaml")
-	if opts.mode != runtimecontracts.FlowInputResolutionModeCreate {
-		canonicalrouting.ReplaceFile(t, validatorSchema, "          mode: create\n", "          mode: "+opts.mode+"\n")
-	}
-	if opts.mint != runtimecontracts.FlowInputResolutionMintUUID {
-		canonicalrouting.ReplaceFile(t, validatorSchema, "            mint: uuid\n", "            mint: "+opts.mint+"\n")
-	}
-	if !opts.includeCarry {
-		canonicalrouting.ReplaceFile(t, validatorSchema, `        carries:
-          validation_case_id:
-            from: instance.key.validation_case_id
-            type: uuid
-`, "")
-	}
-	return root
+	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{
+		Mint:       canonicalrouting.CreateMintUUID,
+		Invalidity: invalidity,
+	})
 }
 
 func writeCompositionConnectProducerFlow(t *testing.T, root string, opts compositionConnectFixtureOptions) {

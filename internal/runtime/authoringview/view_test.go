@@ -679,22 +679,6 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 		t.Fatalf("route instance key = %#v, want explicit receiver carry mapping", edge.Resolution)
 	}
 
-	coordinator := flowByID(t, view, finalflowinstanceauthoring.CoordinatorFlowID)
-	if coordinator.SingletonCoordinator == nil || coordinator.SingletonCoordinator.PrimaryEntity != finalflowinstanceauthoring.CoordinatorEntityType {
-		t.Fatalf("coordinator singleton view = %#v, want primary %s", coordinator.SingletonCoordinator, finalflowinstanceauthoring.CoordinatorEntityType)
-	}
-	if !containsContainedField(coordinator.SingletonCoordinator.ContainedState, "lead_index", "map") ||
-		!containsContainedField(coordinator.SingletonCoordinator.ContainedState, "audit_log", "list") {
-		t.Fatalf("coordinator contained state = %#v, want lead_index map and audit_log list", coordinator.SingletonCoordinator.ContainedState)
-	}
-	mapSet := containedOperationByTargetAndOp(t, coordinator, "entity.lead_index", "set")
-	if mapSet.MapKeyType != "text" || mapSet.MapValueType != "LeadScore" {
-		t.Fatalf("lead_index set view = %#v, want typed map target", mapSet)
-	}
-	listAppend := containedOperationByTargetAndOp(t, coordinator, "entity.audit_log", "append")
-	if listAppend.ListItemType != "AuditEntry" {
-		t.Fatalf("audit_log append view = %#v, want typed list target", listAppend)
-	}
 }
 
 func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T) {

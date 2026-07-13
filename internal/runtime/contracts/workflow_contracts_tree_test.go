@@ -280,6 +280,7 @@ func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
 }
 
 func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=contracts.cross_flow_event_localization proof=internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -379,6 +380,7 @@ validation-orchestrator:
 }
 
 func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
+	// routing-example-census: different-concept issue=none owner=contracts.cross_flow_event_localization proof=internal/runtime/contracts/workflow_contracts_tree_test.go:TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -501,6 +503,7 @@ func repoRootForContractsTest(t *testing.T) string {
 }
 
 func currentWorkflowContractsDirForTest(t *testing.T) string {
+	// routing-example-census: different-concept issue=none owner=contracts.foundation_bundle_loading proof=internal/runtime/contracts/phase1_foundation_test.go:TestPhase1SchemaRegistryUsesMASContractsSource
 	t.Helper()
 	root := t.TempDir()
 

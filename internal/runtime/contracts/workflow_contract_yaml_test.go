@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -3959,7 +3960,7 @@ func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var emit EmitSpec
-			err := yaml.Unmarshal([]byte(tc.yaml), &emit)
+			err := canonicalrouting.NewParserSnippet(t, tc.yaml).Decode(&emit)
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired allow_fanout rejection")
 			}
@@ -3974,7 +3975,7 @@ func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
 
 func TestFanOutDecode_RejectsRetiredAllowFanoutInNestedEmit(t *testing.T) {
 	var spec FanOutSpec
-	err := yaml.Unmarshal([]byte(`
+	err := canonicalrouting.NewParserSnippet(t, `
 items_from: entity.account_ids
 as: account_id
 emit:
@@ -3984,7 +3985,7 @@ emit:
     match:
       account_id: account_id
     allow_fanout: false
-`), &spec)
+`).Decode(&spec)
 	if err == nil || !strings.Contains(err.Error(), "examples/routing/notify-all-children") {
 		t.Fatalf("yaml.Unmarshal error = %v, want nested retired allow_fanout diagnostic", err)
 	}

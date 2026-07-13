@@ -10,7 +10,7 @@ import (
 )
 
 func TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=contracts.payload_named_field proof=internal/runtime/bootverify/workflow_payload_named_field_test.go:TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField
+	// routing-example-census: different-concept issue=none owner=contracts.payload_named_field proof=internal/runtime/bootverify/workflow_payload_named_field_test.go:TestRunAcceptsNormalizerReadingNestedPathBelowPayloadNamedField
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: payload-normalizer

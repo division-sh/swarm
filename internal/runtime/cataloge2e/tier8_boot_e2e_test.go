@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -81,6 +83,45 @@ var tier8StaticMultiEntityRetiredFixtures = map[string]struct{}{
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
+	canonicalrouting.Prove(t,
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-advances-to-list"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-bare-condition"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-cel-parse-error"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-rule-list-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-condition-payload-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-condition-policy"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-create-entity-plus-accumulate"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-deprecated-field"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-dialect-dual"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-dialect-guard"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-emit-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-cycle"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-consumer"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-producer"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-schema"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-handler-field-undefined"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-missing-pin"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-on-complete-dict"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-on-complete-state-invalid"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-payload-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-permission-tool-mismatch"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-policy-conflict"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-produces-drift"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-missing"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-ref"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-ref-stub"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-stub"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-required-agent-missing"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-self-emit"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-state-machine-invalid"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-state-machine-unreachable"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-success"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-tool-missing"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-platform-mailbox-event-subscription"),
+	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier8SupportedFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixtureName)

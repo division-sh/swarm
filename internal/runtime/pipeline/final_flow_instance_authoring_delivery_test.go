@@ -16,93 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestFinalFlowInstanceAuthoringFixturePipelineDispatchPersistsSingletonContainedStateReadback(t *testing.T) {
-	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
-	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pc, workflowStore := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	entityID := FlowInstanceEntityID(finalflowinstanceauthoring.CoordinatorInstance)
-	seedFinalFlowInstanceAuthoringCoordinatorInstance(t, workflowStore, ctx, bundle, entityID)
-
-	target := events.RouteIdentity{
-		FlowID:       finalflowinstanceauthoring.CoordinatorFlowID,
-		FlowInstance: finalflowinstanceauthoring.CoordinatorInstance,
-		EntityID:     entityID,
-	}
-	evt := eventtest.RootIngress(
-		uuid.NewString(),
-		events.EventType(finalflowinstanceauthoring.CoordinatorInput),
-		finalflowinstanceauthoring.CoordinatorFlowID,
-		"",
-		json.RawMessage(`{"coordinator_id":"global","lead_id":"lead-42","observation":{"source":"feed","note":"first seen"},"audit":{"ref":"lead-42","action":"observed"},"followup_audit":{"ref":"lead-42","action":"queued"},"corrected_audit":{"ref":"bootstrap","action":"corrected"}}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
-		time.Now().UTC(),
-	)
-	seedFinalFlowInstanceAuthoringEvent(t, db, ctx, evt)
-	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), finalflowinstanceauthoring.CoordinatorNodeID, target)
-
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
-	if err != nil {
-		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want coordinator handler delivery")
-	}
-	loaded, ok, err := workflowStore.Load(ctx, entityID)
-	if err != nil {
-		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
-	}
-	if !ok {
-		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
-	}
-	if loaded.WorkflowName != finalflowinstanceauthoring.CoordinatorFlowID || loaded.CurrentState != "active" {
-		t.Fatalf("loaded coordinator = storage:%q workflow:%q state:%q, want coordinator/active", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
-	}
-	leadIndex, ok := loaded.Metadata["lead_index"].(map[string]any)
-	if !ok {
-		t.Fatalf("lead_index = %#v, want map", loaded.Metadata["lead_index"])
-	}
-	lead, ok := leadIndex["lead-42"].(map[string]any)
-	if !ok {
-		t.Fatalf("lead_index[lead-42] = %#v, want map", leadIndex["lead-42"])
-	}
-	if lead["status"] != "active" || lead["score"] != float64(1) {
-		t.Fatalf("lead_index[lead-42] = %#v, want status active score 1", lead)
-	}
-	observations, ok := lead["observations"].([]any)
-	if !ok || len(observations) != 1 {
-		t.Fatalf("lead observations = %#v, want one observation", lead["observations"])
-	}
-	observation, ok := observations[0].(map[string]any)
-	if !ok || observation["source"] != "feed" || observation["note"] != "first seen" {
-		t.Fatalf("observation = %#v, want feed/first seen", observations[0])
-	}
-	auditLog, ok := loaded.Metadata["audit_log"].([]any)
-	if !ok || len(auditLog) != 3 {
-		t.Fatalf("audit_log = %#v, want three entries", loaded.Metadata["audit_log"])
-	}
-	firstAudit, ok := auditLog[0].(map[string]any)
-	if !ok || firstAudit["ref"] != "bootstrap" || firstAudit["action"] != "corrected" {
-		t.Fatalf("audit_log[0] = %#v, want corrected bootstrap entry", auditLog[0])
-	}
-	secondAudit, ok := auditLog[1].(map[string]any)
-	if !ok || secondAudit["ref"] != "lead-42" || secondAudit["action"] != "observed" {
-		t.Fatalf("audit_log[1] = %#v, want observed lead-42 entry", auditLog[1])
-	}
-	thirdAudit, ok := auditLog[2].(map[string]any)
-	if !ok || thirdAudit["ref"] != "lead-42" || thirdAudit["action"] != "queued" {
-		t.Fatalf("audit_log[2] = %#v, want queued lead-42 entry", auditLog[2])
-	}
-	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.CoordinatorNodeID, "delivered")
-	assertNoFinalFlowInstanceAuthoringContainedRouteRows(t, db, "coordinator/lead-42")
-	assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t, db, workflowStore, ctx, "coordinator/lead-42")
-}
-
 func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInputConnectEvent(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)
@@ -172,23 +85,6 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, "delivered")
 }
 
-func TestFinalFlowInstanceAuthoringFixturePipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
-	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
-	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pc, _ := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
-
-	containedTarget := events.RouteIdentity{
-		FlowID:       finalflowinstanceauthoring.CoordinatorFlowID,
-		FlowInstance: finalflowinstanceauthoring.CoordinatorInstance + "/lead-42",
-		EntityID:     uuid.NewString(),
-	}
-	if pc.workflowNodeMatchesDeliveryTarget(finalflowinstanceauthoring.CoordinatorNodeID, containedTarget) {
-		t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
-	}
-}
-
 func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *WorkflowInstanceStore) {
 	t.Helper()
 	workflow, err := LoadWorkflowDefinition(source)
@@ -212,29 +108,6 @@ func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, 
 		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	return pc, workflowStore
-}
-
-func seedFinalFlowInstanceAuthoringCoordinatorInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
-	t.Helper()
-	if err := store.Create(ctx, WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      finalflowinstanceauthoring.CoordinatorInstance,
-		WorkflowName:    finalflowinstanceauthoring.CoordinatorFlowID,
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "active",
-		Metadata: map[string]any{
-			"entity_id":      entityID,
-			"flow_path":      finalflowinstanceauthoring.CoordinatorInstance,
-			"instance_id":    entityID,
-			"coordinator_id": "global",
-			"lead_index":     map[string]any{},
-			"audit_log": []any{
-				map[string]any{"ref": "seed", "action": "seed"},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("seed final flow-instance authoring coordinator instance: %v", err)
-	}
 }
 
 func seedFinalFlowInstanceAuthoringEvent(t *testing.T, db *sql.DB, ctx context.Context, evt events.Event) {

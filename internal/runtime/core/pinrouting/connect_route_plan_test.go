@@ -1290,27 +1290,7 @@ func outputEventNames(pins []runtimecontracts.FlowOutputEventPin) []string {
 
 func writeConnectRoutePlanPackageFixture(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "    to: consumer.work_ready\n", `    to: consumer.work_ready
-    adapter: work_ready_projection
-    map:
-      work_id:
-        source: payload.work_id
-        target: entity.work_id
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), "        event: work.ready\n", `        event: work.ready
-        address:
-          by: work_id
-          source: payload.work_id
-          target: entity.work_id
-          cardinality: one
-`)
-	canonicalrouting.WriteFile(t, root, "flows/consumer/entities.yaml", `
-work:
-  work_id:
-    type: text
-`)
-	return root
+	return canonicalrouting.CopyParentConnectAddressVariant(t, canonicalrouting.ParentConnectAddressLowering)
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
@@ -1319,11 +1299,11 @@ func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
 
 func writeCreateResolutionConnectRoutePlanPackageFixture(t *testing.T, mint string) string {
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
-	if strings.TrimSpace(mint) != "uuid" {
-		canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), "            mint: uuid\n", "            mint: "+strings.TrimSpace(mint)+"\n")
+	mode := canonicalrouting.CreateMintUUID
+	if strings.TrimSpace(mint) == runtimecontracts.FlowInputResolutionMintEventID {
+		mode = canonicalrouting.CreateMintEventID
 	}
-	return root
+	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: mode})
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixture(t *testing.T) string {
@@ -1344,55 +1324,20 @@ type selectResolutionConnectRoutePlanFixtureOptions struct {
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
 	// routing-example-census: different-concept issue=none owner=pinrouting.select_resolution_lowering_matrix proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields
 	t.Helper()
-	accountIDEntityType := strings.TrimSpace(options.accountIDEntityType)
-	if accountIDEntityType == "" {
-		accountIDEntityType = "string"
+	mode := canonicalrouting.SelectResolutionSelect
+	if strings.TrimSpace(options.mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+		mode = canonicalrouting.SelectResolutionSelectOrCreate
 	}
-	accountIDCarryType := strings.TrimSpace(options.accountIDCarryType)
-	if accountIDCarryType == "" {
-		accountIDCarryType = "string"
+	invalidity := canonicalrouting.SelectResolutionValid
+	switch {
+	case strings.TrimSpace(options.extraResolution) != "":
+		invalidity = canonicalrouting.SelectResolutionExtraAggregation
+	case strings.TrimSpace(options.accountIDEntityType) == "integer":
+		invalidity = canonicalrouting.SelectResolutionEntityTypeMismatch
+	case strings.TrimSpace(options.accountIDCarryType) == "integer":
+		invalidity = canonicalrouting.SelectResolutionCarryTypeMismatch
 	}
-	mode := strings.TrimSpace(options.mode)
-	if mode == "" {
-		mode = runtimecontracts.FlowInputResolutionModeSelect
-	}
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
-    to: account.account_setup
-`, "")
-	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
-	canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: select
-          instance_key: account_id
-`, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: account_id
-`+options.extraResolution)
-	canonicalrouting.ReplaceFile(t, accountSchema, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: account_id
-`+options.extraResolution+`        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-`, `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: `+mode+`
-          instance_key: account_id
-`+options.extraResolution+`        carries:
-          account_id:
-            from: payload.account_id
-            type: `+accountIDCarryType+`
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: "+accountIDEntityType+"\n")
-	return root
+	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: mode, Invalidity: invalidity})
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {
@@ -1518,49 +1463,7 @@ deployment:
 func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
 	// routing-example-census: different-concept issue=1738 owner=legacy_addressed_template_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup
-    to: account.account_setup
-`, "")
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `      - name: account_ready
-        event: account.ready
-`, `      - name: account_ready
-        event: account.ready
-        key: account_id
-        carries: [account_id, customer_id]
-`)
-	for _, eventsFile := range []string{"flows/producer/events.yaml", "flows/account/events.yaml"} {
-		canonicalrouting.ReplaceFile(t, filepath.Join(root, eventsFile), `account.ready:
-  account_id: text
-`, `account.ready:
-  account_id: text
-  customer_id: text
-`)
-	}
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `      - name: account_ready
-        event: account.ready
-        resolution:
-          mode: select
-          instance_key: account_id
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-`, `      - name: account_ready
-        event: account.ready
-        address:
-          by: customer_id
-          source: payload.customer_id
-          target: entity.customer_id
-          cardinality: one
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `    _unused_reason: receiver instance identity
-`, `    _unused_reason: receiver instance identity
-  customer_id:
-    type: text
-    indexed: true
-`)
-	return root
+	return canonicalrouting.CopyLegacyAddressedTemplateSelect(t)
 }
 
 func writeConnectRoutePlanFlowFixture(t *testing.T, root, flowID, schemaTail, events, entities string) {

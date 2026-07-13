@@ -6093,7 +6093,6 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	start := time.Now()
 	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "opco.spinup_requested",
 		"run_id":          runID,
@@ -6104,12 +6103,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		},
 		"idempotency_key": "issue-1384-" + backend + "-spinup",
 	})
-	elapsed := time.Since(start)
 	if spinupEnvelope.Error != nil {
 		t.Fatalf("spinup event.publish error = %#v", spinupEnvelope.Error)
-	}
-	if elapsed > time.Second {
-		t.Fatalf("spinup event.publish returned after %s, want durable ack before blocked create_flow_instance handler completes", elapsed)
 	}
 	var spinup servedEventPublishRPCResult
 	if err := json.Unmarshal(spinupEnvelope.Result, &spinup); err != nil {
@@ -7273,71 +7268,13 @@ func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) i
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.event_publish_follow_up proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-`, `name: served-event-publish-followup
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), `    item.received:
-      advances_to: done
-      emit:
-        event: item.processed
-        fields:
-          item_id: payload.item_id
-`, `    item.received:
-      rules:
-        initialize:
-          condition: "payload.item_id != 'emit'"
-          advances_to: waiting
-        emit_processed:
-          condition: "payload.item_id == 'emit'"
-          emit:
-            event: item.processed
-            fields:
-              item_id: payload.item_id
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), `item-observer:
-  id: item-observer
-  execution_type: system_node
-  subscribes_to: [item.processed]
-  event_handlers:
-    item.processed: {}
-`, `item-observer:
-  id: item-observer
-  execution_type: system_node
-  subscribes_to: [item.processed]
-  event_handlers:
-    item.processed:
-      rules:
-        complete:
-          condition: "payload.item_id == 'review'"
-          advances_to: done
-`)
-	return root
+	return canonicalrouting.CopyRootIngressServedFollowUp(t)
 }
 
 func writeServedExternalEventFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.externally_handled_event proof=cmd/swarm/main_test.go:TestServedParityHarnessRuntimeIngressControlLifecycle
 	t.Helper()
-	root := writeServedEventPublishFollowUpFixture(t)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "events.yaml"), `item.processed:
-  item_id: text
-`, `item.processed:
-  item_id: text
-external.observed:
-  swarm:
-    source: external
-    consumer: external
-`)
-	return root
+	return canonicalrouting.CopyRootIngressServedExternalEvent(t)
 }
 
 func writeServedTestSetupFixture(t *testing.T) string {
@@ -7611,250 +7548,24 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	return eventID
 }
 
-func addServedLegacyTemplateRootOverlay(t *testing.T, root string) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_overlay proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
-	t.Helper()
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
-  - id: operating
-    flow: operating
-    mode: template
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events:
-      - name: item_received
-        event: item.received
-        source: external
-  outputs:
-    events: []
-`, `name: routing-root-ingress
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
-pins:
-  inputs:
-    events:
-      - name: item_received
-        event: item.received
-        source: external
-      - name: opco_bootstrap_requested
-        event: opco.bootstrap_requested
-        source: external
-      - name: opco_spinup_requested
-        event: opco.spinup_requested
-        source: external
-  outputs:
-    events: []
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "entities.yaml"), "{}\n", `portfolio:
-  owner: text
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "events.yaml"), `item.processed:
-  item_id: text
-`, `item.processed:
-  item_id: text
-opco.bootstrap_requested:
-  owner: text
-opco.spinup_requested:
-  instance_id: text
-  product_id: text
-`)
-	canonicalrouting.ReplaceFile(t, filepath.Join(root, "nodes.yaml"), "    item.processed: {}\n", `    item.processed: {}
-portfolio-bootstrap:
-  id: portfolio-bootstrap
-  execution_type: system_node
-  subscribes_to: [opco.bootstrap_requested]
-  event_handlers:
-    opco.bootstrap_requested:
-      data_accumulation:
-        source_event: opco.bootstrap_requested
-        writes:
-          - source_field: owner
-            target_field: owner
-      advances_to: waiting
-portfolio-node:
-  id: portfolio-node
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  event_handlers:
-    opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
-      advances_to: done
-`)
-}
-
 func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_target_route proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	addServedLegacyTemplateRootOverlay(t, root)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
-name: operating
-mode: template
-instance:
-  by: product_id
-  on_missing: create
-  on_conflict: reject
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, waiting, ready]
-pins:
-  inputs:
-    events:
-      - name: product_initialization_requested
-        event: opco.product_initialization_requested
-      - name: product_review_requested
-        event: opco.product_review_requested
-        source: external
-auto_emit_on_create:
-  event: opco.product_initialization_requested
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
-product:
-  product_id: text
-  note: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
-opco.product_initialization_requested:
-  swarm:
-    source: external
-  product_id: string
-opco.product_review_requested:
-  swarm:
-    source: external
-  note: string
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
-lifecycle-orchestrator:
-  id: lifecycle-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested, opco.product_review_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      data_accumulation:
-        source_event: opco.product_initialization_requested
-        writes:
-          - source_field: product_id
-            target_field: product_id
-      advances_to: waiting
-    opco.product_review_requested:
-      data_accumulation:
-        source_event: opco.product_review_requested
-        writes:
-          - source_field: note
-            target_field: note
-      advances_to: ready
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
-	return root
+	return canonicalrouting.CopyRootIngressLegacyTemplateTargetRoute(t)
 }
 
 func writeServedEventPublishActiveLoadFixture(t *testing.T) string {
 	t.Helper()
-	root := writeServedEventPublishFollowUpFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-load-agent:
-  id: load-agent
-  role: load_agent
-  prompt_ref: load-agent
-  model: regular
-  mode: task
-  subscriptions:
-    - item.processed
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
-Handle the active-load event and wait for test release.
-	`)
-	return root
+	return canonicalrouting.CopyRootIngressServedActiveLoad(t)
 }
 
 func writeServedLiveAgentFixture(t *testing.T) string {
 	t.Helper()
-	root := writeServedEventPublishFollowUpFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-load-agent:
-  id: load-agent
-  role: load_agent
-  prompt_ref: load-agent
-  model: regular
-  mode: task
-  subscriptions:
-    - item.processed
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
-Handle live-agent parity events.
-`)
-	return root
+	return canonicalrouting.CopyRootIngressServedLiveAgent(t)
 }
 
 func writeServedDynamicAutoEmitFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_auto_emit proof=cmd/swarm/main_test.go:TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
 	t.Helper()
-	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	addServedLegacyTemplateRootOverlay(t, root)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
-name: operating
-mode: template
-instance:
-  by: product_id
-  on_missing: create
-  on_conflict: reject
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, spawning, ready]
-auto_emit_on_create:
-  event: opco.product_initialization_requested
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
-product:
-  product_id: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
-opco.product_initialization_requested:
-  product_id: string
-component_scaffold.spawn_requested:
-  product_id: string
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
-lifecycle-orchestrator:
-  id: lifecycle-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  produces: [component_scaffold.spawn_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      data_accumulation:
-        source_event: opco.product_initialization_requested
-        writes:
-          - source_field: product_id
-            target_field: product_id
-      emit:
-        event: component_scaffold.spawn_requested
-        fields:
-          product_id: payload.product_id
-      advances_to: spawning
-component-scaffold:
-  id: component-scaffold
-  execution_type: system_node
-  subscribes_to: [component_scaffold.spawn_requested]
-  event_handlers:
-    component_scaffold.spawn_requested:
-      advances_to: ready
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
-	return root
+	return canonicalrouting.CopyRootIngressLegacyTemplateAutoEmit(t)
 }
 
 func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) string {

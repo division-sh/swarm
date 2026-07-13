@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -14,29 +15,119 @@ import (
 )
 
 const (
-	RootIngress             = "root-ingress"
-	ParentConnect           = "parent-connect"
-	TemplateSelectExisting  = "template-select-existing"
-	TemplateSelectOrCreate  = "template-select-or-create"
-	TemplateReply           = "template-reply"
-	TemplateCreateMintedKey = "template-create-minted-key"
+	RootIngress             ArtifactID = "root-ingress"
+	ParentConnect           ArtifactID = "parent-connect"
+	TemplateSelectExisting  ArtifactID = "template-select-existing"
+	TemplateSelectOrCreate  ArtifactID = "template-select-or-create"
+	TemplateReply           ArtifactID = "template-reply"
+	TemplateCreateMintedKey ArtifactID = "template-create-minted-key"
 )
 
-// ExampleRoot returns the checked-in positive authoring owner for a routing pattern.
-func ExampleRoot(t testing.TB, name string) string {
+// ArtifactID is a checked-in routing artifact identity. The ownership guard
+// accepts only IDs declared in artifact_registry.yaml.
+type ArtifactID string
+
+// RetiredStaticMutation identifies one deliberately invalid legacy routing
+// shape. The closed set prevents negative tests from becoming an arbitrary
+// positive bundle-construction API.
+type RetiredStaticMutation string
+
+const (
+	RetiredStaticCreate             RetiredStaticMutation = "create_entity"
+	RetiredStaticSelect             RetiredStaticMutation = "select_entity"
+	RetiredStaticSelectOrCreate     RetiredStaticMutation = "select_or_create_entity"
+	RetiredStaticMissingAcquisition RetiredStaticMutation = "missing_acquisition"
+)
+
+// ParserSnippet is YAML that can only be decoded in memory. It has no method
+// that can write or materialize a workflow bundle.
+type ParserSnippet struct {
+	document yaml.Node
+}
+
+func NewParserSnippet(t testing.TB, source string) ParserSnippet {
 	t.Helper()
-	return filepath.Join(RepoRoot(t), "examples", "routing", name)
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(source), &doc); err != nil {
+		t.Fatalf("parse bounded routing snippet: %v", err)
+	}
+	return ParserSnippet{document: doc}
+}
+
+// Decode exposes parser-only YAML as data. ParserSnippet deliberately has no
+// byte/string accessor or filesystem operation, so it cannot become a bundle
+// materialization seam.
+func (snippet ParserSnippet) Decode(target any) error {
+	if len(snippet.document.Content) != 1 {
+		return fmt.Errorf("bounded routing snippet must contain one YAML document")
+	}
+	return snippet.document.Content[0].Decode(target)
+}
+
+// ExampleRoot returns the checked-in positive authoring owner for a routing pattern.
+func ExampleRoot(t testing.TB, id ArtifactID) string {
+	t.Helper()
+	root, ok := canonicalExamplePath(id)
+	if !ok {
+		t.Fatalf("routing artifact %q is not one of the six canonical positive fixture owners", id)
+	}
+	return filepath.Join(RepoRoot(t), filepath.FromSlash(root))
 }
 
 // CopyExample materializes a canonical example for a focused overlay or negative mutation.
-func CopyExample(t testing.TB, name string) string {
+func CopyExample(t testing.TB, id ArtifactID) string {
 	t.Helper()
 	target := t.TempDir()
-	CopyTree(t, ExampleRoot(t, name), target)
+	copyTree(t, ExampleRoot(t, id), target)
 	return target
 }
 
-func CopyTree(t testing.TB, source, target string) {
+// Prove declares that the calling TestXxx entrypoint executes the checked-in
+// artifact. The ownership guard requires this call directly in the test body.
+func Prove(t testing.TB, ids ...ArtifactID) {
+	t.Helper()
+	if len(ids) == 0 {
+		t.Fatal("canonical routing proof must name at least one artifact")
+	}
+	for _, id := range ids {
+		root := checkedArtifactRoot(t, id)
+		if _, err := os.Stat(filepath.Join(root, "package.yaml")); err != nil {
+			t.Fatalf("routing artifact %q: %v", id, err)
+		}
+	}
+}
+
+func checkedArtifactRoot(t testing.TB, id ArtifactID) string {
+	t.Helper()
+	root := filepath.ToSlash(filepath.Clean(strings.TrimSpace(string(id))))
+	if root == "." || filepath.IsAbs(root) || strings.HasPrefix(root, "../") {
+		t.Fatalf("invalid routing artifact ID %q", id)
+	}
+	if !strings.Contains(root, "/") {
+		root = filepath.ToSlash(filepath.Join("examples", "routing", root))
+	}
+	return filepath.Join(RepoRoot(t), filepath.FromSlash(root))
+}
+
+func canonicalExamplePath(id ArtifactID) (string, bool) {
+	requested := filepath.ToSlash(filepath.Clean(strings.TrimSpace(string(id))))
+	for _, canonical := range []ArtifactID{
+		RootIngress,
+		ParentConnect,
+		TemplateSelectExisting,
+		TemplateSelectOrCreate,
+		TemplateReply,
+		TemplateCreateMintedKey,
+	} {
+		root := filepath.ToSlash(filepath.Join("examples", "routing", string(canonical)))
+		if requested == string(canonical) || requested == root {
+			return root, true
+		}
+	}
+	return "", false
+}
+
+func copyTree(t testing.TB, source, target string) {
 	t.Helper()
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -61,7 +152,7 @@ func CopyTree(t testing.TB, source, target string) {
 	}
 }
 
-func ReplaceFile(t testing.TB, path, old, replacement string) {
+func applyClosedReplacement(t testing.TB, path, old, replacement string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -76,22 +167,228 @@ func ReplaceFile(t testing.TB, path, old, replacement string) {
 	}
 }
 
-func WriteFile(t testing.TB, root, relativePath, contents string) {
+func writeFixtureFile(path, source string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(source), 0o644)
+}
+
+// duplicateFlowForNegativeMutation creates a second receiver solely for a
+// fail-closed topology test. Positive fixture construction must use ArtifactID.
+func duplicateFlowForNegativeMutation(t testing.TB, root, sourceFlowID, targetFlowID string) {
 	t.Helper()
-	path := filepath.Join(root, relativePath)
+	for label, value := range map[string]string{"source": sourceFlowID, "target": targetFlowID} {
+		value = strings.TrimSpace(value)
+		if value == "" || filepath.Base(value) != value || value == "." || value == ".." {
+			t.Fatalf("negative mutation %s flow ID %q is invalid", label, value)
+		}
+	}
+	copyTree(
+		t,
+		filepath.Join(root, "flows", sourceFlowID),
+		filepath.Join(root, "flows", targetFlowID),
+	)
+}
+
+// AddRetiredStaticFlowForNegativeMutation adds one closed legacy-static
+// invalidity to a copied canonical artifact.
+func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation RetiredStaticMutation) {
+	t.Helper()
+	handler := ""
+	switch mutation {
+	case RetiredStaticCreate:
+		handler = "      create_entity: true\n"
+	case RetiredStaticSelect:
+		handler = "      select_entity:\n        by:\n          legacy_id: payload.legacy_id\n"
+	case RetiredStaticSelectOrCreate:
+		handler = "      select_or_create_entity:\n        by:\n          legacy_id: payload.legacy_id\n"
+	case RetiredStaticMissingAcquisition:
+	default:
+		t.Fatalf("unsupported retired static mutation %q", mutation)
+	}
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - id: account\n    flow: account\n    mode: template\n",
+		"  - id: account\n    flow: account\n    mode: template\n  - id: legacy_static\n    flow: legacy_static\n    mode: static\n")
+	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
+		writeClosedNegativeFile(t, root, "flows/legacy_static/"+file, "{}\n")
+	}
+	writeClosedNegativeFile(t, root, "flows/legacy_static/schema.yaml", `name: legacy_static
+mode: static
+initial_state: active
+states: [active, archived]
+terminal_states: [archived]
+pins:
+  inputs:
+    events:
+      - name: legacy_seen
+        event: legacy.seen
+  outputs:
+    events: []
+`)
+	writeClosedNegativeFile(t, root, "flows/legacy_static/events.yaml", `legacy.seen:
+  legacy_id: text
+  amount: number
+`)
+	writeClosedNegativeFile(t, root, "flows/legacy_static/entities.yaml", `legacy_record:
+  legacy_id:
+    type: text
+    indexed: true
+  amount:
+    type: number
+    initial: 0
+`)
+	writeClosedNegativeFile(t, root, "flows/legacy_static/nodes.yaml", `legacy-writer:
+  id: legacy-writer
+  execution_type: system_node
+  subscribes_to: [legacy.seen]
+  event_handlers:
+    legacy.seen:
+`+handler+`      data_accumulation:
+        writes:
+          - source_field: amount
+            target_field: amount
+`)
+}
+
+// AddRootDefaultEntityIDForNegativeMutation adds the one closed root-static
+// caller-selected identity invalidity used by the retirement proof.
+func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
+	t.Helper()
+	writeClosedNegativeFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
+	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
+	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: subject_created
+        event: subject.created
+  outputs:
+    events: []
+`)
+	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`)
+}
+
+func writeClosedNegativeFile(t testing.TB, root, relativePath, source string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatalf("write closed negative fixture %s: %v", path, err)
+	}
+}
+
+func AddOverlayFile(t testing.TB, root, relativePath, source string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("overlay file %s already exists", path)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("inspect overlay file %s: %v", path, err)
+	}
+	rejectRoutingOverlay(t, path, source)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(source, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
-// MergeMappingFile appends non-conflicting top-level entries to a copied
-// canonical artifact. Existing entries and routing declarations are rejected.
-func MergeMappingFile(t testing.TB, root, relativePath, additions string) {
+// SetOverlayFile creates or replaces a non-routing artifact file.
+func SetOverlayFile(t testing.TB, root, relativePath, source string) {
 	t.Helper()
-	path := filepath.Join(root, relativePath)
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
+	rejectRoutingOverlay(t, path, source)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(source, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func ApplyOverlayMutation(t testing.TB, path, old, replacement string) {
+	t.Helper()
+	rejectRoutingOverlayFragment(t, path+" old fragment", old)
+	rejectRoutingOverlayFragment(t, path+" replacement fragment", replacement)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !strings.Contains(string(contents), old) {
+		t.Fatalf("overlay mutation target missing in %s", path)
+	}
+	updated := strings.Replace(string(contents), old, replacement, 1)
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func rejectRoutingOverlayFragment(t testing.TB, path, source string) {
+	t.Helper()
+	lines := strings.Split(strings.Trim(source, "\n"), "\n")
+	minimumIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if minimumIndent < 0 || indent < minimumIndent {
+			minimumIndent = indent
+		}
+	}
+	if minimumIndent < 0 {
+		return
+	}
+	shift := 2 - minimumIndent
+	for index, line := range lines {
+		if shift >= 0 {
+			lines[index] = strings.Repeat(" ", shift) + line
+			continue
+		}
+		remove := -shift
+		if len(line) >= remove {
+			lines[index] = line[remove:]
+		}
+	}
+	firstIndent := len(lines[0]) - len(strings.TrimLeft(lines[0], " "))
+	wrapped := "overlay:\n"
+	if firstIndent > 2 {
+		wrapped += "  inherited_context:\n"
+	}
+	wrapped += strings.Join(lines, "\n") + "\n"
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(wrapped), &doc); err != nil {
+		t.Fatalf("overlay for %s: parse YAML fragment: %v", path, err)
+	}
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode || len(doc.Content[0].Content) != 2 {
+		t.Fatalf("overlay for %s: fragment must decode as one mapping value", path)
+	}
+	if yamlNodeContainsAuthoredRouting(doc.Content[0].Content[1]) {
+		t.Fatalf("overlay for %s: contains routing declarations; consume a canonical route or use an explicit negative mutation", path)
+	}
+}
+
+// ApplyOverlay appends non-conflicting top-level entries to a copied
+// canonical artifact. Existing entries and routing declarations are rejected.
+func ApplyOverlay(t testing.TB, root, relativePath, additions string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
 	doc := readYAMLDocument(t, path)
 	existing := requireYAMLMapping(t, path, doc.Content[0])
 
@@ -112,7 +409,7 @@ func MergeMappingFile(t testing.TB, root, relativePath, additions string) {
 	}
 	additionRoot := additionDoc.Content[0]
 	if yamlNodeContainsAuthoredRouting(additionRoot) {
-		t.Fatalf("mapping additions for %s contain routing declarations; consume a canonical route or use an explicitly classified negative mutation", path)
+		t.Fatalf("overlay for %s contains routing declarations; consume a canonical route or use an explicit negative mutation", path)
 	}
 	additionsByKey := requireYAMLMapping(t, path, additionRoot)
 	for key := range additionsByKey {
@@ -122,6 +419,24 @@ func MergeMappingFile(t testing.TB, root, relativePath, additions string) {
 	}
 	doc.Content[0].Content = append(doc.Content[0].Content, additionRoot.Content...)
 	writeYAMLDocument(t, path, doc)
+}
+
+func rejectRoutingOverlay(t testing.TB, path, source string) {
+	t.Helper()
+	if err := routingOverlayError(source); err != nil {
+		t.Fatalf("overlay for %s: %v", path, err)
+	}
+}
+
+func routingOverlayError(source string) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.TrimLeft(source, "\n")), &doc); err != nil {
+		return fmt.Errorf("parse YAML: %w", err)
+	}
+	if len(doc.Content) == 1 && yamlNodeContainsAuthoredRouting(doc.Content[0]) {
+		return fmt.Errorf("contains routing declarations; consume a canonical route or use an explicit negative mutation")
+	}
+	return nil
 }
 
 func readYAMLDocument(t testing.TB, path string) *yaml.Node {
@@ -178,6 +493,10 @@ func yamlScalar(node *yaml.Node) string {
 }
 
 func yamlNodeContainsAuthoredRouting(node *yaml.Node) bool {
+	return yamlNodeContainsAuthoredRoutingAt(node, "")
+}
+
+func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string) bool {
 	if node == nil {
 		return false
 	}
@@ -187,27 +506,40 @@ func yamlNodeContainsAuthoredRouting(node *yaml.Node) bool {
 			value := node.Content[i+1]
 			switch key {
 			case "source":
-				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
+				if parentKey == "events" || parentKey == "swarm" ||
+					value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "external") {
 					return true
 				}
-			case "broadcast":
-				if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Value), "true") {
+			case "consumer":
+				if parentKey == "swarm" {
 					return true
+				}
+			case "inputs", "outputs":
+				if parentKey == "pins" || parentKey == "requires" || parentKey == "bind" {
+					return true
+				}
+			case "mode":
+				if value.Kind == yaml.ScalarNode {
+					mode := strings.ToLower(strings.TrimSpace(value.Value))
+					if mode == "static" || mode == "template" {
+						return true
+					}
 				}
 			case "pins", "connect", "resolution", "instance", "delivery", "address", "target",
 				"on_missing", "on_conflict", "select_entity", "select_or_create_entity", "create_flow_instance",
 				"subscriptions", "subscriptions_bootstrap", "subscribes_to", "produces", "emit_events",
-				"event_handlers", "emit", "fan_out", "auto_emit_on_create", "replies_to", "carries":
+				"event_handlers", "emit", "fan_out", "auto_emit_on_create", "replies_to", "carries",
+				"broadcast", "flows", "bind", "requires":
 				return true
 			}
-			if yamlNodeContainsAuthoredRouting(value) {
+			if yamlNodeContainsAuthoredRoutingAt(value, key) {
 				return true
 			}
 		}
 		return false
 	}
 	for _, child := range node.Content {
-		if yamlNodeContainsAuthoredRouting(child) {
+		if yamlNodeContainsAuthoredRoutingAt(child, parentKey) {
 			return true
 		}
 	}
