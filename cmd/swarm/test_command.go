@@ -1922,7 +1922,7 @@ func assertScenarioEventExpectations(actual []string, expect scenarioEventExpect
 	if len(expect.Include) > 0 {
 		for _, want := range expect.Include {
 			if !scenarioStringSliceContains(actual, want) {
-				return fmt.Errorf("expected event %s was not observed", want)
+				return fmt.Errorf("expected event %s was not observed in %v", want, actual)
 			}
 		}
 	}

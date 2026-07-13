@@ -613,7 +613,11 @@ func appendEmitIntentsAsEvents(collector *[]events.Event, intents []runtimeengin
 		return
 	}
 	for _, intent := range intents {
-		*collector = append(*collector, cloneEvent(intent.Event))
+		emitted := cloneEvent(intent.Event)
+		if !intent.Context.Empty() {
+			emitted = emitted.WithDeliveryContext(intent.Context)
+		}
+		*collector = append(*collector, emitted)
 	}
 }
 

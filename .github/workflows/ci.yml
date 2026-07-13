@@ -116,6 +116,11 @@ jobs:
         run: go build ./cmd/swarm
       - name: Check OpenRPC artifact
         run: go run ./cmd/swarm-openrpc-gen --check
+      - name: Check canonical routing split tracker state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SWARM_CANONICAL_ROUTING_VERIFY_TRACKER_REMOTE: "1"
+        run: go test ./internal/runtime/testfixtures/canonicalrouting -run '^TestCanonicalRoutingTrackedSplitsRemainOpen$' -count=1
       - name: Vet
         run: go vet ./...
 

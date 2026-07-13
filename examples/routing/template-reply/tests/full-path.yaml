@@ -1,0 +1,12 @@
+name: reply full authored path
+steps:
+  - publish: initiator/requester.setup.requested
+    payload:
+      account_id: account-1
+  - publish: initiator/request.submitted
+    payload:
+      account_id: account-1
+expect:
+  events:
+    include: [initiator/requester.setup, initiator/requester.requested, provider/provider.replied]
+  no_dead_letters: true

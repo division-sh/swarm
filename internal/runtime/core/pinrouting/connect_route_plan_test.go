@@ -1343,6 +1343,7 @@ type selectResolutionConnectRoutePlanFixtureOptions struct {
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=pinrouting.select_resolution_lowering_matrix proof=TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields
 	t.Helper()
 	accountIDEntityType := strings.TrimSpace(options.accountIDEntityType)
 	if accountIDEntityType == "" {
@@ -1516,6 +1517,7 @@ deployment:
 }
 
 func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_addressed_template_routing proof=TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup

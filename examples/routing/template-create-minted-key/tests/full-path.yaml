@@ -1,0 +1,9 @@
+name: create minted key full authored path
+steps:
+  - publish: producer/validation.triggered
+    payload:
+      candidate: candidate-1
+expect:
+  events:
+    include: [producer/validation.requested]
+  no_dead_letters: true

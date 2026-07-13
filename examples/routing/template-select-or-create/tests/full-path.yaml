@@ -1,0 +1,9 @@
+name: select or create full authored path
+steps:
+  - publish: producer/account.requested
+    payload:
+      account_id: account-1
+expect:
+  events:
+    include: [producer/account.ready]
+  no_dead_letters: true

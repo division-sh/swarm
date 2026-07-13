@@ -7272,30 +7272,22 @@ func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
-	canonicalrouting.WriteFile(t, root, "schema.yaml", `
-name: served-event-publish-followup
+	canonicalrouting.ReplaceFile(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+`, `name: served-event-publish-followup
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
-pins:
-  inputs:
-    events:
-      - name: thing_created
-        event: thing.created
-        source: external
-      - name: thing_reviewed
-        event: thing.reviewed
-        source: external
-      - name: thing_agent_hold
-        event: thing.agent_hold
-        source: external
-      - name: thing_unhandled
-        event: thing.unhandled
-        source: external
-  outputs:
-    events: []
 `)
-	canonicalrouting.WriteFile(t, root, "entities.yaml", `
+	canonicalrouting.AppendRootExternalInputs(t, root,
+		canonicalrouting.RootExternalInput{Name: "thing_created", Event: "thing.created"},
+		canonicalrouting.RootExternalInput{Name: "thing_reviewed", Event: "thing.reviewed"},
+		canonicalrouting.RootExternalInput{Name: "thing_agent_hold", Event: "thing.agent_hold"},
+		canonicalrouting.RootExternalInput{Name: "thing_unhandled", Event: "thing.unhandled"},
+	)
+	canonicalrouting.MergeMappingFile(t, root, "entities.yaml", `
 widget:
   amount:
     type: integer
@@ -7303,7 +7295,7 @@ widget:
   who: text
   note: text
 `)
-	canonicalrouting.WriteFile(t, root, "events.yaml", `
+	canonicalrouting.MergeMappingFile(t, root, "events.yaml", `
 thing.created:
   amount: integer
   who: text
@@ -7317,7 +7309,7 @@ thing.agent_hold:
 thing.unhandled:
   note: text
 `)
-	canonicalrouting.WriteFile(t, root, "nodes.yaml", `
+	canonicalrouting.MergeMappingFile(t, root, "nodes.yaml", `
 entity-writer:
   id: entity-writer
   execution_type: system_node
@@ -7615,6 +7607,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 }
 
 func addServedLegacyTemplateRootOverlay(t *testing.T, root string) {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_overlay proof=TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
 	t.Helper()
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
   - id: operating
@@ -7694,6 +7687,7 @@ portfolio-node:
 }
 
 func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_target_route proof=TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	addServedLegacyTemplateRootOverlay(t, root)
@@ -7837,6 +7831,7 @@ Handle live-agent parity events.
 }
 
 func writeServedDynamicAutoEmitFixture(t *testing.T) string {
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_auto_emit proof=TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	addServedLegacyTemplateRootOverlay(t, root)
