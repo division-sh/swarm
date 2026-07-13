@@ -1989,11 +1989,12 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 
 func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		body       []byte
-		target     InboundTarget
-		configure  func(*http.Request, []byte)
-		wantStatus int
+		name          string
+		body          []byte
+		target        InboundTarget
+		configure     func(*http.Request, []byte)
+		wantStatus    int
+		wantBodyParts []string
 	}{
 		{
 			name:       "missing configured secret",
@@ -2029,6 +2030,39 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			body:       []byte(`{"message":{"message_id":7,"text":"hello"}}`),
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "chat id conversion failure",
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":"not-a-number"},"text":"hello"}}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+			wantBodyParts: []string{
+				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				`normalized event "inbound.telegram.text_message"`, `path "message.chat.id"`,
+				"number_to_text requires a numeric value",
+			},
+		},
+		{
+			name:       "message id type failure",
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":"seven","chat":{"id":42},"text":"hello"}}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+			wantBodyParts: []string{
+				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				`normalized event "inbound.telegram.text_message"`, `path "message.message_id"`,
+				"value type string is incompatible with integer and implicit conversion is forbidden",
+			},
+		},
+		{
+			name:       "message text type failure",
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":99}}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+			wantBodyParts: []string{
+				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				`normalized event "inbound.telegram.text_message"`, `path "message.text"`,
+				"value type json.Number is incompatible with text and implicit conversion is forbidden",
+			},
 		},
 		{
 			name:       "non object payload",
@@ -2076,6 +2110,11 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			for _, want := range tc.wantBodyParts {
+				if !strings.Contains(rec.Body.String(), want) {
+					t.Errorf("body = %q, want containing %q", rec.Body.String(), want)
+				}
 			}
 			if store.recorded {
 				t.Fatal("invalid Telegram request recorded inbound marker")
