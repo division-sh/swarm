@@ -259,11 +259,19 @@ func countAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
+type activeAPIV1RuntimeBusAgentStore interface {
+	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+}
+
+func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) {
 	t.Helper()
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agentID, Role: "observer", FlowID: "global", Type: "stub", Model: "regular", Config: []byte(`{}`)},
-		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
+	if err := owner.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID: agentID, Role: "observer", FlowID: "global", Type: "stub", Model: "regular", Config: []byte(`{}`),
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}

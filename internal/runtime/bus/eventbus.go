@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,7 @@ type DeliveryRouteInterceptor interface {
 // PayloadValidator validates canonical event-store admission before an event is
 // persisted or direct-recipient eligibility is reported. It does not own
 // producer-surface shaping or routing/delivery/source-target semantics.
-type PayloadValidator func(eventType string, payload []byte) error
+type PayloadValidator func(ctx context.Context, eventType string, payload []byte) error
 
 type EventBus struct {
 	mu                          sync.RWMutex
@@ -67,6 +68,37 @@ type EventBus struct {
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 	inFlightEventIDs            map[string]int
+}
+
+type transactionRouteOverlayKey struct{}
+
+type transactionRouteOverlay struct {
+	table *RouteTable
+}
+
+func (eb *EventBus) withTransactionRouteOverlay(ctx context.Context) (context.Context, error) {
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); !active {
+		return ctx, nil
+	}
+	if overlay, _ := ctx.Value(transactionRouteOverlayKey{}).(*transactionRouteOverlay); overlay != nil && overlay.table != nil {
+		return ctx, nil
+	}
+	table, err := DeriveRouteTable(eb.semanticSource)
+	if err != nil {
+		return nil, fmt.Errorf("derive transaction-local route table: %w", err)
+	}
+	return context.WithValue(ctx, transactionRouteOverlayKey{}, &transactionRouteOverlay{table: table}), nil
+}
+
+func transactionRouteTableFromContext(ctx context.Context) *RouteTable {
+	if ctx == nil {
+		return nil
+	}
+	overlay, _ := ctx.Value(transactionRouteOverlayKey{}).(*transactionRouteOverlay)
+	if overlay == nil {
+		return nil
+	}
+	return overlay.table
 }
 
 type PublishRecipientPlan struct {
@@ -292,6 +324,45 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	}
 	req = req.Normalized()
 	hadRoute := table.HasFlowInstanceRoute(req.Identity)
+	if _, txActive := runtimepipeline.PipelineSQLTxFromContext(ctx); txActive && !hadRoute {
+		staged := transactionRouteTableFromContext(ctx)
+		if staged == nil {
+			var err error
+			staged, err = DeriveRouteTable(table.source)
+			if err != nil {
+				return fmt.Errorf("derive transaction-local flow-instance route table: %w", err)
+			}
+		}
+		hadStagedRoute := staged.HasFlowInstanceRoute(req.Identity)
+		if err := staged.AddFlowInstanceRoute(req); err != nil {
+			return err
+		}
+		routes := staged.MaterializedRoutes(req.Identity)
+		persister, ok := eb.store.(FlowInstanceRoutePersistence)
+		if !ok {
+			return errors.New("transactional flow-instance route persistence is required")
+		}
+		for _, route := range routes {
+			if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
+				return err
+			}
+		}
+		if !hadStagedRoute {
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+				if err := table.AddFlowInstanceRoute(req); err != nil {
+					_ = eb.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
+						Level: "error", Message: "Post-commit flow-instance route publication failed",
+						Component: "eventbus", Action: "flow_instance_route_post_commit_publish_failed",
+						Detail: map[string]any{"instance_path": req.Identity.InstancePath, "error": err.Error()},
+					})
+				}
+			}) {
+				return errors.New("transactional flow-instance route requires post-commit publication owner")
+			}
+		}
+		return nil
+	}
 	if err := table.AddFlowInstanceRoute(req); err != nil {
 		return err
 	}

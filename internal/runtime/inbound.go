@@ -18,6 +18,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -25,21 +26,24 @@ import (
 
 const inboundWebhookMaxBodyBytes = 1 << 20
 
-type InboundPersistence interface {
-	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
-}
+type InboundPersistence = runtimeinbound.Runner
 
 type InboundTarget struct {
-	BundleHash    string
-	FlowID        string
-	RunID         string
-	FlowInstance  string
-	EntityID      string
-	EntitySlug    string
-	Alias         string
-	Provider      string
-	SigningSecret string
-	AdmissionPlan providertriggers.InboundAdmissionPlan
+	BundleHash          string
+	ServiceID           string
+	PackageKey          string
+	FlowID              string
+	RunID               string
+	Generation          int64
+	PublicationSequence int64
+	InstanceID          string
+	FlowInstance        string
+	EntityID            string
+	EntitySlug          string
+	Alias               string
+	Provider            string
+	SigningSecret       string
+	AdmissionPlan       providertriggers.InboundAdmissionPlan
 }
 
 func (t InboundTarget) EffectiveEntityID() string {
@@ -62,6 +66,7 @@ func (t *InboundTarget) NormalizeEntity() {
 
 type InboundGateway struct {
 	bus                     *runtimebus.EventBus
+	store                   InboundPersistence
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
 	beginAdmission          func(context.Context) (context.Context, func(), bool)
@@ -75,9 +80,14 @@ func (g *InboundGateway) SetAdmissionGuard(begin func(context.Context) (context.
 	}
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
+	var store InboundPersistence
+	if len(stores) > 0 {
+		store = stores[0]
+	}
 	g := &InboundGateway{
 		bus:                     bus,
+		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
 	}

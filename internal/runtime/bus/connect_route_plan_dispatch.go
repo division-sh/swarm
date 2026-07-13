@@ -141,7 +141,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		routes, subscribers, err := r.deliveryRoutesForMaterialization(plan, materialized, decision)
+		routes, subscribers, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -278,7 +278,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 	}
 	target := record.Origin.Normalized()
-	subscribers := r.resolveSelectedReceiverCarriers(plan, target)
+	subscribers := r.resolveSelectedReceiverCarriers(ctx, plan, target)
 	if target.Empty() || len(subscribers) == 0 {
 		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
 		detail["reply_origin"] = target
@@ -387,7 +387,7 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 	return r.loadDescriptors(ctx)
 }
 
-func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision) ([]events.DeliveryRoute, []Subscriber, error) {
+func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision) ([]events.DeliveryRoute, []Subscriber, error) {
 	targets := connectMaterializedTargets(materialized)
 	if len(targets) == 0 {
 		return nil, nil, nil
@@ -400,7 +400,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimep
 	subscribers := make([]Subscriber, 0, len(targets))
 	for _, target := range targets {
 		target = target.Normalized()
-		matchedSubscribers := r.resolveSelectedReceiverCarriers(plan, target)
+		matchedSubscribers := r.resolveSelectedReceiverCarriers(ctx, plan, target)
 		if len(matchedSubscribers) == 0 {
 			return nil, nil, nil
 		}
@@ -439,18 +439,27 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 	return projection, nil
 }
 
-func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
-	if r.routeTable == nil {
+func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
+	tables := []*RouteTable{r.routeTable}
+	if staged := transactionRouteTableFromContext(ctx); staged != nil && staged != r.routeTable {
+		tables = append(tables, staged)
+	}
+	if len(tables) == 0 {
 		return nil
 	}
 	keys := connectReceiverCarrierRouteKeys(plan, target)
 	out := make([]Subscriber, 0, len(keys))
-	for _, key := range keys {
-		for _, subscriber := range r.routeTable.Resolve(key) {
-			if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
-				continue
+	for _, routeTable := range tables {
+		if routeTable == nil {
+			continue
+		}
+		for _, key := range keys {
+			for _, subscriber := range routeTable.Resolve(key) {
+				if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
+					continue
+				}
+				out = append(out, subscriber)
 			}
-			out = append(out, subscriber)
 		}
 	}
 	return dedupeSubscribers(out)

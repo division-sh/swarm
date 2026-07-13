@@ -10,6 +10,8 @@ import (
 )
 
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*PostgresStore)(nil)
+var _ runtimebus.ActiveAgentDescriptorLister = (*PostgresStore)(nil)
+var _ runtimebus.ActiveAgentDescriptorLister = (*SQLiteRuntimeStore)(nil)
 
 // ListActiveAgentDescriptors implements runtime.ActiveAgentDescriptorLister for
 // explicit runtime delivery planning against persisted agent metadata.
@@ -49,6 +51,42 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	}
 	defer rows.Close()
 
+	out := make([]runtimebus.ActiveAgentDescriptor, 0, 64)
+	for rows.Next() {
+		var descriptor runtimebus.ActiveAgentDescriptor
+		if err := rows.Scan(&descriptor.AgentID, &descriptor.EntityID, &descriptor.FlowInstance); err != nil {
+			return nil, err
+		}
+		if descriptor.AgentID != "" {
+			out = append(out, descriptor.Normalized())
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListActiveAgentDescriptors gives SQLite the same transaction-visible
+// delivery-planning surface as PostgreSQL.
+func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("sqlite runtime store unavailable")
+	}
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT agent_id, COALESCE(entity_id, ''), COALESCE(flow_instance, '')
+		FROM agents
+		WHERE COALESCE(status, '') <> 'terminated'
+		ORDER BY agent_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	out := make([]runtimebus.ActiveAgentDescriptor, 0, 64)
 	for rows.Next() {
 		var descriptor runtimebus.ActiveAgentDescriptor

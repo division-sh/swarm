@@ -203,6 +203,7 @@ func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID 
 	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&out.ActiveDeliveries); err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
 	}
+	quiescenceArgs := append([]any{runID}, diagnosticDirectReplayEventArgs()...)
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events e
@@ -211,9 +212,9 @@ func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID 
 			AND r.subscriber_type = 'platform'
 			AND r.subscriber_id = 'pipeline'
 		WHERE e.run_id = ?
-		  AND e.event_name <> ?
-		  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-	`, runID, runtimeLogEventName).Scan(&out.UnsettledPipelineEvents); err != nil {
+		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
+		  AND r.event_id IS NULL
+	`, quiescenceArgs...).Scan(&out.UnsettledPipelineEvents); err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
 	}
 	if err := s.DB.QueryRowContext(ctx, `

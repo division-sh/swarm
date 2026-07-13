@@ -356,18 +356,19 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 		scopeMode         string
 		normalizationMode string
 	}{
-		"agent":         {candidateSource: "/v1/rpc agent.list", scopeMode: "global_bounded", normalizationMode: "trim_case_sensitive"},
-		"bundle":        {candidateSource: "/v1/rpc bundle.list", scopeMode: "bounded_catalog", normalizationMode: "bundle_digest_hex_case_fold"},
-		"run":           {candidateSource: "/v1/rpc run.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
-		"entity":        {candidateSource: "/v1/rpc entity.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
-		"event":         {candidateSource: "/v1/rpc event.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
-		"session":       {candidateSource: "/v1/rpc conversation.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
-		"turn":          {candidateSource: "/v1/rpc conversation.list_turns", scopeMode: "full_session_required", normalizationMode: "trim_case_sensitive"},
-		"fork":          {candidateSource: "/v1/rpc conversation.fork_list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
-		"mailbox":       {candidateSource: "/v1/rpc mailbox.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
-		"flow_instance": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "existing_flow_path"},
-		"context":       {candidateSource: "local_context_registry", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
-		"subscriber":    {candidateSource: "polymorphic_subscriber_identity", scopeMode: "polymorphic_full_only", normalizationMode: "trim_case_sensitive"},
+		"agent":            {candidateSource: "/v1/rpc agent.list", scopeMode: "global_bounded", normalizationMode: "trim_case_sensitive"},
+		"bundle":           {candidateSource: "/v1/rpc bundle.list", scopeMode: "bounded_catalog", normalizationMode: "bundle_digest_hex_case_fold"},
+		"run":              {candidateSource: "/v1/rpc run.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
+		"entity":           {candidateSource: "/v1/rpc entity.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
+		"event":            {candidateSource: "/v1/rpc event.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
+		"session":          {candidateSource: "/v1/rpc conversation.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"turn":             {candidateSource: "/v1/rpc conversation.list_turns", scopeMode: "full_session_required", normalizationMode: "trim_case_sensitive"},
+		"fork":             {candidateSource: "/v1/rpc conversation.fork_list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"mailbox":          {candidateSource: "/v1/rpc mailbox.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"flow_instance":    {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "existing_flow_path"},
+		"context":          {candidateSource: "local_context_registry", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
+		"subscriber":       {candidateSource: "polymorphic_subscriber_identity", scopeMode: "polymorphic_full_only", normalizationMode: "trim_case_sensitive"},
+		"standing_service": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
 	}
 	familyCount := 0
 	forEachMappingEntry(t, families, func(name string, family *yaml.Node) {

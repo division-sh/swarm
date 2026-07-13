@@ -180,6 +180,7 @@ type Runtime struct {
 	ownershipLease          runtimestartupownership.Lease
 	ownershipLeaseBorrowed  bool
 	pendingOwnershipLease   runtimestartupownership.Lease
+	pendingOwnershipOwned   bool
 	ownershipHandoffPending bool
 	replacementQuiesced     bool
 	ownerID                 string
@@ -243,6 +244,51 @@ func (rt *Runtime) CloseAdmission() {
 	}
 }
 
+// PrepareInitialStartupOwnership acquires the selected-store lease before
+// serve-level recovery and desired-state reconciliation mutate durable state.
+// Start consumes the prepared lease instead of acquiring a second owner.
+func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
+	if rt == nil || rt.Stores.StartupOwnership == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rt.lifecycleMu.Lock()
+	defer rt.lifecycleMu.Unlock()
+	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
+		return fmt.Errorf("runtime already started or has pending startup ownership")
+	}
+	lease, err := rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
+	if err != nil {
+		return err
+	}
+	rt.pendingOwnershipLease = lease
+	rt.pendingOwnershipOwned = lease != nil
+	return nil
+}
+
+// ReleasePreparedStartupOwnership releases an initial lease when serve-level
+// work fails before Start consumes it. It never releases replacement handoffs.
+func (rt *Runtime) ReleasePreparedStartupOwnership(ctx context.Context) error {
+	if rt == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rt.lifecycleMu.Lock()
+	if !rt.pendingOwnershipOwned || rt.pendingOwnershipLease == nil {
+		rt.lifecycleMu.Unlock()
+		return nil
+	}
+	lease := rt.pendingOwnershipLease
+	rt.pendingOwnershipLease = nil
+	rt.pendingOwnershipOwned = false
+	rt.lifecycleMu.Unlock()
+	return lease.Release(ctx)
+}
+
 type StartupOwnershipHandoff struct {
 	predecessor *Runtime
 	candidate   *Runtime
@@ -282,6 +328,7 @@ func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*Startu
 	}
 	predecessor.ownershipHandoffPending = true
 	rt.pendingOwnershipLease = lease
+	rt.pendingOwnershipOwned = false
 	return &StartupOwnershipHandoff{predecessor: predecessor, candidate: rt, lease: lease, active: true}, nil
 }
 
@@ -299,6 +346,7 @@ func (h *StartupOwnershipHandoff) Commit() error {
 	h.predecessor.ownershipLease = nil
 	h.candidate.ownershipLeaseBorrowed = false
 	h.candidate.pendingOwnershipLease = nil
+	h.candidate.pendingOwnershipOwned = false
 	h.committed = true
 	return nil
 }
@@ -332,6 +380,7 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 		h.predecessor.ownershipLease = h.lease
 		h.predecessor.ownershipHandoffPending = false
 		h.candidate.pendingOwnershipLease = nil
+		h.candidate.pendingOwnershipOwned = false
 		h.committed = false
 		h.active = false
 		return nil
@@ -342,6 +391,7 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 	}
 	if h.candidate.pendingOwnershipLease == h.lease {
 		h.candidate.pendingOwnershipLease = nil
+		h.candidate.pendingOwnershipOwned = false
 	}
 	h.predecessor.ownershipHandoffPending = false
 	h.active = false
@@ -574,7 +624,7 @@ func (deps validatedRuntimeDeps) payloadValidator(logger *RuntimeLogger) runtime
 
 func bindRuntimeStorePayloadValidator(stores Stores, payloadValidator runtimebus.PayloadValidator) {
 	type eventPayloadValidationBinder interface {
-		SetEventPayloadValidator(func(eventType string, payload []byte) error)
+		SetEventPayloadValidator(func(context.Context, string, []byte) error)
 	}
 	if binder, ok := stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
 		binder.SetEventPayloadValidator(payloadValidator)
@@ -1006,7 +1056,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	startCtx, cancelStart := context.WithCancel(ctx)
 	lease := rt.pendingOwnershipLease
-	borrowedLease := lease != nil
+	preparedOwnedLease := lease != nil && rt.pendingOwnershipOwned
+	borrowedLease := lease != nil && !preparedOwnedLease
 	if rt.Stores.StartupOwnership != nil && lease == nil {
 		var err error
 		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
@@ -1019,6 +1070,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "owner="+rt.ownerID)
 	} else if borrowedLease {
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "handoff_owner="+rt.ownerID)
+	} else if preparedOwnedLease {
+		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "prepared_owner="+rt.ownerID)
 	} else {
 		rt.emitBootProgress(5, "startup_ownership_lease", "skipped", "startup ownership store unavailable")
 	}
@@ -1026,6 +1079,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.cancelStart = cancelStart
 	rt.ownershipLease = lease
 	rt.ownershipLeaseBorrowed = borrowedLease
+	if preparedOwnedLease {
+		rt.pendingOwnershipLease = nil
+		rt.pendingOwnershipOwned = false
+	}
 	rt.replacementQuiesced = false
 	rt.lifecycleMu.Unlock()
 	started := false

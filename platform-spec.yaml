@@ -8135,8 +8135,8 @@ tool_model:
         the header value to the configured `webhook_signing.<provider>` secret in constant time, and MUST reject HMAC-only
         fields such as `encoding`, `prefix`, `signed_payload`, `signature_param`, and timestamp settings.
       challenge: >
-        Authenticated response-only callback handling. A matched challenge branch must not persist an inbound dedupe marker
-        and must not publish a Swarm event.
+        Authenticated response-only callback handling. A matched challenge branch must not invoke the inbound publication
+        operation and must not publish a Swarm event.
       delivery_condition: JSON object condition that must match before a provider delivery is accepted.
       request_facts: >
         The gateway passes provider-neutral request facts to the manifest interpreter: method, direct scheme/host/request
@@ -8144,7 +8144,7 @@ tool_model:
         receipt time, and user agent. The first-slice exact URL source is the request received by the API listener; forwarded
         proxy/header trust and callback URL lifecycle remain parent-tail work. Recipes that require URL/form facts MUST fail
         closed when those facts are missing, malformed, or ambiguous.
-      delivery_id: authoritative provider delivery id source for dedupe marker input. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
+      delivery_id: authoritative provider delivery id source for inbound publication identity. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
       event_type: authoritative provider event type source for normalized provider_event_type payload metadata. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
       event_name: literal or `{event_type}` template for the emitted Swarm event name.
       event_name_policy: >
@@ -8154,9 +8154,11 @@ tool_model:
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
-        `after_publish` returns after normal publish completion. `durable_before_dispatch` returns after the inbound marker,
-        event row, recipient manifest, and subscribed replay scope are durably persisted or queued, without waiting for
-        post-commit pipeline dispatch, system-node execution, or agent handling.
+        Both modes consume the same committed inbound_publications operation and immutable recipient manifest.
+        `after_publish` returns after normal post-commit dispatch/reconciliation completes. `durable_before_dispatch` returns
+        after the ledger row, evidence event, executable event, recipient manifest, subscribed replay scope, deliveries,
+        receipts, and counters commit atomically, without waiting for post-commit pipeline dispatch, system-node execution,
+        or agent handling. Exact committed retry returns the stored operation without invoking EventBus or replanning.
       redact_keys: payload keys that must be replaced before publication or readback.
       signed_payload_recipe_discipline: >
         Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
@@ -8197,8 +8199,8 @@ tool_model:
       url_verification: >
         Slack `type: url_verification` requests are authenticated provider ingress but not provider deliveries. After
         successful signature and replay validation, the adapter returns HTTP 200 with the `challenge` value as a
-        response-only result. Missing `challenge` fails closed. URL verification MUST NOT call `RecordInboundEvent` and MUST
-        NOT publish an EventBus event.
+        response-only result. Missing `challenge` fails closed. URL verification MUST NOT invoke
+        `RunInboundPublicationMutation` and MUST NOT publish an EventBus event.
       delivery_id: >
         Slack `type: event_callback` requests require the outer `event_id`; that value is the authoritative provider
         delivery id and dedupe-key input. Missing `event_id` fails before dedupe marker persistence.
@@ -8849,16 +8851,21 @@ flow_model:
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     standing_activation_model:
       status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#1951'
+      implementation_tracker: '#2007'
       declaration_surface: 'package.yaml flows[].activation: standing plus optional flows[].ingress'
       canonical_owners:
         declaration: internal/runtime/contracts.ProjectFlowRef
         verification: internal/runtime.ResolveStandingTargetDeclarations
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan
-        lifecycle: internal/runtime.Runtime.EnsureStandingTargets
+        durable_identity_and_desired_state: internal/runtime/pipeline.WorkflowInstanceStore standing_services plus standing_service_generations plus standing_service_journal
+        startup_reconciliation: internal/runtime/pipeline.WorkflowInstanceStore.ReconcileStandingServiceSet
+        replacement_reconciliation: internal/runtime.Runtime.EnsureStandingReplacementTargets plus internal/runtime/pipeline.WorkflowInstanceStore.ReconcileStandingServiceReplacement
+        lifecycle_materialization: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
-        ingress_dispatch: internal/runtime.InboundGateway.HandleResolvedWebhook
+        ingress_operation: internal/store.RunInboundPublicationMutation and internal/store.SQLiteRuntimeStore.RunInboundPublicationMutation
+        ingress_admission: internal/runtime.InboundGateway.HandleResolvedWebhook
+        committed_publication_authority: inbound_publications
         routing_projection: internal/runtime/routingtopology.Build root_input_sources
       authoring_shape:
         example:
@@ -8883,20 +8890,21 @@ flow_model:
         - signing_secret is an explicit deployment credential reference required only by the compiled authentication policy; package data never carries the value
         - every provider binding requires an exact compatible external input pin under its compiled event-name policy
       lifecycle_authority: >
-        Before readiness, package activation atomically and idempotently creates or resumes one deterministic durable run,
-        one singleton flow instance, and that instance's primary entity. First activation consumes the full canonical
-        ActivateFlowInstance path, including routes, agents, initial timers, schedules, and creation effects. Same-source
-        restart rehydrates the persisted instance and runtime side effects without replaying creation effects. The canonical
-        bundle_hash, package flow identity, run_id, flow_instance, and entity_id form the standing semantic authority. The
-        standing instance uses the ordinary canonical flow-instance identity owner: its bundle digest is the logical
-        instance_id and its instance_path is derived from the declared flow scope plus that instance_id. A special standing
-        path segment or alternate route matcher is forbidden.
-        Standing-activated flow agents are materialized only by that canonical flow-instance activation. Ordinary static-agent
-        and static flow-required-agent bootstraps MUST exclude standing-activated flows so they cannot publish a predecessor
-        agent config keyed to the unmaterialized flow scope before the standing instance exists.
-        Admission discovers every active persisted standing owner independently of candidate declarations, then requires each
-        predecessor bundle hash/source pair to be in the complete candidate bundle set. Removing or renaming the declaration,
-        renaming package or flow identity, or changing standing to non-standing MUST NOT hide persisted predecessor authority.
+        The stable standing service identity is the deterministic service_id derived from package_key plus flow_id. Bundle
+        hash and bundle source are revision metadata, never lifecycle identity or admission gates. Before readiness, one
+        selected-store transaction validates the complete declaration set, creates or revises every declared service, and
+        orphans every previously declared service omitted from that complete set. A retained declaration keeps its current
+        nonterminal run and generation while its source revision and journal advance. A removed, renamed, or non-standing
+        declaration is explicitly orphaned: its current generation is quiesced, its run is paused, publication is withdrawn,
+        and its durable identity and lineage remain inspectable. A new declaration creates generation one. Operator suspend,
+        resume, and reset consume the same desired-state owner and survive restart.
+        First materialization consumes the full canonical ActivateFlowInstance path, including routes, agents, initial
+        timers, schedules, and creation effects. Restart rehydrates durable state and process-local effects without replaying
+        creation effects. A restart-abandoned generation may advance only through the explicit repair rule after proving the
+        predecessor owns no live work; every other terminal current generation requires the explicit standing reset command.
+        service_id, current_generation, current_run_id, instance_id, and entity_id are the standing semantic authority. The
+        standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
+        source-equality validator, entity_state scan, or alternate route matcher is forbidden.
       process_routing: >
         One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, replacement, and
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
@@ -8911,34 +8919,34 @@ flow_model:
         predecessor but have not entered its gateway fail closed afterward.
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
-        canonical event name MUST match an exact external input pin on the selected flow before marker persistence, dedupe,
-        event construction, delivery, acknowledgement, or response. The gateway stamps the standing run_id, flow_instance,
-        and entity_id before persistence and publish; root-ingress admission MUST preserve that run and MUST NOT mint a run
-        per webhook.
+        canonical event name MUST match an exact external input pin on the selected flow before publication-ledger
+        reservation, event construction, delivery, acknowledgement, or response. Provider identity lookup occurs before
+        EventBus invocation. The selected-store inbound publication operation locks the current standing service generation
+        and run, requires an active publication sequence and running or paused run, appends the executable event, performs
+        transaction-local route/template/reply planning, and commits the immutable recipient manifest with its evidence event,
+        replay scope, deliveries, receipts, and counters. The gateway stamps the resolved standing run_id, flow_instance,
+        entity_id, service_id, generation, and publication sequence; root ingress MUST preserve that owner and MUST NOT mint
+        a run per webhook. An exact committed retry returns the same operation without invoking EventBus or replanning.
       replacement_policy: >
-        Same-bundle-hash restart resumes the standing identity. Provider-trigger pack directories are re-read and re-verified
-        for every reload. One candidate catalog generation must successfully recompile every surviving loaded context and the
-        replacement context before readiness changes; RuntimeContextManager publishes the context set, target plans,
-        generation, and installed/effective capability subjects as one authority transition. Any failure leaves the previous
-        generation and contexts serving. Same-hash live replacement may publish new runtime objects
-        only after they are ready and then atomically replaces process visibility. Replacement first rejects new predecessor
-        admission and quiesces all predecessor shared-store/background consumers under the configured grace while retaining
-        the one exclusive store lease. Only after quiescence may lease authority transfer and candidate activation begin.
-        Predecessor withdrawal, candidate publication, and restored-predecessor publication consume one RuntimeContextManager
-        replacement transaction; supervisor-local readiness or runtime pointers are not alternate visibility owners. A
-        predecessor quiesce timeout is a mutating failure: recovery MUST finish quiescing under the retained lease and publish
-        a fresh predecessor before restoring readiness. If bounded recovery cannot safely restore, the context remains
-        unavailable, readiness remains false, and the lease remains retained fail closed rather than publishing the partially
-        stopped object.
-        Failed candidate activation before visibility commit MUST be fully quiesced before lease authority returns and a fresh
-        predecessor runtime is restored from the admitted source; predecessor and candidate consumers MUST never overlap.
-        If any active standing target
-        exists, a changed-hash live reload MUST fail before readiness changes, detach, shutdown, activation, registry mutation,
-        or new run/instance/entity/target creation. Cold changed-hash startup against persisted standing authority also fails
-        closed. For a rejected changed-hash replacement, the predecessor remains running and authoritative until a future
-        explicit reset/migration operation defines quiesce, terminal/preservation, side-effect transition, rollback, and
-        restart behavior. Manager-backed deactivation propagates the caller's configured shutdown grace rather than silently
-        substituting runtime defaults.
+        Provider-trigger pack directories are re-read and re-verified for every reload. One candidate catalog generation must
+        successfully recompile every surviving loaded context and the replacement context before readiness changes.
+        Replacement first rejects new predecessor admission and quiesces predecessor shared-store/background consumers under
+        the configured grace while retaining the exclusive store lease. Only after quiescence may lease authority transfer
+        and candidate materialization begin. The replacement runtime plans its complete declaration set and the predecessor
+        declaration set. One selected-store transaction revises retained service ids, creates new ids, orphans omitted
+        predecessor ids, and materializes/publishes the replacement's standing targets. It MUST NOT inspect or mutate services
+        owned by unrelated loaded contexts. Bundle-hash or bundle-source change alone is a normal revision and MUST NOT reject
+        startup or reload. Duplicate identity, missing persisted predecessor identity, terminality outside the explicit repair
+        rule, or any durable/process publication failure fails closed and rolls back the scoped desired-state transaction.
+        Process-local agents, routes, handlers, timers, auto-emit, lifecycle cells, diagnostic projections, and runtime-context
+        publication are staged until their durable transaction commits. RuntimeContextManager then publishes the context set,
+        target plans, catalog generation, and installed/effective capability subjects as one process authority transition.
+        Predecessor withdrawal, candidate publication, and restored-predecessor publication consume its replacement protocol;
+        supervisor-local readiness or runtime pointers are not alternate visibility owners. A quiesce timeout or failed
+        candidate activation remains a mutating failure: recovery finishes quiescing, fully stops the failed candidate, and
+        publishes a freshly restored predecessor before readiness returns. If bounded recovery cannot safely restore, the
+        context remains unavailable and the lease remains retained. Manager-backed deactivation propagates the caller's
+        configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
       - duplicate aliases within a bundle or across loaded runtime contexts
       - duplicate providers within one alias
@@ -8949,7 +8957,11 @@ flow_model:
       - catalog-generation mismatch or incomplete all-context recompilation during boot/reload
       - unknown or unloaded alias/provider target
       - unbound signing-secret value at request time
-      - standing run source or canonical bundle_hash mismatch
+      - duplicate standing service_id or package_key/flow_id owner
+      - standing identity conflict between service_id, package/flow owner, instance_id, or entity_id
+      - missing selected-store desired-state owner or missing persisted predecessor during replacement
+      - current generation terminal outside explicit restart-abandon repair or operator reset
+      - stale standing generation, run status, or publication sequence during inbound publication
       readback: >
         Basic describe projects activation, alias, providers, signing-secret references, and authored admission kind, pack
         pin, raw authentication/event policy, and acknowledgement from package declarations only. It never claims a resolved
@@ -8960,6 +8972,9 @@ flow_model:
         projects each authored alias/provider/admission binding and target flow as admission provenance; it is not a producer,
         edge, or third delivery scope. No surface exposes secret values or creates a second target model.
       legacy_paths_removed:
+      - treating bundle_hash or bundle_source equality as standing identity or reload admission
+      - rejecting a changed-source cold start or hot replacement instead of journaling a revision
+      - discovering standing ownership by scanning entity_state activation metadata
       - scanning entity_state by route alias as ingress target authority
       - reading webhook signing values from flow-instance config
       - discarding a resolved run_id and publishing empty-run root ingress
@@ -10626,6 +10641,7 @@ platform_tables:
         - run_fork_fact_revisions
         - run_fork_revisions
         - run_fork_revision_heads
+        - inbound_publications
         - activity_attempts
         - decision_card_lifecycle_outbox
         - decision_card_route_obligations
@@ -10652,6 +10668,9 @@ platform_tables:
         - conversation_forks
         - timers
       delete_all:
+        - standing_service_journal
+        - standing_service_generations
+        - standing_services
         - runs
       preserve:
         - runtime_store_metadata
@@ -10740,6 +10759,81 @@ platform_tables:
         This table is global platform catalog state, not run-scoped state, and is not referenced
         by runs through a database foreign key.'
       ddl: "CREATE TABLE bundles (\n    bundle_hash      TEXT PRIMARY KEY CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    content_yaml     TEXT NOT NULL,\n    parsed_json      JSONB NOT NULL DEFAULT '{}'::jsonb,\n    data_blob        BYTEA,\n    metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,\n    ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_bundles_ingested_at (ingested_at)\n);"
+    standing_services:
+      description: >-
+        Durable declaration-owned standing-service identity and desired-state owner.
+        package_key plus flow_id is stable across bundle revisions. current_run_id and
+        current_generation select one generation; operator override and publication
+        sequence are explicit persisted facts rather than source-hash inference.
+      ddl: |
+        CREATE TABLE standing_services (
+            service_id             UUID PRIMARY KEY,
+            package_key            TEXT NOT NULL,
+            flow_id                TEXT NOT NULL,
+            instance_id            TEXT NOT NULL UNIQUE,
+            entity_id              UUID NOT NULL UNIQUE,
+            declaration_present    BOOLEAN NOT NULL,
+            operator_override      TEXT NOT NULL DEFAULT 'none' CHECK (operator_override IN ('none', 'suspended')),
+            effective_state        TEXT NOT NULL CHECK (effective_state IN ('active', 'suspended', 'orphaned')),
+            current_bundle_hash    TEXT NOT NULL CHECK (current_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            current_bundle_source  TEXT NOT NULL CHECK (current_bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy')),
+            revision_sequence      BIGINT NOT NULL CHECK (revision_sequence > 0),
+            current_generation     BIGINT NOT NULL CHECK (current_generation > 0),
+            current_run_id         UUID NOT NULL UNIQUE REFERENCES runs(run_id),
+            publication_state      TEXT NOT NULL CHECK (publication_state IN ('pending', 'published')),
+            publication_sequence   BIGINT NOT NULL CHECK (publication_sequence >= 0),
+            override_actor         TEXT,
+            override_reason        TEXT,
+            override_at            TIMESTAMPTZ,
+            created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((declaration_present = FALSE AND effective_state = 'orphaned') OR (declaration_present = TRUE AND operator_override = 'none' AND effective_state = 'active') OR (declaration_present = TRUE AND operator_override = 'suspended' AND effective_state = 'suspended')),
+            CHECK ((operator_override = 'none' AND override_actor IS NULL AND override_reason IS NULL AND override_at IS NULL) OR (operator_override = 'suspended' AND override_actor IS NOT NULL AND override_at IS NOT NULL)),
+            UNIQUE (package_key, flow_id),
+            INDEX idx_standing_services_state (effective_state, publication_state),
+            INDEX idx_standing_services_run (current_run_id)
+        );
+    standing_service_generations:
+      description: Immutable standing-service run-generation lineage. Terminal predecessors remain linked and are never reopened.
+      ddl: |
+        CREATE TABLE standing_service_generations (
+            service_id            UUID NOT NULL REFERENCES standing_services(service_id),
+            generation            BIGINT NOT NULL CHECK (generation > 0),
+            run_id                UUID NOT NULL UNIQUE REFERENCES runs(run_id),
+            created_bundle_hash   TEXT NOT NULL CHECK (created_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            created_bundle_source TEXT NOT NULL CHECK (created_bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy')),
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            retired_at            TIMESTAMPTZ,
+            retired_reason        TEXT,
+            retired_by            TEXT,
+            PRIMARY KEY (service_id, generation),
+            UNIQUE INDEX idx_standing_generations_current (service_id) WHERE retired_at IS NULL,
+            INDEX idx_standing_generations_run (run_id)
+        );
+    standing_service_journal:
+      description: Immutable journal of standing desired-state, source-revision, repair, override, orphan, and reset transitions.
+      ddl: |
+        CREATE TABLE standing_service_journal (
+            service_id              UUID NOT NULL REFERENCES standing_services(service_id),
+            sequence                BIGINT NOT NULL CHECK (sequence > 0),
+            operation_id            UUID NOT NULL,
+            generation              BIGINT NOT NULL CHECK (generation > 0),
+            run_id                  UUID NOT NULL REFERENCES runs(run_id),
+            transition              TEXT NOT NULL CHECK (transition IN ('created', 'resumed', 'revised', 'repaired', 'suspended', 'operator_resumed', 'orphaned', 'reset')),
+            previous_effective_state TEXT,
+            effective_state         TEXT NOT NULL CHECK (effective_state IN ('active', 'suspended', 'orphaned')),
+            previous_bundle_hash    TEXT,
+            bundle_hash             TEXT NOT NULL,
+            previous_bundle_source  TEXT,
+            bundle_source           TEXT NOT NULL,
+            actor                   TEXT NOT NULL,
+            reason                  TEXT,
+            poison_provenance       TEXT,
+            occurred_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (service_id, sequence),
+            UNIQUE (service_id, operation_id),
+            INDEX idx_standing_journal_run (run_id, occurred_at)
+        );
     events:
       description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
         projection set), flow (flow_instance projection set, entity_id NULL), global (both NULL — system bootstrap,
@@ -10832,6 +10926,47 @@ platform_tables:
             PRIMARY KEY (run_id, family, fact_key, revision),
             FOREIGN KEY (run_id, revision) REFERENCES run_fork_revisions(run_id, revision) ON DELETE CASCADE,
             INDEX idx_run_fork_fact_revision_snapshot (run_id, revision, family, fact_key)
+        );
+    inbound_publications:
+      description: >-
+        Permanent inbound provider operation/idempotency owner. The row reserves one
+        provider identity, binds its retry-stable semantic fingerprint to one executable
+        event and one platform.inbound_recorded evidence event, and stores the immutable
+        final recipient-plan manifest. Delivery rows and receipts remain execution/outcome
+        authority. A prepared row is transaction-local only; any durable prepared row is corruption.
+      ddl: |
+        CREATE TABLE inbound_publications (
+            publication_id              UUID PRIMARY KEY,
+            provider                    TEXT NOT NULL,
+            entity_id                   UUID NOT NULL,
+            provider_event_id           TEXT NOT NULL,
+            semantic_fingerprint        TEXT NOT NULL,
+            semantic_projection_version TEXT NOT NULL CHECK (semantic_projection_version = 'inbound-semantic-v1'),
+            stable_service_id            UUID NOT NULL REFERENCES standing_services(service_id),
+            package_key                  TEXT NOT NULL,
+            flow_id                      TEXT NOT NULL,
+            instance_id                  TEXT NOT NULL,
+            target_alias                 TEXT NOT NULL,
+            target_flow_instance         TEXT NOT NULL,
+            expected_publication_sequence BIGINT NOT NULL CHECK (expected_publication_sequence >= 0),
+            resolved_run_id              UUID NOT NULL REFERENCES runs(run_id),
+            marker_event_id              UUID UNIQUE REFERENCES events(event_id),
+            publication_event_id         UUID UNIQUE REFERENCES events(event_id),
+            acknowledgement_mode         TEXT NOT NULL CHECK (acknowledgement_mode IN ('after_publish', 'durable_before_dispatch')),
+            recipient_manifest           JSONB NOT NULL DEFAULT '[]',
+            recipient_manifest_fingerprint TEXT NOT NULL DEFAULT '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+            recipient_count              INTEGER NOT NULL DEFAULT 0 CHECK (recipient_count >= 0),
+            original_received_at         TIMESTAMPTZ NOT NULL,
+            original_user_agent          TEXT NOT NULL,
+            original_transport_metadata  JSONB NOT NULL DEFAULT '{}',
+            state                        TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
+            created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            committed_at                 TIMESTAMPTZ,
+            CHECK ((state = 'prepared' AND marker_event_id IS NULL AND publication_event_id IS NULL AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND publication_event_id IS NOT NULL AND committed_at IS NOT NULL)),
+            UNIQUE (provider, entity_id, provider_event_id),
+            INDEX idx_inbound_publications_run (resolved_run_id, created_at),
+            INDEX idx_inbound_publications_service (stable_service_id, created_at),
+            INDEX idx_inbound_publications_state (state, created_at)
         );
     agent_directive_operations:
       description: >-
@@ -14173,14 +14308,20 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/inbound.go
+        - internal/runtime/inbound.go#InboundGateway.handleResolvedWebhook
+        - internal/store/inbound_publication.go#RunInboundPublicationMutation
+        - internal/store/sqlite_inbound_publication.go#RunInboundPublicationMutation
       routing_class: diagnostic_direct_persisted
       scope: entity or global
       payload:
+        publication_id: uuid
+        publication_event_id: uuid
         provider: string
         provider_event_id: string
         entity_id: uuid
       required:
+      - publication_id
+      - publication_event_id
       - provider
       - provider_event_id
       - entity_id
@@ -17877,6 +18018,14 @@ cli_specification:
             normalization: trim only; case-sensitive
             display_projection: full
             display_shortening_eligible: false
+          standing_service:
+            candidate_source: unpromoted
+            scope_mode: unpromoted_full_only
+            scope_rule: global boundedness not promoted; full service UUID
+            normalization_mode: trim_case_sensitive
+            normalization: trim only; case-sensitive
+            display_projection: full
+            display_shortening_eligible: false
         input_rows:
           agent_view_agent: {command: swarm agent view, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
           agent_diagnose_agent: {command: swarm agent diagnose, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
@@ -17949,6 +18098,9 @@ cli_specification:
           event_list_subscriber: {command: swarm event list, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
           event_follow_subscriber: {command: swarm event follow, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
           run_trace_subscriber: {command: swarm run trace, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
+          standing_suspend_service: {command: swarm standing suspend, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
+          standing_resume_service: {command: swarm standing resume, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
+          standing_reset_service: {command: swarm standing reset, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
           secrets_key: {command: 'swarm secrets <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable secret key}
@@ -18442,6 +18594,25 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: destructive control output is implemented but not routed through the shared output-mode owner.
+            standing:
+              command: swarm standing
+              classification: exception
+              exception_rule: group_help
+            standing_suspend:
+              command: swarm standing suspend
+              classification: split
+              owner_issue: '#1712'
+              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
+            standing_resume:
+              command: swarm standing resume
+              classification: split
+              owner_issue: '#1712'
+              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
+            standing_reset:
+              command: swarm standing reset
+              classification: split
+              owner_issue: '#1712'
+              reason: standing desired-state mutation output is implemented but not routed through the shared output-mode owner.
             agent:
               command: swarm agent
               classification: exception
@@ -20670,6 +20841,45 @@ cli_specification:
       implementation_status: implemented
       owner: /v1/rpc health.check
       behavior: Structured authenticated operator health; separate from lightweight /healthz and /readyz process probes.
+    standing_group:
+      command: swarm standing
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      behavior: Bare standing namespace prints group help and performs no runtime mutation.
+    standing_suspend:
+      command: swarm standing suspend <service-id> [--reason <reason>] [--idempotency-key <key>]
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc standing.suspend
+      behavior: Persistently overrides a declaration-owned standing service to suspended and quiesces its current generation through the canonical standing-service desired-state owner.
+      proof_expectations:
+      - exact /v1/rpc standing.suspend call with service_id plus optional reason and idempotency_key
+      - full standing service UUID is required; invalid input and malformed success results fail closed
+      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
+    standing_resume:
+      command: swarm standing resume <service-id> [--reason <reason>] [--idempotency-key <key>]
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc standing.resume
+      behavior: Clears the persistent suspended override and reconciles the standing service from its current declaration and source revision.
+      proof_expectations:
+      - exact /v1/rpc standing.resume call with service_id plus optional reason and idempotency_key
+      - full standing service UUID is required; invalid input and malformed success results fail closed
+      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
+    standing_reset:
+      command: swarm standing reset <service-id> [--reason <reason>] [--idempotency-key <key>]
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc standing.reset
+      behavior: Journaled destructive replacement of the current standing generation followed by fresh materialization under the same stable service identity.
+      proof_expectations:
+      - exact /v1/rpc standing.reset call with service_id plus optional reason and idempotency_key
+      - full standing service UUID is required; invalid input and malformed success results fail closed
+      - no direct DB, store, runtime manager, scheduler, or EventBus mutation
     control_pause:
       command: swarm control pause <run-id> [--idempotency-key <key>] | --all [--idempotency-key <key>]
       group: run_operate
@@ -22473,6 +22683,9 @@ api_specification:
       - run.stop
       - run.pause
       - run.continue
+      - standing.suspend
+      - standing.resume
+      - standing.reset
       - mailbox.decide
       - mailbox.defer
       - mailbox.begin_input
@@ -25621,6 +25834,16 @@ api_specification:
           ok:
             type: boolean
             const: true
+      StandingServiceMutationResult:
+        type: object
+        additionalProperties: false
+        required: [service_id, run_id, generation, effective_state, transition]
+        properties:
+          service_id: {$ref: '#/components/schemas/OpaqueId'}
+          run_id: {$ref: '#/components/schemas/OpaqueId'}
+          generation: {type: integer, minimum: 1}
+          effective_state: {type: string, enum: [active, suspended, orphaned]}
+          transition: {type: string, enum: [suspended, operator_resumed, reset]}
       RuntimeNukeResult:
         type: object
         additionalProperties: false
@@ -26067,6 +26290,14 @@ api_specification:
         - run_id
         properties:
           run_id:
+            $ref: '#/components/schemas/OpaqueId'
+      STANDING_SERVICE_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - service_id
+        properties:
+          service_id:
             $ref: '#/components/schemas/OpaqueId'
       RUN_ALREADY_TERMINAL:
         type: object
@@ -26987,6 +27218,51 @@ api_specification:
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT
+    standing.suspend:
+      tier: must_have
+      description: Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart.
+      scope:
+        required: [write:runs]
+      idempotency: per the convention.
+      params:
+      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: reason, required: false, schema: {type: string}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
+      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
+    standing.resume:
+      tier: must_have
+      description: Clear a persistent standing-service suspension and reconstruct its routes, agents, schedules, and ingress from the currently loaded declaration. Orphaned services refuse until the declaration is restored.
+      scope:
+        required: [write:runs]
+      idempotency: per the convention.
+      params:
+      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: reason, required: false, schema: {type: string}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
+      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
+    standing.reset:
+      tier: must_have
+      description: Destructively quiesce and retire the current standing generation, preserve its evidence, create the deterministic next generation, clear current state, and rematerialize from the declaration without store surgery.
+      scope:
+        required: [write:runs]
+      idempotency: per the convention.
+      params:
+      - {name: service_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: reason, required: false, schema: {type: string}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/StandingServiceMutationResult'}
+      errors: [STANDING_SERVICE_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     run.stop:
       tier: must_have
       description: >

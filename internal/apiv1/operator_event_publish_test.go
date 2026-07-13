@@ -251,7 +251,7 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runStartTestBundleSourceFact(),
-		PayloadValidator: func(eventType string, _ []byte) error {
+		PayloadValidator: func(_ context.Context, eventType string, _ []byte) error {
 			if eventType == "scan.requested" {
 				return errors.New("schema violation")
 			}
@@ -289,7 +289,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runStartTestBundleSourceFact(),
-		PayloadValidator: func(eventType string, _ []byte) error {
+		PayloadValidator: func(_ context.Context, eventType string, _ []byte) error {
 			if eventType != canonicalEventName {
 				return fmt.Errorf("event type = %q, want %s", eventType, canonicalEventName)
 			}
@@ -1155,6 +1155,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
 	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
 	followUpCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.followup"))
 	defer bus.Unsubscribe("scan-orchestrator")
@@ -1518,7 +1519,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
 			BundleSourceFact: runStartTestBundleSourceFact(),
-			PayloadValidator: func(eventType string, payload []byte) error {
+			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
 				if eventType != "scan.requested" {
 					return fmt.Errorf("unexpected event type %q", eventType)
 				}

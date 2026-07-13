@@ -12,6 +12,30 @@ import (
 
 type EventType string
 
+const (
+	EventTypePlatformRuntimeLog     EventType = "platform.runtime_log"
+	EventTypePlatformInboundRecord  EventType = "platform.inbound_recorded"
+	EventTypePlatformAgentDirective EventType = "platform.agent_directive"
+)
+
+func DiagnosticDirectEventTypes() []EventType {
+	return []EventType{
+		EventTypePlatformRuntimeLog,
+		EventTypePlatformAgentDirective,
+		EventTypePlatformInboundRecord,
+	}
+}
+
+func IsDiagnosticDirectEventType(eventType EventType) bool {
+	eventType = EventType(strings.TrimSpace(string(eventType)))
+	for _, candidate := range DiagnosticDirectEventTypes() {
+		if eventType == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 type EventScope string
 
 const (

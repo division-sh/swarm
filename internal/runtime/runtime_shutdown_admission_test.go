@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
@@ -63,33 +64,54 @@ func (s *runtimeShutdownManagerStore) ListPendingSubscribedEvents(context.Contex
 
 type runtimeShutdownInboundStore struct {
 	recorded bool
+	store    runtimebus.EventStore
 }
 
-type cancellationBlockingInboundEventStore struct {
-	*capturingInboundEventStore
+type cancellationBlockingInboundStore struct {
 	entered chan struct{}
+	store   runtimebus.EventStore
 }
 
-func (s *cancellationBlockingInboundEventStore) RunEventMutation(ctx context.Context, _ func(runtimebus.EventMutation) error) error {
+func (s *cancellationBlockingInboundStore) bindTestInboundEventStore(store runtimebus.EventStore) {
+	s.store = store
+}
+
+func (s *cancellationBlockingInboundStore) RunInboundPublicationMutation(ctx context.Context, _ runtimeinbound.Request, _ func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	select {
 	case s.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
-	return ctx.Err()
+	return runtimeinbound.Record{}, ctx.Err()
 }
 
-func (s *runtimeShutdownInboundStore) RecordInboundEvent(context.Context, string, string, string) (bool, error) {
+func (*cancellationBlockingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+	return runtimeinbound.Record{}, false, nil
+}
+
+func (*cancellationBlockingInboundStore) ValidateInboundPublicationIntegrity(context.Context) error {
+	return nil
+}
+
+func (s *runtimeShutdownInboundStore) bindTestInboundEventStore(store runtimebus.EventStore) {
+	s.store = store
+}
+
+func (s *runtimeShutdownInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	s.recorded = true
-	return true, nil
+	return runTestInboundPublication(ctx, s.store, request, true, fn)
 }
 
 func (s *runtimeShutdownInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
 	return InboundTarget{EntityID: "entity-1", EntitySlug: "entity-1"}, nil
 }
 
-func (*runtimeShutdownInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
-	return 0, nil
+func (*runtimeShutdownInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+	return runtimeinbound.Record{}, false, nil
+}
+
+func (*runtimeShutdownInboundStore) ValidateInboundPublicationIntegrity(context.Context) error {
+	return nil
 }
 
 func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {
@@ -255,9 +277,8 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 }
 
 func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testing.T) {
-	eventStore := &cancellationBlockingInboundEventStore{
-		capturingInboundEventStore: &capturingInboundEventStore{},
-		entered:                    make(chan struct{}, 1),
+	eventStore := &cancellationBlockingInboundStore{
+		entered: make(chan struct{}, 1),
 	}
 	bus, err := runtimebus.NewEventBus(eventStore)
 	if err != nil {

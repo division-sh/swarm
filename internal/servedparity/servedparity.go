@@ -35,6 +35,9 @@ const (
 	ScenarioAgentDirectiveOutcomeLifecycle       = "agent_directive_outcome_lifecycle"
 	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
 	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
+	ScenarioStandingServiceSuspendLifecycle      = "standing_service_suspend_lifecycle"
+	ScenarioStandingServiceResumeLifecycle       = "standing_service_resume_lifecycle"
+	ScenarioStandingServiceResetLifecycle        = "standing_service_reset_lifecycle"
 	ScenarioMailboxNoticeAcknowledgmentLifecycle = "mailbox_notice_acknowledgment_lifecycle"
 	ScenarioMailboxBeginInputLifecycle           = "mailbox_begin_input_lifecycle"
 	ScenarioMailboxCancelInputLifecycle          = "mailbox_cancel_input_lifecycle"
@@ -83,6 +86,9 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioAgentDirectiveOutcomeLifecycle, "agent.send_directive", "TestServedParityHarnessAgentDirectiveOutcomeLifecycle"),
 		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
 		servedControlScenario(ScenarioRuntimeResumeIngressLifecycle, "runtime.resume", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
+		servedControlScenario(ScenarioStandingServiceSuspendLifecycle, "standing.suspend", "TestServedParityHarnessStandingServiceLifecycle"),
+		servedControlScenario(ScenarioStandingServiceResumeLifecycle, "standing.resume", "TestServedParityHarnessStandingServiceLifecycle"),
+		servedControlScenario(ScenarioStandingServiceResetLifecycle, "standing.reset", "TestServedParityHarnessStandingServiceLifecycle"),
 		servedMailboxDecisionScenario(ScenarioMailboxNoticeAcknowledgmentLifecycle, "mailbox.acknowledge"),
 		servedMailboxDecisionScenario(ScenarioMailboxBeginInputLifecycle, "mailbox.begin_input"),
 		servedMailboxDecisionScenario(ScenarioMailboxCancelInputLifecycle, "mailbox.cancel_input"),

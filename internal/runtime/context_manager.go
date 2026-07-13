@@ -39,10 +39,11 @@ const (
 	RuntimeContextStateLoaded   RuntimeContextState = "loaded"
 	RuntimeContextStateUnloaded RuntimeContextState = "unloaded"
 
-	RuntimeContextCauseNotLoaded   = "runtime_context_not_loaded"
-	RuntimeContextCauseUnavailable = "runtime_context_unavailable"
-	RuntimeContextCauseUnloaded    = "runtime_context_unloaded"
-	RuntimeContextCauseReplacing   = "runtime_context_replacing"
+	RuntimeContextCauseNotLoaded          = "runtime_context_not_loaded"
+	RuntimeContextCauseUnavailable        = "runtime_context_unavailable"
+	RuntimeContextCauseUnloaded           = "runtime_context_unloaded"
+	RuntimeContextCauseReplacing          = "runtime_context_replacing"
+	RuntimeContextCauseStandingSuppressed = "standing_service_suppressed"
 )
 
 func (c BundleContext) normalized() BundleContext {
@@ -112,13 +113,14 @@ type RuntimeContextDeactivationResult struct {
 }
 
 type RuntimeContextManager struct {
-	mu                       sync.RWMutex
-	availability             RunBundleAvailabilityReader
-	contexts                 map[string]*runtimeContextEntry
-	order                    []string
-	admissionGeneration      string
-	installedTriggerSubjects []packs.Subject
-	capabilitySubjects       []packs.Subject
+	mu                         sync.RWMutex
+	availability               RunBundleAvailabilityReader
+	contexts                   map[string]*runtimeContextEntry
+	order                      []string
+	admissionGeneration        string
+	installedTriggerSubjects   []packs.Subject
+	capabilitySubjects         []packs.Subject
+	suppressedStandingServices map[string]struct{}
 }
 
 type ProcessAdmissionState struct {
@@ -140,10 +142,11 @@ func newRuntimeContextManager(availability RunBundleAvailabilityReader, state Pr
 		return nil, fmt.Errorf("normalize installed provider trigger subjects: %w", err)
 	}
 	manager := &RuntimeContextManager{
-		availability:             availability,
-		contexts:                 map[string]*runtimeContextEntry{},
-		admissionGeneration:      strings.TrimSpace(state.GenerationID),
-		installedTriggerSubjects: installed,
+		availability:               availability,
+		contexts:                   map[string]*runtimeContextEntry{},
+		admissionGeneration:        strings.TrimSpace(state.GenerationID),
+		installedTriggerSubjects:   installed,
+		suppressedStandingServices: map[string]struct{}{},
 	}
 	for _, contextDef := range contexts {
 		if err := manager.Register(contextDef); err != nil {
@@ -289,6 +292,9 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 			continue
 		}
 		for _, target := range entry.context.StandingTargets {
+			if m.standingServiceSuppressedLocked(target.ServiceID) {
+				continue
+			}
 			subject, err := target.CapabilitySubject()
 			if err != nil {
 				return fmt.Errorf("derive standing ingress capability subject: %w", err)
@@ -545,6 +551,15 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 				continue
 			}
 			aliasFound = true
+			if target.Provider != provider {
+				continue
+			}
+			if m.standingServiceSuppressedLocked(target.ServiceID) {
+				return RuntimeIngressContextLookup{
+					Target: target, State: RuntimeContextStateUnloaded,
+					Cause: RuntimeContextCauseStandingSuppressed, Found: true, AliasFound: true,
+				}
+			}
 			state := entry.state
 			if state == "" {
 				state = RuntimeContextStateLoaded
@@ -554,9 +569,6 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 				cause = RuntimeContextCauseUnavailable
 			}
 			out := RuntimeIngressContextLookup{State: state, Cause: cause, AliasFound: true}
-			if target.Provider != provider {
-				continue
-			}
 			out.Found = true
 			out.Target = target
 			if state == RuntimeContextStateLoaded {
@@ -566,6 +578,118 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 		}
 	}
 	return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded, AliasFound: aliasFound}
+}
+
+func (m *RuntimeContextManager) standingServiceSuppressedLocked(serviceID string) bool {
+	if m == nil || strings.TrimSpace(serviceID) == "" {
+		return false
+	}
+	_, suppressed := m.suppressedStandingServices[strings.TrimSpace(serviceID)]
+	return suppressed
+}
+
+// SuppressStandingServiceTargets withdraws process ingress only after the
+// durable desired-state transition commits. Declaration targets remain in the
+// context so alias collision authority and later resume are preserved.
+func (m *RuntimeContextManager) SuppressStandingServiceTargets(serviceID string) error {
+	if m == nil {
+		return nil
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return fmt.Errorf("standing service_id is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.suppressedStandingServices == nil {
+		m.suppressedStandingServices = map[string]struct{}{}
+	}
+	_, alreadySuppressed := m.suppressedStandingServices[serviceID]
+	m.suppressedStandingServices[serviceID] = struct{}{}
+	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+		if !alreadySuppressed {
+			delete(m.suppressedStandingServices, serviceID)
+		}
+		return err
+	}
+	return nil
+}
+
+// PublishStandingServiceTargets replaces stale run/generation/publication
+// facts from committed reconciliation and makes that service visible.
+func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, targets []StandingTarget) error {
+	if m == nil {
+		return nil
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return fmt.Errorf("standing service_id is required")
+	}
+	byBundleAndKey := map[string]StandingTarget{}
+	for _, raw := range targets {
+		target := raw.normalized()
+		if target.ServiceID != serviceID {
+			return fmt.Errorf("standing target service_id %s does not match %s", target.ServiceID, serviceID)
+		}
+		key := target.BundleHash + "\x00" + target.Alias + "\x00" + target.Provider
+		if _, duplicate := byBundleAndKey[key]; duplicate {
+			return fmt.Errorf("duplicate standing target publication for %s/%s", target.Alias, target.Provider)
+		}
+		byBundleAndKey[key] = target
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	replaced := 0
+	planned := map[string]*BundleContext{}
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.context == nil {
+			continue
+		}
+		copied := *entry.context
+		copied.StandingTargets = append([]StandingTarget(nil), entry.context.StandingTargets...)
+		changed := false
+		for i, existing := range copied.StandingTargets {
+			if strings.TrimSpace(existing.ServiceID) != serviceID {
+				continue
+			}
+			key := bundleHash + "\x00" + existing.normalized().Alias + "\x00" + existing.normalized().Provider
+			published, ok := byBundleAndKey[key]
+			if !ok {
+				return fmt.Errorf("committed standing target publication omitted %s/%s", existing.Alias, existing.Provider)
+			}
+			copied.StandingTargets[i] = published
+			delete(byBundleAndKey, key)
+			replaced++
+			changed = true
+		}
+		if changed {
+			planned[bundleHash] = &copied
+		}
+	}
+	if len(byBundleAndKey) != 0 {
+		return fmt.Errorf("committed standing target publication has no loaded declaration owner")
+	}
+	if replaced == 0 && len(targets) > 0 {
+		return fmt.Errorf("standing service %s has no loaded target owner", serviceID)
+	}
+	oldContexts := map[string]*BundleContext{}
+	for bundleHash, contextDef := range planned {
+		oldContexts[bundleHash] = m.contexts[bundleHash].context
+		m.contexts[bundleHash].context = contextDef
+	}
+	_, wasSuppressed := m.suppressedStandingServices[serviceID]
+	delete(m.suppressedStandingServices, serviceID)
+	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+		for bundleHash, contextDef := range oldContexts {
+			m.contexts[bundleHash].context = contextDef
+		}
+		if wasSuppressed {
+			m.suppressedStandingServices[serviceID] = struct{}{}
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *RuntimeContextManager) ReplaceSameBundle(contextDef BundleContext) error {

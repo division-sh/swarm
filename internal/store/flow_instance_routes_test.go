@@ -169,6 +169,56 @@ func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.
 	}
 }
 
+func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	route := runtimebus.FlowInstanceRouteRecord{
+		Identity:       runtimeflowidentity.DeriveRoute("review", "inst-1"),
+		EventPattern:   "review/inst-1/task.started",
+		SubscriberType: "node",
+		SubscriberID:   "reviewer-inst-1",
+		SourceFlow:     "review",
+	}
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (?, 'review', 'template', '{}', 'active', ?)
+	`, route.Identity.InstancePath, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite flow_instances in tx: %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.UpsertFlowInstanceRoute(txctx, route); err != nil {
+		t.Fatalf("UpsertFlowInstanceRoute in sqlite tx: %v", err)
+	}
+	var inTx int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM routing_rules
+		WHERE flow_instance = ? AND is_materialized = TRUE AND status = 'active'
+	`, route.Identity.InstancePath).Scan(&inTx); err != nil {
+		t.Fatalf("count sqlite routing_rules in tx: %v", err)
+	}
+	if inTx != 1 {
+		t.Fatalf("sqlite routing_rules in tx = %d, want 1", inTx)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	var leaked int
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM routing_rules
+		WHERE flow_instance = ? AND is_materialized = TRUE
+	`, route.Identity.InstancePath).Scan(&leaked); err != nil {
+		t.Fatalf("count sqlite routing_rules after rollback: %v", err)
+	}
+	if leaked != 0 {
+		t.Fatalf("sqlite routing_rules leaked after rollback = %d, want 0", leaked)
+	}
+}
+
 func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

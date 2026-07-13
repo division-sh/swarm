@@ -35,6 +35,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"incidents.go":            {},
 		"logs.go":                 {},
 		"run_command.go":          {},
+		"standing.go":             {},
 		"test_command.go":         {},
 	}
 

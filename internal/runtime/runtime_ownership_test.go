@@ -133,6 +133,75 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 	}
 }
 
+func TestRuntimePreparedStartupOwnershipIsConsumedWithoutReacquire(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	var acquires atomic.Int32
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+		StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				acquires.Add(1)
+				return lease, nil
+			},
+		},
+	}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.PrepareInitialStartupOwnership(context.Background()); err != nil {
+		t.Fatalf("PrepareInitialStartupOwnership: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := acquires.Load(); got != 1 {
+		t.Fatalf("startup ownership acquires = %d, want one prepared acquire", got)
+	}
+	if err := rt.ReleasePreparedStartupOwnership(context.Background()); err != nil {
+		t.Fatalf("ReleasePreparedStartupOwnership after Start: %v", err)
+	}
+	if got := lease.released.Load(); got != 0 {
+		t.Fatalf("consumed prepared lease released before Shutdown %d time(s)", got)
+	}
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("startup ownership lease release count = %d, want one", got)
+	}
+}
+
+func TestRuntimePreparedStartupOwnershipCanBeReleasedBeforeStart(t *testing.T) {
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	rt := &Runtime{
+		Stores: Stores{StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				return lease, nil
+			},
+		}},
+		ownerID: "runtime-owner",
+	}
+	if err := rt.PrepareInitialStartupOwnership(context.Background()); err != nil {
+		t.Fatalf("PrepareInitialStartupOwnership: %v", err)
+	}
+	if err := rt.ReleasePreparedStartupOwnership(context.Background()); err != nil {
+		t.Fatalf("ReleasePreparedStartupOwnership: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("startup ownership lease release count = %d, want one", got)
+	}
+	if err := rt.ReleasePreparedStartupOwnership(context.Background()); err != nil {
+		t.Fatalf("second ReleasePreparedStartupOwnership: %v", err)
+	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("second release changed lease count to %d", got)
+	}
+}
+
 func TestRuntimeCleanupStartFailure_ReleasesSharedStoreOwnership(t *testing.T) {
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	ctx, cancel := context.WithCancel(context.Background())

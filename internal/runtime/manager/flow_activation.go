@@ -173,10 +173,9 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		}
 		return true, nil
 	}
-	if strings.TrimSpace(stored.WorkflowName) != strings.TrimSpace(instance.TemplateID) ||
-		strings.TrimSpace(stored.WorkflowVersion) != strings.TrimSpace(req.ContractBundle.WorkflowVersion()) {
-		return false, fmt.Errorf("standing flow instance %s belongs to %s@%s, not %s@%s; explicit reset or migration is required",
-			instance.InstancePath, stored.WorkflowName, stored.WorkflowVersion, instance.TemplateID, req.ContractBundle.WorkflowVersion())
+	if strings.TrimSpace(stored.WorkflowName) != strings.TrimSpace(instance.TemplateID) {
+		return false, fmt.Errorf("standing flow instance %s belongs to template %s, not %s; run `swarm standing reset %s`",
+			instance.InstancePath, stored.WorkflowName, instance.TemplateID, instance.InstanceID)
 	}
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, instance.TemplateID)
 	if !ok {

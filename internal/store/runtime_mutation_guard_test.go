@@ -843,6 +843,7 @@ func sqlitePipelineTxHelper(site runtimeWriterCallSite) bool {
 	}
 	switch site.Path {
 	case "internal/runtime/pipeline/workflow_instance_store_sqlite.go",
+		"internal/runtime/pipeline/standing_service_store.go",
 		"internal/runtime/pipeline/system_node_receipt_store.go":
 		return true
 	default:

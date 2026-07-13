@@ -32,6 +32,8 @@ type Result struct {
 	Runs                 []QuiescedRun
 	Deliveries           []QuiescedDelivery
 	PipelineReceiptCount int
+	SessionCount         int
+	TimerCount           int
 }
 
 type ServeAbandonStore interface {

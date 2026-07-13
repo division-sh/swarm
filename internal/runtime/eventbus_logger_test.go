@@ -48,7 +48,7 @@ func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {
 		},
 	})
 
-	if err := validator("task.completed", []byte(`{"ok":true}`)); err != nil {
+	if err := validator(context.Background(), "task.completed", []byte(`{"ok":true}`)); err != nil {
 		t.Fatalf("validator(valid payload): %v", err)
 	}
 }
@@ -64,7 +64,7 @@ func TestRuntimePayloadValidator_RejectsInvalidJSON(t *testing.T) {
 		},
 	})
 
-	if err := validator("task.completed", []byte(`{"ok":`)); err == nil {
+	if err := validator(context.Background(), "task.completed", []byte(`{"ok":`)); err == nil {
 		t.Fatal("expected invalid JSON payload to be rejected")
 	}
 }
@@ -85,7 +85,7 @@ func TestRuntimePayloadValidator_RejectsSchemaMismatch(t *testing.T) {
 		},
 	})
 
-	if err := validator("task.completed", []byte(`{"ok":"yes"}`)); err == nil {
+	if err := validator(context.Background(), "task.completed", []byte(`{"ok":"yes"}`)); err == nil {
 		t.Fatal("expected schema-invalid payload to be rejected")
 	}
 }
@@ -105,7 +105,7 @@ func TestRuntimePayloadValidator_AllowsUndeclaredCanonicalContextFields(t *testi
 		},
 	})
 
-	err := validator("task.completed", []byte(`{
+	err := validator(context.Background(), "task.completed", []byte(`{
 			"ok": true,
 			"entity_id": "ent-1",
 			"flow_instance": "flow/inst-1",
@@ -142,7 +142,7 @@ func TestRuntimePayloadValidator_RejectsTriggerSchemaFieldWhenTargetSchemaDisall
 		},
 	})
 
-	err := validator("task.completed", []byte(`{
+	err := validator(context.Background(), "task.completed", []byte(`{
 			"ok": true,
 			"score": 10,
 			"trigger_event_type": "task.started"
@@ -168,7 +168,7 @@ func TestRuntimePayloadValidator_RejectsUndeclaredCallerPayloadFieldWhenAddition
 		},
 	})
 
-	err := validator("task.completed", []byte(`{
+	err := validator(context.Background(), "task.completed", []byte(`{
 			"ok": true,
 			"surprise": "x"
 		}`))
@@ -200,7 +200,7 @@ func TestRuntimePayloadValidator_RejectsScalarAliasUUIDViolationFromEmitRegistry
 	emitRegistry := runtimetools.NewEmitRegistry(source, nil)
 	validator := newRuntimePayloadValidator(nil, emitRegistry.EventSchemaSnapshot())
 
-	if err := validator("task.completed", []byte(`{"trace_id":"not-a-uuid"}`)); err == nil {
+	if err := validator(context.Background(), "task.completed", []byte(`{"trace_id":"not-a-uuid"}`)); err == nil {
 		t.Fatal("expected scalar-alias uuid violation to be rejected")
 	}
 }

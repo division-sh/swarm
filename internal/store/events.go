@@ -55,7 +55,7 @@ func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQuery
 	return db
 }
 
-func (s *PostgresStore) SetEventPayloadValidator(validator func(eventType string, payload []byte) error) {
+func (s *PostgresStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
 	if s == nil {
 		return
 	}
@@ -65,11 +65,11 @@ func (s *PostgresStore) SetEventPayloadValidator(validator func(eventType string
 // validateEventPayload is the store-side canonical admission guard for append
 // paths that may not pass through an emit-surface owner immediately before
 // persistence.
-func (s *PostgresStore) validateEventPayload(eventType string, payload []byte) error {
+func (s *PostgresStore) validateEventPayload(ctx context.Context, eventType string, payload []byte) error {
 	if s == nil || s.eventPayloadValidator == nil {
 		return nil
 	}
-	if err := s.eventPayloadValidator(strings.TrimSpace(eventType), payload); err != nil {
+	if err := s.eventPayloadValidator(ctx, strings.TrimSpace(eventType), payload); err != nil {
 		return fmt.Errorf("validate event payload: %w", err)
 	}
 	return nil
@@ -88,6 +88,9 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.AppendEventTx(txctx, tx, evt)
 		})
+	}
+	if err := validateDiagnosticDirectOwner(ctx, evt); err != nil {
+		return err
 	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -768,7 +771,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		return err
 	}
 	sourceRoute, targetRoute, targetSet := eventRouteStorageEnvelope(evt)
-	if err := s.validateEventPayload(name, payload); err != nil {
+	if err := s.validateEventPayload(ctx, name, payload); err != nil {
 		return err
 	}
 	execFn := s.DB.ExecContext

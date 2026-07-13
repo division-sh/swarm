@@ -10,7 +10,8 @@ import (
 )
 
 var flowInstanceEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))
-var standingRunNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("standing-flow-run"))
+var standingServiceNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("standing-flow-service"))
+var standingRunNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("standing-flow-generation"))
 
 type Instance struct {
 	TemplateID     string
@@ -182,18 +183,22 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	}
 }
 
-func Standing(source semanticview.Source, flowID, bundleHash string) Instance {
-	flowID = strings.TrimSpace(flowID)
-	bundleHash = strings.TrimSpace(bundleHash)
-	identity := strings.TrimPrefix(bundleHash, "bundle-v1:sha256:")
-	return Derive(source, flowID, identity)
-}
-
-func StandingRunID(bundleHash, packageKey, flowID string) string {
+func StandingServiceID(packageKey, flowID string) string {
 	material := strings.Join([]string{
-		strings.TrimSpace(bundleHash),
 		strings.TrimSpace(packageKey),
 		strings.TrimSpace(flowID),
+	}, "\x00")
+	return uuid.NewSHA1(standingServiceNamespace, []byte(material)).String()
+}
+
+func StandingForService(source semanticview.Source, flowID, serviceID string) Instance {
+	return Derive(source, strings.TrimSpace(flowID), strings.TrimSpace(serviceID))
+}
+
+func StandingGenerationRunID(serviceID string, generation int64) string {
+	material := strings.Join([]string{
+		strings.TrimSpace(serviceID),
+		fmt.Sprintf("%d", generation),
 	}, "\x00")
 	return uuid.NewSHA1(standingRunNamespace, []byte(material)).String()
 }

@@ -60,7 +60,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	ch := bus.Subscribe(agentID, eventType)
 	defer bus.Unsubscribe(agentID)
 
-	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -102,7 +102,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
@@ -163,7 +163,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	ch := bus.Subscribe(agentID, eventType)
 	defer bus.Unsubscribe(agentID)
 
-	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -205,7 +205,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
@@ -266,7 +266,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	ch := bus.Subscribe(agentID, eventType)
 	defer bus.Unsubscribe(agentID)
 
-	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -310,7 +310,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
-	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_resume",
 		ControlledBy: "test",
 	})
@@ -1018,12 +1018,15 @@ func seedPostgresInboundGatewayRuntime(
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "observer",
-			FlowID: "global",
-			Type:   "stub",
-			Model:  "regular",
-			Config: []byte(`{}`),
+			ID:            agentID,
+			Role:          "observer",
+			FlowID:        "global",
+			Type:          "stub",
+			Model:         "regular",
+			FlowPath:      flowInstance,
+			EntityID:      entityID,
+			Subscriptions: []string{"inbound." + provider},
+			Config:        []byte(`{}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -1031,6 +1034,7 @@ func seedPostgresInboundGatewayRuntime(
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
+	ensureBoundedStandingTarget(t, ctx, pg, runID, entityID, provider)
 }
 
 func seedSQLiteInboundGatewayRuntime(
@@ -1085,6 +1089,8 @@ func seedSQLiteInboundGatewayRuntime(
 			FlowID:        "global",
 			Type:          "stub",
 			Model:         "regular",
+			FlowPath:      flowInstance,
+			EntityID:      entityID,
 			Config:        []byte(`{}`),
 			Subscriptions: []string{"inbound." + provider},
 		},
@@ -1094,6 +1100,7 @@ func seedSQLiteInboundGatewayRuntime(
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
+	ensureBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, provider)
 }
 
 func loadPostgresInboundProviderEventID(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) string {

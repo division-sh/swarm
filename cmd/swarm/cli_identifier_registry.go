@@ -21,6 +21,7 @@ const (
 	cliIdentifierFamilyFlowInstance cliIdentifierFamily = "flow_instance"
 	cliIdentifierFamilyContext      cliIdentifierFamily = "context"
 	cliIdentifierFamilySubscriber   cliIdentifierFamily = "subscriber"
+	cliIdentifierFamilyStanding     cliIdentifierFamily = "standing_service"
 )
 
 type cliIdentifierInputMode string
@@ -212,6 +213,15 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 		NormalizationRule: "trim only; case-sensitive",
 		DisplayProjection: cliIdentifierDisplayFull,
 	},
+	cliIdentifierFamilyStanding: {
+		Family:            cliIdentifierFamilyStanding,
+		CandidateSource:   cliIdentifierSourceUnpromoted,
+		ScopeMode:         cliIdentifierScopeUnpromoted,
+		ScopeRule:         "global boundedness not promoted; full service UUID",
+		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
+		NormalizationRule: "trim only; case-sensitive",
+		DisplayProjection: cliIdentifierDisplayFull,
+	},
 }
 
 // This is the living public-input ledger. A row describes input semantics, not
@@ -299,6 +309,10 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event follow", Selector: "flag:subscriber-id", Family: cliIdentifierFamilySubscriber, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run trace", Selector: "flag:subscriber-id", Family: cliIdentifierFamilySubscriber, Mode: cliIdentifierModeFullOnly},
 
+	{Command: "swarm standing suspend", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
+	{Command: "swarm standing resume", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
+	{Command: "swarm standing reset", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
+
 	{Command: "swarm <mutating>", Selector: "flag:idempotency-key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "caller-authored retry key"},
 	{Command: "swarm connections <key>", Selector: "arg:key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "authored stable connection key"},
 	{Command: "swarm secrets <key>", Selector: "arg:key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "authored stable secret key"},
@@ -352,6 +366,8 @@ func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIden
 		return cliIdentifierSourceLocalContext, cliIdentifierScopeLocalBounded, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilySubscriber:
 		return cliIdentifierSourcePolymorphic, cliIdentifierScopePolymorphicFull, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyStanding:
+		return cliIdentifierSourceUnpromoted, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
 	default:
 		return "", "", "", false
 	}

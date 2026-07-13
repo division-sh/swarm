@@ -438,6 +438,14 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		return "", fmt.Errorf("predicate is required")
 	}
 	predicate = strings.ReplaceAll(predicate,
+		"current_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		sqliteBundleHashPredicate("current_bundle_hash"),
+	)
+	predicate = strings.ReplaceAll(predicate,
+		"created_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		sqliteBundleHashPredicate("created_bundle_hash"),
+	)
+	predicate = strings.ReplaceAll(predicate,
 		"bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("bundle_hash"),
 	)

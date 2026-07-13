@@ -150,7 +150,52 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 	}
 }
 
-func TestPostgresDiagnosticDirectWritersUseAdmissionFactsAndRemainNonRouted(t *testing.T) {
+func TestSQLiteDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	assertDiagnosticDirectEventsRequireClosedTypedOwners(t, func(ctx context.Context, evt events.Event) error {
+		return store.AppendEvent(ctx, evt)
+	})
+}
+
+func TestPostgresDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := &PostgresStore{DB: db}
+	assertDiagnosticDirectEventsRequireClosedTypedOwners(t, func(ctx context.Context, evt events.Event) error {
+		return store.AppendEvent(ctx, evt)
+	})
+}
+
+func assertDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T, appendEvent func(context.Context, events.Event) error) {
+	t.Helper()
+	for _, eventType := range []string{
+		diagnosticDirectRuntimeLog,
+		diagnosticDirectInboundRecord,
+		diagnosticDirectAgentDirective,
+		"platform.unregistered_diagnostic",
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			evt := eventtest.DiagnosticDirect(
+				uuid.NewString(), events.EventType(eventType), "test", "", json.RawMessage(`{"ok":true}`),
+				0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			err := appendEvent(context.Background(), evt)
+			if err == nil {
+				t.Fatalf("generic append accepted diagnostic-direct event %s", eventType)
+			}
+			if eventType == "platform.unregistered_diagnostic" {
+				if !strings.Contains(err.Error(), "not in the closed catalog") {
+					t.Fatalf("unknown diagnostic-direct error = %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), "requires its typed persistence owner") {
+				t.Fatalf("typed diagnostic-direct error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -165,24 +210,6 @@ func TestPostgresDiagnosticDirectWritersUseAdmissionFactsAndRemainNonRouted(t *t
 		t.Fatalf("RuntimeLogger.Log: %v", err)
 	}
 
-	entityID := uuid.NewString()
-	providerEventID := "provider-event-admission"
-	provider := "webhook"
-	inserted, err := pg.RecordInboundEvent(ctx, providerEventID, entityID, provider)
-	if err != nil {
-		t.Fatalf("RecordInboundEvent: %v", err)
-	}
-	if !inserted {
-		t.Fatal("RecordInboundEvent inserted=false, want first insert")
-	}
-	duplicate, err := pg.RecordInboundEvent(ctx, providerEventID, entityID, provider)
-	if err != nil {
-		t.Fatalf("RecordInboundEvent duplicate: %v", err)
-	}
-	if duplicate {
-		t.Fatal("RecordInboundEvent duplicate inserted=true, want false")
-	}
-
 	logEventID, logRunID, logCreatedAt := loadPostgresAdmissionEventFacts(t, ctx, db, `
 		SELECT event_id::text, COALESCE(run_id::text, ''), created_at
 		FROM events
@@ -193,18 +220,7 @@ func TestPostgresDiagnosticDirectWritersUseAdmissionFactsAndRemainNonRouted(t *t
 		t.Fatalf("runtime_log facts id=%q run=%q created_at=%s, want id/no-run/created", logEventID, logRunID, logCreatedAt)
 	}
 
-	inboundEventID, inboundRunID, inboundCreatedAt := loadPostgresAdmissionEventFacts(t, ctx, db, `
-		SELECT event_id::text, COALESCE(run_id::text, ''), created_at
-		FROM events
-		WHERE event_name = 'platform.inbound_recorded'
-		  AND idempotency_key = $1
-	`, inboundEventIdempotencyKey(providerEventID, entityID, provider))
-	if inboundEventID == "" || inboundRunID != "" || inboundCreatedAt.IsZero() {
-		t.Fatalf("inbound_recorded facts id=%q run=%q created_at=%s, want id/no-run/created", inboundEventID, inboundRunID, inboundCreatedAt)
-	}
-
 	assertPostgresNoDeliveries(t, ctx, db, logEventID)
-	assertPostgresNoDeliveries(t, ctx, db, inboundEventID)
 }
 
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {

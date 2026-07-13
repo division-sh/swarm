@@ -19,6 +19,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -76,6 +77,210 @@ func (telegramPhraseBotLLMRuntime) ContinueSession(_ context.Context, session *r
 
 func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *runtimellm.Session) error {
 	return nil
+}
+func TestServedParityHarnessStandingServiceLifecycle(t *testing.T) {
+	scenarios := []servedparity.Scenario{
+		servedparity.MustScenario(servedparity.ScenarioStandingServiceSuspendLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioStandingServiceResumeLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle),
+	}
+	servedparity.RunScenarioGroup(t, scenarios, runServedStandingServiceLifecycleBackendProof)
+}
+
+func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	telegramCalls := make(chan struct{}, 4)
+	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		telegramCalls <- struct{}{}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(telegram.Close)
+	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	configureStandingLifecycleCredentials(t)
+
+	var db *sql.DB
+	var opts serveOptions
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		sqlitePath := filepath.Join(t.TempDir(), "standing-lifecycle.sqlite")
+		oldBuildStores := buildStoresForServe
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				db = stores.SQLDB
+			}
+			return stores, err
+		}
+		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		opts = serveOptions{
+			ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+			ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		}
+	case servedparity.BackendExplicitPostgres:
+		dsn, _, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		oldBuildStores := buildStoresForServe
+		oldWorkspace := configuredWorkspaceLifecycleForServe
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			pg, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				return storeBundle{}, err
+			}
+			if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+				_ = pg.DB.Close()
+				return storeBundle{}, err
+			}
+			db = pg.DB
+			return selectedPostgresStoreBundle(pg, cfg), nil
+		}
+		configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+			return serveRuntimeWorkspaceStub{}, nil
+		}
+		t.Cleanup(func() {
+			buildStoresForServe = oldBuildStores
+			configuredWorkspaceLifecycleForServe = oldWorkspace
+		})
+		opts = serveOptions{
+			ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot,
+			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
+			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		}
+	default:
+		t.Fatalf("unknown standing served parity backend %q", backend)
+	}
+
+	first := startServeRuntimeTestProcess(t, opts)
+	first.waitForReadyLine()
+	if db == nil {
+		t.Fatal("standing served parity SQLDB is required")
+	}
+	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
+	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, db, string(backend))
+	suspendKey := "standing-suspend-" + string(backend)
+	suspended := invokeServedStandingOperation(t, firstEndpoint, "standing.suspend", serviceID, suspendKey)
+	if suspended.EffectiveState != "suspended" || suspended.Transition != "suspended" || suspended.RunID != firstRunID {
+		t.Fatalf("%s suspend result = %#v", backend, suspended)
+	}
+	replayedSuspend := invokeServedStandingOperation(t, firstEndpoint, "standing.suspend", serviceID, suspendKey)
+	if replayedSuspend != suspended {
+		t.Fatalf("%s suspend replay = %#v, want %#v", backend, replayedSuspend, suspended)
+	}
+	requireStandingTelegramUnavailable(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9001)
+	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "suspended", "paused")
+	if code := first.stop(); code != 0 {
+		t.Fatalf("%s first standing serve exit = %d", backend, code)
+	}
+
+	second := startServeRuntimeTestProcess(t, opts)
+	second.waitForReadyLine()
+	secondOutput := second.outputString()
+	if !strings.Contains(secondOutput, "suspended") || !strings.Contains(secondOutput, "swarm standing resume "+serviceID) {
+		t.Fatalf("%s restart readiness omitted suspended standing story:\n%s", backend, secondOutput)
+	}
+	secondEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, secondOutput) + "/v1/rpc"
+	resumed := invokeServedStandingOperation(t, secondEndpoint, "standing.resume", serviceID, "standing-resume-"+string(backend))
+	if resumed.EffectiveState != "active" || resumed.Transition != "operator_resumed" || resumed.RunID != firstRunID {
+		t.Fatalf("%s resume result = %#v", backend, resumed)
+	}
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002); entity == "" {
+		t.Fatalf("%s resumed standing service returned empty entity", backend)
+	}
+	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "resume")
+	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
+
+	resetKey := "standing-reset-" + string(backend)
+	reset := invokeServedStandingOperation(t, secondEndpoint, "standing.reset", serviceID, resetKey)
+	if reset.EffectiveState != "active" || reset.Transition != "reset" || reset.Generation != firstGeneration+1 || reset.RunID == firstRunID {
+		t.Fatalf("%s reset result = %#v", backend, reset)
+	}
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003); entity == "" {
+		t.Fatalf("%s reset standing service returned empty entity", backend)
+	}
+	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "reset")
+	replayedReset := invokeServedStandingOperation(t, secondEndpoint, "standing.reset", serviceID, resetKey)
+	if replayedReset != reset {
+		t.Fatalf("%s reset replay = %#v, want %#v", backend, replayedReset, reset)
+	}
+	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
+	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
+	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
+	if code := second.stop(); code != 0 {
+		t.Fatalf("%s second standing serve exit = %d", backend, code)
+	}
+}
+
+type servedStandingOperationResult struct {
+	ServiceID      string `json:"service_id"`
+	RunID          string `json:"run_id"`
+	Generation     int64  `json:"generation"`
+	EffectiveState string `json:"effective_state"`
+	Transition     string `json:"transition"`
+}
+
+func invokeServedStandingOperation(t *testing.T, endpoint, method, serviceID, idempotencyKey string) servedStandingOperationResult {
+	t.Helper()
+	var result servedStandingOperationResult
+	requireServedJSONRPCResult(t, endpoint, method, map[string]any{
+		"service_id": serviceID, "reason": "served parity proof", "idempotency_key": idempotencyKey,
+	}, &result)
+	return result
+}
+
+func configureStandingLifecycleCredentials(t *testing.T) {
+	t.Helper()
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	credentials, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+		if err := credentials.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("set credential %s: %v", key, err)
+		}
+	}
+}
+
+func loadServedStandingOwner(t *testing.T, db *sql.DB, backend string) (serviceID, runID string, generation int64) {
+	t.Helper()
+	query := `SELECT service_id, current_run_id, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
+	if backend == string(servedparity.BackendExplicitPostgres) {
+		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
+	}
+	if err := db.QueryRowContext(context.Background(), query).Scan(&serviceID, &runID, &generation); err != nil {
+		t.Fatalf("%s load standing owner: %v", backend, err)
+	}
+	return serviceID, runID, generation
+}
+
+func assertServedStandingState(t *testing.T, db *sql.DB, backend, serviceID, runID string, generation int64, effectiveState, runStatus string) {
+	t.Helper()
+	query := `
+		SELECT ss.current_run_id, ss.current_generation, ss.effective_state, r.status
+		FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
+		WHERE ss.service_id = ?`
+	args := []any{serviceID}
+	if backend == string(servedparity.BackendExplicitPostgres) {
+		query = `
+			SELECT ss.current_run_id::text, ss.current_generation, ss.effective_state, r.status
+			FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
+			WHERE ss.service_id = $1::uuid`
+	}
+	var gotRunID, gotState, gotRunStatus string
+	var gotGeneration int64
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&gotRunID, &gotGeneration, &gotState, &gotRunStatus); err != nil {
+		t.Fatalf("%s load standing state: %v", backend, err)
+	}
+	if gotRunID != runID || gotGeneration != generation || gotState != effectiveState || gotRunStatus != runStatus {
+		t.Fatalf("%s standing state = run:%s generation:%d state:%s run_status:%s", backend, gotRunID, gotGeneration, gotState, gotRunStatus)
+	}
 }
 
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
@@ -165,7 +370,6 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
-	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, nil)
 
 	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
 	if err != nil {
@@ -175,24 +379,18 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	var runs, instances, entities int
 	var standingRunID string
 	if err := sqliteStore.DB.QueryRow(`
-		SELECT es.run_id
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		JOIN runs r ON r.run_id = es.run_id
-		WHERE es.entity_id = ?
-		  AND fi.flow_template = 'telegram-ingress'
-		  AND json_extract(es.fields, '$.activation') = 'standing'
-		  AND r.status = 'running'
-		  AND r.bundle_hash IS NOT NULL
-	`, firstEntity).Scan(&standingRunID); err != nil {
+		SELECT current_run_id
+		FROM standing_services
+		WHERE flow_id = 'telegram-chat'
+		  AND declaration_present = TRUE
+		  AND effective_state = 'active'
+	`).Scan(&standingRunID); err != nil {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
 	if err := sqliteStore.DB.QueryRow(`
-		SELECT COUNT(DISTINCT es.run_id)
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = 'telegram-ingress'
-		  AND json_extract(es.fields, '$.activation') = 'standing'
+		SELECT COUNT(*)
+		FROM standing_services
+		WHERE flow_id = 'telegram-chat'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -233,6 +431,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if entityEvents == 0 || wrongRunEvents != 0 {
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
+	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, nil)
 }
 
 func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
@@ -348,13 +547,6 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
-	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, func(t *testing.T) {
-		var reopenErr error
-		runtimePG, reopenErr = store.NewPostgresStore(dsn)
-		if reopenErr != nil {
-			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
-		}
-	})
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -364,24 +556,18 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	var runs, instances, entities int
 	var standingRunID string
 	if err := db.QueryRow(`
-		SELECT es.run_id::text
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		JOIN runs r ON r.run_id = es.run_id
-		WHERE es.entity_id = $1::uuid
-		  AND fi.flow_template = 'telegram-ingress'
-		  AND es.fields->>'activation' = 'standing'
-		  AND r.status = 'running'
-		  AND r.bundle_hash IS NOT NULL
-	`, entity).Scan(&standingRunID); err != nil {
+		SELECT current_run_id::text
+		FROM standing_services
+		WHERE flow_id = 'telegram-chat'
+		  AND declaration_present = TRUE
+		  AND effective_state = 'active'
+	`).Scan(&standingRunID); err != nil {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
 	if err := db.QueryRow(`
-		SELECT COUNT(DISTINCT es.run_id)
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = 'telegram-ingress'
-		  AND es.fields->>'activation' = 'standing'
+		SELECT COUNT(*)
+		FROM standing_services
+		WHERE flow_id = 'telegram-chat'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -422,9 +608,16 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if entityEvents == 0 || wrongRunEvents != 0 {
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
+	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, func(t *testing.T) {
+		var reopenErr error
+		runtimePG, reopenErr = store.NewPostgresStore(dsn)
+		if reopenErr != nil {
+			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
+		}
+	})
 }
 
-func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, contractsRoot string, prepare func(*testing.T)) {
+func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, contractsRoot, originalRunID string, prepare func(*testing.T)) {
 	t.Helper()
 	packagePath := filepath.Join(contractsRoot, "package.yaml")
 	basePackage, err := os.ReadFile(packagePath)
@@ -438,13 +631,23 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 		t.Fatalf("read standing flow schema: %v", err)
 	}
 	type candidateMutation struct {
-		name  string
-		apply func(*testing.T)
+		name       string
+		apply      func(*testing.T)
+		wantOutput []string
 	}
 	mutations := []candidateMutation{
-		{name: "package identity renamed", apply: func(t *testing.T) {
+		{name: "source revision one", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.1"`, 1))
+		}, wantOutput: []string{" revised run=" + originalRunID}},
+		{name: "source revision two", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.2"`, 1))
+		}, wantOutput: []string{" revised run=" + originalRunID}},
+		{name: "source revision three", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.3"`, 1))
+		}, wantOutput: []string{" revised run=" + originalRunID}},
+		{name: "package manifest name revised", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), "name: standing-telegram-proof", "name: renamed-standing-proof", 1))
-		}},
+		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "standing declaration removed", apply: func(t *testing.T) {
 			before := string(basePackage)
 			start := strings.Index(before, "flows:\n")
@@ -452,7 +655,28 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 				t.Fatal("flows declaration not found")
 			}
 			writeStandingCandidateFile(t, packagePath, before[:start]+"flows: []\n")
-		}},
+		}, wantOutput: []string{" orphaned declaration_removed=true"}},
+		{name: "standing changed to non-standing", apply: func(t *testing.T) {
+			before := string(basePackage)
+			standingBlock := `    activation: standing
+    ingress:
+      alias: chat
+      providers:
+        - provider: telegram
+          signing_secret: webhook_signing.telegram
+`
+			changed := strings.Replace(before, standingBlock, "", 1)
+			if changed == before {
+				t.Fatal("standing activation block not found")
+			}
+			writeStandingCandidateFile(t, packagePath, changed)
+			changedNodes := strings.Replace(string(baseNodes), "    inbound.telegram:\n      activity:", "    inbound.telegram:\n      select_or_create_entity:\n        by:\n          service_id: payload.provider\n      activity:", 1)
+			if changedNodes == string(baseNodes) {
+				t.Fatal("standing handler marker not found")
+			}
+			writeStandingCandidateFile(t, nodesPath, changedNodes)
+			t.Cleanup(func() { _ = os.WriteFile(nodesPath, baseNodes, 0o600) })
+		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
 			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-ingress-v2")
 			if err := os.Rename(flowDir, renamedDir); err != nil {
@@ -462,9 +686,10 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 				_ = os.Rename(renamedDir, flowDir)
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
-			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-ingress", "telegram-ingress-v2"))
-		}},
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-chat", "name: telegram-chat-v2", 1))
+			writeStandingCandidateFile(t, filepath.Join(renamedDir, "nodes.yaml"), strings.ReplaceAll(string(baseNodes), "telegram-chat.telegram_send_message", "telegram-chat-v2.telegram_send_message"))
+			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-chat", "telegram-chat-v2"))
+		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
 	}
 	for _, mutation := range mutations {
 		mutation := mutation
@@ -477,7 +702,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 			if prepare != nil {
 				prepare(t)
 			}
-			requireChangedStandingColdStartRejected(t, opts)
+			requireChangedStandingColdStartReconciled(t, opts, mutation.wantOutput...)
 		})
 	}
 	writeStandingCandidateFile(t, packagePath, string(basePackage))
@@ -490,18 +715,48 @@ func writeStandingCandidateFile(t testing.TB, path, body string) {
 	}
 }
 
-func requireChangedStandingColdStartRejected(t *testing.T, opts serveOptions) {
+func requireChangedStandingColdStartReconciled(t *testing.T, opts serveOptions, wantOutput ...string) {
 	t.Helper()
 	process := startServeRuntimeTestProcess(t, opts)
-	code, exited := process.waitForExit(15 * time.Second)
-	if !exited {
-		process.cleanup()
-		t.Fatal("changed standing bundle did not fail startup")
+	process.waitForReadyLine()
+	if code := process.stop(); code != 0 {
+		t.Fatalf("changed standing bundle exit = %d\n%s", code, process.outputString())
 	}
-	process.recordStopped(code)
 	output := process.outputString()
-	if code == 0 || !strings.Contains(output, "outside candidate bundle set") || !strings.Contains(output, "serve the admitted bundle or perform an explicit reset/migration") {
-		t.Fatalf("changed standing bundle exit/output = %d\n%s", code, output)
+	for _, want := range wantOutput {
+		if !strings.Contains(output, want) {
+			t.Fatalf("changed standing bundle output omitted %q:\n%s", want, output)
+		}
+	}
+}
+
+func requireStandingTelegramUnavailable(t testing.TB, baseURL string, updateID int) {
+	t.Helper()
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"chat":{"id":42},"text":"hello %d"}}`, updateID, updateID, updateID))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new suspended webhook request: %v", err)
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send suspended webhook: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		var payload any
+		_ = json.NewDecoder(resp.Body).Decode(&payload)
+		t.Fatalf("suspended webhook status=%d payload=%v, want %d", resp.StatusCode, payload, http.StatusServiceUnavailable)
+	}
+}
+
+func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, backend servedparity.Backend, phase string) {
+	t.Helper()
+	select {
+	case <-calls:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s timed out waiting for standing Telegram side effect after %s", backend, phase)
 	}
 }
 

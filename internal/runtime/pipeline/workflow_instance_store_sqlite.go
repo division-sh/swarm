@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -235,12 +236,18 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if createOnly {
+			allowRebind := standingGenerationRebindAllowed(txctx)
 			exists, err := workflowInstanceSQLiteCreateTargetExists(txctx, tx, runID, rowID, storageRef)
 			if err != nil {
 				return err
 			}
-			if exists {
+			if exists && !allowRebind {
 				return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
+			}
+			if allowRebind {
+				if err := admitStandingGenerationRebindSQLite(txctx, tx, runID, rowID, storageRef, instance.WorkflowName); err != nil {
+					return err
+				}
 			}
 		}
 		previous, err := s.loadTrackedEntityStateProjectionSQLite(txctx, tx, runID, rowID)
@@ -277,12 +284,23 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			return err
 		}
 		if createOnly {
-			if _, err := tx.ExecContext(txctx, `
+			flowInstanceInsert := `
 				INSERT INTO flow_instances (
 					instance_id, flow_template, mode, config, status, created_at
 				)
 				VALUES (?, ?, ?, ?, 'active', ?)
-			`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), now); err != nil {
+			`
+			if standingGenerationRebindAllowed(txctx) {
+				flowInstanceInsert += `
+					ON CONFLICT(instance_id) DO UPDATE SET
+						flow_template = excluded.flow_template,
+						mode = excluded.mode,
+						config = excluded.config,
+						status = 'active',
+						terminated_at = NULL
+				`
+			}
+			if _, err := tx.ExecContext(txctx, flowInstanceInsert, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), now); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `
@@ -362,6 +380,28 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}
 		return nil
 	})
+}
+
+func admitStandingGenerationRebindSQLite(ctx context.Context, tx *sql.Tx, runID, rowID, storageRef, workflowName string) error {
+	var sameRunExists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?)`, runID, rowID).Scan(&sameRunExists); err != nil {
+		return err
+	}
+	if sameRunExists {
+		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
+	}
+	var existingTemplate string
+	err := tx.QueryRowContext(ctx, `SELECT flow_template FROM flow_instances WHERE instance_id = ?`, storageRef).Scan(&existingTemplate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(existingTemplate) != strings.TrimSpace(workflowName) {
+		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
+	}
+	return nil
 }
 
 func (s *WorkflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context, rows *sql.Rows, runID string) ([]WorkflowInstance, error) {

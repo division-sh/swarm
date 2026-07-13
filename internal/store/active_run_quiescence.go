@@ -186,6 +186,14 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		}
 		out.PipelineReceiptCount++
 	}
+	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, runIDs, out.ReasonCode, now)
+	if err != nil {
+		return runtimerunquiescence.Result{}, err
+	}
+	out.TimerCount, err = cancelActiveRunTimersTx(ctx, tx, runIDs)
+	if err != nil {
+		return runtimerunquiescence.Result{}, err
+	}
 	for _, run := range runs {
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
@@ -344,6 +352,14 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			}
 			attemptOut.PipelineReceiptCount++
 		}
+		attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, attemptRunIDs, attemptOut.ReasonCode, now)
+		if err != nil {
+			return err
+		}
+		attemptOut.TimerCount, err = sqliteCancelActiveRunTimersTx(txctx, tx, attemptRunIDs)
+		if err != nil {
+			return err
+		}
 		for _, run := range runs {
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
@@ -404,6 +420,9 @@ func lockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimeru
 		SELECT run_id::text, COALESCE(status, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
+		  AND NOT EXISTS (
+			SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
+		  )
 		ORDER BY run_id::text
 		FOR UPDATE
 	`)
@@ -496,6 +515,9 @@ func sqliteLockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]run
 		SELECT run_id, COALESCE(status, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
+		  AND NOT EXISTS (
+			SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
+		  )
 		ORDER BY run_id
 	`)
 	if err != nil {
@@ -686,11 +708,7 @@ func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 			'dead_letter', $3, $4::jsonb, $5
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter',
-			reason_code = $3,
-			side_effects = $4::jsonb,
-			processed_at = $5
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO NOTHING
 	`, eventID, activeRunQuiescencePipelineSubscriberID, reasonCode, string(sideEffects), at.UTC()); err != nil {
 		return fmt.Errorf("upsert active run quiescence pipeline receipt: %w", err)
 	}
@@ -712,15 +730,100 @@ func sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *s
 			'dead_letter', ?, ?, ?
 		FROM events e
 		WHERE e.event_id = ?
-		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter',
-			reason_code = excluded.reason_code,
-			side_effects = excluded.side_effects,
-			processed_at = excluded.processed_at
+		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO NOTHING
 	`, uuid.NewString(), activeRunQuiescencePipelineSubscriberID, reasonCode, string(sideEffects), at.UTC(), eventID); err != nil {
 		return fmt.Errorf("upsert sqlite active run quiescence pipeline receipt: %w", err)
 	}
 	return nil
+}
+
+func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = 'cancelled',
+		    termination_detail = $2,
+		    terminated_at = COALESCE(terminated_at, $3),
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = $3
+		WHERE run_id = ANY($1::uuid[])
+		  AND status IN ('active', 'suspended')
+	`, pq.Array(runIDs), reason, at.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("terminate active run sessions: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func cancelActiveRunTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) (int, error) {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE timers
+		SET status = 'cancelled'
+		WHERE run_id = ANY($1::uuid[])
+		  AND status = 'active'
+	`, pq.Array(runIDs))
+	if err != nil {
+		return 0, fmt.Errorf("cancel active run timers: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
+	args := make([]any, 0, len(runIDs)+3)
+	args = append(args, reason, at.UTC(), at.UTC())
+	for _, runID := range runIDs {
+		args = append(args, runID)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = 'cancelled',
+		    termination_detail = ?,
+		    terminated_at = COALESCE(terminated_at, ?),
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = ?
+		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
+		  AND status IN ('active', 'suspended')
+	`, args...)
+	if err != nil {
+		return 0, fmt.Errorf("terminate sqlite active run sessions: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func sqliteCancelActiveRunTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) (int, error) {
+	args := make([]any, 0, len(runIDs))
+	for _, runID := range runIDs {
+		args = append(args, runID)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE timers
+		SET status = 'cancelled'
+		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
+		  AND status = 'active'
+	`, args...)
+	if err != nil {
+		return 0, fmt.Errorf("cancel sqlite active run timers: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
 }
 
 func upsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runID, reasonCode, controlledBy string, at time.Time) error {

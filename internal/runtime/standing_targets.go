@@ -33,32 +33,43 @@ type StandingTargetDeclaration struct {
 }
 
 type StandingTarget struct {
-	BundleHash    string
-	PackageKey    string
-	SourcePath    string
-	FlowID        string
-	FlowPath      string
-	Alias         string
-	Provider      string
-	RunID         string
-	FlowInstance  string
-	EntityID      string
-	SigningSecret string
-	AdmissionPlan providertriggers.InboundAdmissionPlan
+	BundleHash          string
+	ServiceID           string
+	PackageKey          string
+	SourcePath          string
+	FlowID              string
+	FlowPath            string
+	Alias               string
+	Provider            string
+	RunID               string
+	Generation          int64
+	PublicationSequence int64
+	InstanceID          string
+	FlowInstance        string
+	EntityID            string
+	SigningSecret       string
+	AdmissionPlan       providertriggers.InboundAdmissionPlan
 }
 
 type StandingActivation struct {
-	BundleHash   string
-	PackageKey   string
-	FlowID       string
-	RunID        string
-	FlowInstance string
-	EntityID     string
-	Created      bool
+	BundleHash          string
+	ServiceID           string
+	PackageKey          string
+	FlowID              string
+	RunID               string
+	Generation          int64
+	PublicationSequence int64
+	InstanceID          string
+	FlowInstance        string
+	EntityID            string
+	EffectiveState      string
+	Created             bool
 }
 
 type standingTargetPlan struct {
 	declaration StandingTargetDeclaration
+	serviceID   string
+	generation  int64
 	runID       string
 	instance    runtimeflowidentity.Instance
 	targets     []StandingTarget
@@ -66,6 +77,7 @@ type standingTargetPlan struct {
 
 func (t StandingTarget) normalized() StandingTarget {
 	t.BundleHash = strings.TrimSpace(t.BundleHash)
+	t.ServiceID = strings.TrimSpace(t.ServiceID)
 	t.PackageKey = strings.TrimSpace(t.PackageKey)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
 	t.FlowID = strings.TrimSpace(t.FlowID)
@@ -73,6 +85,7 @@ func (t StandingTarget) normalized() StandingTarget {
 	t.Alias = strings.Trim(strings.TrimSpace(t.Alias), "/")
 	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
 	t.RunID = strings.TrimSpace(t.RunID)
+	t.InstanceID = strings.TrimSpace(t.InstanceID)
 	t.FlowInstance = strings.Trim(strings.TrimSpace(t.FlowInstance), "/")
 	t.EntityID = strings.TrimSpace(t.EntityID)
 	t.SigningSecret = strings.TrimSpace(t.SigningSecret)
@@ -369,6 +382,60 @@ func resolveStandingInputEndpointWithCensus(source semanticview.Source, census s
 }
 
 func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, error) {
+	return rt.ensureStandingTargets(ctx, "")
+}
+
+func (rt *Runtime) EnsureStandingServiceTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return nil, nil, fmt.Errorf("standing service_id is required")
+	}
+	return rt.ensureStandingTargets(ctx, serviceID)
+}
+
+// EnsureStandingReplacementTargets atomically reconciles a hot replacement's
+// declaration set before publishing its process-local standing targets.
+func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predecessor *Runtime) ([]StandingTarget, []StandingActivation, error) {
+	if rt == nil {
+		return nil, nil, fmt.Errorf("replacement runtime is required")
+	}
+	candidates, err := rt.PlanStandingServiceCandidates()
+	if err != nil {
+		return nil, nil, err
+	}
+	var previous []runtimepipeline.StandingServiceCandidate
+	if predecessor != nil {
+		previous, err = predecessor.PlanStandingServiceCandidates()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(previous) == 0 && len(candidates) == 0 {
+		return nil, nil, nil
+	}
+	owner := rt.Stores.PipelineStore
+	if owner == nil {
+		return nil, nil, fmt.Errorf("standing replacement requires pipeline store")
+	}
+	if len(previous) > 0 && predecessor.Stores.PipelineStore == nil {
+		return nil, nil, fmt.Errorf("standing predecessor requires pipeline store")
+	}
+	if predecessor != nil && predecessor.Stores.PipelineStore != nil && predecessor.Stores.PipelineStore != owner {
+		return nil, nil, fmt.Errorf("standing replacement requires one selected-store owner")
+	}
+	var targets []StandingTarget
+	var activations []StandingActivation
+	err = owner.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		if _, err := owner.ReconcileStandingServiceReplacement(txctx, previous, candidates); err != nil {
+			return err
+		}
+		targets, activations, err = rt.EnsureStandingTargets(txctx)
+		return err
+	})
+	return targets, activations, err
+}
+
+func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
 		return nil, nil, err
@@ -384,15 +451,38 @@ func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget,
 	targets := make([]StandingTarget, 0)
 	activations := make([]StandingActivation, 0, len(plans))
 	for _, plan := range plans {
+		if serviceID != "" && plan.serviceID != serviceID {
+			continue
+		}
 		declaration := plan.declaration
-		runID := plan.runID
 		instance := plan.instance
-		runCtx := runtimecorrelation.WithRunID(ctx, runID)
-		runCtx = runtimecorrelation.WithBundleSourceFact(runCtx, fact)
 		created := false
-		err := rt.Stores.PipelineStore.RunPipelineMutation(runCtx, func(txctx context.Context) error {
-			if err := rt.Stores.PipelineStore.EnsureStandingRun(txctx, runID, declaration.PackageKey, declaration.FlowID, fact); err != nil {
+		var reconciliation runtimepipeline.StandingServiceReconciliation
+		var publicationSequence int64
+		err := rt.Stores.PipelineStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+			candidate := runtimepipeline.StandingServiceCandidate{
+				ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
+				InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact,
+			}
+			var err error
+			var found bool
+			reconciliation, found, err = rt.Stores.PipelineStore.LoadReconciledStandingService(txctx, candidate)
+			if err != nil {
 				return err
+			}
+			if !found {
+				reconciliation, err = rt.Stores.PipelineStore.ReconcileStandingService(txctx, candidate)
+				if err != nil {
+					return err
+				}
+			}
+			if reconciliation.EffectiveState != "active" {
+				return nil
+			}
+			txctx = runtimecorrelation.WithRunID(txctx, reconciliation.RunID)
+			txctx = runtimecorrelation.WithBundleSourceFact(txctx, fact)
+			if reconciliation.Generation > 1 {
+				txctx = runtimepipeline.WithStandingGenerationRebind(txctx)
 			}
 			wasCreated, err := rt.Manager.EnsureFlowInstance(txctx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
@@ -414,19 +504,47 @@ func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget,
 					return fmt.Errorf("arm initial stage lifecycle: %w", err)
 				}
 			}
-			return nil
+			publicationSequence, err = rt.Stores.PipelineStore.PublishStandingService(txctx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
+			return err
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("activate standing flow %s: %w", declaration.FlowID, err)
 		}
+		if reconciliation.EffectiveState != "active" {
+			activations = append(activations, StandingActivation{
+				BundleHash: fact.BundleHash, ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
+				FlowID: declaration.FlowID, RunID: reconciliation.RunID, Generation: reconciliation.Generation,
+				PublicationSequence: reconciliation.PublicationSequence, InstanceID: instance.InstanceID,
+				FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+				EffectiveState: reconciliation.EffectiveState, Created: false,
+			})
+			for _, target := range plan.targets {
+				target.BundleHash = fact.BundleHash
+				target.RunID = reconciliation.RunID
+				target.Generation = reconciliation.Generation
+				target.PublicationSequence = reconciliation.PublicationSequence
+				targets = append(targets, target.normalized())
+			}
+			continue
+		}
+		runCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
+		runCtx = runtimecorrelation.WithBundleSourceFact(runCtx, fact)
 		if err := ensureLifecycleWorkflowSchedules(runCtx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			return nil, nil, fmt.Errorf("rehydrate standing flow %s schedules: %w", declaration.FlowID, err)
 		}
 		activations = append(activations, StandingActivation{
-			BundleHash: fact.BundleHash, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
-			RunID: runID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID, Created: created,
+			BundleHash: fact.BundleHash, ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
+			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: publicationSequence, InstanceID: instance.InstanceID,
+			FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+			EffectiveState: reconciliation.EffectiveState, Created: created,
 		})
-		targets = append(targets, plan.targets...)
+		for _, target := range plan.targets {
+			target.BundleHash = fact.BundleHash
+			target.RunID = reconciliation.RunID
+			target.Generation = reconciliation.Generation
+			target.PublicationSequence = publicationSequence
+			targets = append(targets, target.normalized())
+		}
 	}
 	return targets, activations, nil
 }
@@ -444,6 +562,22 @@ func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 		targets = append(targets, plan.targets...)
 	}
 	return targets, nil
+}
+
+func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingServiceCandidate, error) {
+	plans, err := rt.standingTargetPlans()
+	if err != nil {
+		return nil, err
+	}
+	fact := rt.Options.BundleSourceFact.Normalized()
+	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
+	for _, plan := range plans {
+		out = append(out, runtimepipeline.StandingServiceCandidate{
+			ServiceID: plan.serviceID, PackageKey: plan.declaration.PackageKey, FlowID: plan.declaration.FlowID,
+			InstanceID: plan.instance.InstanceID, EntityID: plan.instance.EntityID, Source: fact,
+		})
+	}
+	return out, nil
 }
 
 func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
@@ -464,14 +598,17 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	}
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
-		runID := runtimeflowidentity.StandingRunID(fact.BundleHash, declaration.PackageKey, declaration.FlowID)
-		instance := runtimeflowidentity.Standing(source, declaration.FlowID, fact.BundleHash)
-		plan := standingTargetPlan{declaration: declaration, runID: runID, instance: instance}
+		serviceID := runtimeflowidentity.StandingServiceID(declaration.PackageKey, declaration.FlowID)
+		generation := int64(1)
+		runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
+		instance := runtimeflowidentity.StandingForService(source, declaration.FlowID, serviceID)
+		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, generation: generation, runID: runID, instance: instance}
 		for _, binding := range declaration.Ingress {
 			plan.targets = append(plan.targets, StandingTarget{
-				BundleHash: fact.BundleHash, PackageKey: declaration.PackageKey, SourcePath: declaration.SourcePath,
+				BundleHash: fact.BundleHash, ServiceID: serviceID, PackageKey: declaration.PackageKey, SourcePath: declaration.SourcePath,
 				FlowID: declaration.FlowID, FlowPath: declaration.FlowPath, Alias: declaration.Alias,
-				Provider: binding.Provider, RunID: runID, FlowInstance: instance.InstancePath,
+				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
+				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,
 				EntityID: instance.EntityID, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 			}.normalized())
 		}

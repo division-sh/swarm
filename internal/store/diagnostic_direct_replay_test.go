@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -25,6 +24,8 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 
 	runtimeLogID := persistSQLiteRuntimeLogForReplayTest(t, ctx, store, runID)
 	inboundID := uuid.NewString()
+	publicationID := uuid.NewString()
+	publicationEventID := uuid.NewString()
 	agentDirectiveID := uuid.NewString()
 	executableID := uuid.NewString()
 
@@ -33,7 +34,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		events.EventType("platform.inbound_recorded"),
 		"github",
 		"",
-		json.RawMessage(`{"provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`"}`),
+		json.RawMessage(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`"}`),
 		0,
 		runID,
 		"",
@@ -205,23 +206,23 @@ func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, p
 
 func recordPostgresInboundEventForReplayTest(t *testing.T, ctx context.Context, pg *PostgresStore, runID, entityID string) string {
 	t.Helper()
-	inserted, err := pg.RecordInboundEvent(runtimecorrelation.WithRunID(ctx, runID), "provider-event-1", entityID, "github")
-	if err != nil {
-		t.Fatalf("RecordInboundEvent: %v", err)
-	}
-	if !inserted {
-		t.Fatal("RecordInboundEvent inserted=false, want true")
-	}
-	var eventID string
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT event_id::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name = 'platform.inbound_recorded'
-		ORDER BY created_at DESC, event_id DESC
-		LIMIT 1
-	`, runID).Scan(&eventID); err != nil {
-		t.Fatalf("load postgres inbound event_id: %v", err)
+	eventID := uuid.NewString()
+	publicationID := uuid.NewString()
+	publicationEventID := uuid.NewString()
+	evt := eventtest.PersistedProjection(
+		eventID,
+		events.EventType("platform.inbound_recorded"),
+		"github",
+		inboundEventIdempotencyKey("provider-event-1", entityID, "github"),
+		json.RawMessage(`{"publication_id":"`+publicationID+`","publication_event_id":"`+publicationEventID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
+	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt); err != nil {
+		t.Fatalf("append typed inbound evidence: %v", err)
 	}
 	return eventID
 }

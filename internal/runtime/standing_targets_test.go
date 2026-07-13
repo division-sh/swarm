@@ -216,6 +216,51 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	}
 }
 
+func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneration(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	hash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := StandingTarget{
+		BundleHash: hash, ServiceID: "service-1", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
+		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+	}
+	manager, err := NewRuntimeContextManagerWithAdmission(nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
+		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus}, StandingTargets: []StandingTarget{target},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
+		t.Fatalf("SuppressStandingServiceTargets: %v", err)
+	}
+	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
+		t.Fatalf("suppressed lookup = %#v", lookup)
+	}
+	published := target
+	published.RunID = "run-2"
+	published.Generation = 2
+	published.PublicationSequence = 3
+	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}); err != nil {
+		t.Fatalf("PublishStandingServiceTargets: %v", err)
+	}
+	lookup := manager.LookupIngress("chat", "telegram")
+	if !lookup.Loaded() || lookup.Target.RunID != "run-2" || lookup.Target.Generation != 2 || lookup.Target.PublicationSequence != 3 {
+		t.Fatalf("republished lookup = %#v", lookup)
+	}
+}
+
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}

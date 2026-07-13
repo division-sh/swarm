@@ -23,6 +23,8 @@ var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptForRunSpec"}:                               1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsWithPendingDeliveriesForRunSpec"}:                                1,
 	{Path: "internal/store/pending_delivery_read_surface.go", Scope: "scanPendingAgentDeliveryRecords"}:                                 1,
+	{Path: "internal/store/inbound_publication.go", Scope: "loadPostgresInboundPublicationEvent"}:                                       1,
+	{Path: "internal/store/sqlite_inbound_publication.go", Scope: "loadSQLiteInboundPublicationEvent"}:                                  1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.ListPendingSubscribedEvents"}:                 1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsMissingPipelineReceipt"}:      1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsWithPendingDeliveriesForRun"}: 1,
