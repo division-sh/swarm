@@ -4901,6 +4901,7 @@ type servedControlProofRuntime struct {
 	Backend    string
 	BundleHash string
 	Probe      *lifecycletest.Probe
+	Runtime    *runtimepkg.Runtime
 }
 
 type servedConversationForkProofRuntime struct {
@@ -5201,11 +5202,11 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		opts.NoRequireBundleMatch = true
 		opts.Verbose = true
 		opts.TestLLMRuntime = runtimellm.NoopRuntime{}
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath)}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath), Runtime: rt}
 	}
 
 	var rt servedControlProofRuntime
@@ -5282,6 +5283,11 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	})
 	if !initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), servedProofPollDeadline)
+	defer cancelWait()
+	if err := rt.Runtime.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("wait for %s conversation fork source quiescence: %v", rt.Backend, err)
 	}
 	fixture := seedServedConversationForkSource(t, rt.DB, rt.Backend, initial.RunID)
 	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
