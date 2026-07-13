@@ -11119,9 +11119,10 @@ platform_tables:
       description: 'Durable, age-independent retry owner for a committed decision whose frozen route has not completed.
         The obligation is created atomically with the card verdict, remains pending until EventBus receipt persistence and
         normal-run convergence both succeed, and is scheduled by attempt count plus next_attempt_at so an unavailable bundle
-        cannot starve newer route work. A non-deferred failure atomically writes an error receipt and quarantines the row,
-        preserving the typed failure while allowing unrelated obligations to progress. Generic missing-receipt recovery excludes
-        every non-completed row owned here.'
+        cannot starve newer route work. A non-deferred route-execution failure before processed receipt persistence atomically
+        writes an error receipt and quarantines the row. A later convergence or completion failure preserves the processed
+        receipt, defers the pending row with an incremented attempt count, and continues unrelated work without rerouting.
+        Generic missing-receipt recovery excludes every non-completed row owned here.'
       ddl: |
         CREATE TABLE decision_card_route_obligations (
             event_id       UUID PRIMARY KEY,
@@ -21997,6 +21998,14 @@ api_specification:
       status_storage_model: 'Typed cards are pending, decided, or superseded. Defer is non-terminal: status remains pending and
         deferred_until is updated independently. An input draft is never a verdict. Notice acknowledgment mutates only notice
         notification state.'
+      decision_input_types: >
+        Stage-gate verdict inputs use one closed scalar vocabulary: text,
+        integer, numeric, boolean, timestamp, and uuid. Gate authoring rejects
+        node-state aliases and structured types such as string, int, float,
+        jsonb, object, and list forms. The same owner validates mailbox.decide
+        values and proves decision.<field> compatibility with authored outcome
+        event fields; parse, verify/emission, and runtime API validation MUST NOT
+        maintain separate type subsets.
       decision_event_payload_contract:
         terminal_event_name: mailbox.card_decided
         deferred_event_name: mailbox.card_deferred
@@ -22038,12 +22047,17 @@ api_specification:
         missing-receipt lookback, schedules startup and periodic retries by
         attempt count and next_attempt_at; non-completed rows are excluded from the
         generic scanner so an unavailable pin cannot monopolize its bounded
-        page. A non-deferred route failure atomically writes its typed error
-        pipeline receipt and quarantines the obligation before recovery continues
-        with later rows; poison work cannot remain due or abort the page. Recovery
-        replays the frozen route and settles through one EventBus
-        owner that writes the processed receipt, converges terminal/no-emit run
-        completion, then completes the obligation. A competing
+        page. A non-deferred route-execution failure, before a processed receipt
+        exists, atomically writes its typed error pipeline receipt and quarantines
+        the obligation before recovery continues with later rows; poison work
+        cannot remain due or abort the page. Once routing writes a processed
+        receipt, convergence or obligation-completion failure is a settlement
+        dependency failure, never a route failure: the processed receipt remains
+        authoritative, the pending obligation advances attempt_count and
+        next_attempt_at, and recovery continues with later rows without rerouting
+        the authored verdict. Recovery replays the frozen route and settles through
+        one EventBus owner that writes the processed receipt, converges
+        terminal/no-emit run completion, then completes the obligation. A competing
         stage exit may supersede only an open card; exactly one CAS outcome wins.
         Paused dispatch preserves decision_committed and continuation resumes
         routing after continue.

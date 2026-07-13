@@ -256,10 +256,15 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, limit int
 		}
 		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
 		if settled, err := eb.settleProcessedDecisionRouteIfPresent(workCtx, evt); settled || err != nil {
-			_ = lease.Release(workCtx)
 			if err != nil {
-				return recovered, err
+				if deferErr := eb.deferDecisionRouteObligation(workCtx, evt.ID(), err); deferErr != nil {
+					_ = lease.Release(workCtx)
+					return recovered, deferErr
+				}
+				_ = lease.Release(workCtx)
+				continue
 			}
+			_ = lease.Release(workCtx)
 			recovered++
 			continue
 		}
@@ -281,8 +286,12 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, limit int
 			continue
 		}
 		if err := eb.SettleRecoveredPipelineEvent(workCtx, evt); err != nil {
+			if deferErr := eb.deferDecisionRouteObligation(workCtx, evt.ID(), err); deferErr != nil {
+				_ = lease.Release(workCtx)
+				return recovered, deferErr
+			}
 			_ = lease.Release(workCtx)
-			return recovered, err
+			continue
 		}
 		_ = lease.Release(workCtx)
 		recovered++

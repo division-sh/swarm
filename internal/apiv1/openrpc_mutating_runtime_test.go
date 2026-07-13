@@ -1526,6 +1526,9 @@ func (s *mutatingProbeDecisionCardStore) DecideDecisionCard(_ context.Context, r
 	if s.err != nil {
 		return decisioncard.DecisionOutcome{}, s.err
 	}
+	if err := decisioncard.ValidateDecision(s.card, req.Verdict, req.Fields); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	s.state.recordEffect()
 	card := s.card
 	card.Status = decisioncard.StatusDecided

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -110,6 +111,26 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 		if resp.Error == nil || resp.Error.Code != codeMethodNotFound {
 			t.Fatalf("%s error = %#v, want method not found", retired, resp.Error)
 		}
+	}
+}
+
+func TestMailboxDecideAdmitsEveryCanonicalGateInputType(t *testing.T) {
+	state := newMutatingRuntimeProbeState(t, "mailbox.decide")
+	state.decisionCards.card.Snapshot.Outcomes["typed"] = runtimecontracts.WorkflowGateOutcomePlan{
+		AdvancesTo: "operating",
+		Input: map[string]runtimecontracts.WorkflowGateInputField{
+			"text_value":      {Type: "text", Required: true},
+			"integer_value":   {Type: "integer", Required: true},
+			"numeric_value":   {Type: "numeric", Required: true},
+			"boolean_value":   {Type: "boolean", Required: true},
+			"timestamp_value": {Type: "timestamp", Required: true},
+			"uuid_value":      {Type: "uuid", Required: true},
+		},
+	}
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorReadHandlers(state.options(t))})
+	response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"typed","method":"mailbox.decide","params":{"card_id":"card-1","verdict":"typed","observed_content_hash":"content-1","idempotency_key":"typed-inputs","fields":{"text_value":"reason","integer_value":7,"numeric_value":7.5,"boolean_value":true,"timestamp_value":"2026-07-13T01:02:03Z","uuid_value":"00000000-0000-0000-0000-000000000123"}}}`)
+	if response.Error != nil || asMap(t, response.Result)["status"] != decisioncard.StatusDecided {
+		t.Fatalf("typed mailbox.decide = result %#v error %#v", response.Result, response.Error)
 	}
 }
 

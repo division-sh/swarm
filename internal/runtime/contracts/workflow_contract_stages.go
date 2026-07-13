@@ -334,9 +334,9 @@ func (f *WorkflowGateInputField) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&out); err != nil {
 		return err
 	}
-	normalized, err := NormalizeNodeStateFieldType(out.Type)
+	normalized, err := NormalizeWorkflowGateInputType(out.Type)
 	if err != nil {
-		return fmt.Errorf("stage gate input type: %w", err)
+		return err
 	}
 	out.Type = normalized
 	out.Label = strings.TrimSpace(out.Label)

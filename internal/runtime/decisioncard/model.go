@@ -337,6 +337,13 @@ func (c Card) Validate() error {
 	if len(c.Snapshot.Outcomes) == 0 {
 		return fmt.Errorf("decision card has no authored outcomes")
 	}
+	for verdict, outcome := range c.Snapshot.Outcomes {
+		for name, declaration := range outcome.Input {
+			if _, err := runtimecontracts.NormalizeWorkflowGateInputType(declaration.Type); err != nil {
+				return fmt.Errorf("decision card outcome %s input %s: %w", strings.TrimSpace(verdict), strings.TrimSpace(name), err)
+			}
+		}
+	}
 	draftTTL, err := time.ParseDuration(strings.TrimSpace(c.EffectiveCadence.InputDraftTTL))
 	if err != nil || draftTTL <= 0 {
 		return fmt.Errorf("decision card input draft TTL is invalid")
@@ -428,7 +435,7 @@ func ValidateDecision(card Card, verdict string, fields map[string]any) error {
 		if !present || value == nil {
 			continue
 		}
-		if !matchesType(value, declaration.Type) {
+		if !runtimecontracts.WorkflowGateInputValueMatches(declaration.Type, value) {
 			return fmt.Errorf("%w: field %s must be %s", ErrInvalidFields, name, declaration.Type)
 		}
 	}
@@ -445,39 +452,6 @@ func DecodeSnapshot(raw []byte) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	return snapshot, nil
-}
-
-func matchesType(value any, kind string) bool {
-	switch strings.TrimSpace(strings.ToLower(kind)) {
-	case "text":
-		_, ok := value.(string)
-		return ok
-	case "boolean", "bool":
-		_, ok := value.(bool)
-		return ok
-	case "integer":
-		switch typed := value.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			return true
-		case float64:
-			return typed == float64(int64(typed))
-		case json.Number:
-			_, err := typed.Int64()
-			return err == nil
-		}
-	case "number":
-		switch value.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
-			return true
-		}
-	case "object":
-		_, ok := value.(map[string]any)
-		return ok
-	case "list":
-		_, ok := value.([]any)
-		return ok
-	}
-	return false
 }
 
 func humanize(value string) string {
