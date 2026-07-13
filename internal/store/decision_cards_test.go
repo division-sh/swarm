@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,29 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			}
 			if len(changes) != 4 || changes[0].ChangeType != decisioncard.ChangeCreated || changes[2].ChangeType != decisioncard.ChangeDraftConsumed || changes[3].ChangeType != decisioncard.ChangeDecided {
 				t.Fatalf("changes = %#v", changes)
+			}
+		})
+	}
+}
+
+func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
+			card.DecisionID = " launch_review "
+
+			if err := cardStore.CreateDecisionCard(ctx, card); err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+				t.Fatalf("CreateDecisionCard error = %v, want noncanonical decision identity rejection", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, card.CardID); !errors.Is(err, decisioncard.ErrNotFound) {
+				t.Fatalf("GetDecisionCard after rejected create error = %v, want ErrNotFound", err)
+			}
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10})
+			if err != nil || len(changes) != 0 {
+				t.Fatalf("changes after rejected create = %#v, %v", changes, err)
 			}
 		})
 	}

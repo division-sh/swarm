@@ -151,6 +151,26 @@ type Snapshot struct {
 	Outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan `json:"outcomes"`
 }
 
+type decisionSchemaProjection struct {
+	Version  string                                     `json:"version"`
+	Outcomes map[string]decisionOutcomeSchemaProjection `json:"outcomes"`
+}
+
+type decisionOutcomeSchemaProjection struct {
+	Input map[string]decisionInputSchemaProjection `json:"input"`
+	Emit  *decisionEmitSchemaProjection            `json:"emit,omitempty"`
+}
+
+type decisionInputSchemaProjection struct {
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+}
+
+type decisionEmitSchemaProjection struct {
+	Fields map[string]map[string]any `json:"fields"`
+	Schema map[string]any            `json:"schema"`
+}
+
 type Card struct {
 	CardID             string         `json:"card_id"`
 	RunID              string         `json:"run_id"`
@@ -333,7 +353,10 @@ func (c Card) Validate() error {
 	if c.Status == StatusSuperseded && strings.TrimSpace(c.SupersededReason) == "" {
 		return fmt.Errorf("superseded card is missing reason")
 	}
-	if strings.TrimSpace(c.Snapshot.Decision) != strings.TrimSpace(c.DecisionID) {
+	if c.DecisionID != strings.TrimSpace(c.DecisionID) {
+		return fmt.Errorf("decision card decision_id %q is not canonical", c.DecisionID)
+	}
+	if c.Snapshot.Decision != c.DecisionID {
 		return fmt.Errorf("decision card snapshot identity does not match decision_id")
 	}
 	if len(c.Snapshot.Outcomes) == 0 {
@@ -458,6 +481,10 @@ func outcomeDecisionField(expression runtimecontracts.ExpressionValue) (string, 
 }
 
 func New(card Card) (Card, error) {
+	decisionID := strings.TrimSpace(card.DecisionID)
+	if card.DecisionID != decisionID {
+		return Card{}, fmt.Errorf("decision card decision_id %q is not canonical; use %q", card.DecisionID, decisionID)
+	}
 	now := card.CreatedAt.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -465,7 +492,7 @@ func New(card Card) (Card, error) {
 	card.CreatedAt = now
 	card.UpdatedAt = now
 	card.Status = StatusPending
-	card.Snapshot.Decision = strings.TrimSpace(card.DecisionID)
+	card.Snapshot.Decision = decisionID
 	if strings.TrimSpace(card.Snapshot.Title) == "" {
 		card.Snapshot.Title = humanize(card.DecisionID)
 	}
@@ -490,11 +517,10 @@ func New(card Card) (Card, error) {
 	if err := validateSnapshotContract(card.Snapshot); err != nil {
 		return Card{}, err
 	}
-	schema := map[string]any{}
-	for verdict, outcome := range card.Snapshot.Outcomes {
-		schema[verdict] = outcome.Input
+	schema, err := projectDecisionSchema(card.Snapshot)
+	if err != nil {
+		return Card{}, err
 	}
-	var err error
 	card.CardContentHash, err = canonicaljson.Hash(card.Snapshot)
 	if err != nil {
 		return Card{}, fmt.Errorf("hash decision card content: %w", err)
@@ -507,6 +533,41 @@ func New(card Card) (Card, error) {
 		return Card{}, err
 	}
 	return card, nil
+}
+
+func projectDecisionSchema(snapshot Snapshot) (decisionSchemaProjection, error) {
+	projection := decisionSchemaProjection{
+		Version:  "swarm.decision-schema/v1",
+		Outcomes: make(map[string]decisionOutcomeSchemaProjection, len(snapshot.Outcomes)),
+	}
+	for verdict, outcome := range snapshot.Outcomes {
+		projected := decisionOutcomeSchemaProjection{
+			Input: make(map[string]decisionInputSchemaProjection, len(outcome.Input)),
+		}
+		for name, input := range outcome.Input {
+			projected.Input[name] = decisionInputSchemaProjection{Type: input.Type, Required: input.Required}
+		}
+		if !outcome.Emit.Empty() {
+			emit := &decisionEmitSchemaProjection{
+				Fields: make(map[string]map[string]any, len(outcome.Emit.Fields)),
+				Schema: runtimeeventschema.CanonicalAcceptanceSchema(outcome.EmitSchema),
+			}
+			for field, expression := range outcome.Emit.Fields {
+				if expression.HasLiteralValue() {
+					emit.Fields[field] = map[string]any{"kind": "literal", "value": expression.Literal}
+					continue
+				}
+				inputName, err := outcomeDecisionField(expression)
+				if err != nil {
+					return decisionSchemaProjection{}, fmt.Errorf("project decision schema outcome %s field %s: %w", verdict, field, err)
+				}
+				emit.Fields[field] = map[string]any{"kind": "decision", "field": inputName}
+			}
+			projected.Emit = emit
+		}
+		projection.Outcomes[verdict] = projected
+	}
+	return projection, nil
 }
 
 func ValidateDecision(card Card, verdict string, fields map[string]any) error {

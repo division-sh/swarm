@@ -162,6 +162,72 @@ func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
 	}
 }
 
+func TestNewAndValidateRejectNonCanonicalTopLevelDecisionID(t *testing.T) {
+	input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "operating"},
+	})
+	input.DecisionID = " launch_review "
+	card, err := New(input)
+	if err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("New error = %v, want noncanonical top-level decision identity rejection", err)
+	}
+	if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
+		t.Fatalf("noncanonical decision identity was hashed: %#v", card)
+	}
+
+	valid, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "operating"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid.DecisionID = " launch_review "
+	if err := valid.Validate(); err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("persisted-card validation error = %v, want exact top-level identity rejection", err)
+	}
+}
+
+func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *testing.T) {
+	newCard := func(title, outcomeLabel, inputLabel, pattern string) Card {
+		t.Helper()
+		input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {
+				Verdict: "approve", Label: outcomeLabel, AdvancesTo: "operating",
+				Input: map[string]runtimecontracts.WorkflowGateInputField{
+					"code": {Type: "text", Required: true, Label: inputLabel},
+				},
+				Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+					"code": runtimecontracts.CELExpression("decision.code"),
+				}},
+				EmitSchema: textEventSchema(map[string]map[string]any{
+					"code": {"type": "string", "pattern": pattern, "description": inputLabel + " help"},
+				}, []string{"code"}),
+			},
+		})
+		input.Snapshot.Outcomes["approve"].EmitSchema["title"] = outcomeLabel + " result"
+		input.Snapshot.Title = title
+		card, err := New(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+
+	lowercase := newCard("Launch review", "Approve", "Code", "^[a-z]+$")
+	uppercase := newCard("Launch review", "Approve", "Code", "^[A-Z]+$")
+	if lowercase.DecisionSchemaHash == uppercase.DecisionSchemaHash {
+		t.Fatalf("acceptance-changing patterns share schema hash %q", lowercase.DecisionSchemaHash)
+	}
+
+	polished := newCard("Production launch review", "Ship it", "Approval code", "^[a-z]+$")
+	if lowercase.DecisionSchemaHash != polished.DecisionSchemaHash {
+		t.Fatalf("presentation-only edits changed schema hash: %q != %q", lowercase.DecisionSchemaHash, polished.DecisionSchemaHash)
+	}
+	if lowercase.CardContentHash == polished.CardContentHash {
+		t.Fatal("presentation-only edits did not change card content hash")
+	}
+}
+
 func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 	tests := []struct {
 		name     string

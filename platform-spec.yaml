@@ -351,8 +351,20 @@ contract_formats:
           Card creation evaluates context once and freezes the structured
           snapshot, authored outcome/input schema, effective cadence,
           provenance, bundle/workflow identity, card_content_hash, and
-          decision_schema_hash. mailbox.get returns this snapshot; live entity
-          context is supplementary and never reconstructs what was shown.
+          decision_schema_hash. The raw top-level decision_id MUST already equal
+          its trimmed canonical spelling and MUST equal snapshot.decision before
+          either hash or any persistence is acquired; deriving a canonical
+          snapshot identity from a different public/persisted spelling is
+          forbidden. decision_schema_hash is the versioned canonical semantic
+          verdict/input contract: verdict and input identities, canonical input
+          types and requiredness, semantic outcome field mappings/literals, and
+          the enforcement-only projection of every frozen target-schema
+          constraint consumed by mailbox.decide. Acceptance-changing edits MUST
+          change it. Title, verdict/input labels, descriptions, display hints,
+          and other presentation metadata MUST NOT change it; those remain
+          covered by card_content_hash. There is no legacy schema-hash
+          compatibility path. mailbox.get returns the frozen snapshot; live
+          entity context is supplementary and never reconstructs what was shown.
         cadence: >
           The effective first reminder (default 4h), urgency deadline (default
           24h), later reminder interval (default 24h), and input-draft TTL
