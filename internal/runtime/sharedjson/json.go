@@ -3,42 +3,15 @@ package sharedjson
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
+	"math"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
 
 func AsFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int8:
-		return float64(n), true
-	case int16:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint8:
-		return float64(n), true
-	case uint16:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	case float32:
-		return float64(n), true
-	case float64:
-		return n, true
-	case json.Number:
-		value, err := n.Float64()
-		return value, err == nil
-	default:
-		return 0, false
-	}
+	number, err := canonicaljson.NormalizeNumber(v)
+	return number, err == nil
 }
 
 func SchemaAdditionalProps(raw any) bool {
@@ -52,31 +25,13 @@ func SchemaAdditionalProps(raw any) bool {
 }
 
 func IsNumeric(v any) bool {
-	switch n := v.(type) {
-	case float64, float32, int, int64, int32, uint, uint64, uint32:
-		return true
-	case json.Number:
-		_, ok := new(big.Rat).SetString(n.String())
-		return ok
-	default:
-		return false
-	}
+	_, ok := AsFloat64(v)
+	return ok
 }
 
 func IsInteger(v any) bool {
-	switch t := v.(type) {
-	case int, int64, int32, uint, uint64, uint32:
-		return true
-	case float64:
-		return t == float64(int64(t))
-	case float32:
-		return t == float32(int64(t))
-	case json.Number:
-		value, ok := new(big.Rat).SetString(t.String())
-		return ok && value.IsInt()
-	default:
-		return false
-	}
+	number, ok := AsFloat64(v)
+	return ok && math.Trunc(number) == number
 }
 
 func AsArray(v any) ([]any, bool) {

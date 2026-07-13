@@ -13,9 +13,12 @@ func TestJSONNumberPredicates(t *testing.T) {
 		integer   bool
 		asFloat64 bool
 	}{
-		{name: "precision boundary integer", value: "9007199254740993", numeric: true, integer: true, asFloat64: true},
+		{name: "safe integer boundary", value: "9007199254740991", numeric: true, integer: true, asFloat64: true},
+		{name: "unsafe integer", value: "9007199254740992"},
 		{name: "integer exponent", value: "1e3", numeric: true, integer: true, asFloat64: true},
-		{name: "fraction", value: "1.0000000000000001", numeric: true, integer: false, asFloat64: true},
+		{name: "binary64-normalized fraction", value: "1.0000000000000001", numeric: true, integer: true, asFloat64: true},
+		{name: "ordinary fraction", value: "1.25", numeric: true, integer: false, asFloat64: true},
+		{name: "negative zero", value: "-0"},
 		{name: "invalid", value: "not-a-number"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

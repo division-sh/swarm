@@ -228,6 +228,32 @@ func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *te
 	}
 }
 
+func TestDecisionSchemaHashSplitsSafeNumericBounds(t *testing.T) {
+	newCard := func(minimum int64) Card {
+		t.Helper()
+		card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {
+				Verdict: "approve", AdvancesTo: "operating",
+				Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
+					"score": runtimecontracts.LiteralExpression(minimum),
+				}},
+				EmitSchema: textEventSchema(map[string]map[string]any{
+					"score": {"type": "integer", "minimum": minimum},
+				}, []string{"score"}),
+			},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	lower := newCard(9007199254740990)
+	upper := newCard(9007199254740991)
+	if lower.DecisionSchemaHash == upper.DecisionSchemaHash {
+		t.Fatalf("distinct safe numeric bounds share schema hash %q", lower.DecisionSchemaHash)
+	}
+}
+
 func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
 	valid, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"revise": {
@@ -262,18 +288,18 @@ func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
 	}
 }
 
-func TestSnapshotDecodePreservesNumericHashIdentity(t *testing.T) {
-	const preciseInteger = int64(9007199254740993)
+func TestSnapshotDecodePreservesSafeNumericHashIdentity(t *testing.T) {
+	const safeInteger = int64(9007199254740991)
 	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {
 			Verdict: "approve", AdvancesTo: "operating",
 			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"large_integer": runtimecontracts.LiteralExpression(preciseInteger),
+				"large_integer": runtimecontracts.LiteralExpression(safeInteger),
 			}},
 			EmitSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"large_integer": map[string]any{"type": "integer", "minimum": preciseInteger},
+					"large_integer": map[string]any{"type": "integer", "minimum": safeInteger},
 				},
 				"required": []string{"large_integer"}, "additionalProperties": false,
 			},
@@ -282,7 +308,7 @@ func TestSnapshotDecodePreservesNumericHashIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	card.Snapshot.Context = map[string]any{"large_integer": preciseInteger}
+	card.Snapshot.Context = map[string]any{"large_integer": safeInteger}
 	card, err = New(card)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +321,7 @@ func TestSnapshotDecodePreservesNumericHashIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertExactSnapshotNumbers(t, decoded, "9007199254740993")
+	assertSafeSnapshotNumbers(t, decoded, float64(safeInteger))
 
 	roundTripped := card
 	roundTripped.Snapshot = decoded
@@ -304,13 +330,13 @@ func TestSnapshotDecodePreservesNumericHashIdentity(t *testing.T) {
 	}
 }
 
-func assertExactSnapshotNumbers(t *testing.T, snapshot Snapshot, want string) {
+func assertSafeSnapshotNumbers(t *testing.T, snapshot Snapshot, want float64) {
 	t.Helper()
 	assertNumber := func(name string, value any) {
 		t.Helper()
-		number, ok := value.(json.Number)
-		if !ok || number.String() != want {
-			t.Fatalf("%s = %#v, want json.Number(%s)", name, value, want)
+		number, ok := value.(float64)
+		if !ok || number != want {
+			t.Fatalf("%s = %#v, want float64(%v)", name, value, want)
 		}
 	}
 	assertNumber("context.large_integer", snapshot.Context["large_integer"])
@@ -325,6 +351,41 @@ func assertExactSnapshotNumbers(t *testing.T, snapshot Snapshot, want string) {
 		t.Fatalf("large_integer schema = %#v", properties["large_integer"])
 	}
 	assertNumber("schema minimum", property["minimum"])
+}
+
+func TestNewRejectsUnsupportedSnapshotNumbersBeforeHashing(t *testing.T) {
+	const unsafeInteger = int64(9007199254740992)
+	baseOutcome := runtimecontracts.WorkflowGateOutcomePlan{Verdict: "approve", AdvancesTo: "operating"}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Card)
+	}{
+		{name: "context", mutate: func(card *Card) { card.Snapshot.Context = map[string]any{"unsafe": unsafeInteger} }},
+		{name: "outcome literal", mutate: func(card *Card) {
+			outcome := baseOutcome
+			outcome.Emit = runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(unsafeInteger)}}
+			outcome.EmitSchema = textEventSchema(map[string]map[string]any{"value": {"type": "integer"}}, []string{"value"})
+			card.Snapshot.Outcomes["approve"] = outcome
+		}},
+		{name: "schema bound", mutate: func(card *Card) {
+			outcome := baseOutcome
+			outcome.Emit = runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(1)}}
+			outcome.EmitSchema = textEventSchema(map[string]map[string]any{"value": {"type": "integer", "minimum": unsafeInteger}}, []string{"value"})
+			card.Snapshot.Outcomes["approve"] = outcome
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": baseOutcome})
+			tc.mutate(&input)
+			card, err := New(input)
+			if err == nil {
+				t.Fatal("New accepted an unsupported snapshot number")
+			}
+			if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
+				t.Fatalf("unsupported snapshot acquired hashes: %#v", card)
+			}
+		})
+	}
 }
 
 func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {

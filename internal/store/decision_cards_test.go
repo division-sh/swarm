@@ -177,8 +177,8 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	}
 }
 
-func TestDecisionCardStorePreservesNumericSnapshotCarriersOnBothStores(t *testing.T) {
-	const preciseInteger = int64(9007199254740993)
+func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *testing.T) {
+	const safeInteger = int64(9007199254740991)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
@@ -188,17 +188,17 @@ func TestDecisionCardStorePreservesNumericSnapshotCarriersOnBothStores(t *testin
 				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
 				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
 				Snapshot: decisioncard.Snapshot{
-					Decision: "launch_review", Context: map[string]any{"large_integer": preciseInteger},
+					Decision: "launch_review", Context: map[string]any{"large_integer": safeInteger},
 					Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 						"approve": {
 							Verdict: "approve", AdvancesTo: "operating",
 							Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-								"large_integer": runtimecontracts.LiteralExpression(preciseInteger),
+								"large_integer": runtimecontracts.LiteralExpression(safeInteger),
 							}},
 							EmitSchema: map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"large_integer": map[string]any{"type": "integer", "minimum": preciseInteger},
+									"large_integer": map[string]any{"type": "integer", "minimum": safeInteger},
 								},
 								"required": []string{"large_integer"}, "additionalProperties": false,
 							},
@@ -222,9 +222,9 @@ func TestDecisionCardStorePreservesNumericSnapshotCarriersOnBothStores(t *testin
 			if loaded.CardContentHash != card.CardContentHash || loaded.DecisionSchemaHash != card.DecisionSchemaHash {
 				t.Fatalf("round-trip hashes = %q/%q, want %q/%q", loaded.CardContentHash, loaded.DecisionSchemaHash, card.CardContentHash, card.DecisionSchemaHash)
 			}
-			assertStoreSnapshotNumber(t, "context.large_integer", loaded.Snapshot.Context["large_integer"])
+			assertStoreSnapshotNumber(t, "context.large_integer", loaded.Snapshot.Context["large_integer"], float64(safeInteger))
 			outcome := loaded.Snapshot.Outcomes["approve"]
-			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal)
+			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal, float64(safeInteger))
 			properties, ok := outcome.EmitSchema["properties"].(map[string]any)
 			if !ok {
 				t.Fatalf("emit schema properties = %#v", outcome.EmitSchema["properties"])
@@ -233,16 +233,26 @@ func TestDecisionCardStorePreservesNumericSnapshotCarriersOnBothStores(t *testin
 			if !ok {
 				t.Fatalf("large_integer schema = %#v", properties["large_integer"])
 			}
-			assertStoreSnapshotNumber(t, "schema minimum", property["minimum"])
+			assertStoreSnapshotNumber(t, "schema minimum", property["minimum"], float64(safeInteger))
+
+			unsafe := card
+			unsafe.CardID = uuid.NewString()
+			unsafe.Snapshot.Context["large_integer"] = int64(9007199254740992)
+			if err := cardStore.CreateDecisionCard(ctx, unsafe); err == nil || !strings.Contains(err.Error(), "I-JSON safe range") {
+				t.Fatalf("CreateDecisionCard unsafe integer error = %v", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, unsafe.CardID); !errors.Is(err, decisioncard.ErrNotFound) {
+				t.Fatalf("GetDecisionCard after unsafe create error = %v, want ErrNotFound", err)
+			}
 		})
 	}
 }
 
-func assertStoreSnapshotNumber(t *testing.T, name string, value any) {
+func assertStoreSnapshotNumber(t *testing.T, name string, value any, want float64) {
 	t.Helper()
-	number, ok := value.(json.Number)
-	if !ok || number.String() != "9007199254740993" {
-		t.Fatalf("%s = %#v, want exact json.Number", name, value)
+	number, ok := value.(float64)
+	if !ok || number != want {
+		t.Fatalf("%s = %#v, want float64(%v)", name, value, want)
 	}
 }
 

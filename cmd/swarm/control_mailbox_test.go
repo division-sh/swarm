@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -104,6 +105,51 @@ func TestMailboxViewRendersTaggedResources(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMailboxViewUsesCanonicalSemanticJSONForDecisionEvidence(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	result := mailboxCardDetailResult("card-numeric")
+	result["snapshot"] = map[string]any{
+		"decision": "launch_review",
+		"context":  map[string]any{"safe_integer": int64(9007199254740991)},
+		"outcomes": map[string]any{"approve": map[string]any{
+			"Emit":       map[string]any{"Fields": map[string]any{"score": map[string]any{"Literal": int64(9007199254740990)}}},
+			"EmitSchema": map[string]any{"properties": map[string]any{"score": map[string]any{"minimum": int64(9007199254740989)}}},
+		}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{"kind": "decision_card", "decision_card": result})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "view", "card-numeric"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{`"safe_integer":9007199254740991`, `"Literal":9007199254740990`, `"minimum":9007199254740989`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("mailbox view rewrote %s:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestMailboxViewRejectsUnsupportedNumericDecisionEvidence(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"swarm-cli:mailbox.get","result":{"kind":"decision_card","decision_card":{"card_id":"card-unsafe","run_id":"run-1","flow_instance":"root","entity_id":"entity-1","stage":"review","decision_id":"launch_review","title":"Review","status":"pending","created_at":"2026-05-13T12:00:01Z","updated_at":"2026-05-13T12:00:01Z","card_content_hash":"hash","snapshot":{"context":{"unsafe":9007199254740992}}}}}`)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "view", "card-unsafe"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code == 0 || !strings.Contains(stderr.String(), "I-JSON safe range") || stdout.Len() != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s, want fail-closed unsupported evidence", code, stdout.String(), stderr.String())
 	}
 }
 
