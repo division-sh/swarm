@@ -52,6 +52,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -76,6 +77,12 @@ type delayedRunStatusAgent struct {
 
 type servedEventPublishBlockingLLMRuntime struct {
 	started chan<- struct{}
+	release <-chan struct{}
+}
+
+type servedSessionCleanupProofLLMRuntime struct {
+	store   *store.PostgresStore
+	started chan<- string
 	release <-chan struct{}
 }
 
@@ -168,6 +175,45 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 		Message:   runtimellm.Message{Role: "assistant", Content: "acknowledged"},
 		SessionID: sessionID,
 	}, nil
+}
+
+func (r servedSessionCleanupProofLLMRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{
+		ID: uuid.NewString(), AgentID: agentID, SystemPrompt: systemPrompt,
+		Tools: append([]runtimellm.ToolDefinition(nil), tools...), ConversationMode: runtimesessions.RuntimeModeSession.String(),
+	}, nil
+}
+
+func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
+	if r.store == nil || session == nil {
+		return nil, errors.New("served session cleanup proof requires store and session")
+	}
+	lease, err := r.store.Acquire(ctx, session.AgentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeFlow, "served-cleanup-proof", "served-cleanup-proof")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.store.Release(context.Background(), lease) }()
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	turn, err := r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID: session.AgentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
+		ScopeKey: "served-cleanup-proof", RunID: runID, ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !turn.EvidenceStored || turn.Projection != runtimellm.AgentTurnProjectionApplied {
+		return nil, fmt.Errorf("served session cleanup proof projection = %#v", turn)
+	}
+	select {
+	case r.started <- lease.SessionID:
+	default:
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "released"}, SessionID: lease.SessionID}, nil
 }
 
 type servedLiveAgentProofLLMRuntime struct {
@@ -4504,6 +4550,169 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	runServedEventPublishActiveLoadProof(t, endpoint, db, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
+func TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
+	proof := startServedSessionCleanupProof(t)
+	var result struct {
+		OK      bool   `json:"ok"`
+		Status  string `json:"status"`
+		Deleted bool   `json:"deleted"`
+	}
+	runServedSessionCleanupMutation(t, proof, "bundle.delete", map[string]any{
+		"bundle_hash": proof.BundleHash, "force": true, "idempotency_key": "issue-1927-bundle-force-" + uuid.NewString(),
+	}, &result)
+	if !result.OK || result.Status != "completed" || !result.Deleted {
+		t.Fatalf("served bundle.delete result = %#v", result)
+	}
+	assertServedSessionCleanupQuiesced(t, proof)
+}
+
+func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
+	proof := startServedSessionCleanupProof(t)
+	var result struct {
+		OK             bool   `json:"ok"`
+		Status         string `json:"status"`
+		IncludeBundles bool   `json:"include_bundles"`
+	}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
+		"include_bundles": false, "idempotency_key": "issue-1927-runtime-nuke-" + uuid.NewString(),
+	}, &result)
+	if !result.OK || result.Status != "completed" || result.IncludeBundles {
+		t.Fatalf("served runtime.nuke result = %#v", result)
+	}
+	assertServedSessionCleanupQuiesced(t, proof)
+}
+
+type servedSessionCleanupProof struct {
+	Endpoint   string
+	DB         *sql.DB
+	BundleHash string
+	RunID      string
+	SessionID  string
+	Contexts   *runtimepkg.RuntimeContextManager
+	Release    func()
+}
+
+func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
+	t.Helper()
+	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := writeServedSessionCleanupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, Verbose: true, TestLifecycleProbe: probe,
+		TestLLMRuntime:          servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release},
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
+			contextsReady <- contexts
+		},
+	})
+	releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseWriter)
+	var contexts *runtimepkg.RuntimeContextManager
+	select {
+	case contexts = <-contextsReady:
+	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+		t.Fatal("timed out waiting for served runtime context manager")
+	}
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "thing.created", "bundle_hash": bundleHash,
+		"payload": map[string]any{"amount": 7, "who": "operator"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString(),
+	})
+	waitForServedEventPublishNodeDeliveryLifecycle(t, db, "postgres", initial.RunID, initial.EventID, probe)
+	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name": "thing.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
+		"payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString(),
+	})
+	var sessionID string
+	select {
+	case sessionID = <-started:
+	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+		t.Fatalf("timed out waiting for lifecycle-authorized session writer\n%s", servedEventPublishDebugSummary(t, db, "postgres", initial.RunID))
+	}
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, hold.EventID, "agent", "load-agent", "in_progress", 1)
+	var sessionRunID, status string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(run_id::text, ''), status
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&sessionRunID, &status); err != nil {
+		t.Fatalf("load in-flight served session: %v", err)
+	}
+	if sessionRunID != initial.RunID || status != "active" {
+		t.Fatalf("in-flight served session = run:%q status:%q, want %s/active", sessionRunID, status, initial.RunID)
+	}
+	return servedSessionCleanupProof{
+		Endpoint: endpoint, DB: db, BundleHash: bundleHash, RunID: initial.RunID,
+		SessionID: sessionID, Contexts: contexts, Release: releaseWriter,
+	}
+}
+
+func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any, out any) {
+	t.Helper()
+	response := make(chan servedJSONRPCEnvelope, 1)
+	go func() {
+		response <- requestServedJSONRPC(t, proof.Endpoint, method, params)
+	}()
+	deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
+	for time.Now().Before(deadline) {
+		lookup := proof.Contexts.LookupBundleHashStatus(proof.BundleHash)
+		if lookup.State == runtimepkg.RuntimeContextStateUnloaded {
+			proof.Release()
+			select {
+			case envelope := <-response:
+				if envelope.Error != nil {
+					t.Fatalf("%s error = %#v", method, envelope.Error)
+				}
+				if err := json.Unmarshal(envelope.Result, out); err != nil {
+					t.Fatalf("decode %s result: %v\n%s", method, err, string(envelope.Result))
+				}
+				return
+			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+				t.Fatalf("timed out waiting for %s after runtime admission closed", method)
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	proof.Release()
+	t.Fatalf("timed out waiting for %s to close runtime admission", method)
+}
+
+func assertServedSessionCleanupQuiesced(t *testing.T, proof servedSessionCleanupProof) {
+	t.Helper()
+	var current int
+	if err := proof.DB.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+		  AND status IN ('active', 'suspended')
+	`, proof.SessionID).Scan(&current); err != nil {
+		t.Fatalf("count current served cleanup sessions: %v", err)
+	}
+	if current != 0 {
+		t.Fatalf("current served cleanup sessions after shutdown barrier = %d, want 0", current)
+	}
+	var late int
+	if err := proof.DB.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE agent_id = 'load-agent'
+		  AND status IN ('active', 'suspended')
+	`).Scan(&late); err != nil {
+		t.Fatalf("count late served cleanup sessions: %v", err)
+	}
+	if late != 0 {
+		t.Fatalf("late served cleanup sessions = %d, want 0 after successful runtime shutdown", late)
+	}
+}
+
 func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *testing.T) {
 	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendDefaultSQLite)
 }
@@ -7364,6 +7573,25 @@ func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
 func writeServedEventPublishActiveLoadFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyRootIngressServedActiveLoad(t)
+}
+
+func writeServedSessionCleanupFixture(t *testing.T) string {
+	t.Helper()
+	root := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+load-agent:
+  id: load-agent
+  role: load_agent
+  prompt_ref: load-agent
+  model: regular
+  mode: task
+  subscriptions:
+    - thing.agent_hold
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
+Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.
+	`)
+	return root
 }
 
 func writeServedLiveAgentFixture(t *testing.T) string {

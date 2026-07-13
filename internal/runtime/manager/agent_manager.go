@@ -428,18 +428,29 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
 
-	newAgent, err := am.buildAgent(updated)
-	if err != nil {
-		return err
-	}
 	rec := PersistedAgent{Config: updated, Status: "active", HiredBy: "reconfigure"}
 	revision, err := lifecycleConfigRevision(rec)
 	if err != nil {
 		return err
 	}
-	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"reconfigure", agentID, revision}, "\x00"))).String()
-
 	subordinate := reconfigureSessionMutationPlan(current, updated)
+	_, subordinateIdentity, err := normalizedLifecycleSubordinate(subordinate)
+	if err != nil {
+		return err
+	}
+	currentRevision, err := lifecycleConfigRevision(PersistedAgent{Config: current})
+	if err != nil {
+		return err
+	}
+	if revision == currentRevision {
+		return nil
+	}
+	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"reconfigure", agentID, revision, subordinateIdentity}, "\x00"))).String()
+
+	newAgent, err := am.buildAgent(updated)
+	if err != nil {
+		return err
+	}
 	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", operationID, &rec, subordinate); err != nil {
 		return err
 	}

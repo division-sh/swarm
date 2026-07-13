@@ -384,6 +384,7 @@ type serveOptions struct {
 	TestLLMRuntime                   runtimellm.Runtime
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
+	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
 	TestBeforeReadinessCommit        func() error
 }
 
@@ -1297,6 +1298,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	if opts.TestRuntimeReadyHook != nil {
 		opts.TestRuntimeReadyHook(rt)
+	}
+	if opts.TestRuntimeContextsReadyHook != nil {
+		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
 	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
 	presenter.boot(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
