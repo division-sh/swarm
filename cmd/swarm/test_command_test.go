@@ -1794,7 +1794,7 @@ expect:
 }
 
 func writeScenarioSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC
+	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=cmd/swarm/test_command_test.go:TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1883,7 +1883,7 @@ expect:
 }
 
 func writeScenarioRootSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC
+	// routing-example-census: harness issue=2024 owner=scenario_harness_injection proof=cmd/swarm/test_command_test.go:TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `

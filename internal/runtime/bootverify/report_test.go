@@ -607,7 +607,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=bootverify.active_role_carrier proof=TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier
+	// routing-example-census: different-concept issue=none owner=bootverify.active_role_carrier proof=internal/runtime/bootverify/report_test.go:TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier
 	t.Parallel()
 
 	cases := []struct {
@@ -6968,7 +6968,7 @@ type rootDefaultStaticInputPinFixtureOptions struct {
 }
 
 func writeRootDefaultStaticInputPinFixtureWithOptions(t *testing.T, opts rootDefaultStaticInputPinFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.root_primary_entity_validation proof=TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers
+	// routing-example-census: different-concept issue=none owner=bootverify.root_primary_entity_validation proof=internal/runtime/bootverify/report_test.go:TestRun_AllowsNonMaterializingRootDefaultStaticInputPinHandlers
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7251,7 +7251,7 @@ type timerStateCancelReachabilityFixtureOptions struct {
 }
 
 func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCancelReachabilityFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.timer_reachability proof=TestTimerReachabilityConsumesAccumulatorTransitionCarriers
+	// routing-example-census: different-concept issue=none owner=bootverify.timer_reachability proof=internal/runtime/bootverify/report_test.go:TestRun_AllowsTimerCancelStateReachableFromEventStartContext
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7371,7 +7371,7 @@ support-node:
 }
 
 func timerValidationEventEntry(eventType string, externalSource bool, swarmLines string) string {
-	// routing-example-census: parser-only issue=none owner=bootverify.timer_validation_fixture proof=TestTimerReachabilityConsumesAccumulatorTransitionCarriers
+	// routing-example-census: parser-only issue=none owner=bootverify.timer_validation_fixture proof=internal/runtime/bootverify/report_test.go:TestRun_AllowsBootTimerWithoutCancelOn
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return ""
@@ -7518,7 +7518,7 @@ consumer-node:
 }
 
 func writeInputPinExternalScopeFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_scope proof=TestRun_ConstrainsExternalInputProducerPathToConsumingScope
+	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_scope proof=internal/runtime/bootverify/report_test.go:TestRun_ConstrainsExternalInputProducerPathToConsumingScope
 	t.Helper()
 	root := t.TempDir()
 

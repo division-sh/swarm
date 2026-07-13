@@ -85,7 +85,7 @@ func addDataAccumulationOverlay(t testing.TB, root string) {
 }
 
 func applyNegativeMutation(t testing.TB, root string, opts Options) {
-	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=TestTemplateFlowPilotConformance_FailClosedMatrix
+	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=internal/runtime/conformance/template_flow_pilot_conformance_test.go:TestTemplateFlowPilotConformance_FailClosedMatrix
 	t.Helper()
 	packageFile := filepath.Join(root, "package.yaml")
 	if opts.BadConnectMapping {

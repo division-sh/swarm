@@ -90,7 +90,7 @@ func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 }
 
 func runGeneratedActivityFixture(t *testing.T, subscribeResults bool) Report {
-	// routing-example-census: different-concept issue=none owner=generated_activity_result_topology proof=TestRunAcceptsGeneratedActivityResultsWithoutAuthoredSchemas
+	// routing-example-census: different-concept issue=none owner=generated_activity_result_topology proof=internal/runtime/bootverify/workflow_generated_activity_topology_test.go:TestRunAcceptsGeneratedActivityResultsWithoutAuthoredSchemas
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -165,7 +165,7 @@ activity-node:
 }
 
 func loadNestedGeneratedActivityFixture(t *testing.T) semanticview.Source {
-	// routing-example-census: different-concept issue=none owner=generated_activity_result_topology proof=TestRunAcceptsNestedFlowGeneratedActivityResultOwnership
+	// routing-example-census: different-concept issue=none owner=generated_activity_result_topology proof=internal/runtime/bootverify/workflow_generated_activity_topology_test.go:TestRunAcceptsNestedFlowGeneratedActivityResultOwnership
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `

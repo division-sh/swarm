@@ -55,7 +55,7 @@ func assertRuntimeStartCarriesFlowPath(t *testing.T, source semanticview.Source)
 }
 
 func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
-	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath
+	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=internal/runtime/runtime_session_scope_startup_test.go:TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
@@ -124,7 +124,7 @@ backend:
 }
 
 func loadSoleParentFlowRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
-	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath
+	// routing-example-census: different-concept issue=none owner=runtime.session_scope_startup proof=internal/runtime/runtime_session_scope_startup_test.go:TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()

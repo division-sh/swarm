@@ -283,7 +283,7 @@ func loadEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowA
 }
 
 func writeEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowAuthorityFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityRejectsFlowSurfaceRestatements
+	// routing-example-census: different-concept issue=none owner=bootverify.event_metadata_authority proof=internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityRejectsFlowSurfaceRestatements
 	t.Helper()
 	opts.flowStartedSwarm = canonicalParentConnectMetadataRole(opts.flowStartedSwarm)
 	opts.deployDoneSwarm = canonicalParentConnectMetadataRole(opts.deployDoneSwarm)
@@ -355,7 +355,7 @@ func eventMetadataAuthorityRoutedEventEntry(eventName, swarm string) string {
 }
 
 func eventMetadataAuthorityEventsYAML(opts eventMetadataAuthorityFixtureOptions) string {
-	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityAcceptsExternalProof
+	// routing-example-census: parser-only issue=none owner=bootverify.event_metadata_authority proof=internal/runtime/bootverify/workflow_event_metadata_authority_checks_test.go:TestEventMetadataAuthorityAcceptsExternalProof
 	externalSwarm := indentEventMetadataAuthoritySwarm(opts.externalRequestedSwarm)
 	if strings.TrimSpace(externalSwarm) == "" {
 		externalSwarm = "    source: external"

@@ -175,7 +175,7 @@ lead.observed:
   followup_audit: AuditEntry
   corrected_audit: AuditEntry
 `)
-	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.contained_state_model proof=TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners
+	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.contained_state_model proof=internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go:TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners
 	canonicalrouting.WriteFile(t, root, "flows/coordinator/schema.yaml", `
 name: coordinator
 mode: singleton
@@ -206,7 +206,7 @@ coordinator-indexer:
 }
 
 func applyRoutingMutation(t testing.TB, root string, opts Options) {
-	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix
+	// routing-example-census: negative-mutation issue=none owner=examples.routing.template_select_or_create proof=internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go:TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix
 	t.Helper()
 	inputSchema := filepath.Join(root, "flows", TemplateFlowID, "schema.yaml")
 	if opts.MissingOutputKey {

@@ -70,7 +70,7 @@ func TestRun_RejectsRootTemplateInstanceDeclaration(t *testing.T) {
 }
 
 func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_validation proof=TestRun_RejectsInvalidTemplateInstanceDeclarations
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_validation proof=internal/runtime/bootverify/workflow_template_instance_checks_test.go:TestRun_RejectsInvalidTemplateInstanceDeclarations
 	tests := []struct {
 		name         string
 		flowSchema   string

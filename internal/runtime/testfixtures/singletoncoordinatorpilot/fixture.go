@@ -73,7 +73,7 @@ flows:
 }
 
 func writeCoordinator(t testing.TB, root string, opts Options) {
-	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners
+	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go:TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners
 	t.Helper()
 	writeFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
 name: coordinator

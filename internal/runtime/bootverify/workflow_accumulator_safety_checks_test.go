@@ -522,7 +522,7 @@ producer.start:
 }
 
 func writeAccumulatorCrossFlowFixture(t *testing.T, withConnect bool) string {
-	// routing-example-census: different-concept issue=none owner=engine.accumulation proof=TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths
+	// routing-example-census: different-concept issue=none owner=engine.accumulation proof=internal/runtime/bootverify/workflow_accumulator_safety_checks_test.go:TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths
 	t.Helper()
 	root := t.TempDir()
 	connectBlock := ""

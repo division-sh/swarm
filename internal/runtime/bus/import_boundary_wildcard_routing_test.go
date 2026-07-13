@@ -743,7 +743,7 @@ func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildca
 }
 
 func writeBusImportBoundaryWildcardFixture(t *testing.T, opts importBoundaryWildcardFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=flow_package.wildcard_observation_boundary proof=TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault
+	// routing-example-census: different-concept issue=none owner=flow_package.wildcard_observation_boundary proof=internal/runtime/bus/import_boundary_wildcard_routing_test.go:TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault
 	t.Helper()
 	root := t.TempDir()
 	mode := strings.TrimSpace(opts.WorkerMode)

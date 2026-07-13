@@ -159,7 +159,7 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 }
 
 func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=TestDescribeRoutesHumanAndJSONAreDeterministic
+	// routing-example-census: different-concept issue=none owner=cli.routing_topology_presentation proof=cmd/swarm/describe_test.go:TestDescribeRoutesHumanAndJSONAreDeterministic
 	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var firstJSON, firstHuman string
 	for i := 0; i < 5; i++ {
@@ -680,7 +680,7 @@ account:
 }
 
 func writeDescribeStageGraphContracts(t testing.TB) string {
-	// routing-example-census: different-concept issue=none owner=cli.stage_graph_presentation proof=TestDescribeCommandGraphRendersStageGraph
+	// routing-example-census: different-concept issue=none owner=cli.stage_graph_presentation proof=cmd/swarm/describe_test.go:TestDescribeCommandGraphRendersStageGraph
 	t.Helper()
 	root := t.TempDir()
 	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `

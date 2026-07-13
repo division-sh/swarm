@@ -654,7 +654,7 @@ func standingSQLiteDiagnostics(path string) string {
 }
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
-	// routing-example-census: provider-ingress issue=none owner=standing_ingress proof=TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies
+	// routing-example-census: provider-ingress issue=none owner=standing_ingress proof=cmd/swarm/standing_ingress_supported_surface_test.go:TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{

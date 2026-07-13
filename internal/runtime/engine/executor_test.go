@@ -6328,7 +6328,7 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 }
 
 func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
-	// routing-example-census: different-concept issue=none owner=engine.entity_projection proof=TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent
+	// routing-example-census: different-concept issue=none owner=engine.entity_projection proof=internal/runtime/engine/executor_test.go:TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent
 	t.Helper()
 	root := t.TempDir()
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `

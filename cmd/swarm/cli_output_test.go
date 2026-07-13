@@ -731,7 +731,7 @@ func newCLIOutputColorPolicyRPCServer(t *testing.T, wantMethod string, result ma
 }
 
 func outputModeVerifyFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=cli.output_mode_rendering proof=TestCLIOutputModesForLocalConsumers
+	// routing-example-census: different-concept issue=none owner=cli.output_mode_rendering proof=cmd/swarm/cli_output_test.go:TestCLIOutputModesForLocalConsumers
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
