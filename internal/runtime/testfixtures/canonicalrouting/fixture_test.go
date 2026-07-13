@@ -45,7 +45,7 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 }
 
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
-	// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=TestCanonicalRoutingExampleInventoryAndTeachingContract
+	// routing-example-census: parser-only issue=none owner=examples.routing.teaching_contract proof=internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
 	want := canonicalExampleNames()
 	sort.Strings(want)
 	entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))

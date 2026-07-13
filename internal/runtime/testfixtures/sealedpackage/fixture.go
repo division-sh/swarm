@@ -33,7 +33,7 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 }
 
 func Write(t testing.TB, opts Options) string {
-	// routing-example-census: different-concept issue=none owner=sealed_flow_package_bindings proof=TestSealedFlowPackageConformance_CoversBoundaryOwners
+	// routing-example-census: different-concept issue=none owner=sealed_flow_package_bindings proof=internal/runtime/conformance/sealed_flow_package_conformance_test.go:TestSealedFlowPackageConformance_CoversBoundaryOwners
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
 	packageFile := filepath.Join(root, "package.yaml")

@@ -134,7 +134,7 @@ work:
 }
 
 func writeRootCompositionConnectSemanticFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=semanticview.root_connect_projection proof=TestCompositionConnectFactsExposeRootProducerEndpoint
+	// routing-example-census: different-concept issue=none owner=semanticview.root_connect_projection proof=internal/runtime/semanticview/composition_connect_test.go:TestCompositionConnectFactsExposeRootProducerEndpoint
 	t.Helper()
 	root := t.TempDir()
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `

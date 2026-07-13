@@ -2847,7 +2847,7 @@ func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMiss
 }
 
 func writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t testing.TB, mode, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=resolution_vs_legacy_instance_policy_precedence proof=TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute
+	// routing-example-census: different-concept issue=1738 owner=resolution_vs_legacy_instance_policy_precedence proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute
 	t.Helper()
 	root := t.TempDir()
 	mode = strings.TrimSpace(mode)
@@ -2933,7 +2933,7 @@ func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_instance_key_adapter proof=TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
+	// routing-example-census: different-concept issue=1738 owner=legacy_instance_key_adapter proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -3019,7 +3019,7 @@ func writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t testing.TB, delivery, o
 }
 
 func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, delivery, policyLines string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -3090,7 +3090,7 @@ consumer-node:
 }
 
 func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/bus/connect_route_plan_dispatch_test.go:TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `

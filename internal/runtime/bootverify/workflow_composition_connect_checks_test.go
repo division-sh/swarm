@@ -895,7 +895,7 @@ func (o compositionConnectAdapterFixtureOptions) clone() compositionConnectAdapt
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
 	t.Helper()
 	root := t.TempDir()
 	connectFrom := firstTestValue(opts.connectFrom, "producer.deploy_done")
@@ -964,7 +964,7 @@ connect:
 }
 
 func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.root_output_connect_validation proof=TestRun_AllowsRootProducerCompositionConnectAsRouteProof
+	// routing-example-census: different-concept issue=none owner=bootverify.root_output_connect_validation proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_AllowsRootProducerCompositionConnectAsRouteProof
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1031,7 +1031,7 @@ root.ready:
 }
 
 func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.root_auto_emit_key_carries proof=TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence
+	// routing-example-census: different-concept issue=none owner=bootverify.root_auto_emit_key_carries proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1103,7 +1103,7 @@ deployment:
 }
 
 func writeCompositionConnectTopologyFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=TestRun_TreatsParentCompositionConnectAsEventTopologyProof
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_TreatsParentCompositionConnectAsEventTopologyProof
 	t.Helper()
 	root := t.TempDir()
 	writeCompositionConnectRootPackage(t, root, "composition-connect-topology", `
@@ -1122,7 +1122,7 @@ func writeCompositionConnectTopologyFixture(t *testing.T) string {
 }
 
 func writeCompositionConnectAmbiguityFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.composition_ambiguity_diagnostics proof=TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_ambiguity_diagnostics proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1188,7 +1188,7 @@ ticket.ready:
 }
 
 func writeCompositionConnectRootPackage(t *testing.T, root, name, connectEntries string) {
-	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=TestRun_TreatsParentCompositionConnectAsEventTopologyProof
+	// routing-example-census: different-concept issue=none owner=bootverify.composition_topology_diagnostics proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_TreatsParentCompositionConnectAsEventTopologyProof
 	t.Helper()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: `+name+`
@@ -1286,7 +1286,7 @@ type selectResolutionCompositionFixtureOptions struct {
 }
 
 func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.select_resolution_validation_matrix proof=TestRun_FailsClosedForInvalidSelectInputResolution
+	// routing-example-census: different-concept issue=none owner=bootverify.select_resolution_validation_matrix proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_FailsClosedForInvalidSelectInputResolution
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 	receiverMode := strings.TrimSpace(opts.receiverMode)
@@ -1385,7 +1385,7 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 }
 
 func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.create_resolution_validation_matrix proof=TestRun_FailsClosedForInvalidCreateInputResolution
+	// routing-example-census: different-concept issue=none owner=bootverify.create_resolution_validation_matrix proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_FailsClosedForInvalidCreateInputResolution
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
 	packageFile := filepath.Join(root, "package.yaml")
@@ -1524,7 +1524,7 @@ func producerAutoEmitOnCreateBlock(opts compositionConnectFixtureOptions) string
 }
 
 func writeCompositionConnectConsumerFlow(t *testing.T, root string, opts compositionConnectFixtureOptions) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_adapter_and_instance_policy_validation proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress
 	t.Helper()
 	if opts.consumerRequiresInput {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "package.yaml"), `
@@ -1618,7 +1618,7 @@ func compositionConnectConsumerRegionEntitySchema(opts compositionConnectFixture
 }
 
 func writeCompositionConnectAdapterBootverifyFixture(t *testing.T, opts compositionConnectAdapterFixtureOptions) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_connect_instance_adapter_validation proof=TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance
+	// routing-example-census: different-concept issue=1738 owner=legacy_connect_instance_adapter_validation proof=internal/runtime/bootverify/workflow_composition_connect_checks_test.go:TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance
 	t.Helper()
 	root := t.TempDir()
 	outputKey := firstTestValue(opts.outputKey, "source_vertical_id")

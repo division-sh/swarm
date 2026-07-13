@@ -57,7 +57,7 @@ memory-agent:
 }
 
 func TestRun_RejectsSingletonCoordinatorTemplateInstanceMix(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=TestRun_RejectsSingletonCoordinatorTemplateInstanceMix
+	// routing-example-census: different-concept issue=none owner=flow_instance_authoring.singleton_coordinator proof=internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go:TestRun_RejectsSingletonCoordinatorTemplateInstanceMix
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton

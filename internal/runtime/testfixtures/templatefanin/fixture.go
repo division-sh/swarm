@@ -69,7 +69,7 @@ func Write(t testing.TB, opts Options) string {
 }
 
 func writeRoot(t testing.TB, root string, opts Options) {
-	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=internal/runtime/conformance/fan_in_stream_conformance_test.go:TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
 	t.Helper()
 	writeFile(t, filepath.Join(root, "package.yaml"), `
 name: template-fan-in
@@ -95,7 +95,7 @@ connect:
 }
 
 func deliveryYAML(opts Options) string {
-	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=internal/runtime/conformance/fan_in_stream_conformance_test.go:TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
 	if opts.DeliveryMany {
 		return "    delivery: many\n"
 	}
@@ -114,7 +114,7 @@ func legacyMapYAML(opts Options) string {
 }
 
 func writeOperating(t testing.TB, root string) {
-	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=internal/runtime/conformance/fan_in_stream_conformance_test.go:TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
 	t.Helper()
 	writeFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
@@ -155,7 +155,7 @@ operating.reported:
 }
 
 func writePortfolio(t testing.TB, root string, opts Options) {
-	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=internal/runtime/conformance/fan_in_stream_conformance_test.go:TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
 	t.Helper()
 	writeFile(t, filepath.Join(root, "flows", "portfolio", "default", "schema.yaml"), `
 name: portfolio
@@ -211,7 +211,7 @@ portfolio-collector:
 }
 
 func ambiguousReceiverInputYAML(opts Options) string {
-	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
+	// routing-example-census: different-concept issue=2023 owner=resolution.fan_in proof=internal/runtime/conformance/fan_in_stream_conformance_test.go:TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup
 	if !opts.AmbiguousReceiverInput {
 		return ""
 	}

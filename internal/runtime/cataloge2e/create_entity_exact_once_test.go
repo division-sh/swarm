@@ -22,7 +22,7 @@ func TestCatalogRejectsStaticCreateEntityHandlerFixture(t *testing.T) {
 }
 
 func writeCreateEntityExactOnceFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_static_create_entity_retirement proof=TestCatalogRejectsStaticCreateEntityHandlerFixture
+	// routing-example-census: different-concept issue=1738 owner=legacy_static_create_entity_retirement proof=internal/runtime/cataloge2e/create_entity_exact_once_test.go:TestCatalogRejectsStaticCreateEntityHandlerFixture
 	t.Helper()
 	root := t.TempDir()
 	writeFixtureFile(t, root, "package.yaml", `

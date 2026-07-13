@@ -1342,7 +1342,7 @@ type selectResolutionConnectRoutePlanFixtureOptions struct {
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
-	// routing-example-census: different-concept issue=none owner=pinrouting.select_resolution_lowering_matrix proof=TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields
+	// routing-example-census: different-concept issue=none owner=pinrouting.select_resolution_lowering_matrix proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields
 	t.Helper()
 	accountIDEntityType := strings.TrimSpace(options.accountIDEntityType)
 	if accountIDEntityType == "" {
@@ -1396,7 +1396,7 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1456,7 +1456,7 @@ deployment:
 }
 
 func writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t *testing.T, usingBlock, outputKey, outputCarries, instanceBy string) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_instance_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1516,7 +1516,7 @@ deployment:
 }
 
 func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_addressed_template_routing proof=TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute
+	// routing-example-census: different-concept issue=1738 owner=legacy_addressed_template_routing proof=internal/runtime/core/pinrouting/connect_route_plan_test.go:TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), `  - from: producer.account_setup

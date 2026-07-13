@@ -4128,7 +4128,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=runtime.run_fork_identity proof=TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity
+	// routing-example-census: different-concept issue=none owner=runtime.run_fork_identity proof=cmd/swarm/main_test.go:TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -7273,7 +7273,7 @@ func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) i
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.event_publish_follow_up proof=TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
+	// routing-example-census: different-concept issue=none owner=runtime.event_publish_follow_up proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
@@ -7325,7 +7325,7 @@ states: [new, waiting, done]
 }
 
 func writeServedExternalEventFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.externally_handled_event proof=TestServedParityHarnessRuntimeIngressControlLifecycle
+	// routing-example-census: different-concept issue=none owner=runtime.externally_handled_event proof=cmd/swarm/main_test.go:TestServedParityHarnessRuntimeIngressControlLifecycle
 	t.Helper()
 	root := writeServedEventPublishFollowUpFixture(t)
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "events.yaml"), `item.processed:
@@ -7341,7 +7341,7 @@ external.observed:
 }
 
 func writeServedTestSetupFixture(t *testing.T) string {
-	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=TestServedParityHarnessTestSetupEntitiesLifecycle
+	// routing-example-census: harness issue=2024 owner=test_setup_injection proof=cmd/swarm/main_test.go:TestServedParityHarnessTestSetupEntitiesLifecycle
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7422,7 +7422,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
 }
 
 func writeServedJoinProofFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=engine.join proof=TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
+	// routing-example-census: different-concept issue=none owner=engine.join proof=cmd/swarm/main_test.go:TestRunServeRuntimeJoinFailureReachesAPIAndCLI
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -7612,7 +7612,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 }
 
 func addServedLegacyTemplateRootOverlay(t *testing.T, root string) {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_overlay proof=TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_lifecycle_overlay proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
 	t.Helper()
 	canonicalrouting.ReplaceFile(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
   - id: operating
@@ -7692,7 +7692,7 @@ portfolio-node:
 }
 
 func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_target_route proof=TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_target_route proof=cmd/swarm/main_test.go:TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	addServedLegacyTemplateRootOverlay(t, root)
@@ -7798,7 +7798,7 @@ Handle live-agent parity events.
 }
 
 func writeServedDynamicAutoEmitFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=1738 owner=legacy_template_auto_emit proof=TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
+	// routing-example-census: different-concept issue=1738 owner=legacy_template_auto_emit proof=cmd/swarm/main_test.go:TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	addServedLegacyTemplateRootOverlay(t, root)
@@ -12991,7 +12991,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 }
 
 func writeVerifyLintEvidenceFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=cli.verify_lint_evidence proof=TestRunVerifyCommand_SurfacesLintEvidence
+	// routing-example-census: different-concept issue=none owner=cli.verify_lint_evidence proof=cmd/swarm/main_test.go:TestRunVerifyCommand_SurfacesLintEvidence
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -13274,7 +13274,7 @@ support-node:
 }
 
 func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=cli.tutorial_lint proof=TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence
+	// routing-example-census: different-concept issue=none owner=cli.tutorial_lint proof=cmd/swarm/main_test.go:TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: ticket-flow
@@ -13518,7 +13518,7 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=contracts.state_schema proof=TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat
+	// routing-example-census: different-concept issue=none owner=contracts.state_schema proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-state-schema-float
@@ -13574,7 +13574,7 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
-	// routing-example-census: different-concept issue=none owner=engine.accumulation_projection proof=TestRunVerifyCommand_AllowsAccumulatorEntityProjection
+	// routing-example-census: different-concept issue=none owner=engine.accumulation_projection proof=cmd/swarm/main_test.go:TestRunVerifyCommand_AllowsAccumulatorEntityProjection
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
 	root := t.TempDir()
@@ -13883,7 +13883,7 @@ func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID strin
 }
 
 func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentKey, agentID string) string {
-	// routing-example-census: different-concept issue=none owner=runtime.agent_slug_admission proof=TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness
+	// routing-example-census: different-concept issue=none owner=runtime.agent_slug_admission proof=cmd/swarm/main_test.go:TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
@@ -13940,7 +13940,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 }
 
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=runtime.artifact_repo_admission proof=TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot
+	// routing-example-census: different-concept issue=none owner=runtime.artifact_repo_admission proof=cmd/swarm/main_test.go:TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -14027,7 +14027,7 @@ artifact-writer:
 }
 
 func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
-	// routing-example-census: different-concept issue=none owner=runtime.model_alias_validation proof=TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias
+	// routing-example-census: different-concept issue=none owner=runtime.model_alias_validation proof=cmd/swarm/main_test.go:TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias
 	t.Helper()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-model-alias
@@ -15987,7 +15987,7 @@ func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testin
 }
 
 func writeVerifyMissingPinWarningFixture(t *testing.T) string {
-	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_producer_path proof=TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface
+	// routing-example-census: different-concept issue=none owner=bootverify.input_pin_producer_path proof=cmd/swarm/main_test.go:TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface
 	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
