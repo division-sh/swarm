@@ -3734,6 +3734,13 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if loaded.serveIdentityDetail() != projection.BundleHash {
 		t.Fatalf("serve identity = %q, want bundle hash %q", loaded.serveIdentityDetail(), projection.BundleHash)
 	}
+	authorLabel := serveRuntimeBundleAuthorLabel(loaded)
+	if authorLabel == "" || strings.Contains(authorLabel, projection.BundleHash) || strings.Contains(authorLabel, loaded.bootIdentity.Fingerprint) {
+		t.Fatalf("author label = %q, want workflow name/version without bundle identity", authorLabel)
+	}
+	if projectName := serveLifecycleProjectName(localRuntimeStateResolution{}, []serveRuntimeBundle{loaded}); projectName != authorLabel {
+		t.Fatalf("no-root project name = %q, want author label %q", projectName, authorLabel)
+	}
 	if loaded.bundleSourceFact.BundleHash != projection.BundleHash || loaded.bundleSourceFact.BundleSource != storerunlifecycle.BundleSourcePersisted {
 		t.Fatalf("bundle source fact = %#v, want persisted %s", loaded.bundleSourceFact, projection.BundleHash)
 	}
@@ -10140,12 +10147,20 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 		SelfCheck:          true,
 		RequireBundleMatch: true,
 		AbandonActiveRuns:  true,
-		Verbose:            true,
+		Verbose:            false,
 	})
 
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	if !strings.Contains(serve.outputString(), "active work cleared for a clean start") {
+		t.Fatalf("concise abandon output omitted author outcome:\n%s", serve.outputString())
+	}
+	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
+		if strings.Contains(serve.outputString(), forbidden) {
+			t.Fatalf("concise abandon output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
+		}
 	}
 	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
 	if err != nil {
@@ -10373,7 +10388,7 @@ func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *te
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
 		RequireBundleMatch:      false,
-		Verbose:                 true,
+		Verbose:                 false,
 		TestLLMRuntime:          runtimellm.NoopRuntime{},
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
@@ -10381,9 +10396,14 @@ func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *te
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	for _, want := range []string{firstHash, secondHash, "[22/22] ready"} {
+	for _, want := range []string{"swarm serve · 2 persisted bundles", "2 bundles", "ready in "} {
 		if !strings.Contains(serve.outputString(), want) {
 			t.Fatalf("serve output missing %q:\n%s", want, serve.outputString())
+		}
+	}
+	for _, forbidden := range []string{firstHash, secondHash, "bundle-v1:sha256:", "sha256:", "fingerprint"} {
+		if strings.Contains(serve.outputString(), forbidden) {
+			t.Fatalf("concise multi-context output exposed identity %q:\n%s", forbidden, serve.outputString())
 		}
 	}
 }
@@ -10558,12 +10578,20 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
 		RequireBundleMatch: true,
-		Verbose:            true,
+		Verbose:            false,
 	})
 
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	if !strings.Contains(serve.outputString(), "unfinished work restored") {
+		t.Fatalf("concise recovery output omitted author outcome:\n%s", serve.outputString())
+	}
+	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
+		if strings.Contains(serve.outputString(), forbidden) {
+			t.Fatalf("concise recovery output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
+		}
 	}
 	assertServeRuntimeRunStillActive(t, context.Background(), &store.PostgresStore{DB: db}, persistedRunID)
 	for _, target := range orphanTargets {
@@ -14795,11 +14823,15 @@ func postgresMainTestTableExists(t *testing.T, db *sql.DB, tableName string) boo
 	return exists
 }
 
-func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
+func TestWaitForServeHealthEndpointsProvesOnlyPreCommitLiveness(t *testing.T) {
+	var readyCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/healthz", "/readyz":
+		case "/healthz":
 			w.WriteHeader(http.StatusOK)
+		case "/readyz":
+			readyCalls.Add(1)
+			http.Error(w, "not committed", http.StatusServiceUnavailable)
 		default:
 			http.NotFound(w, r)
 		}
@@ -14808,6 +14840,9 @@ func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
 
 	if err := waitForServeHealthEndpoints(context.Background(), server.Listener.Addr()); err != nil {
 		t.Fatalf("waitForServeHealthEndpoints: %v", err)
+	}
+	if readyCalls.Load() != 0 {
+		t.Fatalf("pre-commit liveness probe called /readyz %d times", readyCalls.Load())
 	}
 }
 
@@ -15068,6 +15103,63 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 	}
 	binding := receiveToolGatewayBinding(t, bindingCh, "")
 	assertToolGatewayBindingUsesMCPPort(t, binding, mcpPort, stalePort)
+}
+
+func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	apiPortText := freeDoctorTCPPort(t)
+	apiPort, err := strconv.Atoi(apiPortText)
+	if err != nil {
+		t.Fatalf("parse api port %q: %v", apiPortText, err)
+	}
+
+	apiOpts := defaultRootCommandOptions()
+	apiOpts.apiRPCEndpointOverride = "http://127.0.0.1:" + apiPortText + "/v1/rpc"
+	apiOpts.runReadyTimeout = serveRuntimeReadyTimeout
+	apiOpts.runReadyPoll = 10 * time.Millisecond
+	mcpListenAddr := "127.0.0.1:" + freeDoctorTCPPort(t)
+	var readyStatus atomic.Int32
+	apiOpts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		serveOpts.MCPListenAddr = mcpListenAddr
+		serveOpts.TestBeforeReadinessCommit = func() error {
+			response, probeErr := http.Get("http://127.0.0.1:" + apiPortText + "/readyz")
+			if probeErr != nil {
+				return fmt.Errorf("probe pre-commit readiness: %w", probeErr)
+			}
+			readyStatus.Store(int32(response.StatusCode))
+			_ = response.Body.Close()
+			return errors.New("late readiness proof failed")
+		}
+		return runServeRuntime(ctx, repo, serveOpts)
+	}
+
+	var startupFailure bytes.Buffer
+	stop, err := startLocalRunServe(context.Background(), repoRoot(), runCommandOptions{
+		apiOptions:       apiOpts,
+		configPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "late-gate.sqlite"), nil),
+		contractsPath:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		dataSource:       t.TempDir(),
+		platformSpecPath: defaultPlatformSpecPath,
+		apiPort:          apiPort,
+	}, &startupFailure)
+	if stop != nil {
+		stop()
+		t.Fatal("local run accepted readiness before the late gate committed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "exited before readiness") {
+		t.Fatalf("startLocalRunServe error = %v, want pre-readiness exit", err)
+	}
+	if readyStatus.Load() != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz during final pre-commit gate = %d, want %d", readyStatus.Load(), http.StatusServiceUnavailable)
+	}
+	text := startupFailure.String()
+	if !strings.Contains(text, "serve failed · ready · late readiness proof failed") {
+		t.Fatalf("local run did not replay the truthful late-gate failure:\n%s", text)
+	}
+	if strings.Contains(text, "ready in ") || strings.Contains(text, "shutdown · complete") {
+		t.Fatalf("local run late-gate failure exposed readiness:\n%s", text)
+	}
 }
 
 func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
