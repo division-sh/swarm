@@ -149,6 +149,36 @@ func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) 
 	)}, nil
 }
 
+type deliveryContextDeferredInterceptor struct {
+	t    *testing.T
+	want events.DeliveryContext
+}
+
+func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	switch evt.Type() {
+	case events.EventType("custom.root"):
+		next := eventtest.RootIngress(
+			"",
+			events.EventType("custom.middle"),
+			"",
+			"",
+			nil,
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
+			time.Now().UTC(),
+		).WithDeliveryContext(i.want)
+		return false, []events.Event{next}, nil
+	case events.EventType("custom.middle"):
+		if got := events.DeliveryContextFromContext(ctx).ReplyContextID(); got != i.want.ReplyContextID() {
+			i.t.Fatalf("deferred publish reply context = %q, want %q", got, i.want.ReplyContextID())
+		}
+	}
+	return true, nil, nil
+}
+
 type nonTransactionalPersistedBeforeInterceptor struct {
 	t     *testing.T
 	store *recordingEventStore
@@ -1206,6 +1236,36 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	requireNoBusEvent(t, otherCh, "deferred delivery to filtered agent")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+}
+
+func TestEventBusPublishDeferredRestoresEventDeliveryContext(t *testing.T) {
+	store := &recordingEventStore{}
+	want := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:deferred-publish"}}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{deliveryContextDeferredInterceptor{t: t, want: want}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.root"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := eb.WaitForQuiescence(ctx); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
 }
 
 func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {

@@ -71,6 +71,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:ReplaceFile:filesystem_write:1":                            ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:WriteFile:filesystem_write:1":                              ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:WriteFile:filesystem_write:2":                              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeYAMLDocument:filesystem_write:1":                      ownerBuildTest,
 	"internal/runtime/testfixtures/singletoncoordinatorpilot/fixture.go:writeFile:filesystem_write:1":                     ownerBuildTest,
 	"internal/runtime/testfixtures/templatefanin/fixture.go:writeFile:filesystem_write:1":                                 ownerBuildTest,
 	"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1":                                               ownerManagedAgent,

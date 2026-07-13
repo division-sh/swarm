@@ -102,7 +102,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt,
-	), nil
+	).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions, eventType EventType) (Event, error) {
@@ -134,7 +134,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt.UTC(),
-	), nil
+	).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func normalizedAdmissionClass(class EventAdmissionClass) EventAdmissionClass {

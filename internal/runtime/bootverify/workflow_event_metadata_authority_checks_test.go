@@ -284,6 +284,7 @@ func loadEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowA
 }
 
 func writeEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlowAuthorityFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.event_metadata_authority proof=TestEventMetadataAuthorityRejectsFlowSurfaceRestatements
 	t.Helper()
 	opts.flowStartedSwarm = canonicalParentConnectMetadataRole(opts.flowStartedSwarm)
 	opts.deployDoneSwarm = canonicalParentConnectMetadataRole(opts.deployDoneSwarm)

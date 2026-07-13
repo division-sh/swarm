@@ -1116,7 +1116,7 @@ func cloneEvent(evt events.Event) events.Event {
 		evt.ParentEventID(),
 		evt.NormalizedEnvelope(),
 		evt.CreatedAt(),
-	)
+	).WithDeliveryContext(evt.DeliveryContext())
 }
 
 func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowState {

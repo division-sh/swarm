@@ -1009,6 +1009,7 @@ func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time, 
 	if err != nil {
 		return ctx, events.EmptyEvent(), err
 	}
+	ctx = events.WithDeliveryContext(ctx, admitted.DeliveryContext())
 	if runID := strings.TrimSpace(admitted.RunID()); runID != "" {
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}

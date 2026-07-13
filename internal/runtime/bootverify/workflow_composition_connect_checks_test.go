@@ -1287,6 +1287,7 @@ type selectResolutionCompositionFixtureOptions struct {
 }
 
 func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.select_resolution_validation_matrix proof=TestRun_FailsClosedForInvalidSelectInputResolution
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 	receiverMode := strings.TrimSpace(opts.receiverMode)
@@ -1385,6 +1386,7 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 }
 
 func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {
+	// routing-example-census: different-concept issue=none owner=bootverify.create_resolution_validation_matrix proof=TestRun_FailsClosedForInvalidCreateInputResolution
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
 	packageFile := filepath.Join(root, "package.yaml")

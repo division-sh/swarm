@@ -34,6 +34,28 @@ func TestAdmissionRootIngressAllocatesPersistedFacts(t *testing.T) {
 	}
 }
 
+func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
+	want := DeliveryContext{Reply: &ReplyContextRef{ID: "reply-v1:admission"}}
+	admitted, err := AdmitForPublish(NewProjectionEvent(
+		"event-1",
+		EventType("provider.replied"),
+		"provider-node",
+		"",
+		nil,
+		0,
+		"run-1",
+		"request-1",
+		EventEnvelope{},
+		time.Now().UTC(),
+	).WithDeliveryContext(want), AdmissionOptions{})
+	if err != nil {
+		t.Fatalf("AdmitForPublish: %v", err)
+	}
+	if got := admitted.DeliveryContext().ReplyContextID(); got != want.ReplyContextID() {
+		t.Fatalf("admitted reply context = %q, want %q", got, want.ReplyContextID())
+	}
+}
+
 func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	admitted, err := AdmitForPublish(NewRuntimeControlEvent(
 		"",

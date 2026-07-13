@@ -23,6 +23,7 @@ func LoadBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 }
 
 func Write(t testing.TB) string {
+	// routing-example-census: different-concept issue=none owner=flow_required_agent_authority proof=TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
 	producerSchema := filepath.Join(root, "flows", "producer", "schema.yaml")
