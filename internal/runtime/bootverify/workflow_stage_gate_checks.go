@@ -55,6 +55,11 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		sort.Strings(verdicts)
 		for _, verdict := range verdicts {
 			outcome := plan.Outcomes[verdict]
+			for inputName, input := range outcome.Input {
+				if _, err := runtimecontracts.NormalizeWorkflowGateInputType(input.Type); err != nil {
+					findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s decision.%s has invalid type: %v", verdict, strings.TrimSpace(inputName), err)))
+				}
+			}
 			target := strings.TrimSpace(outcome.AdvancesTo)
 			switch {
 			case target == "":
@@ -156,12 +161,7 @@ func stageGateExpressionText(expression runtimecontracts.ExpressionValue) string
 }
 
 func stageGateTypesCompatible(inputType, eventType string) bool {
-	inputType = strings.TrimSpace(strings.Split(inputType, " ")[0])
-	eventType = strings.TrimSpace(strings.Split(eventType, " ")[0])
-	if inputType == eventType {
-		return true
-	}
-	return inputType == "text" && (eventType == "string" || eventType == "text")
+	return runtimecontracts.WorkflowGateInputTypeCompatible(inputType, eventType)
 }
 
 func normalizedGateSet(values []string) map[string]struct{} {

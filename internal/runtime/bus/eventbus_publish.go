@@ -901,6 +901,12 @@ func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt event
 		}
 		return
 	}
+	if publishErr == nil && evt.Type() == events.EventType("mailbox.card_decided") {
+		if err := eb.SettleRecoveredPipelineEvent(ctx, evt); err != nil {
+			_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), err)
+		}
+		return
+	}
 	if !shouldPersistPipelineReceipt(true, publishErr) {
 		return
 	}
@@ -911,6 +917,12 @@ func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt event
 }
 
 func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
+	// Decision-route convergence is part of its durable settlement state machine.
+	// Sending a post-route failure through this generic path can overwrite a
+	// processed receipt and quarantine a verdict that already executed.
+	if evt.Type() == events.EventType("mailbox.card_decided") {
+		return
+	}
 	if err := eb.convergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "normal_run_completion_failed", "eventbus", "post_commit_convergence", map[string]any{
 			"event_id": evt.ID(), "event_type": string(evt.Type()),

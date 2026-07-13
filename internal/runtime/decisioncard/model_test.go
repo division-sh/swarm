@@ -122,3 +122,21 @@ func TestNewRejectsInputDraftTTLBeyondReminderInterval(t *testing.T) {
 		t.Fatalf("New error = %v, want draft TTL constraint", err)
 	}
 }
+
+func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
+	_, err := New(Card{
+		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
+		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
+		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"reject": {
+				AdvancesTo: "building",
+				Input: map[string]runtimecontracts.WorkflowGateInputField{
+					"feedback": {Type: "string", Required: true},
+				},
+			},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported stage gate input type") {
+		t.Fatalf("New error = %v, want noncanonical gate input rejection", err)
+	}
+}

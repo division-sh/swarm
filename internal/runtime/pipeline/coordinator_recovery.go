@@ -201,6 +201,14 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	quarantiner, _ := r.bus.(persistedPipelineRecoveryQuarantiner)
 	_, requiresCanonicalSettlement := r.store.(DecisionRouteObligationStore)
 	settlementOwner, _ := r.store.(runtimereplayclaim.SettlementOwner)
+	deferSettlement := func(settleCtx context.Context, evt events.Event, cause error) error {
+		obligations, ok := r.store.(DecisionRouteObligationStore)
+		if !ok || obligations == nil {
+			return fmt.Errorf("missing decision route settlement retry owner")
+		}
+		failure := runtimefailures.Normalize(cause, "pipeline-recovery", "defer_decision_route_settlement")
+		return obligations.DeferDecisionRouteObligation(settleCtx, evt.ID(), time.Now().UTC().Add(DecisionRouteRetryDelay), &failure)
+	}
 	settleProcessed := func(settleCtx context.Context, evt events.Event) error {
 		if settler != nil {
 			return settler.SettleRecoveredPipelineEvent(settleCtx, evt)
@@ -279,8 +287,10 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 				continue
 			}
 			if processed {
-				if err := settleProcessed(workCtx, evt); err != nil && firstErr == nil {
-					firstErr = fmt.Errorf("settle processed decision route %s: %w", evt.ID(), err)
+				if err := settleProcessed(workCtx, evt); err != nil {
+					if deferErr := deferSettlement(workCtx, evt, err); deferErr != nil && firstErr == nil {
+						firstErr = fmt.Errorf("defer processed decision route %s: %w", evt.ID(), deferErr)
+					}
 				}
 				_ = lease.Release(workCtx)
 				continue
@@ -385,8 +395,14 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			_ = lease.Release(workCtx)
 			continue
 		}
-		if err := settleProcessed(workCtx, evt); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
+		if err := settleProcessed(workCtx, evt); err != nil {
+			if _, decisionRoute := decisionRouteIDs[strings.TrimSpace(evt.ID())]; decisionRoute {
+				if deferErr := deferSettlement(workCtx, evt, err); deferErr != nil && firstErr == nil {
+					firstErr = fmt.Errorf("defer replay event %s settlement: %w", evt.ID(), deferErr)
+				}
+			} else if firstErr == nil {
+				firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
+			}
 		}
 		logStartupRecoveryPipelineReplayAftermath(workCtx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, persistedRecipients)
 		_ = lease.Release(workCtx)
