@@ -767,15 +767,6 @@ pins:
             cel: payload.chat_id
           text:
             cel: payload.text
-telegram-outcome-observer:
-  id: telegram-outcome-observer
-  execution_type: system_node
-  subscribes_to: [telegram-chat.telegram_send_message.succeeded, telegram-chat.telegram_send_message.failed]
-  event_handlers:
-    telegram-chat.telegram_send_message.succeeded:
-      advances_to: active
-    telegram-chat.telegram_send_message.failed:
-      advances_to: done
 `,
 		"flows/telegram-chat/tools.yaml": fmt.Sprintf(`telegram.send_message:
   category: provider_connector
