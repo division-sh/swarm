@@ -137,7 +137,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 }
 
 func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
@@ -227,7 +227,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 }
 
 func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
@@ -299,10 +299,10 @@ type workflowJoinStoreCase struct {
 	open func(*testing.T) (*WorkflowInstanceStore, context.Context)
 }
 
-func workflowJoinStoreCases(requirement testutil.DatabaseRequirement) []workflowJoinStoreCase {
+func workflowJoinStoreCases(requirement, sqliteRequirement testutil.DatabaseRequirement) []workflowJoinStoreCase {
 	return []workflowJoinStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t, testutil.SQLiteFreshFile())
+			db := newSQLiteWorkflowInstanceStoreTestDB(t, sqliteRequirement)
 			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 		}},
 		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {

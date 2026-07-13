@@ -3765,7 +3765,8 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) {
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
@@ -3806,7 +3807,8 @@ func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) 
 func TestRunServeRuntimeDBLoadedExecutesExplicitHostRefusal(t *testing.T) {
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	bundleHash := seedServeRuntimeBundleCatalog(t, ctx, pg, doctorAgentContractsPath)
 	var out lockedBuffer
@@ -3847,7 +3849,8 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 			return "", nil
 		})
 		return manager
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	bundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, contractsRoot)
 	var out lockedBuffer
@@ -3878,7 +3881,8 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
@@ -3991,7 +3995,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
-	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash := startServedJoinProofRuntime(t, testutil.PostgresRowState())
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
 		"bundle_hash":     bundleHash,
@@ -4051,7 +4055,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
-	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash := startServedJoinProofRuntime(t, testutil.PostgresRowState())
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
@@ -4124,7 +4128,8 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	sourceBundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	sourceProjection, err := runtimecontracts.BuildBundleCatalogProjection(sourceBundle)
@@ -4357,7 +4362,8 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4421,7 +4427,8 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	contractsPath := writeServedEventPublishTargetRouteFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4489,7 +4496,8 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	contractsPath := writeServedEventPublishActiveLoadFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4517,16 +4525,18 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *testing.T) {
-	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendDefaultSQLite)
+	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendDefaultSQLite, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing.T) {
-	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendExplicitPostgres)
+	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendExplicitPostgres, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
 }
 
 func TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle)
-	servedparity.Run(t, scenario, runServedDynamicAutoEmitBackendProof)
+	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
+		runServedDynamicAutoEmitBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessLiveAgentEventReplayLifecycle(t *testing.T) {
@@ -4534,7 +4544,9 @@ func TestServedParityHarnessLiveAgentEventReplayLifecycle(t *testing.T) {
 		servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentEventReplayBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedLiveAgentEventReplayBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
@@ -4543,24 +4555,32 @@ func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
 		servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedRunControlBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedRunControlBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessLiveAgentReplayBacklogLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentReplayBacklogBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedLiveAgentReplayBacklogBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle)
-	servedparity.Run(t, scenario, runServedAgentRestartBackendProof)
+	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
+		runServedAgentRestartBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessAgentDirectiveOutcomeLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle)
-	servedparity.Run(t, scenario, runServedAgentDirectiveBackendProof)
+	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
+		runServedAgentDirectiveBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
@@ -4568,7 +4588,9 @@ func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
 		servedparity.MustScenario(servedparity.ScenarioRuntimePauseIngressLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedRuntimeIngressControlBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedRuntimeIngressControlBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
@@ -4577,12 +4599,16 @@ func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
 		servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioMailboxDeferDecisionLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedMailboxDecisionBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedMailboxDecisionBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessTestSetupEntitiesLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle)
-	servedparity.Run(t, scenario, runServedTestSetupEntitiesBackendProof)
+	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
+		runServedTestSetupEntitiesBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
@@ -4591,11 +4617,13 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 		servedparity.MustScenario(servedparity.ScenarioConversationForkChatLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioConversationForkDeleteLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedConversationForkBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, func(t *testing.T, backend servedparity.Backend) {
+		runServedConversationForkBackendProof(t, backend, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
+	})
 }
 
 func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
-	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite)
+	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite, testutil.PostgresEmptyPhysical(), testutil.SQLiteDefaultTemp())
 	cases := []struct {
 		method string
 		params map[string]any
@@ -4655,21 +4683,21 @@ type servedConversationForkProofRuntime struct {
 	LLMRequests *atomic.Int32
 }
 
-func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
-	return startServedLiveAgentProofRuntimeWithLLM(t, backend, servedLiveAgentProofLLMRuntime{})
+func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedControlProofRuntime {
+	return startServedLiveAgentProofRuntimeWithLLM(t, backend, servedLiveAgentProofLLMRuntime{}, postgresRequirement, sqliteRequirement)
 }
 
-func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime) servedControlProofRuntime {
-	return startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, llm, nil)
+func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedControlProofRuntime {
+	return startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, llm, nil, postgresRequirement, sqliteRequirement)
 }
 
-func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults) servedControlProofRuntime {
+func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
-		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		sqlitePath := testutil.SQLitePath(t, sqliteRequirement)
 		contractsPath := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4707,7 +4735,8 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
-		})
+		}, postgresRequirement)
+
 		if faults != nil {
 			oldBuildStores := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
@@ -4760,13 +4789,13 @@ func wrapServedDirectiveFaultStore(t *testing.T, stores storeBundle, faults *ser
 	return stores
 }
 
-func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
-		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		sqlitePath := testutil.SQLitePath(t, sqliteRequirement)
 		contractsPath := writeServedEventPublishFollowUpFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4802,7 +4831,8 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
-		})
+		}, postgresRequirement)
+
 		contractsPath := writeServedEventPublishFollowUpFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4827,64 +4857,64 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 	}
 }
 
-func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedRunControlLifecycleProof(t, rt)
 }
 
-func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedLiveAgentProofRuntime(t, backend)
+	rt := startServedLiveAgentProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
 }
 
-func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedLiveAgentProofRuntime(t, backend)
+	rt := startServedLiveAgentProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedLiveAgentReplayBacklogLifecycleProof(t, rt)
 }
 
-func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedLiveAgentProofRuntime(t, backend)
+	rt := startServedLiveAgentProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedAgentRestartLifecycleProof(t, rt)
 }
 
-func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	var effects atomic.Int32
 	faults := &servedDirectivePersistenceFaults{}
-	rt := startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects, directiveFailures: true}, faults)
+	rt := startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects, directiveFailures: true}, faults, postgresRequirement, sqliteRequirement)
 	runServedAgentDirectiveOutcomeLifecycleProof(t, rt, &effects, faults)
 }
 
-func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedRuntimeIngressControlLifecycleProof(t, rt)
 }
 
-func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedMailboxDecisionLifecycleProof(t, rt)
 }
 
-func runServedTestSetupEntitiesBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedTestSetupEntitiesBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedTestSetupEntitiesProofRuntime(t, backend)
+	rt := startServedTestSetupEntitiesProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedTestSetupEntitiesLifecycleProof(t, rt)
 }
 
-func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
-	rt := startServedConversationForkProofRuntime(t, backend)
+	rt := startServedConversationForkProofRuntime(t, backend, postgresRequirement, sqliteRequirement)
 	runServedConversationForkLifecycleProof(t, rt)
 }
 
-func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend) servedConversationForkProofRuntime {
+func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedConversationForkProofRuntime {
 	t.Helper()
 	requests := &atomic.Int32{}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4955,12 +4985,12 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
-		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		sqlitePath := testutil.SQLitePath(t, sqliteRequirement)
 		configPath := writeServedConversationForkConfig(t, storebackend.BackendSQLite.String(), sqlitePath, provider.URL)
 		rt = start(configPath, serveOptions{})
 		rt.Backend = "sqlite"
 	case servedparity.BackendExplicitPostgres:
-		_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} }, postgresRequirement)
 		configPath := writeServedConversationForkConfig(t, storebackend.BackendPostgres.String(), "", provider.URL)
 		rt = start(configPath, serveOptions{StoreMode: "postgres", StoreModeSet: true})
 		rt.Backend = "postgres"
@@ -5295,13 +5325,13 @@ func setServedConversationForkExpiry(t *testing.T, db *sql.DB, backend, forkID s
 	}
 }
 
-func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
-		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		sqlitePath := testutil.SQLitePath(t, sqliteRequirement)
 		contractsPath := writeServedTestSetupFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		oldBuildStores := buildStoresForServe
@@ -5335,7 +5365,8 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
-		})
+		}, postgresRequirement)
+
 		contractsPath := writeServedTestSetupFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
@@ -6254,23 +6285,23 @@ func requireServedMailboxEventCount(t *testing.T, db *sql.DB, backend, eventName
 	}
 }
 
-func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Backend, postgresRequirement, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
-		runServedDynamicAutoEmitSQLiteProof(t)
+		runServedDynamicAutoEmitSQLiteProof(t, sqliteRequirement)
 	case servedparity.BackendExplicitPostgres:
-		runServedDynamicAutoEmitPostgresProof(t)
+		runServedDynamicAutoEmitPostgresProof(t, postgresRequirement)
 	default:
 		t.Fatalf("unknown served dynamic auto_emit backend %q", backend)
 	}
 }
 
-func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
+func runServedDynamicAutoEmitSQLiteProof(t *testing.T, sqliteRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
-	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	sqlitePath := testutil.SQLitePath(t, sqliteRequirement)
 	contractsPath := writeServedDynamicAutoEmitFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
@@ -6327,11 +6358,12 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	runServedDynamicAutoEmitProof(t, endpoint, servedDB, "sqlite", bundleHash, blocked, release, &releaseOnce)
 }
 
-func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
+func runServedDynamicAutoEmitPostgresProof(t *testing.T, postgresRequirement testutil.DatabaseRequirement) {
 	t.Helper()
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, postgresRequirement)
+
 	contractsPath := writeServedDynamicAutoEmitFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
@@ -7682,11 +7714,12 @@ scorer:
 	return root
 }
 
-func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
+func startServedJoinProofRuntime(t *testing.T, requirement testutil.DatabaseRequirement) (string, *sql.DB, string) {
 	t.Helper()
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, requirement)
+
 	root := writeServedJoinProofFixture(t)
 	bundleHash := seedServeRuntimeBundleCatalogRoot(t, context.Background(), pg, root)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
@@ -9750,7 +9783,7 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	_, _, _ = installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources workspaceMountSources) serveWorkspaceLifecycle {
 		capturedMountSources = mountSources
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
@@ -9912,7 +9945,8 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
@@ -9940,7 +9974,8 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:           writeServeRuntimeTestConfig(t),
 		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
@@ -10217,7 +10252,8 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresEmptyPhysical())
+
 	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	var out lockedBuffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
@@ -10318,7 +10354,8 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	firstRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-a", "alpha", "shared-worker")
 	secondRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-b", "beta", "shared-worker")
@@ -10368,7 +10405,8 @@ func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *te
 	isolateCLIAPIConfigEnv(t)
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	firstRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-a", "alpha-worker")
 	secondRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-b", "beta-worker")
@@ -10418,7 +10456,8 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		workspaceConfigured.Store(true)
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	firstHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	secondHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier1-primitives", "test-emits-single"))
@@ -10471,7 +10510,8 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
 	legacyRunID := uuid.NewString()
@@ -10519,7 +10559,8 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 			},
 			stoppedContainers: &stoppedContainers,
 		}
-	})
+	}, testutil.PostgresRowState())
+
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, role, model, conversation_mode, runtime_descriptor)
@@ -10604,18 +10645,19 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 
 const serveRuntimeLegacyRunIDForTest = "11111111-2222-3333-4444-555555555555"
 
-func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle, requirement testutil.DatabaseRequirement) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	return installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(workspaceMountSources) serveWorkspaceLifecycle {
 		return workspaceFactory()
-	})
+	}, requirement)
+
 }
 
-func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle, requirement testutil.DatabaseRequirement) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	return installServeRuntimePostgresTestStoresForDatabase(t, func(workspaceMountSources) serveWorkspaceLifecycle {
 		return workspaceFactory()
-	}, false, testutil.PostgresEmptyPhysical())
+	}, false, requirement)
 }
 
 func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, requirement testutil.DatabaseRequirement) (string, string) {
@@ -10682,9 +10724,9 @@ func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 	})
 }
 
-func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle, requirement testutil.DatabaseRequirement) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
-	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true, testutil.PostgresRowState())
+	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true, requirement)
 }
 
 func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle, useTemplate bool, requirement testutil.DatabaseRequirement) (string, *sql.DB, *store.PostgresStore) {

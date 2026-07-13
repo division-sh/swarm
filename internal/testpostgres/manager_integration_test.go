@@ -657,7 +657,7 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 	}
 }
 
-func integrationManager(t *testing.T) *Manager {
+func integrationManager(t testing.TB) *Manager {
 	t.Helper()
 	raw := strings.TrimSpace(os.Getenv(SourceEnv))
 	if raw == "" {
@@ -674,6 +674,31 @@ func integrationManager(t *testing.T) *Manager {
 		t.Fatal(err)
 	}
 	return manager
+}
+
+func BenchmarkRowStateLeaseLifecycle(b *testing.B) {
+	manager := integrationManager(b)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	var acquireTime, releaseTime time.Duration
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		started := time.Now()
+		lease, err := manager.AcquireRowState(ctx)
+		acquireTime += time.Since(started)
+		if err != nil {
+			b.Fatal(err)
+		}
+		started = time.Now()
+		if err := lease.Release(ctx); err != nil {
+			b.Fatal(err)
+		}
+		releaseTime += time.Since(started)
+	}
+	if b.N > 0 {
+		b.ReportMetric(float64(acquireTime.Nanoseconds())/float64(b.N), "acquire-ns/op")
+		b.ReportMetric(float64(releaseTime.Nanoseconds())/float64(b.N), "release-ns/op")
+	}
 }
 
 func TestRowStateLeaseProcessDeathReconciliationFencesRoleAndRetiresSlot(t *testing.T) {
@@ -853,6 +878,34 @@ func TestRowStateLeaseRoleTransactionRollbackLeavesNoRole(t *testing.T) {
 	}
 	if exists {
 		t.Fatalf("lease role %q survived transaction rollback", attemptedRole)
+	}
+}
+
+func TestPermanentDMLRoleTransactionRollbackLeavesNoUnstampedRole(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager.dmlRole = dmlRolePrefix + "rollback_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	manager.beforeDMLRoleCommit = func(role string) error {
+		if role != manager.dmlRole {
+			t.Fatalf("DML role commit hook role = %q, want %q", role, manager.dmlRole)
+		}
+		return errors.New("injected permanent role pre-commit failure")
+	}
+	if err := manager.ensureDMLRole(ctx, db); err == nil || !strings.Contains(err.Error(), "injected permanent role pre-commit failure") {
+		t.Fatalf("ensureDMLRole error=%v, want injected rollback", err)
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)`, manager.dmlRole).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatalf("unstamped permanent DML role %q survived transaction rollback", manager.dmlRole)
 	}
 }
 

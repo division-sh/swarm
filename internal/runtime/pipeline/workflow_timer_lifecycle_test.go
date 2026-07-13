@@ -534,7 +534,7 @@ func TestLoopConnectedRecurringTimerFailsClosedAtRuntimeOnBothStores(t *testing.
 			StartOn: "state:review", Delay: "1h", Recurring: true,
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -580,7 +580,7 @@ func TestLoopTimerCannotBypassCloseAtRuntimeOnBothStores(t *testing.T) {
 			StartOn: "state:review", Delay: "1h", AdvancesTo: "expired",
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -609,7 +609,7 @@ func TestLoopTimerGenerationRejectsPriorAttemptAndAdvancesCurrentAttemptOnBothSt
 			StartOn: "state:review", Delay: "1h", AdvancesTo: "drafting",
 		}},
 	}}
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			prior, entityID := seedLoopActivityInstance(t, store, ctx, "review")

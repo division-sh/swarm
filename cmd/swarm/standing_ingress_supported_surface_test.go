@@ -122,7 +122,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if firstEntity == "" || firstEntity != secondEntity {
 		t.Fatalf("delivery entities = %q and %q, want one standing entity", firstEntity, secondEntity)
 	}
-	requireStandingTelegramCalls(t, calls, sqlitePath, 42, 42)
+	requireStandingTelegramCalls(t, calls, sqlitePath, testutil.SQLiteDefaultTemp(), 42, 42)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -160,7 +160,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if restartedEntity != firstEntity {
 		t.Fatalf("restart entity = %q, want %q", restartedEntity, firstEntity)
 	}
-	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
+	requireStandingTelegramCalls(t, calls, sqlitePath, testutil.SQLiteDefaultTemp(), 84)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -326,7 +326,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42); got != entity {
 		t.Fatalf("second entity = %q, want %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
+	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, testutil.SQLiteDefaultTemp(), 42, 42)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -339,7 +339,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != entity {
 		t.Fatalf("restart entity = %q, want %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
+	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, testutil.SQLiteDefaultTemp(), 84)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -520,7 +520,7 @@ func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID i
 	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
 }
 
-func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sqlitePath string, chatIDs ...int) {
+func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sqlitePath string, sqliteRequirement testutil.DatabaseRequirement, chatIDs ...int) {
 	t.Helper()
 	for i, chatID := range chatIDs {
 		select {
@@ -533,7 +533,7 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sql
 			if strings.HasPrefix(sqlitePath, "postgres:") {
 				diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(sqlitePath, "postgres:"))
 			} else if strings.TrimSpace(sqlitePath) != "" {
-				diagnostics = standingSQLiteDiagnostics(sqlitePath, testutil.SQLiteDefaultTemp())
+				diagnostics = standingSQLiteDiagnostics(sqlitePath, sqliteRequirement)
 			}
 			t.Fatalf("timed out waiting for Telegram reply %d/%d; diagnostics: %s", i+1, len(chatIDs), diagnostics)
 		}

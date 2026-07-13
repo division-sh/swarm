@@ -136,7 +136,7 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 }
 
 func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical()) {
+	for _, tc := range workflowJoinStoreCases(testutil.PostgresFreshPhysical(), testutil.SQLiteFreshFile()) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 

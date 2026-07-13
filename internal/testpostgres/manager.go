@@ -47,6 +47,7 @@ type Manager struct {
 	rowPool      rowStatePool
 
 	afterCandidateSnapshot func()
+	beforeDMLRoleCommit    func(role string) error
 	beforeLeaseRoleCommit  func(role string) error
 }
 

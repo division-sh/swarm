@@ -418,11 +418,26 @@ func (m *Manager) ensureDMLRole(ctx context.Context, db *sql.DB) error {
 	if err != sql.ErrNoRows {
 		return err
 	}
-	if _, err := lockConn.ExecContext(ctx, `CREATE ROLE `+quoteIdent(m.dmlRole)+` NOLOGIN`); err != nil {
-		return fmt.Errorf("create postgres test DML role: %w", err)
+	tx, err := lockConn.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin postgres test DML role transaction: %w", err)
 	}
-	if _, err := lockConn.ExecContext(ctx, `COMMENT ON ROLE `+quoteIdent(m.dmlRole)+` IS `+quoteLiteral(m.signedRoleComment(m.dmlRole, "dml-role"))); err != nil {
-		return fmt.Errorf("stamp postgres test DML role: %w", err)
+	rollback := func(cause error) error {
+		return errors.Join(cause, tx.Rollback())
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE ROLE `+quoteIdent(m.dmlRole)+` NOLOGIN`); err != nil {
+		return rollback(fmt.Errorf("create postgres test DML role: %w", err))
+	}
+	if _, err := tx.ExecContext(ctx, `COMMENT ON ROLE `+quoteIdent(m.dmlRole)+` IS `+quoteLiteral(m.signedRoleComment(m.dmlRole, "dml-role"))); err != nil {
+		return rollback(fmt.Errorf("stamp postgres test DML role: %w", err))
+	}
+	if m.beforeDMLRoleCommit != nil {
+		if err := m.beforeDMLRoleCommit(m.dmlRole); err != nil {
+			return rollback(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit postgres test DML role: %w", err)
 	}
 	return nil
 }

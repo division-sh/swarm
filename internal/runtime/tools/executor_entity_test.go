@@ -104,7 +104,7 @@ func assertEntityToolDiagnosticLineage(t *testing.T, bus *entityToolRuntimeLogBu
 }
 
 func TestEntityTools_HappyPath(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"name":          "Acme",
@@ -254,7 +254,7 @@ func TestEntityTools_HappyPath(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -294,7 +294,7 @@ func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *te
 }
 
 func TestEntityTools_CreateEntityAcceptsAnnotatedJSONBFields(t *testing.T) {
-	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	ctx, exec := newAnnotatedEntityToolExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
@@ -770,7 +770,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 }
 
 func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
-	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	ctx, exec := newAnnotatedEntityToolExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{"flow_instance": "validation/inst-1"})
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -799,7 +799,7 @@ func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
 }
 
 func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
-	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	ctx, exec := newAnnotatedEntityToolExecutor(t, testutil.PostgresRowState())
 	brief := map[string]any{"summary": "validated"}
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/inst-1",
@@ -831,7 +831,7 @@ func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityFieldAllowsDeclaredNestedWritePath(t *testing.T) {
-	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	ctx, exec := newAnnotatedEntityToolExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
@@ -880,7 +880,7 @@ func TestEntityTools_SaveEntityFieldAllowsDeclaredNestedWritePath(t *testing.T) 
 }
 
 func TestEntityTools_SaveEntityFieldAllowsNestedListWritePath(t *testing.T) {
-	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	ctx, exec := newAnnotatedEntityToolExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields": map[string]any{
@@ -925,7 +925,8 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
-	})
+	}, testutil.PostgresRowState())
+
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -999,7 +1000,7 @@ accounts:
     immutable: true
   status: text
 `)
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1032,7 +1033,8 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "query_entities"},
-	})
+	}, testutil.PostgresRowState())
+
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1083,7 +1085,7 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, db := newEntityToolTestHarness(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1141,7 +1143,8 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
-	})
+	}, testutil.PostgresRowState())
+
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1195,7 +1198,7 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 }
 
 func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, db := newEntityToolTestHarness(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1244,7 +1247,7 @@ func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
 }
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, db := newEntityToolTestHarness(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1503,7 +1506,7 @@ accounts:
 }
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, db := newEntityToolTestHarness(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1559,7 +1562,7 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 }
 
 func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1593,7 +1596,7 @@ func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
 }
 
 func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNearestMatch(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `metadata.regoin == "us"`,
@@ -1609,7 +1612,7 @@ func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNear
 }
 
 func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `entity.metadata.region == "us"`,
@@ -1625,7 +1628,7 @@ func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.
 }
 
 func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 
 	_, err := exec.Execute(ctx, "query_metrics", map[string]any{
 		"metric": "count",
@@ -1662,7 +1665,8 @@ signal:
 		ID:    "researcher",
 		Role:  "researcher",
 		Tools: []string{"query_entities", "query_metrics", "search_entities"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
+
 	subjectID := uuid.NewString()
 	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "signal-search/run-1", "signal", "active", map[string]any{
@@ -1779,7 +1783,7 @@ child_subject:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle, testutil.PostgresRowState())
 	rootID := uuid.NewString()
 	childID := uuid.NewString()
 	seedEntityStateRow(t, db, rootID, rootID, "", "root_subject", "active", map[string]any{
@@ -1856,7 +1860,7 @@ validation_case:
     initial: {}
   score: integer
 `)
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle, testutil.PostgresRowState())
 
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/case-1",
@@ -1985,7 +1989,7 @@ signal:
 		ID:    "researcher",
 		Role:  "researcher",
 		Tools: []string{"query_entities", "query_metrics", "search_entities"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"entity_type": "discovery.campaign",
@@ -2049,7 +2053,7 @@ signal:
 }
 
 func TestEntityTools_InvalidField(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -2068,7 +2072,7 @@ func TestEntityTools_InvalidField(t *testing.T) {
 }
 
 func TestEntityTools_GetEntityNotFound(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{
 		"entity_id": uuid.NewString(),
 	})
@@ -2079,7 +2083,7 @@ func TestEntityTools_GetEntityNotFound(t *testing.T) {
 }
 
 func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityID(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"entity_id":     uuid.NewString(),
 		"flow_instance": "review/inst-1",
@@ -2096,7 +2100,7 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityID(t *testing.T) {
 }
 
 func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityType(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"entity_type":   "accounts",
 		"flow_instance": "review/inst-1",
@@ -2111,7 +2115,7 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityType(t *testing.T) {
 }
 
 func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec := newEntityToolTestExecutor(t, testutil.PostgresRowState())
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"subject_id":    uuid.NewString(),
 		"flow_instance": "review/inst-1",
@@ -2130,7 +2134,8 @@ func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *test
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"emit_something"},
-	})
+	}, testutil.PostgresRowState())
+
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"entity_id":     entityID,
@@ -2154,7 +2159,8 @@ func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) 
 		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued"},
-	})
+	}, testutil.PostgresRowState())
+
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": "review/inst-1",
 	})
@@ -2186,7 +2192,8 @@ foreign:
 		ID:    "analyzer",
 		Role:  "analyzer",
 		Tools: []string{"save_entity_field", "get_entity"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
+
 	entityID := uuid.NewString()
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
@@ -2271,7 +2278,8 @@ analysis:
 		ID:    "analyzer",
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
+
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
 		"fields": map[string]any{
@@ -2302,7 +2310,8 @@ analysis:
 		ID:    "analyzer",
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
+
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
 		"fields": map[string]any{
@@ -2341,7 +2350,8 @@ foreign:
 		ID:    "analyzer",
 		Role:  "analyzer",
 		Tools: []string{"get_entity"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
+
 	entityID := uuid.NewString()
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
@@ -2377,7 +2387,7 @@ operating_case:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle, testutil.PostgresRowState())
 	firstID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
@@ -2586,7 +2596,7 @@ foreign:
 		ID:    "analyzer",
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
-	}, bundle)
+	}, bundle, testutil.PostgresRowState())
 
 	scoringID := uuid.NewString()
 	subjectID := uuid.NewString()
@@ -2620,17 +2630,18 @@ foreign:
 	}
 }
 
-func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
+func newEntityToolTestExecutor(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	ctx, exec, _ := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
-	})
+	}, requirement)
+
 	return ctx, exec
 }
 
-func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
+func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
 types:
@@ -2657,17 +2668,17 @@ accounts:
   mvp_spec: Spec
   validation_kit: ValidationKit
 `)
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle, requirement)
 	return ctx, exec
 }
 
-func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor) {
+func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle, requirement)
 	return ctx, exec
 }
 
-func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
+func newAnnotatedEntityToolExecutor(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	return newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
 		ID:    "tester",
@@ -2692,19 +2703,21 @@ validation:
   business_brief: Brief
   mvp_spec: Spec
   validation_kit: ValidationKit
-`))
+`), requirement)
+
 }
 
-func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarness(t *testing.T, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	return newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
-	})
+	}, requirement)
+
 }
 
-func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	if strings.TrimSpace(actor.Type) == "" {
 		actor.Type = "internal"
@@ -2734,12 +2747,12 @@ accounts:
   mvp_spec: Spec
   validation_kit: ValidationKit
 `)
-	return newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	return newEntityToolTestHarnessWithBundle(t, actor, bundle, requirement)
 }
 
-func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
-	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true, testutil.PostgresRowState())
+	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true, requirement)
 }
 
 func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool, requirement testutil.DatabaseRequirement) (context.Context, *runtimetools.Executor, *sql.DB) {

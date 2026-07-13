@@ -128,7 +128,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "forked", true)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
-	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
+	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot, testutil.PostgresRowState())
 }
 
 func TestTier12RuntimeForkFixtures_AreExplicitlyClassified(t *testing.T) {
@@ -392,11 +392,11 @@ func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string
 	}
 }
 
-func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot string) {
+func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot string, requirement testutil.DatabaseRequirement) {
 	t.Helper()
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
-	h := newRuntimeHarness(t, fixtureRoot, true, testutil.PostgresRowState())
+	h := newRuntimeHarness(t, fixtureRoot, true, requirement)
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)
 	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)
