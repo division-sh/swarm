@@ -76,7 +76,7 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key").Store,
-		CompletionController: runtimeeffects.NewController(harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness),
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -141,7 +141,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	harness := effecttest.New()
 	harness.Token.AgentID = "agent-1"
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
-	runtime.completionController = runtimeeffects.NewController(harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
 	ctx := runtimeactors.WithActor(harness.Context("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
@@ -171,7 +171,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	harness := effecttest.New()
 	harness.Token.AgentID = "agent-1"
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
-	runtime.completionController = runtimeeffects.NewController(harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 

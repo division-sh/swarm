@@ -797,7 +797,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, projector runtimeeffects.CompletionSpendProjector) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
@@ -808,7 +808,7 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 		Workspaces:           workspaces,
 		ToolGateway:          binding,
 		Credentials:          providerCredentials,
-		CompletionController: runtimeeffects.NewController(effectStore),
+		CompletionController: runtimeeffects.NewCompletionController(effectStore, projector),
 	}.Build()
 }
 
@@ -1169,7 +1169,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		presenter.fail(5, "forkchat_sandbox", fmt.Errorf("selected runtime store does not implement completion execution authority"))
 		return 1
 	}
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, effectStore)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, effectStore, rt.Budget)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1

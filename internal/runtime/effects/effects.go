@@ -260,7 +260,7 @@ type Store interface {
 }
 
 type CompletionStore interface {
-	SettleCompletion(context.Context, Attempt, CompletionSettlement) error
+	SettleCompletion(context.Context, Attempt, CompletionSettlement) (CompletionSettlementResult, error)
 }
 
 type CompletionHeartbeatStore interface {
@@ -277,13 +277,18 @@ type RecoveryStore interface {
 }
 
 type Controller struct {
-	store Store
+	store                    Store
+	completionSpendProjector CompletionSpendProjector
 }
 
 type controllerContextKey struct{}
 
 func NewController(store Store) *Controller {
 	return &Controller{store: store}
+}
+
+func NewCompletionController(store Store, projector CompletionSpendProjector) *Controller {
+	return &Controller{store: store, completionSpendProjector: projector}
 }
 
 func WithController(ctx context.Context, controller *Controller) context.Context {
@@ -309,7 +314,7 @@ func (c *Controller) CompletionEnabled() bool {
 	}
 	_, canHeartbeat := c.store.(CompletionHeartbeatStore)
 	_, canSettle := c.store.(CompletionStore)
-	return canHeartbeat && canSettle
+	return canHeartbeat && canSettle && c.completionSpendProjector != nil
 }
 
 func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool, error) {
@@ -529,7 +534,14 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if err := settlement.Validate(h.attempt); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
 	}
-	return store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
+	result, err := store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
+	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
+		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(context.WithoutCancel(ctx), CompletionSpendProjection{
+			AttemptID: result.AttemptID,
+			EntityID:  result.EntityID,
+		})
+	}
+	return err
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {

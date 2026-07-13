@@ -157,6 +157,25 @@ type existingExternalAttempt struct {
 	failureJSON    string
 }
 
+func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffects.Authority) bool {
+	return e.authorityKind == string(authority.Kind) && e.authorityID == authority.ID
+}
+
+func (e existingExternalAttempt) matchesRetryAuthority(authority runtimeeffects.Authority) bool {
+	if !e.matchesAuthorityIdentity(authority) || e.generation != authority.Generation() {
+		return false
+	}
+	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		return e.agentID == authority.Normal.AgentID && e.epoch == authority.Normal.RuntimeEpoch
+	}
+	return e.agentID == "" && e.epoch == 0
+}
+
+func (e existingExternalAttempt) matchesRequest(req runtimeeffects.AuthorizeRequest) bool {
+	return e.kind == string(req.Kind) && e.class == string(req.Class) && e.adapter == req.Adapter &&
+		e.transport == req.Transport && e.fingerprint == req.RequestFingerprint
+}
+
 func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operationID string) (existingExternalAttempt, bool, error) {
 	var existing existingExternalAttempt
 	err := tx.QueryRowContext(ctx, `
@@ -219,11 +238,11 @@ func authorizeClaudePrelaunchRetrySQLite(ctx context.Context, tx *sql.Tx, author
 }
 
 func claudePrelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) bool {
-	if req.Adapter != "claude_cli" || existing.attemptState != string(runtimeeffects.StateTerminalFailure) {
+	if req.Adapter != "claude_cli" || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
+		existing.attemptState != string(runtimeeffects.StateTerminalFailure) {
 		return false
 	}
-	if existing.authorityKind != string(authority.Kind) || existing.authorityID != authority.ID || existing.kind != string(req.Kind) || existing.class != string(req.Class) ||
-		existing.adapter != req.Adapter || existing.transport != req.Transport || existing.fingerprint != req.RequestFingerprint {
+	if !existing.matchesRetryAuthority(authority) || !existing.matchesRequest(req) {
 		return false
 	}
 	failure, err := runtimefailures.UnmarshalEnvelope([]byte(existing.failureJSON))
@@ -282,8 +301,11 @@ func externalEffectReplayRefusal(authority runtimeeffects.Authority, req runtime
 		"operation_id": req.OperationID, "attempt_id": existing.attemptID,
 		"operation_state": existing.operationState, "attempt_state": existing.attemptState,
 	}
-	if existing.authorityKind != string(authority.Kind) || existing.authorityID != authority.ID || existing.kind != string(req.Kind) || existing.class != string(req.Class) ||
-		existing.adapter != req.Adapter || existing.transport != req.Transport || existing.fingerprint != req.RequestFingerprint {
+	if existing.generation != authority.Generation() {
+		detail["existing_generation"] = existing.generation
+		detail["authority_generation"] = authority.Generation()
+	}
+	if !existing.matchesAuthorityIdentity(authority) || !existing.matchesRequest(req) {
 		detail["expected_fingerprint"] = existing.fingerprint
 		detail["request_fingerprint"] = req.RequestFingerprint
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_replay_fingerprint_conflict", "external-effects", "authorize_attempt", detail)

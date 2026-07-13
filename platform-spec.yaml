@@ -28743,7 +28743,7 @@ managed_external_effect_authority:
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   automatic_redispatch_allowlist:
     - adapter: claude_cli
-      condition: preceding attempt is terminal_failure with no launched_at, or carries exact launch_rejected=true evidence after cmd.Start rejection
+      condition: preceding operation and attempt are terminal_failure, retain the same persisted authority epoch/generation as the current typed authority, and have no launched_at or carry exact launch_rejected=true evidence after cmd.Start rejection
       exclusion: cmd.Start success, launched/response_observed/outcome_uncertain/settled state, provider exit classification, and inferred gateway/native/customization inactivity never authorize another attempt
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
@@ -28780,6 +28780,7 @@ llm_completion_execution_authority:
     heartbeat: Before launch and for the full lifetime of the HTTP request or provider process, the adapter renews the exact attempt lease through the selected-store authority. Renewal revalidates the authority, operation, attempt, execution owner, fence, and live attempt state; extends the lease monotonically without holding a transaction across provider work; and cancels the primitive plus forces outcome_uncertain settlement if renewal is lost. A completion controller without this capability fails before authorization.
     response_observed: Terminal provider bytes or a terminal process ResultMessage are durably marked response_observed before parsing or conversion.
     terminal: One selected-store transaction locks the attempt/fence, budget scopes, target, and optional Claude provider head; writes exactly one target usage fact and at most one spend row keyed by attempt_id; settles the effect; releases all reservations; and commits required transcript/audit mutation.
+    post_commit_budget_projection: After a transaction commits a spend row, the completion controller synchronously asks the runtime budget projector to re-read retained selected-store spend for the affected scopes. The projector updates warning/throttle/emergency suppression state and emits platform.budget_threshold_crossed without writing spend. Projection failure never reopens or redispatches the committed provider attempt. Startup recovery performs the same read-through projection after recovery settlement.
     recovery: Expired authorized attempts become terminal_failure without dispatch. Expired launched/response_observed attempts become outcome_uncertain, persist unavailable target evidence, create at most one pessimistic accounting row when positive reservations existed, release reservations, and never redispatch.
   usage:
     fields: [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, provider_reported_cost_usd, exactness, resolved_model]
@@ -28794,14 +28795,14 @@ llm_completion_execution_authority:
     unavailable_accounting: One synthetic spend row uses MAX reservation amount, usage_accounting estimated, and accounting_basis accounting_unavailable_exhaustion; reservations are deleted in the same transaction.
   selected_fork:
     issuer: run_fork_selected_contract_runtime_executions is the sole container-generation issuer. The non-mutating admission is prerequisite evidence, never the execution grant.
-    lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed.
+    lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.
     backend: Authority schema/issuance/fencing/settlement/recovery are parity obligations on SQLite and PostgreSQL. Full served/standalone selected-fork runtime and process-competition proof are PostgreSQL-only until separately gated.
   forkchat:
     group_owner: conversation_fork_turns is preallocated before provider authorization and owns request occurrence, actor/hash/idempotency binding, group fence, terminal transcript, abandonment, and no-repeat recovery.
     child_owner: conversation_fork_turn_completions stores one immutable ordered result per provider attempt and remains valid across later tool rounds or failures.
-    heartbeat: The API execution loop renews the exact prepared/executing group lease while the provider/tool loop is live. Each child authorization transaction renews without shortening the current lease and copies the durable current expiry into the attempt; heartbeat loss cancels execution and terminalizes outcome_uncertain rather than permitting stale settlement.
+    heartbeat: The API execution loop renews the exact prepared/executing group lease while the provider/tool loop is live. Each child authorization transaction renews without shortening the current lease and copies the durable current expiry into the attempt; heartbeat loss cancels execution and terminalizes outcome_uncertain rather than permitting stale settlement. Successful group terminalization consumes the shared store-owned current-authority guard and database transaction time, and cannot win after lease expiry or while a child attempt remains live.
     lifecycle: prepared -> executing -> succeeded; prepared -> failed or abandoned; executing -> failed, outcome_uncertain, or succeeded.
     replay: Same-key replay validates request hash, never launches a second provider call, and returns live conflict or stable terminal/recovery-required truth. Public response reconstruction remains separately owned.
   migration:

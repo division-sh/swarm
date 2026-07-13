@@ -83,7 +83,7 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,
-		CompletionController: runtimeeffects.NewController(harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness),
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -154,7 +154,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	harness := effecttest.New()
 	harness.Token.AgentID = "agent-1"
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
-	runtime.completionController = runtimeeffects.NewController(harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key")
 	ctx := runtimeactors.WithActor(harness.Context("openai-responses-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")

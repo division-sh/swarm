@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/google/uuid"
@@ -300,9 +301,9 @@ func (s conversationForkStore) heartbeatOperatorConversationForkChat(ctx context
 			UPDATE conversation_fork_turns
 			SET lease_expires_at=CASE WHEN lease_expires_at>? THEN lease_expires_at ELSE ? END,updated_at=?
 			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
-			  AND state IN ('prepared','executing') AND execution_owner=? AND fence_generation=? AND lease_expires_at>?
+			  AND state IN ('prepared','executing') AND execution_owner=? AND fence_generation=? AND `+s.currentLeaseSQL()+`
 		`, expires, expires, now, prepared.ForkTurnID, prepared.Fork.ForkID, prepared.ActorTokenID, prepared.RequestOccurrenceID,
-			prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration, now)
+			prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration)
 		if err := requireExactlyOneMutation(res, err, "heartbeat conversation fork chat"); err != nil {
 			return err
 		}
@@ -363,7 +364,8 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 	execution := req.Execution
 	prepared := req.Prepared
 	if prepared.ForkTurnID == "" || prepared.Fork.ForkID != forkID || prepared.RequestHash == "" || prepared.RequestOccurrenceID == "" ||
-		prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 || execution.ExecutionOwner != prepared.ExecutionOwner || execution.FenceGeneration != prepared.FenceGeneration {
+		prepared.ActorTokenID != actorTokenID || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 ||
+		execution.ExecutionOwner != prepared.ExecutionOwner || execution.FenceGeneration != prepared.FenceGeneration {
 		return ConversationForkChatResult{}, fmt.Errorf("conversation fork chat terminalization requires exact prepared authority")
 	}
 	execution.AssistantMessage = strings.TrimSpace(execution.AssistantMessage)
@@ -435,6 +437,24 @@ func completeConversationForkTurn(
 	policy ConversationForkSandboxPolicy,
 	now time.Time,
 ) (OperatorConversationTurn, error) {
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
+		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
+		ForkChat: runtimeeffects.ConversationForkChatAuthority{
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
+		},
+	}
+	if owner.dialect == conversationForkSQLite {
+		if err := requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority); err != nil {
+			return OperatorConversationTurn{}, err
+		}
+	} else if err := requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority); err != nil {
+		return OperatorConversationTurn{}, err
+	}
+	if err := requireCompletionAuthorityNoLiveAttempts(ctx, tx, owner.dialect == conversationForkSQLite, authority); err != nil {
+		return OperatorConversationTurn{}, err
+	}
 	var childCount int
 	if err := owner.queryRow(ctx, tx, `SELECT COUNT(*) FROM conversation_fork_turn_completions WHERE fork_turn_id=?`, prepared.ForkTurnID).Scan(&childCount); err != nil {
 		return OperatorConversationTurn{}, fmt.Errorf("count conversation fork completion children: %w", err)
@@ -455,12 +475,10 @@ func completeConversationForkTurn(
 		UPDATE conversation_fork_turns
 		SET state='succeeded',assistant_message=?,request_payload=?,response_payload=?,tool_calls=?,
 		    sandbox_policy=?,snapshot_owner=?,lease_expires_at=NULL,failure=NULL,updated_at=?,terminal_at=?
-		WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
-		  AND state='executing' AND execution_owner=? AND fence_generation=?
+		WHERE fork_turn_id=? AND state='executing'
 		RETURNING created_at
 	`, execution.AssistantMessage, string(requestPayload), string(responsePayload), string(toolCallsJSON), string(policyJSON),
-		ConversationForkChatSnapshotOwner, now, now, prepared.ForkTurnID, prepared.Fork.ForkID, actorTokenID,
-		prepared.RequestOccurrenceID, prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration).Scan(&createdAt); err != nil {
+		ConversationForkChatSnapshotOwner, now, now, prepared.ForkTurnID).Scan(&createdAt); err != nil {
 		return OperatorConversationTurn{}, fmt.Errorf("terminalize conversation fork turn: %w", err)
 	}
 	return OperatorConversationTurn{

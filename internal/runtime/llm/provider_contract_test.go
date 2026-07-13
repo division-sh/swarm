@@ -116,7 +116,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 			}
 			runtime, err := RuntimeFactory{
 				Cfg:                  cfg,
-				CompletionController: runtimeeffects.NewController(harness),
+				CompletionController: runtimeeffects.NewCompletionController(harness, harness),
 			}.Build()
 			if err != nil {
 				t.Fatalf("Build: %v", err)
@@ -138,7 +138,7 @@ func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
 		Cfg: &config.Config{
 			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
 		},
-		CompletionController: runtimeeffects.NewController(harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness),
 	}.Build()
 	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
 		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)

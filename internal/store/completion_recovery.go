@@ -142,7 +142,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgres bool,
 				return runtimeeffects.RecoverySummary{}, err
 			}
 			if state != runtimeeffects.StateTerminalFailure {
-				if err := insertCompletionSpendPostgres(ctx, tx, attempt, settlement); err != nil {
+				if _, err := insertCompletionSpendPostgres(ctx, tx, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 			}
@@ -157,7 +157,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgres bool,
 				return runtimeeffects.RecoverySummary{}, err
 			}
 			if state != runtimeeffects.StateTerminalFailure {
-				if err := insertCompletionSpendSQLite(ctx, tx, attempt, settlement); err != nil {
+				if _, err := insertCompletionSpendSQLite(ctx, tx, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 			}

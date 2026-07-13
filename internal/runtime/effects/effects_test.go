@@ -10,6 +10,19 @@ type effectStoreProbe struct {
 	authorizations []AuthorizeRequest
 }
 
+type completionStoreProbe struct {
+	effectStoreProbe
+}
+
+func (*completionStoreProbe) SettleCompletion(context.Context, Attempt, CompletionSettlement) (CompletionSettlementResult, error) {
+	return CompletionSettlementResult{}, nil
+}
+
+type completionProjectionProbe struct{}
+
+func (completionProjectionProbe) ProjectCommittedCompletionSpend(context.Context, CompletionSpendProjection) {
+}
+
 func (*effectStoreProbe) IsExternalEffectAuthorityCurrent(context.Context, Authority) (bool, error) {
 	return true, nil
 }
@@ -77,6 +90,16 @@ func TestBeginRequiresControllerAndLogicalIdentity(t *testing.T) {
 	withController := WithController(withToken, NewController(&effectStoreProbe{}))
 	if _, err := Begin(withController, "authored_http_tool", []byte("request"), nil); err == nil {
 		t.Fatal("managed effect was admitted without logical operation identity")
+	}
+}
+
+func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
+	store := &completionStoreProbe{}
+	if NewController(store).CompletionEnabled() {
+		t.Fatal("generic effect controller enabled completion without a spend projection owner")
+	}
+	if !NewCompletionController(store, completionProjectionProbe{}).CompletionEnabled() {
+		t.Fatal("completion controller with settlement and projection owners is disabled")
 	}
 }
 

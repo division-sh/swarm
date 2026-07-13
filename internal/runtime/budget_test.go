@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -109,7 +110,7 @@ func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T
 	}
 }
 
-func TestBudgetTrackerThresholdEventAndEmergencyMailboxConsumeBudgetSpendOwner(t *testing.T) {
+func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyState(t *testing.T) {
 	store := &budgetSpendStoreCapture{sum: 0.95}
 	eventStore := &bootSelfCheckDescriptorStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -128,18 +129,7 @@ func TestBudgetTrackerThresholdEventAndEmergencyMailboxConsumeBudgetSpendOwner(t
 		"budget": map[string]any{"system_monthly_cap": 1},
 	}}, mailbox, nil, source)
 
-	if err := tracker.RecordSpend(context.Background(), SpendRecord{
-		FlowInstance:    "global",
-		AgentID:         "agent-1",
-		Model:           "claude",
-		InputTokens:     1,
-		OutputTokens:    1,
-		CostUSD:         0.95,
-		InvocationType:  "api",
-		UsageAccounting: "exact",
-	}); err != nil {
-		t.Fatalf("RecordSpend: %v", err)
-	}
+	tracker.ProjectCommittedCompletionSpend(context.Background(), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
 	events := eventStore.appendedEvents()
 	if len(events) != 1 || string(events[0].Type()) != "platform.budget_threshold_crossed" {
 		t.Fatalf("events = %#v, want one platform.budget_threshold_crossed", events)
@@ -156,6 +146,12 @@ func TestBudgetTrackerThresholdEventAndEmergencyMailboxConsumeBudgetSpendOwner(t
 	}
 	if len(store.sumQueries) != 1 || store.sumQueries[0].Scope != budgetspend.ScopeSystem {
 		t.Fatalf("sum queries = %#v, want one system aggregate", store.sumQueries)
+	}
+	if len(store.records) != 0 {
+		t.Fatalf("completion projection wrote %d spend rows, want read-only projection", len(store.records))
+	}
+	if !tracker.IsEmergency("") || !tracker.IsThrottle("") {
+		t.Fatalf("projected budget state emergency=%v throttle=%v, want both true", tracker.IsEmergency(""), tracker.IsThrottle(""))
 	}
 }
 

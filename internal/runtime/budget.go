@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -233,6 +234,19 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 		}
 	}
 	return nil
+}
+
+func (t *BudgetTracker) ProjectCommittedCompletionSpend(ctx context.Context, projection runtimeeffects.CompletionSpendProjection) {
+	if t == nil || t.store == nil {
+		return
+	}
+	entityID := strings.TrimSpace(projection.EntityID)
+	if err := t.evaluateAndEmit(ctx, entityID); err != nil && t.logger != nil {
+		handleRuntimeLogPersistenceError("budget", "project_completion_spend_failed", t.logger.Warn(ctx, "budget", "project_completion_spend_failed", map[string]any{
+			"attempt_id": strings.TrimSpace(projection.AttemptID),
+			"entity_id":  entityID,
+		}, err))
+	}
 }
 
 func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) error {
