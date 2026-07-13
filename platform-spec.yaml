@@ -28725,7 +28725,7 @@ agent_lifecycle_authority:
     idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
     diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
   reconfigure:
-    operation_identity: Derived from agent id and candidate config revision.
+    operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, and normalized subordinate plan. Retry while that expected occurrence remains current reuses the id; the same candidate and plan after any intervening committed generation is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.

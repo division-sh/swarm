@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -24,6 +25,22 @@ type lifecycleSubordinateStore interface {
 	runtimesessions.Registry
 }
 
+type lifecycleOccurrenceStore interface {
+	lifecycleSubordinateStore
+	runtimemanager.ManagerPersistence
+}
+
+type lifecycleOccurrenceAgent struct{ id string }
+
+func (a lifecycleOccurrenceAgent) ID() string { return a.id }
+func (lifecycleOccurrenceAgent) Type() string { return "generic" }
+func (lifecycleOccurrenceAgent) Subscriptions() []events.EventType {
+	return nil
+}
+func (lifecycleOccurrenceAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, nil
+}
+
 func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	proveLifecycleSubordinateTransaction(t, store, store.DB, true)
@@ -32,6 +49,81 @@ func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
 func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveLifecycleSubordinateTransaction(t, &PostgresStore{DB: db}, db, false)
+}
+
+func TestLifecycleReconfigureOccurrenceIdentitySQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveLifecycleReconfigureOccurrenceIdentity(t, store, store.DB, true)
+}
+
+func TestLifecycleReconfigureOccurrenceIdentityPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveLifecycleReconfigureOccurrenceIdentity(t, &PostgresStore{DB: db}, db, false)
+}
+
+func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOccurrenceStore, db *sql.DB, sqlite bool) {
+	t.Helper()
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
+	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
+	cfg := runtimeactors.AgentConfig{
+		ID:               "reconfigure-occurrence-agent",
+		Role:             "worker",
+		Type:             "sonnet",
+		Model:            "regular",
+		Mode:             "global",
+		ConversationMode: runtimesessions.RuntimeModeSession.String(),
+		SessionScope:     runtimesessions.SessionScopeFlow.String(),
+		FlowPath:         "support/occurrence",
+	}
+	if err := manager.SpawnAgent(cfg); err != nil {
+		t.Fatalf("spawn agent: %v", err)
+	}
+	agents, err := store.LoadAgents(context.Background())
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("load spawned agent: agents=%#v err=%v", agents, err)
+	}
+	initialGeneration := agents[0].LifecycleGeneration
+	for i, tool := range []string{"tool-a", "tool-b", "tool-a", "tool-b"} {
+		if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Tools: []string{tool}}); err != nil {
+			t.Fatalf("reconfigure occurrence %d (%s): %v", i+1, tool, err)
+		}
+		agents, err = store.LoadAgents(context.Background())
+		if err != nil || len(agents) != 1 {
+			t.Fatalf("load occurrence %d: agents=%#v err=%v", i+1, agents, err)
+		}
+		if got, want := agents[0].LifecycleGeneration, initialGeneration+uint64(i)+1; got != want {
+			t.Fatalf("occurrence %d generation = %d, want %d", i+1, got, want)
+		}
+	}
+	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
+
+	if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Tools: []string{"tool-b"}}); err != nil {
+		t.Fatalf("same-current reconfigure: %v", err)
+	}
+	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
+	agents, err = store.LoadAgents(context.Background())
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("load same-current agent: agents=%#v err=%v", agents, err)
+	}
+	if got, want := agents[0].LifecycleGeneration, initialGeneration+4; got != want {
+		t.Fatalf("same-current generation = %d, want %d", got, want)
+	}
+}
+
+func assertLifecycleReconfigureOperationCount(t *testing.T, db *sql.DB, sqlite bool, agentID string, want int) {
+	t.Helper()
+	query := `SELECT COUNT(*), COUNT(DISTINCT operation_id) FROM agent_lifecycle_operations WHERE agent_id = ? AND operation_kind = 'reconfigure'`
+	if !sqlite {
+		query = `SELECT COUNT(*), COUNT(DISTINCT operation_id) FROM agent_lifecycle_operations WHERE agent_id = $1 AND operation_kind = 'reconfigure'`
+	}
+	var count, distinct int
+	if err := db.QueryRowContext(context.Background(), query, agentID).Scan(&count, &distinct); err != nil {
+		t.Fatalf("count reconfigure operations: %v", err)
+	}
+	if count != want || distinct != want {
+		t.Fatalf("reconfigure operations count=%d distinct=%d, want %d distinct occurrences", count, distinct, want)
+	}
 }
 
 func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordinateStore, db *sql.DB, sqlite bool) {

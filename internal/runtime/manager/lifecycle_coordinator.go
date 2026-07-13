@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,19 @@ func normalizedLifecycleSubordinate(plan runtimesessions.LifecycleMutationPlan) 
 		return runtimesessions.LifecycleMutationPlan{}, "", err
 	}
 	return normalized, string(raw), nil
+}
+
+func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uint64, phase AgentLifecyclePhase, revision, planIdentity string) string {
+	parts := []string{
+		"agent-lifecycle-reconfigure-occurrence-v1",
+		strings.TrimSpace(agentID),
+		strconv.FormatInt(epoch, 10),
+		strconv.FormatUint(generation, 10),
+		string(phase),
+		strings.TrimSpace(revision),
+		planIdentity,
+	}
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join(parts, "\x00"))).String()
 }
 
 func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedAgent, persist bool) error {
@@ -252,9 +266,6 @@ func (c *agentLifecycleCoordinator) abortReset() {
 
 func (c *agentLifecycleCoordinator) replaceLoop(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	agentID = strings.TrimSpace(agentID)
-	if operationID == "" {
-		operationID = uuid.NewString()
-	}
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -291,6 +302,18 @@ func (c *agentLifecycleCoordinator) replaceLoop(ctx context.Context, agentID, tr
 		if err != nil {
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
+		}
+	}
+	if trigger == "reconfigure" && revision == cell.configRevision {
+		token := runtimeeffects.LifecycleToken{RuntimeEpoch: cell.epoch, AgentID: agentID, Generation: cell.generation}
+		c.mu.Unlock()
+		return nil, token, nil, nil
+	}
+	if operationID == "" {
+		if trigger == "reconfigure" {
+			operationID = lifecycleReconfigureOperationID(agentID, previousEpoch, previousGeneration, previousPhase, revision, planHash)
+		} else {
+			operationID = uuid.NewString()
 		}
 	}
 	targetPhase := AgentLifecycleRunning
@@ -335,13 +358,18 @@ func (c *agentLifecycleCoordinator) replaceLoop(ctx context.Context, agentID, tr
 		result.Replayed = replayed
 	}
 	if result.Replayed {
-		if result.RuntimeEpoch != cell.epoch || result.Generation != cell.generation || result.Phase != cell.phase {
+		if result.RuntimeEpoch == cell.epoch && result.Generation == cell.generation && result.Phase == cell.phase {
+			token := runtimeeffects.LifecycleToken{RuntimeEpoch: cell.epoch, AgentID: agentID, Generation: cell.generation}
+			c.mu.Unlock()
+			return nil, token, nil, nil
+		}
+		if result.OperationID != operationID || result.AgentID != agentID ||
+			result.PreviousEpoch != cell.epoch || result.PreviousGeneration != cell.generation || result.PreviousPhase != cell.phase ||
+			result.RuntimeEpoch != nextEpoch || result.Generation != nextGeneration || result.Phase != targetPhase ||
+			result.ConfigRevision != revision || result.RunMode != targetMode {
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
 		}
-		token := runtimeeffects.LifecycleToken{RuntimeEpoch: cell.epoch, AgentID: agentID, Generation: cell.generation}
-		c.mu.Unlock()
-		return nil, token, nil, nil
 	}
 	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode
 	cell.cancel, cell.done = nil, nil

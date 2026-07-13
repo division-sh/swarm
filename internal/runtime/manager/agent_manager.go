@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 type AgentManager struct {
@@ -429,29 +428,13 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	}
 
 	rec := PersistedAgent{Config: updated, Status: "active", HiredBy: "reconfigure"}
-	revision, err := lifecycleConfigRevision(rec)
-	if err != nil {
-		return err
-	}
 	subordinate := reconfigureSessionMutationPlan(current, updated)
-	_, subordinateIdentity, err := normalizedLifecycleSubordinate(subordinate)
-	if err != nil {
-		return err
-	}
-	currentRevision, err := lifecycleConfigRevision(PersistedAgent{Config: current})
-	if err != nil {
-		return err
-	}
-	if revision == currentRevision {
-		return nil
-	}
-	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{"reconfigure", agentID, revision, subordinateIdentity}, "\x00"))).String()
 
 	newAgent, err := am.buildAgent(updated)
 	if err != nil {
 		return err
 	}
-	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", operationID, &rec, subordinate); err != nil {
+	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", "", &rec, subordinate); err != nil {
 		return err
 	}
 	if am.lifecycle.store == nil && am.store != nil {

@@ -20,7 +20,9 @@ type lifecyclePersistenceProbe struct {
 	cell       lifecycleProbeCell
 	exists     bool
 	operations map[string]AgentLifecycleTransitionResult
+	requests   []AgentLifecycleTransition
 	failNext   error
+	failAfter  error
 }
 
 type lifecycleProbeCell struct {
@@ -36,6 +38,7 @@ func newLifecyclePersistenceProbe() *lifecyclePersistenceProbe {
 func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.requests = append(p.requests, req)
 	if p.failNext != nil {
 		err := p.failNext
 		p.failNext = nil
@@ -62,7 +65,24 @@ func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Con
 	p.cell = lifecycleProbeCell{Epoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase}
 	p.exists = true
 	p.operations[req.OperationID] = result
+	if p.failAfter != nil {
+		err := p.failAfter
+		p.failAfter = nil
+		return AgentLifecycleTransitionResult{}, err
+	}
 	return result, nil
+}
+
+func (p *lifecyclePersistenceProbe) requestsFor(kind string) []AgentLifecycleTransition {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	requests := make([]AgentLifecycleTransition, 0, len(p.requests))
+	for _, req := range p.requests {
+		if req.OperationKind == kind {
+			requests = append(requests, req)
+		}
+	}
+	return requests
 }
 
 func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing.T) {
@@ -93,6 +113,118 @@ func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing
 	coordinator.cancelShutdownWork()
 	if err := coordinator.releaseLoop(token, done); err != nil {
 		t.Fatalf("release loop: %v", err)
+	}
+}
+
+func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurrence(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	base := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), base, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	plan := runtimesessions.LifecycleMutationPlan{
+		Action:            runtimesessions.LifecycleMutationRotateCurrentSet,
+		TerminationReason: runtimesessions.TerminationReasonNormal,
+		TerminationDetail: "agent_reconfigured",
+		CheckpointSummary: "agent reconfigured",
+	}
+	recA := base
+	recA.Config.Tools = []string{"tool-a"}
+	recB := base
+	recB.Config.Tools = []string{"tool-b"}
+	for i, rec := range []*PersistedAgent{&recA, &recB, &recA} {
+		if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", rec, plan); err != nil {
+			t.Fatalf("reconfigure occurrence %d: %v", i+1, err)
+		}
+	}
+	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &recA, plan); err != nil {
+		t.Fatalf("same-current reconfigure: %v", err)
+	}
+
+	requests := probe.requestsFor("reconfigure")
+	if len(requests) != 3 {
+		t.Fatalf("reconfigure requests = %d, want 3 committed occurrences", len(requests))
+	}
+	seen := map[string]struct{}{}
+	for i, req := range requests {
+		if _, duplicate := seen[req.OperationID]; duplicate {
+			t.Fatalf("occurrence %d reused operation_id %q", i+1, req.OperationID)
+		}
+		seen[req.OperationID] = struct{}{}
+		if i > 0 && req.ExpectedGeneration != requests[i-1].TargetGeneration {
+			t.Fatalf("occurrence %d expected generation = %d, want %d", i+1, req.ExpectedGeneration, requests[i-1].TargetGeneration)
+		}
+	}
+	if requests[0].ConfigRevision != requests[2].ConfigRevision {
+		t.Fatalf("A -> B -> A revisions differ: first=%q third=%q", requests[0].ConfigRevision, requests[2].ConfigRevision)
+	}
+	if requests[0].Subordinate.Action != requests[2].Subordinate.Action {
+		t.Fatalf("A -> B -> A plans differ: first=%q third=%q", requests[0].Subordinate.Action, requests[2].Subordinate.Action)
+	}
+}
+
+func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	base := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), base, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	target := base
+	target.Config.Tools = []string{"tool-a"}
+	probe.mu.Lock()
+	probe.failNext = fmt.Errorf("injected persistence failure")
+	probe.mu.Unlock()
+	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
+		t.Fatal("first reconfigure succeeded despite persistence failure")
+	}
+	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
+		t.Fatalf("retry reconfigure: %v", err)
+	}
+	requests := probe.requestsFor("reconfigure")
+	if len(requests) != 2 {
+		t.Fatalf("reconfigure attempts = %d, want 2", len(requests))
+	}
+	if requests[0].OperationID != requests[1].OperationID {
+		t.Fatalf("retry operation ids differ: first=%q retry=%q", requests[0].OperationID, requests[1].OperationID)
+	}
+}
+
+func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	base := lifecycleTestPersistedAgent()
+	if err := coordinator.register(context.Background(), base, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	target := base
+	target.Config.Tools = []string{"tool-a"}
+	probe.mu.Lock()
+	probe.failAfter = fmt.Errorf("injected response loss after commit")
+	probe.mu.Unlock()
+	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
+		t.Fatal("first reconfigure observed success despite injected response loss")
+	}
+	coordinator.mu.Lock()
+	beforeRetry := runtimeeffects.LifecycleToken{
+		RuntimeEpoch: coordinator.cells[base.Config.ID].epoch,
+		AgentID:      base.Config.ID,
+		Generation:   coordinator.cells[base.Config.ID].generation,
+	}
+	coordinator.mu.Unlock()
+	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
+		t.Fatalf("retry reconfigure: %v", err)
+	}
+	coordinator.mu.Lock()
+	afterRetry := coordinator.cells[base.Config.ID].generation
+	coordinator.mu.Unlock()
+	if afterRetry != beforeRetry.Generation+1 {
+		t.Fatalf("retry generation = %d, want committed successor %d", afterRetry, beforeRetry.Generation+1)
+	}
+	requests := probe.requestsFor("reconfigure")
+	if len(requests) != 2 || requests[0].OperationID != requests[1].OperationID {
+		t.Fatalf("response-loss retry requests = %#v, want one stable operation identity", requests)
 	}
 }
 

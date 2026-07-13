@@ -188,6 +188,57 @@ func TestReconfigureAgent_ReplayTaskToSessionIsNoOp(t *testing.T) {
 	}
 }
 
+func TestReconfigureAgent_RepeatedTargetEdgesAreDistinctOccurrences(t *testing.T) {
+	registry := sessions.NewInMemoryRegistry(0)
+	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{Sessions: registry})
+	cfg := models.AgentConfig{
+		ID:               "reconfigure-cycle-agent",
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "support/inst-cycle",
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
+	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.RuntimeModeSession, sessions.SessionScopeFlow, "reconfigure", cfg.CanonicalFlowPath())
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	initialGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+	previousSessionID := lease.SessionID
+	for i, tool := range []string{"tool-a", "tool-b", "tool-a", "tool-b"} {
+		if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{Tools: []string{tool}}); err != nil {
+			t.Fatalf("ReconfigureAgent occurrence %d (%s): %v", i+1, tool, err)
+		}
+		if got, want := lifecycleGenerationForTest(t, am, cfg.ID), initialGeneration+uint64(i)+1; got != want {
+			t.Fatalf("occurrence %d generation = %d, want %d", i+1, got, want)
+		}
+		rec, ok := registry.Snapshot(cfg.ID)
+		if !ok {
+			t.Fatalf("occurrence %d session snapshot missing", i+1)
+		}
+		if rec.SessionID == previousSessionID {
+			t.Fatalf("occurrence %d did not rotate session %q", i+1, previousSessionID)
+		}
+		previousSessionID = rec.SessionID
+	}
+
+	finalGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{Tools: []string{"tool-b"}}); err != nil {
+		t.Fatalf("same-current ReconfigureAgent: %v", err)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != finalGeneration {
+		t.Fatalf("same-current generation = %d, want unchanged %d", got, finalGeneration)
+	}
+	if rec, ok := registry.Snapshot(cfg.ID); !ok || rec.SessionID != previousSessionID {
+		t.Fatalf("same-current session = %#v ok=%v, want unchanged %q", rec, ok, previousSessionID)
+	}
+}
+
 func lifecycleGenerationForTest(t *testing.T, am *AgentManager, agentID string) uint64 {
 	t.Helper()
 	am.lifecycle.mu.Lock()
