@@ -1,9 +1,66 @@
 package eventschema
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testing.T) {
+	t.Parallel()
+
+	got := CanonicalAcceptanceSchema(map[string]any{
+		"type": "object", "title": "Review result", "description": "Presentation only",
+		"required": []any{"owner", "code", "owner"}, "additionalProperties": false,
+		"properties": map[string]any{
+			"code": map[string]any{
+				"type": "string", "description": "Shown to an operator", "pattern": "^[a-z]+$",
+				"enum":      []any{"beta", "", "alpha", "beta"},
+				"format":    "uuid",
+				"minLength": 2,
+				"maxLength": 12,
+			},
+			"owner": map[string]any{"type": "string", "nullable": true, "x-swarm-equalTo": "code"},
+			"score": map[string]any{"type": "number", "minimum": 1, "maximum": 5},
+			"tags": map[string]any{
+				"type": "array", "minItems": 1, "maxItems": 3,
+				"items": map[string]any{"type": "string", "description": "Presentation only"},
+			},
+		},
+	})
+	if _, ok := got["title"]; ok {
+		t.Fatalf("canonical acceptance schema retained title: %#v", got)
+	}
+	if _, ok := got["description"]; ok {
+		t.Fatalf("canonical acceptance schema retained description: %#v", got)
+	}
+	if required, _ := got["required"].([]string); !reflect.DeepEqual(required, []string{"code", "owner"}) {
+		t.Fatalf("canonical required fields = %#v", got["required"])
+	}
+	properties := got["properties"].(map[string]any)
+	code := properties["code"].(map[string]any)
+	if code["pattern"] != "^[a-z]+$" || code["format"] != "uuid" || code["minLength"] != 2 || code["maxLength"] != 12 || !reflect.DeepEqual(code["enum"], []string{"", "alpha", "beta"}) {
+		t.Fatalf("canonical code constraints = %#v", code)
+	}
+	if _, ok := code["description"]; ok {
+		t.Fatalf("canonical field schema retained description: %#v", code)
+	}
+	owner := properties["owner"].(map[string]any)
+	if owner["nullable"] != true || owner["x-swarm-equalTo"] != "code" || got["additionalProperties"] != false {
+		t.Fatalf("canonical relational/object constraints = %#v", got)
+	}
+	score := properties["score"].(map[string]any)
+	if score["minimum"] != float64(1) || score["maximum"] != float64(5) {
+		t.Fatalf("canonical numeric constraints = %#v", score)
+	}
+	tags := properties["tags"].(map[string]any)
+	if tags["minItems"] != 1 || tags["maxItems"] != 3 || tags["items"].(map[string]any)["type"] != "string" {
+		t.Fatalf("canonical array constraints = %#v", tags)
+	}
+	if _, ok := tags["items"].(map[string]any)["description"]; ok {
+		t.Fatalf("canonical item schema retained description: %#v", tags)
+	}
+}
 
 func TestValidatePayloadAgainstSchema_RejectsUnsupportedSchemaType(t *testing.T) {
 	t.Parallel()

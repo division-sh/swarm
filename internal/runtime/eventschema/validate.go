@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,7 +17,7 @@ func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any)
 	if schema == nil {
 		return nil
 	}
-	return validateSchemaObject("$", schema, payload)
+	return validateSchemaObject("$", CanonicalAcceptanceSchema(schema), payload)
 }
 
 // ValidateValueAgainstSchema validates one value against an already-resolved
@@ -26,7 +27,87 @@ func ValidateValueAgainstSchema(schema map[string]any, value any) error {
 	if schema == nil {
 		return nil
 	}
-	return validateValue("$", schema, value)
+	return validateValue("$", CanonicalAcceptanceSchema(schema), value)
+}
+
+// CanonicalAcceptanceSchema projects the exact schema subset enforced by this
+// package. Presentation metadata is deliberately excluded so semantic hashes
+// change with accepted values, not labels or descriptions.
+func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if value := strings.TrimSpace(asString(schema["type"])); value != "" {
+		out["type"] = value
+	}
+	if schemaAllowsNull(schema) {
+		out["nullable"] = true
+	}
+	if raw, ok := schema["enum"]; ok {
+		if values, ok := asArray(raw); ok {
+			normalized := make([]string, 0, len(values))
+			for _, value := range values {
+				normalized = append(normalized, strings.TrimSpace(asString(value)))
+			}
+			out["enum"] = uniqueSortedStrings(normalized, true)
+		}
+	}
+	if value := strings.TrimSpace(asString(schema["format"])); value == "date-time" || value == "uuid" {
+		out["format"] = value
+	}
+	for _, key := range []string{"pattern", "x-swarm-equalTo"} {
+		if value := strings.TrimSpace(asString(schema[key])); value != "" {
+			out[key] = value
+		}
+	}
+	for _, key := range []string{"minLength", "maxLength", "minItems", "maxItems"} {
+		if value, ok := runtimesharedjson.AsFloat64(schema[key]); ok {
+			out[key] = int(value)
+		}
+	}
+	for _, key := range []string{"minimum", "maximum"} {
+		if value, ok := runtimesharedjson.AsFloat64(schema[key]); ok {
+			out[key] = value
+		}
+	}
+	required := uniqueSortedStrings(requiredList(schema["required"]), false)
+	if len(required) > 0 {
+		out["required"] = required
+	}
+	properties := schemaProperties(schema["properties"])
+	if len(properties) > 0 {
+		projected := make(map[string]any, len(properties))
+		for name, property := range properties {
+			projected[name] = CanonicalAcceptanceSchema(property)
+		}
+		out["properties"] = projected
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		out["items"] = CanonicalAcceptanceSchema(items)
+	}
+	_, hasAdditionalProperties := schema["additionalProperties"]
+	if strings.TrimSpace(asString(schema["type"])) == "object" || len(properties) > 0 || len(required) > 0 || hasAdditionalProperties {
+		out["additionalProperties"] = schemaAdditionalProps(schema["additionalProperties"])
+	}
+	return out
+}
+
+func uniqueSortedStrings(values []string, preserveEmpty bool) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if !preserveEmpty && value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func validateSchemaObject(path string, schema map[string]any, payload map[string]any) error {
