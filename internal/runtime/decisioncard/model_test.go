@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
 
@@ -60,9 +62,9 @@ func TestNewStampsDefaultCadenceAndStableHashes(t *testing.T) {
 		CardID: uuid.NewString(), RunID: "run-1", FlowInstance: "root", EntityID: "entity-1",
 		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
 		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: now,
-		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
-		}},
+		}, nil),
 	}
 	first, err := New(input)
 	if err != nil {
@@ -114,9 +116,9 @@ func TestNewRejectsInputDraftTTLBeyondReminderInterval(t *testing.T) {
 		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
 		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
 		EffectiveCadence: Cadence{InputDraftTTL: "25h", ReminderInterval: "24h"},
-		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
-		}},
+		}, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "TTL exceeds reminder interval") {
 		t.Fatalf("New error = %v, want draft TTL constraint", err)
@@ -127,14 +129,14 @@ func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
 	_, err := New(Card{
 		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
 		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
-		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"reject": {
 				AdvancesTo: "building",
 				Input: map[string]runtimecontracts.WorkflowGateInputField{
 					"feedback": {Type: "string", Required: true},
 				},
 			},
-		}},
+		}, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported stage gate input type") {
 		t.Fatalf("New error = %v, want noncanonical gate input rejection", err)
@@ -145,14 +147,14 @@ func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
 	card, err := New(Card{
 		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
 		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
-		Snapshot: Snapshot{Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"reject": {
 				AdvancesTo: "building",
 				Input: map[string]runtimecontracts.WorkflowGateInputField{
 					"feedback": {Type: " TEXT ", Required: true},
 				},
 			},
-		}},
+		}, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "is not canonical") {
 		t.Fatalf("New error = %v, want exact canonical-spelling rejection", err)
@@ -190,6 +192,10 @@ func TestNewAndValidateRejectNonCanonicalTopLevelDecisionID(t *testing.T) {
 func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *testing.T) {
 	newCard := func(title, outcomeLabel, inputLabel, pattern string) Card {
 		t.Helper()
+		schema := textEventSchema(map[string]map[string]any{
+			"code": {"type": "string", "pattern": pattern, "description": inputLabel + " help"},
+		}, []string{"code"})
+		schema["title"] = outcomeLabel + " result"
 		input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {
 				Verdict: "approve", Label: outcomeLabel, AdvancesTo: "operating",
@@ -199,12 +205,9 @@ func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *te
 				Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
 					"code": runtimecontracts.CELExpression("decision.code"),
 				}},
-				EmitSchema: textEventSchema(map[string]map[string]any{
-					"code": {"type": "string", "pattern": pattern, "description": inputLabel + " help"},
-				}, []string{"code"}),
+				EmitSchema: schema,
 			},
 		})
-		input.Snapshot.Outcomes["approve"].EmitSchema["title"] = outcomeLabel + " result"
 		input.Snapshot.Title = title
 		card, err := New(input)
 		if err != nil {
@@ -288,6 +291,27 @@ func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresObjectShapedSemanticCarriers(t *testing.T) {
+	valid, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "operating"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	badProvenance := valid
+	badProvenance.Provenance = semanticvalue.MustString("not-an-object")
+	if err := badProvenance.Validate(); err == nil || !strings.Contains(err.Error(), "provenance must be an object") {
+		t.Fatalf("scalar provenance validation error = %v", err)
+	}
+
+	badFields := valid
+	badFields.Fields = semanticvalue.MustString("not-an-object")
+	if err := badFields.Validate(); err == nil || !strings.Contains(err.Error(), "fields must be an object") {
+		t.Fatalf("scalar fields validation error = %v", err)
+	}
+}
+
 func TestSnapshotDecodePreservesSafeNumericHashIdentity(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
 	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -308,7 +332,10 @@ func TestSnapshotDecodePreservesSafeNumericHashIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	card.Snapshot.Context = map[string]any{"large_integer": safeInteger}
+	card.Snapshot.Context, err = canonicaljson.FromGo(map[string]any{"large_integer": safeInteger})
+	if err != nil {
+		t.Fatal(err)
+	}
 	card, err = New(card)
 	if err != nil {
 		t.Fatal(err)
@@ -339,12 +366,20 @@ func assertSafeSnapshotNumbers(t *testing.T, snapshot Snapshot, want float64) {
 			t.Fatalf("%s = %#v, want float64(%v)", name, value, want)
 		}
 	}
-	assertNumber("context.large_integer", snapshot.Context["large_integer"])
-	outcome := snapshot.Outcomes["approve"]
-	assertNumber("outcome literal", outcome.Emit.Fields["large_integer"].Literal)
-	properties, ok := outcome.EmitSchema["properties"].(map[string]any)
+	contextValue, ok := snapshot.Context.Lookup("large_integer")
 	if !ok {
-		t.Fatalf("emit schema properties = %#v", outcome.EmitSchema["properties"])
+		t.Fatal("context.large_integer is absent")
+	}
+	assertNumber("context.large_integer", contextValue.Interface())
+	outcome := snapshot.Outcomes["approve"]
+	assertNumber("outcome literal", outcome.Emit.Fields["large_integer"].Literal.Interface())
+	schema, ok := outcome.EmitSchema.Interface().(map[string]any)
+	if !ok {
+		t.Fatalf("emit schema = %#v", outcome.EmitSchema.Interface())
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("emit schema properties = %#v", schema["properties"])
 	}
 	property, ok := properties["large_integer"].(map[string]any)
 	if !ok {
@@ -355,34 +390,26 @@ func assertSafeSnapshotNumbers(t *testing.T, snapshot Snapshot, want float64) {
 
 func TestNewRejectsUnsupportedSnapshotNumbersBeforeHashing(t *testing.T) {
 	const unsafeInteger = int64(9007199254740992)
-	baseOutcome := runtimecontracts.WorkflowGateOutcomePlan{Verdict: "approve", AdvancesTo: "operating"}
 	for _, tc := range []struct {
-		name   string
-		mutate func(*Card)
+		name     string
+		context  map[string]any
+		outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan
 	}{
-		{name: "context", mutate: func(card *Card) { card.Snapshot.Context = map[string]any{"unsafe": unsafeInteger} }},
-		{name: "outcome literal", mutate: func(card *Card) {
-			outcome := baseOutcome
-			outcome.Emit = runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(unsafeInteger)}}
-			outcome.EmitSchema = textEventSchema(map[string]map[string]any{"value": {"type": "integer"}}, []string{"value"})
-			card.Snapshot.Outcomes["approve"] = outcome
-		}},
-		{name: "schema bound", mutate: func(card *Card) {
-			outcome := baseOutcome
-			outcome.Emit = runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(1)}}
-			outcome.EmitSchema = textEventSchema(map[string]map[string]any{"value": {"type": "integer", "minimum": unsafeInteger}}, []string{"value"})
-			card.Snapshot.Outcomes["approve"] = outcome
-		}},
+		{name: "context", context: map[string]any{"unsafe": unsafeInteger}, outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}}},
+		{name: "outcome literal", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Emit:       runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(unsafeInteger)}},
+			EmitSchema: textEventSchema(map[string]map[string]any{"value": {"type": "integer"}}, []string{"value"}),
+		}}},
+		{name: "schema bound", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
+			Verdict: "approve", AdvancesTo: "operating",
+			Emit:       runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(1)}},
+			EmitSchema: textEventSchema(map[string]map[string]any{"value": {"type": "integer", "minimum": unsafeInteger}}, []string{"value"}),
+		}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": baseOutcome})
-			tc.mutate(&input)
-			card, err := New(input)
-			if err == nil {
-				t.Fatal("New accepted an unsupported snapshot number")
-			}
-			if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
-				t.Fatalf("unsupported snapshot acquired hashes: %#v", card)
+			if _, err := FreezeSnapshot("launch_review", "", tc.context, tc.outcomes); err == nil {
+				t.Fatal("FreezeSnapshot accepted an unsupported number")
 			}
 		})
 	}
@@ -435,10 +462,10 @@ func TestValidateDecisionConsumesFrozenEmitSchemaBeforeSettlement(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateDecision(card, "approve", map[string]any{"code": "NOT-LOWER"}); err == nil || !strings.Contains(err.Error(), "pattern") {
+	if err := ValidateDecision(card, "approve", semanticObject(map[string]any{"code": "NOT-LOWER"})); err == nil || !strings.Contains(err.Error(), "pattern") {
 		t.Fatalf("ValidateDecision error = %v, want frozen pattern rejection", err)
 	}
-	if err := ValidateDecision(card, "approve", map[string]any{"code": "ready"}); err != nil {
+	if err := ValidateDecision(card, "approve", semanticObject(map[string]any{"code": "ready"})); err != nil {
 		t.Fatalf("valid refined decision rejected: %v", err)
 	}
 }
@@ -498,18 +525,39 @@ func TestNewAndValidateDecisionConsumeRelationalEmitSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateDecision(dynamic, "approve", map[string]any{"component": "api", "owner": "worker"}); err == nil || !strings.Contains(err.Error(), "must equal") {
+	if err := ValidateDecision(dynamic, "approve", semanticObject(map[string]any{"component": "api", "owner": "worker"})); err == nil || !strings.Contains(err.Error(), "must equal") {
 		t.Fatalf("dynamic relational decision error = %v, want pre-settlement rejection", err)
 	}
 }
 
 func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) Card {
+	snapshot, err := FreezeSnapshot("launch_review", "", nil, outcomes)
+	if err != nil {
+		panic(err)
+	}
 	return Card{
 		CardID: uuid.NewString(), RunID: "run-1", FlowInstance: "root", EntityID: "entity-1",
 		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
 		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: time.Date(2026, time.July, 13, 5, 0, 0, 0, time.UTC),
-		Snapshot: Snapshot{Outcomes: outcomes},
+		Snapshot: snapshot,
 	}
+}
+
+func testSnapshot(t *testing.T, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, context map[string]any) Snapshot {
+	t.Helper()
+	snapshot, err := FreezeSnapshot("launch_review", "", context, outcomes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func semanticObject(values map[string]any) semanticvalue.Value {
+	value, err := canonicaljson.FromGo(values)
+	if err != nil {
+		panic(err)
+	}
+	return value
 }
 
 func textEventSchema(properties map[string]map[string]any, required []string) map[string]any {

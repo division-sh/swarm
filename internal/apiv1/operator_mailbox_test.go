@@ -116,7 +116,7 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 
 func TestMailboxDecideAdmitsEveryCanonicalGateInputType(t *testing.T) {
 	state := newMutatingRuntimeProbeState(t, "mailbox.decide")
-	state.decisionCards.card.Snapshot.Outcomes["typed"] = runtimecontracts.WorkflowGateOutcomePlan{
+	typed := mustTestDecisionSnapshot("launch_review", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{"typed": {
 		AdvancesTo: "operating",
 		Input: map[string]runtimecontracts.WorkflowGateInputField{
 			"text_value":      {Type: "text", Required: true},
@@ -126,7 +126,8 @@ func TestMailboxDecideAdmitsEveryCanonicalGateInputType(t *testing.T) {
 			"timestamp_value": {Type: "timestamp", Required: true},
 			"uuid_value":      {Type: "uuid", Required: true},
 		},
-	}
+	}})
+	state.decisionCards.card.Snapshot.Outcomes["typed"] = typed.Outcomes["typed"]
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorReadHandlers(state.options(t))})
 	response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"typed","method":"mailbox.decide","params":{"card_id":"card-1","verdict":"typed","observed_content_hash":"content-1","idempotency_key":"typed-inputs","fields":{"text_value":"reason","integer_value":7,"numeric_value":7.5,"boolean_value":true,"timestamp_value":"2026-07-13T01:02:03Z","uuid_value":"00000000-0000-0000-0000-000000000123"}}}`)
 	if response.Error != nil || asMap(t, response.Result)["status"] != decisioncard.StatusDecided {

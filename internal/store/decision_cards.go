@@ -16,6 +16,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
 
@@ -50,7 +51,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	if err := card.Validate(); err != nil {
 		return err
 	}
-	snapshot, err := json.Marshal(card.Snapshot)
+	snapshot, err := decisioncard.SnapshotJSON(card)
 	if err != nil {
 		return err
 	}
@@ -58,7 +59,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	if err != nil {
 		return err
 	}
-	provenance, err := json.Marshal(card.Provenance)
+	provenance, err := canonicaljson.Encode(card.Provenance)
 	if err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 		}
 		return fmt.Errorf("decision card identity collision: %s", card.CardID)
 	}
-	_, err = appendDecisionCardChange(ctx, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
+	_, err = appendDecisionCardChangeDTO(ctx, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
 		"status": card.Status, "stage_activation_id": card.StageActivationID,
 	}, card.CreatedAt, postgres)
 	return err
@@ -162,17 +163,21 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	if err != nil {
 		return decisioncard.Card{}, err
 	}
-	if err := canonicaljson.Decode(snapshot, &card.Snapshot); err != nil {
+	decodedSnapshot, err := decisioncard.DecodeSnapshot(snapshot)
+	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("decode decision card snapshot: %w", err)
 	}
+	card.Snapshot = decodedSnapshot
 	if err := json.Unmarshal(cadence, &card.EffectiveCadence); err != nil {
 		return decisioncard.Card{}, fmt.Errorf("decode decision card cadence: %w", err)
 	}
-	if err := json.Unmarshal(provenance, &card.Provenance); err != nil {
+	card.Provenance, err = canonicaljson.Decode(provenance)
+	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("decode decision card provenance: %w", err)
 	}
 	if len(fields) > 0 {
-		if err := canonicaljson.Decode(fields, &card.Fields); err != nil {
+		card.Fields, err = canonicaljson.Decode(fields)
+		if err != nil {
 			return decisioncard.Card{}, fmt.Errorf("decode decision card fields: %w", err)
 		}
 	}
@@ -342,6 +347,9 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	if strings.TrimSpace(req.ObservedContentHash) == "" || strings.TrimSpace(req.ObservedContentHash) != card.CardContentHash {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrStaleContent
 	}
+	if req.Fields.Kind() == semanticvalue.KindNull {
+		req.Fields = semanticvalue.EmptyObject()
+	}
 	if err := decisioncard.ValidateDecision(card, req.Verdict, req.Fields); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
@@ -359,14 +367,14 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 		if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusConsumed, now, postgres); err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
-		if _, err := appendDecisionCardChange(ctx, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftConsumed, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTO(ctx, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftConsumed, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres); err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
 	}
 	if _, err := transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{cardID: card.CardID, excludeID: strings.TrimSpace(req.InputDraftID)}, now, false, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	fields, err := json.Marshal(req.Fields)
+	fields, err := canonicaljson.Encode(req.Fields)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
@@ -395,7 +403,7 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	card.DeliveryReceiptID = strings.TrimSpace(req.DeliveryReceiptID)
 	card.DeliveryRenderHash = strings.TrimSpace(req.DeliveryRenderHash)
 	card.UpdatedAt = now
-	changeID, err := appendDecisionCardChange(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDecided, map[string]any{
+	changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDecided, map[string]any{
 		"verdict": card.Verdict, "decision_event_id": card.DecisionEventID,
 	}, now, postgres)
 	if err != nil {
@@ -451,7 +459,7 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 	}
 	card.DeferredUntil = req.Until.UTC()
 	card.UpdatedAt = now
-	changeID, err := appendDecisionCardChange(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{"until": card.DeferredUntil}, now, postgres)
+	changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{"until": card.DeferredUntil}, now, postgres)
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, err
 }
 
@@ -521,7 +529,7 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if _, err := tx.ExecContext(ctx, query, draft.InputDraftID, draft.RunID, draft.CardID, draft.ActorTokenID, draft.Verdict, nullString(draft.DeliveryReceiptID), draft.Status, draft.ExpiresAt, draft.CreatedAt, draft.UpdatedAt); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
-	_, err = appendDecisionCardChange(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDraftStarted, map[string]any{
+	_, err = appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDraftStarted, map[string]any{
 		"input_draft_id": draft.InputDraftID, "verdict": draft.Verdict, "actor_token_id": draft.ActorTokenID, "expires_at": draft.ExpiresAt,
 	}, now, postgres)
 	return draft, err
@@ -564,7 +572,7 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	}
 	draft.Status = decisioncard.DraftStatusCancelled
 	draft.UpdatedAt = now
-	_, err = appendDecisionCardChange(ctx, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftCancelled, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres)
+	_, err = appendDecisionCardChangeDTO(ctx, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftCancelled, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres)
 	return draft, err
 }
 
@@ -698,7 +706,7 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 		if err := updateDecisionCardDraftStatus(ctx, tx, draft.id, status, now, postgres); err != nil {
 			return 0, err
 		}
-		if _, err := appendDecisionCardChange(ctx, tx, draft.runID, draft.cardID, changeType, map[string]any{"input_draft_id": draft.id}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTO(ctx, tx, draft.runID, draft.cardID, changeType, map[string]any{"input_draft_id": draft.id}, now, postgres); err != nil {
 			return 0, err
 		}
 	}
@@ -742,7 +750,7 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	if _, err := tx.ExecContext(ctx, query, decisioncard.StatusSuperseded, strings.TrimSpace(reason), now, card.CardID); err != nil {
 		return err
 	}
-	_, err = appendDecisionCardChange(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeSuperseded, map[string]any{"reason": strings.TrimSpace(reason)}, now, postgres)
+	_, err = appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeSuperseded, map[string]any{"reason": strings.TrimSpace(reason)}, now, postgres)
 	return err
 }
 
@@ -809,10 +817,10 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		if _, err := tx.ExecContext(ctx, update, decisioncard.StatusSuperseded, reason, now, cardID); err != nil {
 			return err
 		}
-		if _, err := appendDecisionCardChange(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
 		}
-		payload, err := json.Marshal(map[string]any{
+		payload, err := canonicaljson.Bytes(map[string]any{
 			"card_id": card.CardID, "stage_activation_id": card.StageActivationID, "reason": reason,
 		})
 		if err != nil {
@@ -976,16 +984,31 @@ func listDecisionCardChanges(ctx context.Context, db decisionCardSQL, opts decis
 		} else {
 			change.CreatedAt = at
 		}
-		if err := json.Unmarshal(payload, &change.Payload); err != nil {
+		change.Payload, err = canonicaljson.Decode(payload)
+		if err != nil {
 			return nil, err
+		}
+		if change.Payload.Kind() != semanticvalue.KindObject {
+			return nil, fmt.Errorf("decode decision card change payload: payload must be an object")
 		}
 		out = append(out, change)
 	}
 	return out, rows.Err()
 }
 
-func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload map[string]any, now time.Time, postgres bool) (int64, error) {
-	raw, err := json.Marshal(payload)
+func appendDecisionCardChangeDTO(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload any, now time.Time, postgres bool) (int64, error) {
+	admitted, err := canonicaljson.FromGo(payload)
+	if err != nil {
+		return 0, fmt.Errorf("admit decision card change payload: %w", err)
+	}
+	return appendDecisionCardChange(ctx, db, runID, cardID, changeType, admitted, now, postgres)
+}
+
+func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
+	if payload.Kind() != semanticvalue.KindObject {
+		return 0, fmt.Errorf("decision card change payload must be an object")
+	}
+	raw, err := canonicaljson.Encode(payload)
 	if err != nil {
 		return 0, err
 	}

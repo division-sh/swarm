@@ -2,12 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -147,7 +147,7 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	if !ok || publisher == nil {
 		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
 	}
-	payload, err := json.Marshal(map[string]any{
+	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
 	})
 	if err != nil {
@@ -221,14 +221,22 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 		}
 		frozenOutcomes[verdict] = outcome
 	}
+	snapshot, err := decisioncard.FreezeSnapshot(plan.Decision, plan.Title, contextSnapshot, frozenOutcomes)
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage})
+	if err != nil {
+		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
+	}
 	card := decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"), FlowID: plan.FlowID,
 		EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
 		StageActivationID: activation.ActivationID, DecisionID: plan.Decision,
-		Snapshot:   decisioncard.Snapshot{Decision: plan.Decision, Title: plan.Title, Context: contextSnapshot, Outcomes: frozenOutcomes},
+		Snapshot:   snapshot,
 		BundleHash: activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
 		EffectiveCadence: pc.decisionCardCadence.Stamp(activation.OpenedAt),
-		Provenance:       map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage},
+		Provenance:       provenance,
 		CreatedAt:        activation.OpenedAt,
 	}
 	return decisioncard.New(card)

@@ -121,7 +121,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("created cards/transaction = %#v/%#v", cards.created, cards.createTx)
 			}
-			if schema := cards.created[0].Snapshot.Outcomes["approve"].EmitSchema; len(schema) == 0 {
+			if schema := cards.created[0].Snapshot.Outcomes["approve"].EmitSchema; schema.Len() == 0 {
 				t.Fatalf("created card did not freeze the resolved outcome event schema: %#v", cards.created[0].Snapshot)
 			}
 			loaded, ok, err := workflowStore.Load(ctx, entityID)

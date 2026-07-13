@@ -157,17 +157,38 @@ vocabulary:
 contract_formats:
   description: Canonical format for all flow contract files.
   semantic_json:
-    canonical_owner: internal/runtime/canonicaljson
+    canonical_owner: internal/runtime/semanticvalue
+    json_codec: internal/runtime/canonicaljson
+    implementation_tracker: '#1986'
+    broader_migration_tracker: '#2046'
+    implemented_scope:
+    - decision-card context snapshots
+    - frozen decision-card outcome literals and event schemas
+    - decision-card provenance, verdict fields, change payloads, persistence, lifecycle events, replay, fork cloning, and readback
+    - complete JSON-RPC request envelopes admitted by the v1 HTTP and WebSocket server
+    - complete JSON-RPC response and subscription-notification envelopes emitted by the v1 HTTP and WebSocket server
+    explicitly_deferred_scope:
+    - unrelated event payload interpreters
+    - provider ingress and module ABI payloads
+    - non-decision-card persistence and replay projections
+    - unrelated CLI and WebSocket client readbacks
     contract: >
-      Every semantic JSON boundary uses one closed v1 value model: null,
-      boolean, string, array, object, and finite IEEE 754 binary64 number.
-      Admission rejects duplicate object keys, negative zero, non-finite or
-      unsupported number spellings, and every integer-valued number outside
-      the I-JSON safe range -(2^53-1)..(2^53-1). Identifiers requiring wider
-      precision MUST be strings. Equivalent supported numeric spellings are
-      normalized before canonical hashing; transports, persistence, event and
-      schema validation, and CLI readback MUST NOT introduce independent
-      float64/json.Number/int64 interpretations.
+      The implemented scope above uses one immutable closed v1 semantic value
+      model: null, boolean, string, array, object, and finite IEEE 754 binary64
+      number. JSON is a codec for that model, not its semantic owner. Admission
+      rejects duplicate object keys, invalid UTF-8, negative zero, non-finite
+      or unsupported number spellings, nonzero lexical values that underflow
+      binary64 to zero, and every integer-valued number outside the I-JSON safe
+      range -(2^53-1)..(2^53-1). Representable binary64 subnormal numbers are
+      supported. Identifiers requiring wider precision MUST be strings.
+      Decoded object-key identity is exact and case-sensitive after JSON escape
+      decoding; keys are not trimmed or Unicode-normalized, and canonical
+      encoding sorts them lexically. Equivalent supported numeric spellings
+      normalize to the codec's deterministic shortest binary64 JSON spelling
+      before hashing. Within the implemented scope, validation, hashing,
+      persistence, lifecycle events, replay, fork cloning, API output, and
+      readback consume the same admitted value. This section does not claim
+      that the deferred #2046 boundaries already consume this owner.
   authoritative_yaml_source:
     canonical_owner: platform-spec.yaml#contract_formats.authoritative_yaml_source
     implementation_owner: internal/yamlsource

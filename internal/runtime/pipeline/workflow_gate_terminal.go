@@ -2,12 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -54,7 +54,7 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 		if s.gateEvents == nil {
 			return fmt.Errorf("transactional event publisher is required to terminate gated flow %s", instance.InstanceID)
 		}
-		payload, err := json.Marshal(map[string]any{
+		payload, err := canonicaljson.Bytes(map[string]any{
 			"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
 		})
 		if err != nil {

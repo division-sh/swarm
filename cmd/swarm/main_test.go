@@ -5618,7 +5618,7 @@ func requireServedDecisionEventSafeInteger(t *testing.T, db *sql.DB, backend, ev
 		t.Fatalf("%s decision event = %s %s, want exact safe integer", backend, eventName, payload)
 	}
 	var decoded map[string]any
-	if err := canonicaljson.Decode([]byte(payload), &decoded); err != nil {
+	if err := canonicaljson.DecodeInto([]byte(payload), &decoded); err != nil {
 		t.Fatalf("%s decode decision event payload: %v", backend, err)
 	}
 	fields := servedAnyMap(t, decoded["fields"])
@@ -5925,17 +5925,24 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	}); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
+	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
+		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+	})
+	if err != nil {
+		t.Fatalf("freeze decision card snapshot: %v", err)
+	}
+	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": sourceEventID})
+	if err != nil {
+		t.Fatalf("admit decision card provenance: %v", err)
+	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, FlowInstance: "root", EntityID: entityID,
 		Stage: activation.Stage, StageActivationID: activation.ActivationID, DecisionID: activation.DecisionID,
-		Snapshot: decisioncard.Snapshot{Decision: activation.DecisionID, Title: "Launch review", Context: map[string]any{"environment": "staging"},
-			Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-				"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
-				"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
-			}},
+		Snapshot:   snapshot,
 		BundleHash: bundleHash, WorkflowVersion: "1.0.0",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       map[string]any{"source_event": sourceEventID}, CreatedAt: now,
+		Provenance:       provenance, CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("new decision card: %v", err)

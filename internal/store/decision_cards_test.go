@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -33,13 +35,10 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review-1", FlowID: "launch", EntityID: uuid.NewString(),
 				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
-				Snapshot: decisioncard.Snapshot{
-					Decision: "launch_review", Context: map[string]any{"summary": "ready"},
-					Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-						"accept": {Verdict: "accept", AdvancesTo: "operating"},
-						"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
-					},
-				},
+				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"accept": {Verdict: "accept", AdvancesTo: "operating"},
+					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+				}),
 				BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				WorkflowVersion: "1", EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 				CreatedAt: now,
@@ -54,7 +53,8 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 				t.Fatalf("idempotent CreateDecisionCard: %v", err)
 			}
 			loaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
-			if err != nil || loaded.CardContentHash != card.CardContentHash || loaded.Snapshot.Context["summary"] != "ready" {
+			summary, _ := loaded.Snapshot.Context.Lookup("summary")
+			if err != nil || loaded.CardContentHash != card.CardContentHash || summary.Interface() != "ready" {
 				t.Fatalf("GetDecisionCard = %#v, %v", loaded, err)
 			}
 
@@ -63,13 +63,13 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 				t.Fatalf("BeginDecisionCardInput: %v", err)
 			}
 			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "revise", Fields: map[string]any{"feedback": "fix tests"}, ActorTokenID: "operator-a",
+				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), ActorTokenID: "operator-a",
 				ObservedContentHash: "sha256:stale", InputDraftID: draft.InputDraftID, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			}); !errors.Is(err, decisioncard.ErrStaleContent) {
 				t.Fatalf("stale decide error = %v", err)
 			}
 			outcome, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "revise", Fields: map[string]any{"feedback": "fix tests"}, ActorTokenID: "operator-a",
+				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), ActorTokenID: "operator-a",
 				ObservedContentHash: card.CardContentHash, InputDraftID: draft.InputDraftID, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if err != nil {
@@ -179,6 +179,7 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 
 func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
+	const outcomeEvent = "review.completed"
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
@@ -187,26 +188,27 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
 				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
-				Snapshot: decisioncard.Snapshot{
-					Decision: "launch_review", Context: map[string]any{"large_integer": safeInteger},
-					Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-						"approve": {
-							Verdict: "approve", AdvancesTo: "operating",
-							Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-								"large_integer": runtimecontracts.LiteralExpression(safeInteger),
-							}},
-							EmitSchema: map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"large_integer": map[string]any{"type": "integer", "minimum": safeInteger},
-								},
-								"required": []string{"large_integer"}, "additionalProperties": false,
+				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"large_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {
+						Verdict: "approve", AdvancesTo: "operating",
+						Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}},
+						Emit: runtimecontracts.EmitSpec{Event: outcomeEvent, Fields: map[string]runtimecontracts.ExpressionValue{
+							"large_integer": runtimecontracts.LiteralExpression(safeInteger),
+							"score":         runtimecontracts.CELExpression("decision.score"),
+						}},
+						EmitSchema: map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"large_integer": map[string]any{"type": "integer", "minimum": safeInteger},
+								"score":         map[string]any{"type": "integer"},
 							},
+							"required": []string{"large_integer", "score"}, "additionalProperties": false,
 						},
 					},
-				},
+				}),
 				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
 				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+				Provenance:       admitDecisionCardTestObject(t, map[string]any{"safe_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}),
 				CreatedAt:        time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC),
 			})
 			if err != nil {
@@ -222,12 +224,20 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			if loaded.CardContentHash != card.CardContentHash || loaded.DecisionSchemaHash != card.DecisionSchemaHash {
 				t.Fatalf("round-trip hashes = %q/%q, want %q/%q", loaded.CardContentHash, loaded.DecisionSchemaHash, card.CardContentHash, card.DecisionSchemaHash)
 			}
-			assertStoreSnapshotNumber(t, "context.large_integer", loaded.Snapshot.Context["large_integer"], float64(safeInteger))
+			contextNumber, _ := loaded.Snapshot.Context.Lookup("large_integer")
+			assertStoreSnapshotNumber(t, "context.large_integer", contextNumber.Interface(), float64(safeInteger))
+			contextSubnormal, _ := loaded.Snapshot.Context.Lookup("subnormal")
+			assertStoreSnapshotNumber(t, "context.subnormal", contextSubnormal.Interface(), math.SmallestNonzeroFloat64)
+			provenanceNumber, _ := loaded.Provenance.Lookup("safe_integer")
+			assertStoreSnapshotNumber(t, "provenance.safe_integer", provenanceNumber.Interface(), float64(safeInteger))
+			provenanceSubnormal, _ := loaded.Provenance.Lookup("subnormal")
+			assertStoreSnapshotNumber(t, "provenance.subnormal", provenanceSubnormal.Interface(), math.SmallestNonzeroFloat64)
 			outcome := loaded.Snapshot.Outcomes["approve"]
-			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal, float64(safeInteger))
-			properties, ok := outcome.EmitSchema["properties"].(map[string]any)
+			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal.Interface(), float64(safeInteger))
+			schema := outcome.EmitSchema.Interface().(map[string]any)
+			properties, ok := schema["properties"].(map[string]any)
 			if !ok {
-				t.Fatalf("emit schema properties = %#v", outcome.EmitSchema["properties"])
+				t.Fatalf("emit schema properties = %#v", schema["properties"])
 			}
 			property, ok := properties["large_integer"].(map[string]any)
 			if !ok {
@@ -235,14 +245,104 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			}
 			assertStoreSnapshotNumber(t, "schema minimum", property["minimum"], float64(safeInteger))
 
-			unsafe := card
-			unsafe.CardID = uuid.NewString()
-			unsafe.Snapshot.Context["large_integer"] = int64(9007199254740992)
-			if err := cardStore.CreateDecisionCard(ctx, unsafe); err == nil || !strings.Contains(err.Error(), "I-JSON safe range") {
-				t.Fatalf("CreateDecisionCard unsafe integer error = %v", err)
+			decisionEventID := uuid.NewString()
+			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"score": safeInteger}),
+				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID,
+				Now: card.CreatedAt.Add(time.Minute),
+			}); err != nil {
+				t.Fatalf("DecideDecisionCard with safe field: %v", err)
 			}
-			if _, err := cardStore.GetDecisionCard(ctx, unsafe.CardID); !errors.Is(err, decisioncard.ErrNotFound) {
+			decided, err := cardStore.GetDecisionCard(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("GetDecisionCard after safe decision: %v", err)
+			}
+			fieldNumber, _ := decided.Fields.Lookup("score")
+			assertStoreSnapshotNumber(t, "fields.score", fieldNumber.Interface(), float64(safeInteger))
+
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			changePayload := admitDecisionCardTestObject(t, map[string]any{"safe_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64})
+			if _, err := appendDecisionCardChange(ctx, db, runID, card.CardID, decisioncard.ChangeDeferred, changePayload, card.CreatedAt.Add(2*time.Minute), postgres); err != nil {
+				t.Fatalf("append semantic decision-card change: %v", err)
+			}
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10})
+			if err != nil {
+				t.Fatalf("ListDecisionCardChanges: %v", err)
+			}
+			last := changes[len(changes)-1]
+			changeNumber, _ := last.Payload.Lookup("safe_integer")
+			assertStoreSnapshotNumber(t, "change.safe_integer", changeNumber.Interface(), float64(safeInteger))
+			changeSubnormal, _ := last.Payload.Lookup("subnormal")
+			assertStoreSnapshotNumber(t, "change.subnormal", changeSubnormal.Interface(), math.SmallestNonzeroFloat64)
+
+			unsafeID := uuid.NewString()
+			if _, err := decisioncard.FreezeSnapshot("launch_review", "", map[string]any{"large_integer": int64(9007199254740992)}, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}}); err == nil || !strings.Contains(err.Error(), "safe range") {
+				t.Fatalf("FreezeSnapshot unsafe integer error = %v", err)
+			}
+			if _, err := cardStore.GetDecisionCard(ctx, unsafeID); !errors.Is(err, decisioncard.ErrNotFound) {
 				t.Fatalf("GetDecisionCard after unsafe create error = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestDecisionCardStoreRejectsUnadmittedPersistedCarriersOnBothStores(t *testing.T) {
+	const unsafeJSON = `{"unsafe":9007199254740992}`
+	const scalarJSON = `"not-an-object"`
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			for _, carrier := range []string{"provenance", "fields", "change_payload"} {
+				carrier := carrier
+				t.Run(carrier, func(t *testing.T) {
+					ctx := context.Background()
+					cardStore, runID := decisionCardTestStore(t, backend)
+					card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 13, 0, 0, 0, time.UTC))
+					if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+						t.Fatal(err)
+					}
+					db, postgres := decisionCardStoreDB(t, cardStore)
+					switch carrier {
+					case "provenance", "fields":
+						query := fmt.Sprintf("UPDATE decision_cards SET %s = ? WHERE card_id = ?", carrier)
+						args := []any{unsafeJSON, card.CardID}
+						if postgres {
+							query = fmt.Sprintf("UPDATE decision_cards SET %s = $1::jsonb WHERE card_id = $2::uuid", carrier)
+						}
+						if _, err := db.ExecContext(ctx, query, args...); err != nil {
+							t.Fatalf("corrupt %s: %v", carrier, err)
+						}
+						if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), "safe range") {
+							t.Fatalf("GetDecisionCard after %s corruption error = %v, want semantic admission failure", carrier, err)
+						}
+						args[0] = scalarJSON
+						if _, err := db.ExecContext(ctx, query, args...); err != nil {
+							t.Fatalf("corrupt %s with scalar: %v", carrier, err)
+						}
+						if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), carrier+" must be an object") {
+							t.Fatalf("GetDecisionCard after scalar %s corruption error = %v, want object-shape failure", carrier, err)
+						}
+					case "change_payload":
+						query := "UPDATE decision_card_changes SET payload = ? WHERE card_id = ?"
+						args := []any{unsafeJSON, card.CardID}
+						if postgres {
+							query = "UPDATE decision_card_changes SET payload = $1::jsonb WHERE card_id = $2::uuid"
+						}
+						if _, err := db.ExecContext(ctx, query, args...); err != nil {
+							t.Fatalf("corrupt change payload: %v", err)
+						}
+						if _, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10}); err == nil || !strings.Contains(err.Error(), "safe range") {
+							t.Fatalf("ListDecisionCardChanges after payload corruption error = %v, want semantic admission failure", err)
+						}
+						args[0] = scalarJSON
+						if _, err := db.ExecContext(ctx, query, args...); err != nil {
+							t.Fatalf("corrupt change payload with scalar: %v", err)
+						}
+						if _, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10}); err == nil || !strings.Contains(err.Error(), "payload must be an object") {
+							t.Fatalf("ListDecisionCardChanges after scalar payload corruption error = %v, want object-shape failure", err)
+						}
+					}
+				})
 			}
 		})
 	}
@@ -256,7 +356,7 @@ func assertStoreSnapshotNumber(t *testing.T, name string, value any, want float6
 	}
 }
 
-func setDecisionCardFeedbackRequired(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, required bool) {
+func setDecisionCardFeedbackRequired(outcomes map[string]decisioncard.FrozenOutcome, required bool) {
 	outcome := outcomes["revise"]
 	outcome.Input["feedback"] = runtimecontracts.WorkflowGateInputField{Type: "text", Required: required}
 	outcomes["revise"] = outcome
@@ -277,7 +377,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, FlowInstance: "root", FlowID: "launch", EntityID: uuid.NewString(),
 				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
-				Snapshot: decisioncard.Snapshot{Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve", AdvancesTo: "operating",
 						Input: map[string]runtimecontracts.WorkflowGateInputField{
@@ -288,7 +388,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 						}},
 						EmitSchema: map[string]any{"type": "object", "properties": properties, "required": []string{"code", "component", "owner"}, "additionalProperties": false},
 					},
-				}},
+				}),
 				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
 				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 			})
@@ -299,7 +399,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			_, err = cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", Fields: map[string]any{"code": "NOT-LOWER", "component": "api", "owner": "worker"},
+				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"code": "NOT-LOWER", "component": "api", "owner": "worker"}),
 				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if !errors.Is(err, decisioncard.ErrInvalidFields) {
@@ -649,10 +749,10 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
 		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
-		Snapshot: decisioncard.Snapshot{Decision: "launch_review", Context: map[string]any{"summary": "ready"}, Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"accept": {Verdict: "accept", AdvancesTo: "operating"},
 			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
-		}},
+		}),
 		BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 	})
@@ -660,6 +760,24 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 		t.Fatalf("New decision card: %v", err)
 	}
 	return card
+}
+
+func freezeDecisionCardTestSnapshot(t *testing.T, decision string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) decisioncard.Snapshot {
+	t.Helper()
+	snapshot, err := decisioncard.FreezeSnapshot(decision, "", context, outcomes)
+	if err != nil {
+		t.Fatalf("FreezeSnapshot: %v", err)
+	}
+	return snapshot
+}
+
+func admitDecisionCardTestObject(t *testing.T, object map[string]any) semanticvalue.Value {
+	t.Helper()
+	value, err := canonicaljson.FromGo(object)
+	if err != nil {
+		t.Fatalf("admit semantic object: %v", err)
+	}
+	return value
 }
 
 func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, string) {

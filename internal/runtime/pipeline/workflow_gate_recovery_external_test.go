@@ -607,10 +607,14 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 
 func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) string {
 	t.Helper()
+	snapshot, err := decisioncard.FreezeSnapshot("launch_review", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/recovery", FlowID: "launch", EntityID: uuid.NewString(),
 		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
-		Snapshot:   decisioncard.Snapshot{Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}}},
+		Snapshot:   snapshot,
 		BundleHash: gateRecoveryBundle, EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: at,
 	})
 	if err != nil {

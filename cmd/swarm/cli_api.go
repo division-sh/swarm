@@ -734,7 +734,7 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	}
 
 	var envelope jsonRPCResponse
-	if err := canonicaljson.Decode(raw, &envelope); err != nil {
+	if err := canonicaljson.DecodeInto(raw, &envelope); err != nil {
 		return &cliAPIProtocolError{surface: "runtime API", endpoint: c.endpoint, operation: "response", err: err}
 	}
 	if envelope.JSONRPC != "2.0" {
@@ -753,7 +753,7 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	if result == nil {
 		return nil
 	}
-	if err := canonicaljson.Decode(envelope.Result, result); err != nil {
+	if err := canonicaljson.DecodeInto(envelope.Result, result); err != nil {
 		return fmt.Errorf("decode JSON-RPC result: %w", err)
 	}
 	return nil

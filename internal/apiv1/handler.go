@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -78,13 +79,14 @@ type Options struct {
 }
 
 type Request struct {
-	ID            any
-	Method        string
-	Params        map[string]any
-	CorrelationID string
-	Transport     string
-	ActorTokenID  string
-	RequestHash   string
+	ID             any
+	Method         string
+	Params         map[string]any
+	SemanticParams semanticvalue.Value
+	CorrelationID  string
+	Transport      string
+	ActorTokenID   string
+	RequestHash    string
 }
 
 type rpcRequest struct {
@@ -105,6 +107,11 @@ type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
+}
+
+type outboundMessage struct {
+	value      semanticvalue.Value
+	closeAfter bool
 }
 
 type standardErrorData struct {
@@ -225,7 +232,7 @@ func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, a
 	}
 	req.Transport = transport
 	req.ActorTokenID = strings.TrimSpace(actorTokenID)
-	req.RequestHash = requestBodyHash(req.Method, req.Params)
+	req.RequestHash = requestBodyHash(req.Method, req.SemanticParams)
 	if method, ok := h.registry.Method(req.Method); ok {
 		if rpcErr := h.admitMethodTransport(req.Method, method, transport, correlationID); rpcErr != nil {
 			return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
@@ -374,7 +381,7 @@ type webSocketSession struct {
 	conn                  *websocket.Conn
 	ctx                   context.Context
 	cancel                context.CancelFunc
-	out                   chan any
+	out                   chan outboundMessage
 	fallbackCorrelationID string
 	actorTokenID          string
 	mu                    sync.Mutex
@@ -392,7 +399,7 @@ func newWebSocketSession(handler *Handler, conn *websocket.Conn, parent context.
 		conn:                  conn,
 		ctx:                   ctx,
 		cancel:                cancel,
-		out:                   make(chan any, queueSize),
+		out:                   make(chan outboundMessage, queueSize),
 		fallbackCorrelationID: strings.TrimSpace(fallbackCorrelationID),
 		actorTokenID:          strings.TrimSpace(actorTokenID),
 		subs:                  map[string]context.CancelFunc{},
@@ -429,7 +436,16 @@ func (s *webSocketSession) writeLoop() {
 		case <-s.ctx.Done():
 			return
 		case msg := <-s.out:
-			if err := s.conn.WriteJSON(msg); err != nil {
+			raw, err := canonicaljson.Encode(msg.value)
+			if err != nil {
+				s.close()
+				return
+			}
+			if err := s.conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+				s.close()
+				return
+			}
+			if msg.closeAfter {
 				s.close()
 				return
 			}
@@ -469,10 +485,23 @@ func (s *webSocketSession) handleRaw(raw []byte) bool {
 }
 
 func (s *webSocketSession) enqueue(msg any) bool {
+	admitted, err := admitRPCMessage(msg)
+	closeAfter := false
+	if err != nil {
+		requestID := any(nil)
+		if response, ok := msg.(rpcResponse); ok {
+			requestID = response.ID
+		} else {
+			closeAfter = true
+		}
+		diaglog.ProcessLog(diaglog.LevelError, "api", "json-rpc websocket output admission failed",
+			"correlation_id", s.fallbackCorrelationID, "error", err.Error(), "connection_closing", closeAfter)
+		admitted = safeOutputFailureValue(requestID)
+	}
 	select {
 	case <-s.ctx.Done():
 		return false
-	case s.out <- msg:
+	case s.out <- outboundMessage{value: admitted, closeAfter: closeAfter}:
 		return true
 	default:
 		s.close()
@@ -544,26 +573,27 @@ func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Reques
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return Request{}, nil, correlationID, h.standardError(codeParseError, "parse error", correlationID, map[string]any{"reason": "empty request body"})
 	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &object); err != nil {
+	admitted, err := canonicaljson.Decode(raw)
+	if err != nil {
+		if canonicaljson.IsAdmissionError(err) {
+			return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"error": err.Error()})
+		}
 		return Request{}, nil, correlationID, h.standardError(codeParseError, "parse error", correlationID, map[string]any{"error": err.Error()})
 	}
-	if object == nil {
+	object, ok := admitted.ObjectMap()
+	if !ok {
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "request must be an object"})
 	}
 	var req rpcRequest
-	if err := canonicaljson.Decode(raw, &req); err != nil {
+	if err := canonicaljson.ValueInto(admitted, &req); err != nil {
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"error": err.Error()})
 	}
-	idRaw, hasID := object["id"]
+	_, hasID := object["id"]
 	if !hasID {
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id is required"})
 	}
 	if strings.TrimSpace(req.JSONRPC) != jsonRPCVersion {
 		return Request{}, req.ID, requestCorrelationID(nil, req.ID, correlationID), h.standardError(codeInvalidRequest, "invalid request", requestCorrelationID(nil, req.ID, correlationID), map[string]any{"reason": "jsonrpc must be 2.0"})
-	}
-	if len(bytes.TrimSpace(idRaw)) == 0 {
-		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id is invalid"})
 	}
 	if !validJSONRPCID(req.ID) {
 		correlationID = requestCorrelationID(nil, req.ID, correlationID)
@@ -574,32 +604,31 @@ func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Reques
 	if method == "" {
 		return Request{}, req.ID, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "method is required"})
 	}
-	params, rpcErr := decodeParams(req.Params, correlationID)
+	paramsValue := semanticvalue.EmptyObject()
+	if value, exists := object["params"]; exists && value.Kind() != semanticvalue.KindNull {
+		paramsValue = value
+	}
+	params, rpcErr := decodeParams(paramsValue, correlationID)
 	if rpcErr != nil {
 		return Request{}, req.ID, correlationID, rpcErr
 	}
 	return Request{
-		ID:            req.ID,
-		Method:        method,
-		Params:        params,
-		CorrelationID: correlationID,
+		ID:             req.ID,
+		Method:         method,
+		Params:         params,
+		SemanticParams: paramsValue,
+		CorrelationID:  correlationID,
 	}, req.ID, correlationID, nil
 }
 
-func decodeParams(raw json.RawMessage, correlationID string) (map[string]any, *rpcError) {
-	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return map[string]any{}, nil
-	}
-	var params map[string]any
-	if err := canonicaljson.Decode(raw, &params); err != nil {
+func decodeParams(value semanticvalue.Value, correlationID string) (map[string]any, *rpcError) {
+	params, ok := value.Interface().(map[string]any)
+	if !ok {
 		return nil, &rpcError{
 			Code:    codeInvalidParams,
 			Message: "invalid params",
 			Data:    standardErrorData{CorrelationID: correlationID, Details: map[string]any{"reason": "params must be an object"}},
 		}
-	}
-	if params == nil {
-		params = map[string]any{}
 	}
 	return params, nil
 }
@@ -806,9 +835,134 @@ func writeAuthFailure(w http.ResponseWriter, failure *authFailure) {
 }
 
 func writeRPC(w http.ResponseWriter, resp rpcResponse) {
+	value, err := admitRPCMessage(resp)
+	if err != nil {
+		diaglog.ProcessLog(diaglog.LevelError, "api", "json-rpc http output admission failed", "error", err.Error())
+		value = safeOutputFailureValue(resp.ID)
+	}
+	raw, err := canonicaljson.Encode(value)
+	if err != nil {
+		raw = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal error"}}`)
+	}
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	_, _ = w.Write(append(raw, '\n'))
+}
+
+func admitRPCMessage(message any) (semanticvalue.Value, error) {
+	switch typed := message.(type) {
+	case rpcResponse:
+		return rpcResponseValue(typed)
+	case rpcSubscriptionNotification:
+		result, err := admitProgrammaticResult(typed.Params.Result)
+		if err != nil {
+			return semanticvalue.Value{}, err
+		}
+		subscription, err := semanticvalue.String(typed.Params.Subscription)
+		if err != nil {
+			return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC subscription id: %w", err)
+		}
+		version, err := semanticvalue.String(typed.JSONRPC)
+		if err != nil {
+			return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC notification version: %w", err)
+		}
+		method, err := semanticvalue.String(typed.Method)
+		if err != nil {
+			return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC notification method: %w", err)
+		}
+		params, err := semanticvalue.ObjectFromMap(map[string]semanticvalue.Value{
+			"subscription": subscription,
+			"result":       result,
+		})
+		if err != nil {
+			return semanticvalue.Value{}, err
+		}
+		return semanticvalue.ObjectFromMap(map[string]semanticvalue.Value{
+			"jsonrpc": version,
+			"method":  method,
+			"params":  params,
+		})
+	default:
+		return canonicaljson.FromGo(message)
+	}
+}
+
+func rpcResponseValue(response rpcResponse) (semanticvalue.Value, error) {
+	id, err := canonicaljson.FromGo(response.ID)
+	if err != nil {
+		return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC response id: %w", err)
+	}
+	version, err := semanticvalue.String(response.JSONRPC)
+	if err != nil {
+		return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC response version: %w", err)
+	}
+	fields := map[string]semanticvalue.Value{
+		"jsonrpc": version,
+		"id":      id,
+	}
+	if response.Error != nil {
+		failure, err := canonicaljson.FromGo(response.Error)
+		if err != nil {
+			return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC error: %w", err)
+		}
+		fields["error"] = failure
+	} else {
+		result, err := admitProgrammaticResult(response.Result)
+		if err != nil {
+			return semanticvalue.Value{}, fmt.Errorf("admit JSON-RPC result: %w", err)
+		}
+		fields["result"] = result
+	}
+	return semanticvalue.ObjectFromMap(fields)
+}
+
+func admitProgrammaticResult(result any) (semanticvalue.Value, error) {
+	if value, ok := result.(semanticvalue.Value); ok {
+		return value, nil
+	}
+	return canonicaljson.FromGo(result)
+}
+
+func safeOutputFailureValue(id any) semanticvalue.Value {
+	safeID, err := canonicaljson.FromGo(id)
+	if err != nil {
+		safeID = semanticvalue.Null()
+	}
+	failureErr := runtimefailures.New(
+		runtimefailures.ClassInternalFailure,
+		"typed_read_result_marshal_failed",
+		"api",
+		"serialize_json_rpc",
+		map[string]any{"reason": "programmatic result is outside the admitted semantic value domain"},
+	)
+	failure := runtimefailures.Normalize(failureErr, "api", "serialize_json_rpc")
+	value, err := rpcResponseValue(rpcResponse{
+		JSONRPC: jsonRPCVersion,
+		ID:      safeID.Interface(),
+		Error: &rpcError{
+			Code: codeInternalError, Message: "internal error",
+			Data: standardErrorData{Details: map[string]any{"failure": failure}},
+		},
+	})
+	if err != nil {
+		return semanticvalue.MustObject(map[string]semanticvalue.Value{
+			"jsonrpc": semanticvalue.MustString(jsonRPCVersion),
+			"id":      semanticvalue.Null(),
+			"error": semanticvalue.MustObject(map[string]semanticvalue.Value{
+				"code":    mustSemanticNumber(codeInternalError),
+				"message": semanticvalue.MustString("internal error"),
+			}),
+		})
+	}
+	return value
+}
+
+func mustSemanticNumber(value int) semanticvalue.Value {
+	out, err := semanticvalue.Number(float64(value))
+	if err != nil {
+		panic(err)
+	}
+	return out
 }
 
 func requestCorrelationID(r *http.Request, id any, fallback ...string) string {
@@ -858,12 +1012,19 @@ func actorTokenID(token string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func requestBodyHash(method string, params map[string]any) string {
-	body := map[string]any{
-		"method": strings.TrimSpace(method),
-		"params": params,
+func requestBodyHash(method string, params semanticvalue.Value) string {
+	methodValue, err := semanticvalue.String(strings.TrimSpace(method))
+	if err != nil {
+		methodValue = semanticvalue.Null()
 	}
-	raw, err := canonicaljson.Bytes(body)
+	body, err := semanticvalue.ObjectFromMap(map[string]semanticvalue.Value{
+		"method": methodValue,
+		"params": params,
+	})
+	if err != nil {
+		body = methodValue
+	}
+	raw, err := canonicaljson.Encode(body)
 	if err != nil {
 		raw = []byte(strings.TrimSpace(method))
 	}

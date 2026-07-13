@@ -126,7 +126,7 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 	logPaths := make([]string, 0, len(prefixes))
 	for index, prefix := range prefixes {
 		command := exec.Command(runner, "--", blocker, prefix)
-		command.Env = os.Environ()
+		command.Env = withoutPostgresConnectionEnv(os.Environ())
 		logPath := filepath.Join(root, fmt.Sprintf("runner-%d.log", index))
 		logPaths = append(logPaths, logPath)
 		logFile, err := os.Create(logPath)
