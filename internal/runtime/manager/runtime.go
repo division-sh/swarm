@@ -1461,6 +1461,15 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 
 func (am *AgentManager) startAgentLoopTransition(parent context.Context, agent Agent, subscriptions []events.EventType, trigger, operationID string, rec *PersistedAgent, subordinate sessions.LifecycleMutationPlan) error {
 	loopCtx, token, done, err := am.lifecycle.replaceLoop(parent, agent.ID(), trigger, operationID, rec, subordinate)
+	return am.activateAgentLoopTransition(parent, agent, subscriptions, loopCtx, token, done, err)
+}
+
+func (am *AgentManager) startAgentLoopTransitionLocked(parent context.Context, agent Agent, subscriptions []events.EventType, trigger, operationID string, rec *PersistedAgent, subordinate sessions.LifecycleMutationPlan, lockedCell *agentLifecycleCell) error {
+	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, agent.ID(), trigger, operationID, rec, subordinate, lockedCell)
+	return am.activateAgentLoopTransition(parent, agent, subscriptions, loopCtx, token, done, err)
+}
+
+func (am *AgentManager) activateAgentLoopTransition(parent context.Context, agent Agent, subscriptions []events.EventType, loopCtx context.Context, token runtimeeffects.LifecycleToken, done chan struct{}, err error) error {
 	if err != nil {
 		return err
 	}

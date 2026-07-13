@@ -400,9 +400,16 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.Agen
 }
 
 func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {
-	if strings.TrimSpace(agentID) == "" {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
 		return errors.New("agentID is required")
 	}
+	cell, err := am.lifecycle.lockAgentOperation(agentID)
+	if err != nil {
+		return err
+	}
+	defer cell.opMu.Unlock()
+
 	am.mu.RLock()
 	current, ok := am.agentCfg[agentID]
 	am.mu.RUnlock()
@@ -434,7 +441,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	if err != nil {
 		return err
 	}
-	if err := am.startAgentLoopTransition(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", "", &rec, subordinate); err != nil {
+	if err := am.startAgentLoopTransitionLocked(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", "", &rec, subordinate, cell); err != nil {
 		return err
 	}
 	if am.lifecycle.store == nil && am.store != nil {

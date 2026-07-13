@@ -266,23 +266,43 @@ func (c *agentLifecycleCoordinator) abortReset() {
 
 func (c *agentLifecycleCoordinator) replaceLoop(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	agentID = strings.TrimSpace(agentID)
+	cell, err := c.lockAgentOperation(agentID)
+	if err != nil {
+		return nil, runtimeeffects.LifecycleToken{}, nil, err
+	}
+	defer cell.opMu.Unlock()
+	return c.replaceLoopLocked(ctx, agentID, trigger, operationID, rec, subordinate, cell)
+}
+
+func (c *agentLifecycleCoordinator) lockAgentOperation(agentID string) (*agentLifecycleCell, error) {
+	agentID = strings.TrimSpace(agentID)
+	c.mu.Lock()
+	cell := c.cells[agentID]
+	if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+	}
+	c.mu.Unlock()
+	cell.opMu.Lock()
+	c.mu.Lock()
+	current := c.cells[agentID]
+	valid := current == cell && current.phase != AgentLifecycleTerminated && current.phase != AgentLifecycleFailed
+	c.mu.Unlock()
+	if !valid {
+		cell.opMu.Unlock()
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+	}
+	return cell, nil
+}
+
+func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan, lockedCell *agentLifecycleCell) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
 	c.mu.Lock()
 	cell := c.cells[agentID]
-	if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
-		c.mu.Unlock()
-		return nil, runtimeeffects.LifecycleToken{}, nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
-	}
-	c.mu.Unlock()
-	cell.opMu.Lock()
-	defer cell.opMu.Unlock()
-
-	c.mu.Lock()
-	cell = c.cells[agentID]
-	if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell != lockedCell || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
