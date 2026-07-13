@@ -1855,12 +1855,7 @@ func (r scenarioRunner) readTestQuiescence(ctx context.Context, runID string) (d
 
 func (r scenarioRunner) evaluateExpectations(ctx context.Context, state *scenarioRunState, evaluator *scenarioExpressionEvaluator, expect scenarioExpect) error {
 	runID := state.RunID
-	rows, err := r.fetchRunTraceRows(ctx, runID)
-	if err != nil {
-		return err
-	}
-	names := uniqueScenarioTraceEventNames(rows)
-	if err := assertScenarioEventExpectations(names, expect.Events); err != nil {
+	if err := r.waitForEventExpectations(ctx, runID, expect.Events); err != nil {
 		return err
 	}
 	if expect.NoDeadLetters != nil && *expect.NoDeadLetters {
@@ -1874,6 +1869,30 @@ func (r scenarioRunner) evaluateExpectations(ctx context.Context, state *scenari
 		}
 	}
 	return nil
+}
+
+func (r scenarioRunner) waitForEventExpectations(ctx context.Context, runID string, expect scenarioEventExpect) error {
+	deadline := time.Now().Add(r.timeout)
+	for {
+		rows, err := r.fetchRunTraceRows(ctx, runID)
+		if err != nil {
+			return err
+		}
+		names := uniqueScenarioTraceEventNames(rows)
+		if err := assertScenarioEventExpectations(names, expect); err == nil {
+			return nil
+		} else if time.Now().After(deadline) {
+			return err
+		}
+
+		timer := time.NewTimer(r.pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func uniqueScenarioTraceEventNames(rows []diagnosticRunTraceRow) []string {
