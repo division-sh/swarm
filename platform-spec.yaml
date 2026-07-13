@@ -4521,12 +4521,14 @@ engine:
       activation_owner: '#2051'
       status: design_locked_not_activated
       owner: run_model.fork.temporal_frontier.schema_apply and privilege_contract
-      migration_invocation: swarm schema apply --runtime-role <postgres-role> --config <explicit-migration-config>
+      migration_invocation: swarm schema apply --runtime-role <postgres-role> --cleanup-authorizer-role <postgres-role> --config <explicit-migration-config>
       runtime_invocation: swarm serve --config <runtime-config>
       rules:
-      - The migration invocation and runtime invocation use the same typed database config shape but distinct PostgreSQL logins.
+      - The migration invocation, ordinary runtime store, and destructive-reset cleanup authorizer use three distinct PostgreSQL logins.
       - The explicit migration config authenticates as the schema-owning migration login and is never loaded by serve.
       - Runtime config authenticates as the restricted metadata-declared runtime role and cannot own or migrate schema.
+      - Runtime config also declares one typed `database.cleanup_authorizer` connection with the same host/database/SSL shape and its own explicit password-source authority. It is delivered only to the canonical destructive-reset plan/quiescence/directive owner; ordinary store, SQL helpers, and other runtime consumers cannot obtain it.
+      - A temporal-generation serve fails admission when either runtime or cleanup-authorizer credentials are absent, name the same role, disagree with metadata, or hold broader privileges than their exact grant matrices. No ambient PG* or SWARM_DB_* fallback is allowed for either identity.
       - Login creation, passwords, and role provisioning remain operator/DBA work; Swarm does not mint or persist them.
       - #2050 does not add the command or alter startup behavior. #2051 activates both surfaces atomically with the temporal generation.
     runtime_backend_rule:
@@ -11499,7 +11501,7 @@ platform_tables:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
         build and exact platform specification created the store; they never decide whether a later build may open it.
         Products never read or write this table. The inactive temporal-frontier-v1 target adds schema_generation,
-        schema_ddl_sha256, schema_owner_role, and runtime_role through the one-shot migration owned by
+        schema_ddl_sha256, schema_catalog_sha256, schema_owner_role, runtime_role, and cleanup_authorizer_role through the one-shot migration owned by
         run_model.fork.temporal_frontier; normal boot does not add those columns in #2050.'
       ddl: "CREATE TABLE runtime_store_metadata (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    swarm_version\
         \     TEXT NOT NULL,\n    platform_version  TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL\n);"
@@ -11783,15 +11785,23 @@ run_model:
         mutable_projection: >
           Mutable rows are current projections, not historical truth. Every admitted INSERT, UPDATE, and DELETE writes
           typed before/after transition evidence under the same run revision. An ownership-moving UPDATE requires every
-          distinct non-NULL OLD.run_id and NEW.run_id in the sealed declaration and records evidence for both runs.
+          distinct non-NULL OLD.run_id and NEW.run_id in the sealed declaration with normal disposition and records
+          evidence for both runs. A stored run identity that is derived from immutable lineage must agree with that
+          lineage on every INSERT and UPDATE; changing both is admitted only when the new lineage resolves to the new run.
         immutable_events: >
           Run-scoped events are immutable after insertion. Runtime receives INSERT but not UPDATE or DELETE authority.
           Trigger enforcement rejects UPDATE even if a grant drifts and permits DELETE only through whole-run destructive
           authority with a sealed destructive declaration.
         destructive_cleanup: >
-          Whole-run deletion declares destructive mode, locks the frontier before run-owned facts, records one durable
-          run_deletion_tombstone outside the run cascade, and then deletes the run. It never allocates an ordinary
-          revision. An unversioned legacy run therefore remains destructible without fabricating normal history.
+          Whole-run deletion consumes a sealed run_cleanup_authorizations row produced by the canonical destructive-reset
+          plan/quiescence/directive owner. Restricted runtime cannot create, alter, or select that evidence and cannot
+          choose the deleted runs or actor. Claiming the authorization declares a disposition per run: destructive for
+          cleanup runs and normal for surviving runs whose references are severed in the same transaction. Normal runs
+          receive typed history and ordinary revisions; destructive runs receive tombstones and no ordinary revision.
+          The authorization-consuming delete wrapper records one durable run_deletion_tombstone outside each run cascade
+          and then deletes exactly the authorized cleanup set. An unversioned legacy run therefore remains destructible without
+          fabricating normal history, while an arbitrary active/source run cannot be deleted through a generic runtime
+          function.
       selectors:
         public:
         - default_latest_event
@@ -11811,14 +11821,29 @@ run_model:
         xid_type: xid8
         declaration_owner: run_temporal_transactions
         declaration_rule: >
-          Owner-only swarm_declare_temporal_runs(uuid[], mode) inserts exactly one durable header for
-          pg_current_xact_id(). Runtime can call only swarm_claim_temporal_runs(uuid[]), which delegates with normal mode;
-          swarm_destroy_run is the only runtime surface that may delegate with destructive mode. The sorted,
-          duplicate-free run_ids array and mode are sealed: a second declaration must match byte-for-byte or fail. Full
-          xid8 is retained; txid_current() bigint truncation and xid32 storage are forbidden.
-        modes:
-          normal: Requires model_version=1 and history_complete=true for every run; allocates revisions.
-          destructive: Permits versioned or unversioned whole-run cleanup; allocates no ordinary revision.
+          Owner-only swarm_declare_temporal_runs(normal_run_ids uuid[], destructive_run_ids uuid[]) inserts one durable
+          header for pg_current_xact_id() plus one run_temporal_transaction_runs row per run. Sorted, duplicate-free,
+          disjoint run sets and each per-run disposition are sealed; a second declaration must match exactly or fail.
+          Runtime can call swarm_claim_temporal_runs(uuid[]) for normal work or claim one persisted cleanup authorization;
+          it cannot call the mode-bearing declaration directly. Full xid8 is retained; txid_current() bigint truncation
+          and xid32 storage are forbidden.
+        dispositions:
+          normal: Requires model_version=1 and history_complete=true; allocates one revision for that run.
+          destructive: Permits versioned or unversioned whole-run cleanup; allocates no ordinary revision for that run.
+        run_creation: >
+          Runtime has no direct runs INSERT grant. SECURITY DEFINER swarm_create_run(uuid,text) is the sole creation
+          primitive: it validates the initial status, inserts a version-1 frontier under a deferred run foreign key,
+          declares that run normal, allocates revision/ordinal one, inserts the run, and writes run_lifecycle_history in
+          one transaction. Failure publishes none of those rows.
+        cleanup_authorization: >
+          run_cleanup_authorizations is a sealed handoff from the canonical destructive-reset plan/quiescence/directive
+          owner through a dedicated cleanup-authorizer login. That login can execute only
+          swarm_authorize_run_cleanup(uuid,text,text,uuid[],uuid[]); the function persists session_user as non-spoofable
+          authorizer evidence and seals the operation identity, actor evidence, sorted normal survivor set, and sorted
+          destructive cleanup set. It cannot mutate runtime facts, temporal authority, history, or schema. Ordinary
+          runtime can execute only claim/delete wrappers by authorization UUID and has no direct table privileges. The
+          claim wrapper consumes the row once in the current xid and declares both sets; the delete wrapper requires that
+          same claimed xid and deletes exactly the destructive set.
         ordinal_rule: >
           run_temporal_revisions.next_ordinal starts at zero. Each guarded fact/history operation atomically increments it
           and receives the resulting positive integer. A multi-run ownership move receives one ordinal in each run.
@@ -11840,15 +11865,20 @@ run_model:
             ddl: |
               CREATE TABLE run_temporal_transactions (
                   transaction_id XID8 PRIMARY KEY,
-                  run_ids UUID[] NOT NULL,
-                  mode TEXT NOT NULL CHECK (mode IN ('normal', 'destructive')),
-                  declared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-                  CHECK (cardinality(run_ids) > 0)
+                  declared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+              );
+          run_temporal_transaction_runs:
+            ddl: |
+              CREATE TABLE run_temporal_transaction_runs (
+                  transaction_id XID8 NOT NULL REFERENCES run_temporal_transactions(transaction_id) ON DELETE CASCADE,
+                  run_id UUID NOT NULL,
+                  disposition TEXT NOT NULL CHECK (disposition IN ('normal', 'destructive')),
+                  PRIMARY KEY (transaction_id, run_id)
               );
           run_temporal_frontiers:
             ddl: |
               CREATE TABLE run_temporal_frontiers (
-                  run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+                  run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
                   model_version INTEGER NOT NULL CHECK (model_version IN (0, 1)),
                   current_revision BIGINT NOT NULL DEFAULT 0 CHECK (current_revision >= 0),
                   history_complete BOOLEAN NOT NULL DEFAULT FALSE,
@@ -11873,10 +11903,27 @@ run_model:
                   from_generation TEXT NOT NULL,
                   to_generation TEXT NOT NULL,
                   ddl_sha256 TEXT NOT NULL CHECK (ddl_sha256 ~ '^[0-9a-f]{64}$'),
+                  catalog_sha256 TEXT NOT NULL CHECK (catalog_sha256 ~ '^[0-9a-f]{64}$'),
                   schema_owner_role TEXT NOT NULL,
                   runtime_role TEXT NOT NULL,
+                  cleanup_authorizer_role TEXT NOT NULL,
                   applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-                  CHECK (schema_owner_role <> runtime_role)
+                  CHECK (schema_owner_role <> runtime_role
+                      AND schema_owner_role <> cleanup_authorizer_role
+                      AND runtime_role <> cleanup_authorizer_role)
+              );
+          run_cleanup_authorizations:
+            ddl: |
+              CREATE TABLE run_cleanup_authorizations (
+                  authorization_id UUID PRIMARY KEY,
+                  operation_id TEXT NOT NULL UNIQUE,
+                  actor_evidence TEXT NOT NULL CHECK (BTRIM(actor_evidence) <> ''),
+                  authorized_by TEXT NOT NULL CHECK (BTRIM(authorized_by) <> ''),
+                  normal_run_ids UUID[] NOT NULL DEFAULT '{}',
+                  destructive_run_ids UUID[] NOT NULL,
+                  authorized_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                  claimed_transaction_id XID8 UNIQUE,
+                  CHECK (cardinality(destructive_run_ids) > 0)
               );
           run_deletion_tombstones:
             ddl: |
@@ -11951,10 +11998,12 @@ run_model:
               ALTER TABLE runtime_store_metadata
                   ADD COLUMN schema_generation TEXT,
                   ADD COLUMN schema_ddl_sha256 TEXT,
+                  ADD COLUMN schema_catalog_sha256 TEXT,
                   ADD COLUMN schema_owner_role TEXT,
-                  ADD COLUMN runtime_role TEXT;
+                  ADD COLUMN runtime_role TEXT,
+                  ADD COLUMN cleanup_authorizer_role TEXT;
           immutable_append_facts:
-            tables: [events, entity_mutations, dead_letters, agent_turns]
+            tables: [events, entity_mutations, dead_letters, agent_turns, selected fork lineage rows]
             columns: temporal_revision BIGINT, temporal_ordinal INTEGER
           event_receipts_derived_identity:
             ddl: |
@@ -11986,47 +12035,65 @@ run_model:
           dead_letters: original event lineage
           runless_events: explicit NULL revision and ordinal
       trigger_contract:
-        functions: [swarm_declare_temporal_runs, swarm_claim_temporal_runs, swarm_next_temporal_ordinal, swarm_guard_events, swarm_guard_event_deliveries, swarm_guard_event_receipts, swarm_destroy_run]
+        functions: [swarm_declare_temporal_runs, swarm_create_run, swarm_claim_temporal_runs, swarm_authorize_run_cleanup, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs, swarm_next_temporal_ordinal, swarm_resolve_temporal_run, swarm_guard_append_fact, swarm_guard_mutable_fact]
+        exact_trigger_families:
+          append_guard:
+            direct_run: [events, entity_mutations, agent_turns, selected fork lineage rows]
+            event_derived_run: [dead_letters]
+          mutable_guard:
+            direct_run: [runs, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
+            event_derived_run: [event_receipts]
+            asserted_event_run: [event_deliveries]
         properties:
         - Every function is owned by the schema-owner/migration login, is SECURITY DEFINER, schema-qualifies all objects,
           and pins search_path to pg_catalog plus the runtime schema.
-        - PUBLIC receives no EXECUTE. Runtime receives EXECUTE only on the normal-only swarm_claim_temporal_runs(uuid[])
-          wrapper and swarm_destroy_run; the mode-bearing declaration function, trigger functions, and ordinal helpers are
-          unavailable as direct bypass surfaces.
+        - PUBLIC receives no EXECUTE. Runtime receives EXECUTE only on swarm_create_run, the normal-only claim wrapper, and
+          the authorization-ID cleanup claim/delete wrappers. The per-disposition declaration function, lineage resolver,
+          trigger functions, and ordinal helper are unavailable as direct bypass surfaces.
         - Every temporal trigger is ENABLE ALWAYS. Runtime admission verifies trigger name, table/function OIDs,
           tgenabled='A', function owner, prosecdef=true, proconfig search_path, and function checksum.
         - Event INSERT overwrites caller revision/ordinal. Event UPDATE always rejects. Event DELETE requires destructive
           mode and never writes ordinary history.
-        - Mutable UPDATE and DELETE guard OLD.run_id before mutation; ownership moves independently guard every distinct
-          OLD and NEW non-NULL run and write typed evidence for each.
+        - Mutable UPDATE and DELETE guard OLD run identity before mutation; ownership moves independently guard every
+          distinct OLD and NEW non-NULL run and write typed evidence for each. Event-derived and asserted-event families
+          derive through events.run_id and reject missing or disagreeing lineage before allocating an ordinal.
         - Cascade-triggered fact deletion accepts only the same sealed destructive transaction that owns the run tombstone.
       privilege_contract:
         schema_owner_migration_login:
           attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS]
           owns: [runtime schema, temporal tables, temporal functions, temporal triggers, runtime_store_metadata, runtime_store_migrations]
           use: one-shot swarm schema apply only
+        cleanup_authorizer_login:
+          attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner, distinct_from_runtime]
+          schema: USAGE only; no CREATE
+          tables: no direct privileges
+          functions:
+            execute: [swarm_authorize_run_cleanup]
+            denied: [all other temporal functions]
+          use: canonical destructive-reset plan/quiescence/directive owner only
         runtime_login:
           attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner]
           schema: USAGE only; no CREATE
           tables:
             read: [runtime_store_metadata, runtime_store_migrations, run_temporal_frontiers, run_temporal_revisions, temporal history, runtime fact tables]
             insert_only: [events, append-only run fact tables]
-            guarded_insert_update: [runs]
+            guarded_update: [runs]
             guarded_insert_update_delete: [event_deliveries, event_receipts, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
-            denied_all_dml: [run_temporal_transactions, run_temporal_frontiers, run_temporal_revisions, temporal history, run_deletion_tombstones, runtime_store_metadata, runtime_store_migrations]
-            denied_direct_mutation: [events.UPDATE, events.DELETE, runs.DELETE]
+            denied_all_dml: [run_temporal_transactions, run_temporal_transaction_runs, run_temporal_frontiers, run_temporal_revisions, temporal history, run_cleanup_authorizations, run_deletion_tombstones, runtime_store_metadata, runtime_store_migrations]
+            denied_direct_mutation: [events.UPDATE, events.DELETE, runs.INSERT, runs.DELETE]
           functions:
-            execute: [swarm_claim_temporal_runs, swarm_destroy_run]
-            denied: [swarm_declare_temporal_runs, all trigger functions, swarm_next_temporal_ordinal]
+            execute: [swarm_create_run, swarm_claim_temporal_runs, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs]
+            denied: [swarm_declare_temporal_runs, swarm_authorize_run_cleanup, swarm_resolve_temporal_run, all trigger functions, swarm_next_temporal_ordinal]
         admission: >
           Serve verifies current_user equals metadata.runtime_role, differs from metadata.schema_owner_role, is not a
           member of that role, and lacks SUPERUSER, BYPASSRLS, CREATEROLE, schema CREATE, table ownership, trigger/history/
           metadata DML, and forbidden function EXECUTE. Any missing required grant or extra forbidden grant fails boot.
       schema_apply:
-        command: swarm schema apply --runtime-role <postgres-role> --config <explicit-migration-config>
+        command: swarm schema apply --runtime-role <postgres-role> --cleanup-authorizer-role <postgres-role> --config <explicit-migration-config>
         authority: >
           The explicit config uses the same typed database connection shape as serve but authenticates as the migration
-          owner. The runtime role is named separately and must already exist. Login provisioning is operator/DBA work.
+          owner. The runtime and cleanup-authorizer roles are named separately, differ from each other and the schema
+          owner, and must already exist. Login provisioning is operator/DBA work.
           Serve never loads, discovers, or falls back to migration credentials.
         migration_id: temporal-frontier-v1
         recognized_legacy: >
@@ -12041,12 +12108,16 @@ run_model:
           order:
           - Acquire the temporal-schema exclusive advisory lock.
           - Lock recognized legacy tables ACCESS EXCLUSIVE in deterministic name order so first upgrade excludes old binaries.
-          - Re-read metadata, catalog checksum, active runs, owner identity, and migration edge.
+          - Re-read metadata, the registered complete catalog checksum, active runs, owner identity, and migration edge.
           - Normalize only the registered legacy shape; create the temporal model and guarded functions/triggers.
           - Insert model_version=0 frontiers for retained legacy runs without synthesizing revisions or histories.
           - Apply exact ownership, revocations, grants, ENABLE ALWAYS triggers, and catalog validation.
           - Insert migration ledger and update metadata generation/DDL checksum/roles last, then commit.
-        rollback: Any failure rolls back DDL, grants, ledger, and metadata. Reapply of the exact committed migration is a no-op after full revalidation; a different checksum fails closed.
+        rollback: >
+          Any failure rolls back DDL, grants, ledger, and metadata. The migration stores both the canonical DDL checksum
+          and a deterministic installed-catalog checksum covering relations, columns, constraints, indexes, functions,
+          ALWAYS triggers, owners, and grants. Reapply recomputes the complete target catalog and is a no-op only when both
+          checksums and all admission invariants match; any drift fails closed.
       deployment_exclusion:
         lock_key: hashtextextended('swarm:temporal-schema:' || current_database() || ':' || runtime_schema, 0)::bigint
         runtime: New temporal-aware serve holds the shared session advisory lock for its database connection lifetime.
@@ -12054,12 +12125,13 @@ run_model:
         first_upgrade: ACCESS EXCLUSIVE legacy table locks cover old binaries that do not yet hold the shared advisory lock.
       runtime_admission:
         schema_mutation: forbidden
-        checks: [platform version, schema generation, canonical DDL checksum, migration ledger, schema owner, runtime role, role attributes and membership, exact grants, temporal columns and constraints, trigger/function OIDs and checksums, ENABLE ALWAYS state]
+        checks: [platform version, schema generation, canonical DDL checksum, installed catalog checksum, migration ledger, schema owner, runtime role, role attributes and membership, exact grants, temporal columns and constraints, trigger/function OIDs and checksums, ENABLE ALWAYS state]
         second_boot: Two independent runtime-login boots must pass the same read-only admission without executing DDL, DML, GRANT, REVOKE, ALTER, or role changes.
       required_conformance:
         committed_record: internal/runtime/conformance/testdata/temporal_frontier_design_record.yaml
         postgres_test: TestTemporalFrontierPostgresDesignConformance
         runner: go run ./cmd/swarm-test-postgres -- go test ./internal/runtime/conformance -run '^TestTemporalFrontierPostgresDesignConformance$' -count=1
+        compact_path: restricted runtime creates a run, mutates every guarded fact family, rejects lineage mismatch, consumes authorized mixed cleanup, and passes read-only second boot after complete migration/reapply validation
         scope: Design/schema/privilege feasibility only; passing does not prove production writer or reader migration.
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
       point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts

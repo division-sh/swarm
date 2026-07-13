@@ -6,13 +6,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
@@ -47,25 +48,29 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
 	ownerRole := "tf_owner_" + suffix
 	runtimeRole := "tf_runtime_" + suffix
+	cleanupAuthorizerRole := "tf_cleanup_authorizer_" + suffix
 	upgradeSchema := "tf_upgrade_" + suffix
 	freshSchema := "tf_fresh_" + suffix
 	runtimePassword := "tf-runtime-" + suffix
+	cleanupAuthorizerPassword := "tf-cleanup-authorizer-" + suffix
 
 	mustExecTemporal(t, ctx, admin, `CREATE ROLE `+quoteTemporalIdent(ownerRole)+` LOGIN PASSWORD 'owner-not-used' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`)
 	mustExecTemporal(t, ctx, admin, `CREATE ROLE `+quoteTemporalIdent(runtimeRole)+` LOGIN PASSWORD `+quoteTemporalLiteral(runtimePassword)+` NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`)
+	mustExecTemporal(t, ctx, admin, `CREATE ROLE `+quoteTemporalIdent(cleanupAuthorizerRole)+` LOGIN PASSWORD `+quoteTemporalLiteral(cleanupAuthorizerPassword)+` NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`)
 	defer func() {
 		_, _ = admin.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+quoteTemporalIdent(freshSchema)+` CASCADE`)
 		_, _ = admin.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+quoteTemporalIdent(upgradeSchema)+` CASCADE`)
 		_, _ = admin.ExecContext(context.Background(), `DROP ROLE IF EXISTS `+quoteTemporalIdent(runtimeRole))
+		_, _ = admin.ExecContext(context.Background(), `DROP ROLE IF EXISTS `+quoteTemporalIdent(cleanupAuthorizerRole))
 		_, _ = admin.ExecContext(context.Background(), `DROP ROLE IF EXISTS `+quoteTemporalIdent(ownerRole))
 	}()
 
 	mustExecTemporal(t, ctx, admin, `CREATE SCHEMA `+quoteTemporalIdent(freshSchema)+` AUTHORIZATION `+quoteTemporalIdent(ownerRole))
-	if err := applyTemporalPrototype(ctx, admin, freshSchema, ownerRole, runtimeRole, true, false); err != nil {
+	if err := applyTemporalPrototype(ctx, admin, freshSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, true, false); err != nil {
 		t.Fatalf("fresh temporal schema apply: %v", err)
 	}
-	assertTemporalTargetMetadata(t, ctx, admin, freshSchema, ownerRole, runtimeRole)
-	for _, table := range []string{"run_temporal_transactions", "run_temporal_frontiers", "run_temporal_revisions", "runtime_store_migrations", "run_deletion_tombstones", "event_delivery_history", "event_receipt_history"} {
+	assertTemporalTargetMetadata(t, ctx, admin, freshSchema, ownerRole, runtimeRole, cleanupAuthorizerRole)
+	for _, table := range []string{"run_temporal_transactions", "run_temporal_transaction_runs", "run_temporal_frontiers", "run_temporal_revisions", "runtime_store_migrations", "run_cleanup_authorizations", "run_deletion_tombstones", "event_delivery_history", "event_receipt_history"} {
 		assertTemporalTableExists(t, ctx, admin, freshSchema, table, true)
 	}
 
@@ -80,14 +85,21 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`INSERT INTO %s.event_deliveries(delivery_id,run_id,event_id,status) VALUES ($1,$2,$3,'pending')`, quoteTemporalIdent(upgradeSchema)), legacyDelivery, legacyRun, legacyEvent)
 	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`INSERT INTO %s.event_receipts(receipt_id,event_id,outcome) VALUES ($1,$2,'success')`, quoteTemporalIdent(upgradeSchema)), legacyReceipt, legacyEvent)
 
-	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, false, false)
+	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false)
 	if err == nil || !strings.Contains(err.Error(), legacyRun) {
 		t.Fatalf("active legacy migration error = %v, want exact active run", err)
 	}
 	assertTemporalTableExists(t, ctx, admin, upgradeSchema, "run_temporal_frontiers", false)
 	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`UPDATE %s.runs SET status='completed' WHERE run_id=$1`, quoteTemporalIdent(upgradeSchema)), legacyRun)
 
-	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, false, true)
+	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`ALTER TABLE %s.events ADD COLUMN unregistered_drift TEXT`, quoteTemporalIdent(upgradeSchema)))
+	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false)
+	if err == nil || !strings.Contains(err.Error(), "legacy catalog checksum mismatch") {
+		t.Fatalf("drifted legacy migration error = %v, want catalog checksum rejection", err)
+	}
+	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`ALTER TABLE %s.events DROP COLUMN unregistered_drift`, quoteTemporalIdent(upgradeSchema)))
+
+	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, true)
 	if err == nil || !strings.Contains(err.Error(), "forced temporal migration rollback") {
 		t.Fatalf("forced migration error = %v", err)
 	}
@@ -100,11 +112,11 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 		t.Fatalf("rolled-back platform version = %q, want 0.7.0", legacyVersion)
 	}
 
-	if err := applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, false, false); err != nil {
+	if err := applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false); err != nil {
 		t.Fatalf("recognized temporal upgrade: %v", err)
 	}
-	assertTemporalTargetMetadata(t, ctx, admin, upgradeSchema, ownerRole, runtimeRole)
-	if err := applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, false, false); err != nil {
+	assertTemporalTargetMetadata(t, ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole)
+	if err := applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false); err != nil {
 		t.Fatalf("idempotent temporal reapply: %v", err)
 	}
 	var migrationCount int
@@ -113,6 +125,15 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	}
 	if migrationCount != 1 {
 		t.Fatalf("temporal migration rows = %d, want 1", migrationCount)
+	}
+	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`ALTER TABLE %s.event_deliveries DISABLE TRIGGER temporal_event_deliveries_guard`, quoteTemporalIdent(upgradeSchema)))
+	err = applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false)
+	if err == nil || !strings.Contains(err.Error(), "target catalog checksum mismatch") {
+		t.Fatalf("drifted target reapply error = %v, want full catalog rejection", err)
+	}
+	mustExecTemporal(t, ctx, admin, fmt.Sprintf(`ALTER TABLE %s.event_deliveries ENABLE ALWAYS TRIGGER temporal_event_deliveries_guard`, quoteTemporalIdent(upgradeSchema)))
+	if err := applyTemporalPrototype(ctx, admin, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole, false, false); err != nil {
+		t.Fatalf("reapply after restoring target catalog: %v", err)
 	}
 
 	runtimeDSN := temporalRoleDSN(connection.Parameters(), runtimeRole, runtimePassword)
@@ -123,6 +144,15 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	defer runtimeDB.Close()
 	if err := runtimeDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping restricted runtime connection: %v", err)
+	}
+	cleanupAuthorizerDSN := temporalRoleDSN(connection.Parameters(), cleanupAuthorizerRole, cleanupAuthorizerPassword)
+	cleanupAuthorizerDB, err := sql.Open("postgres", cleanupAuthorizerDSN)
+	if err != nil {
+		t.Fatalf("open cleanup authorizer connection: %v", err)
+	}
+	defer cleanupAuthorizerDB.Close()
+	if err := cleanupAuthorizerDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping cleanup authorizer connection: %v", err)
 	}
 
 	lockKey := temporalSchemaLockKey(upgradeSchema)
@@ -142,20 +172,24 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	mustExecTemporal(t, ctx, runtimeLockConn, `SELECT pg_advisory_unlock_shared($1)`, lockKey)
 	runtimeLockConn.Close()
 
-	assertTemporalRuntimeAdmission(t, ctx, runtimeDB, upgradeSchema, ownerRole, runtimeRole)
+	assertTemporalRuntimeAdmission(t, ctx, runtimeDB, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole)
 	secondRuntimeDB, err := sql.Open("postgres", runtimeDSN)
 	if err != nil {
 		t.Fatalf("open second runtime connection: %v", err)
 	}
-	assertTemporalRuntimeAdmission(t, ctx, secondRuntimeDB, upgradeSchema, ownerRole, runtimeRole)
+	assertTemporalRuntimeAdmission(t, ctx, secondRuntimeDB, upgradeSchema, ownerRole, runtimeRole, cleanupAuthorizerRole)
 	secondRuntimeDB.Close()
 
 	assertTemporalPrivilegeDenials(t, ctx, runtimeDB, upgradeSchema, ownerRole)
+	assertTemporalCleanupAuthorizerAdmission(t, ctx, cleanupAuthorizerDB, upgradeSchema)
 
 	runA := "10000000-0000-0000-0000-000000000001"
 	runB := "20000000-0000-0000-0000-000000000002"
 	runC := "30000000-0000-0000-0000-000000000003"
-	seedTemporalVersionedRuns(t, ctx, admin, upgradeSchema, ownerRole, runA, runB, runC)
+	for _, runID := range []string{runA, runB, runC} {
+		mustExecTemporal(t, ctx, runtimeDB, fmt.Sprintf(`SELECT %s.swarm_create_run($1,'running')`, quoteTemporalIdent(upgradeSchema)), runID)
+	}
+	assertTemporalCreatedRuns(t, ctx, runtimeDB, upgradeSchema, runA, runB, runC)
 
 	eventID := "a0000000-0000-0000-0000-000000000001"
 	deliveryID := "d0000000-0000-0000-0000-000000000001"
@@ -166,11 +200,13 @@ func TestTemporalFrontierPostgresDesignConformance(t *testing.T) {
 	assertTemporalDirectEventMutationRejected(t, ctx, runtimeDB, upgradeSchema, eventID)
 	assertTemporalEventTriggerDefendsGrantDrift(t, ctx, admin, upgradeSchema, ownerRole, runA, eventID)
 	assertTemporalUndeclaredDeliveryMutationRejected(t, ctx, runtimeDB, upgradeSchema, deliveryID)
-	assertTemporalOwnershipMove(t, ctx, runtimeDB, upgradeSchema, deliveryID, runA, runB)
-	assertTemporalDeclaredDeliveryDelete(t, ctx, runtimeDB, upgradeSchema, deliveryID, runB)
+	assertTemporalDeliveryLineageMismatchRejected(t, ctx, runtimeDB, upgradeSchema, deliveryID, runA, runB)
+	assertTemporalDeclaredDeliveryDelete(t, ctx, runtimeDB, upgradeSchema, deliveryID, runA)
+	assertTemporalAllGuardedFamilies(t, ctx, runtimeDB, upgradeSchema, runA, eventID)
 	assertTemporalRollbackPublishesNothing(t, ctx, runtimeDB, upgradeSchema, runC)
 	assertTemporalRunlessLineage(t, ctx, runtimeDB, upgradeSchema)
-	assertTemporalUnversionedDestruction(t, ctx, runtimeDB, upgradeSchema, legacyRun, legacyEvent, legacyDelivery, legacyReceipt)
+	assertTemporalAuthorizedMixedCleanup(t, ctx, cleanupAuthorizerDB, runtimeDB, upgradeSchema, runA, runC)
+	assertTemporalUnversionedDestruction(t, ctx, cleanupAuthorizerDB, runtimeDB, upgradeSchema, legacyRun, legacyEvent, legacyDelivery, legacyReceipt)
 	assertTemporalReverseClaimsSerialize(t, ctx, admin, runtimeDB, upgradeSchema, runA, runB)
 }
 
@@ -188,7 +224,7 @@ func createTemporalLegacySchema(t *testing.T, ctx context.Context, db *sql.DB, s
 	}
 }
 
-func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runtimeRole string, fresh, forceRollback bool) error {
+func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runtimeRole, cleanupAuthorizerRole string, fresh, forceRollback bool) error {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return fmt.Errorf("begin temporal schema apply: %w", err)
@@ -230,22 +266,29 @@ func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runt
 		SELECT count(*)
 		FROM information_schema.columns
 		WHERE table_schema=$1 AND table_name='runtime_store_metadata'
-		  AND column_name IN ('schema_generation','schema_ddl_sha256','schema_owner_role','runtime_role')
+		  AND column_name IN ('schema_generation','schema_ddl_sha256','schema_catalog_sha256','schema_owner_role','runtime_role','cleanup_authorizer_role')
 	`, schema).Scan(&targetColumns); err != nil {
 		return fmt.Errorf("inspect temporal metadata generation: %w", err)
 	}
 	checksum := temporalPrototypeChecksum()
-	if targetColumns == 4 {
-		var generation, storedChecksum, storedOwner, storedRuntime string
-		if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT schema_generation,schema_ddl_sha256,schema_owner_role,runtime_role FROM %s.runtime_store_metadata WHERE id=1`, qSchema)).Scan(&generation, &storedChecksum, &storedOwner, &storedRuntime); err != nil {
+	if targetColumns == 6 {
+		var generation, storedChecksum, storedCatalogChecksum, storedOwner, storedRuntime, storedCleanupAuthorizer string
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT schema_generation,schema_ddl_sha256,schema_catalog_sha256,schema_owner_role,runtime_role,cleanup_authorizer_role FROM %s.runtime_store_metadata WHERE id=1`, qSchema)).Scan(&generation, &storedChecksum, &storedCatalogChecksum, &storedOwner, &storedRuntime, &storedCleanupAuthorizer); err != nil {
 			return fmt.Errorf("read temporal target metadata: %w", err)
 		}
-		if generation != "temporal-frontier-v1" || storedChecksum != checksum || storedOwner != owner || storedRuntime != runtimeRole {
+		if generation != "temporal-frontier-v1" || storedChecksum != checksum || storedOwner != owner || storedRuntime != runtimeRole || storedCleanupAuthorizer != cleanupAuthorizerRole {
 			return fmt.Errorf("temporal target metadata drift")
 		}
 		var ledgerCount int
-		if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM %s.runtime_store_migrations WHERE migration_id='temporal-frontier-v1' AND ddl_sha256=$1`, qSchema), checksum).Scan(&ledgerCount); err != nil || ledgerCount != 1 {
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM %s.runtime_store_migrations WHERE migration_id='temporal-frontier-v1' AND ddl_sha256=$1 AND catalog_sha256=$2 AND cleanup_authorizer_role=$3`, qSchema), checksum, storedCatalogChecksum, cleanupAuthorizerRole).Scan(&ledgerCount); err != nil || ledgerCount != 1 {
 			return fmt.Errorf("temporal migration ledger drift: count=%d err=%v", ledgerCount, err)
+		}
+		actualCatalogChecksum, err := temporalCatalogChecksum(ctx, tx, schema, owner, runtimeRole)
+		if err != nil {
+			return fmt.Errorf("revalidate temporal target catalog: %w", err)
+		}
+		if actualCatalogChecksum != storedCatalogChecksum {
+			return fmt.Errorf("target catalog checksum mismatch: got %s want %s", actualCatalogChecksum, storedCatalogChecksum)
 		}
 		return tx.Commit()
 	}
@@ -256,7 +299,7 @@ func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runt
 	if _, err := tx.ExecContext(ctx, `SET LOCAL ROLE `+quoteTemporalIdent(owner)); err != nil {
 		return fmt.Errorf("assume temporal schema owner: %w", err)
 	}
-	for _, table := range []string{"event_deliveries", "event_receipts", "events", "runs", "runtime_store_metadata"} {
+	for _, table := range []string{"activity_attempts", "agent_conversation_audits", "agent_sessions", "agent_turns", "dead_letters", "entity_mutations", "entity_state", "event_deliveries", "event_receipts", "events", "reply_contexts", "runs", "runtime_store_metadata", "selected_fork_lineage", "timers"} {
 		if _, err := tx.ExecContext(ctx, `LOCK TABLE `+qSchema+`.`+quoteTemporalIdent(table)+` IN ACCESS EXCLUSIVE MODE`); err != nil {
 			return fmt.Errorf("lock legacy table %s: %w", table, err)
 		}
@@ -288,6 +331,13 @@ func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runt
 	if platformVersion != "0.7.0" {
 		return fmt.Errorf("unrecognized legacy platform version %q", platformVersion)
 	}
+	legacyCatalogChecksum, err := temporalCatalogChecksum(ctx, tx, schema, owner, runtimeRole)
+	if err != nil {
+		return fmt.Errorf("inspect legacy catalog checksum: %w", err)
+	}
+	if legacyCatalogChecksum != temporalRegisteredLegacyCatalogChecksum {
+		return fmt.Errorf("legacy catalog checksum mismatch: got %s want %s", legacyCatalogChecksum, temporalRegisteredLegacyCatalogChecksum)
+	}
 	if _, err := tx.ExecContext(ctx, temporalTargetDDL(qSchema)); err != nil {
 		return fmt.Errorf("create temporal target schema: %w", err)
 	}
@@ -300,24 +350,28 @@ func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runt
 	`, qSchema)); err != nil {
 		return fmt.Errorf("mark retained legacy runs unversioned: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, temporalGrantDDL(qSchema, quoteTemporalIdent(runtimeRole))); err != nil {
+	if _, err := tx.ExecContext(ctx, temporalGrantDDL(qSchema, quoteTemporalIdent(runtimeRole), quoteTemporalIdent(cleanupAuthorizerRole))); err != nil {
 		return fmt.Errorf("apply temporal grants: %w", err)
 	}
 	if forceRollback {
 		return fmt.Errorf("forced temporal migration rollback")
 	}
+	targetCatalogChecksum, err := temporalCatalogChecksum(ctx, tx, schema, owner, runtimeRole)
+	if err != nil {
+		return fmt.Errorf("compute installed temporal catalog checksum: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s.runtime_store_migrations(migration_id,from_generation,to_generation,ddl_sha256,schema_owner_role,runtime_role)
-		VALUES ('temporal-frontier-v1','pre-temporal-v0','temporal-frontier-v1',$1,$2,$3)
-	`, qSchema), checksum, owner, runtimeRole); err != nil {
+		INSERT INTO %s.runtime_store_migrations(migration_id,from_generation,to_generation,ddl_sha256,catalog_sha256,schema_owner_role,runtime_role,cleanup_authorizer_role)
+		VALUES ('temporal-frontier-v1','pre-temporal-v0','temporal-frontier-v1',$1,$2,$3,$4,$5)
+	`, qSchema), checksum, targetCatalogChecksum, owner, runtimeRole, cleanupAuthorizerRole); err != nil {
 		return fmt.Errorf("write temporal migration ledger: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s.runtime_store_metadata
 		SET platform_version='0.7.0', schema_generation='temporal-frontier-v1', schema_ddl_sha256=$1,
-		    schema_owner_role=$2, runtime_role=$3
+		    schema_catalog_sha256=$2, schema_owner_role=$3, runtime_role=$4, cleanup_authorizer_role=$5
 		WHERE id=1
-	`, qSchema), checksum, owner, runtimeRole); err != nil {
+	`, qSchema), checksum, targetCatalogChecksum, owner, runtimeRole, cleanupAuthorizerRole); err != nil {
 		return fmt.Errorf("commit temporal metadata authority: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -326,14 +380,14 @@ func applyTemporalPrototype(ctx context.Context, db *sql.DB, schema, owner, runt
 	return nil
 }
 
-func assertTemporalTargetMetadata(t *testing.T, ctx context.Context, db *sql.DB, schema, owner, runtimeRole string) {
+func assertTemporalTargetMetadata(t *testing.T, ctx context.Context, db *sql.DB, schema, owner, runtimeRole, cleanupAuthorizerRole string) {
 	t.Helper()
-	var generation, checksum, gotOwner, gotRuntime string
-	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT schema_generation,schema_ddl_sha256,schema_owner_role,runtime_role FROM %s.runtime_store_metadata WHERE id=1`, quoteTemporalIdent(schema))).Scan(&generation, &checksum, &gotOwner, &gotRuntime); err != nil {
+	var generation, checksum, catalogChecksum, gotOwner, gotRuntime, gotCleanupAuthorizer string
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT schema_generation,schema_ddl_sha256,schema_catalog_sha256,schema_owner_role,runtime_role,cleanup_authorizer_role FROM %s.runtime_store_metadata WHERE id=1`, quoteTemporalIdent(schema))).Scan(&generation, &checksum, &catalogChecksum, &gotOwner, &gotRuntime, &gotCleanupAuthorizer); err != nil {
 		t.Fatalf("read temporal target metadata: %v", err)
 	}
-	if generation != "temporal-frontier-v1" || checksum != temporalPrototypeChecksum() || gotOwner != owner || gotRuntime != runtimeRole {
-		t.Fatalf("temporal metadata = generation:%q checksum:%q owner:%q runtime:%q", generation, checksum, gotOwner, gotRuntime)
+	if generation != "temporal-frontier-v1" || checksum != temporalPrototypeChecksum() || len(catalogChecksum) != 64 || gotOwner != owner || gotRuntime != runtimeRole || gotCleanupAuthorizer != cleanupAuthorizerRole {
+		t.Fatalf("temporal metadata = generation:%q checksum:%q catalog:%q owner:%q runtime:%q cleanup_authorizer:%q", generation, checksum, catalogChecksum, gotOwner, gotRuntime, gotCleanupAuthorizer)
 	}
 }
 
@@ -348,16 +402,18 @@ func assertTemporalTableExists(t *testing.T, ctx context.Context, db *sql.DB, sc
 	}
 }
 
-func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.DB, schema, owner, runtimeRole string) {
+func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.DB, schema, owner, runtimeRole, cleanupAuthorizerRole string) {
 	t.Helper()
 	qSchema := quoteTemporalIdent(schema)
-	var currentUser, generation, metadataRuntime string
-	var ownerMember, superuser, bypassRLS, createRole, schemaCreate bool
+	var currentUser, generation, metadataRuntime, metadataCleanupAuthorizer string
+	var ownerMember, cleanupAuthorizerMember, superuser, bypassRLS, createRole, schemaCreate bool
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT current_user,
 		       m.schema_generation,
 		       m.runtime_role,
+		       m.cleanup_authorizer_role,
 		       pg_has_role(current_user,$1,'MEMBER'),
+		       pg_has_role(current_user,$3,'MEMBER'),
 		       r.rolsuper,
 		       r.rolbypassrls,
 		       r.rolcreaterole,
@@ -365,11 +421,11 @@ func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.D
 		FROM %[1]s.runtime_store_metadata m
 		JOIN pg_roles r ON r.rolname=current_user
 		WHERE m.id=1
-	`, qSchema), owner, schema).Scan(&currentUser, &generation, &metadataRuntime, &ownerMember, &superuser, &bypassRLS, &createRole, &schemaCreate); err != nil {
+	`, qSchema), owner, schema, cleanupAuthorizerRole).Scan(&currentUser, &generation, &metadataRuntime, &metadataCleanupAuthorizer, &ownerMember, &cleanupAuthorizerMember, &superuser, &bypassRLS, &createRole, &schemaCreate); err != nil {
 		t.Fatalf("read temporal runtime admission: %v", err)
 	}
-	if currentUser != runtimeRole || metadataRuntime != runtimeRole || generation != "temporal-frontier-v1" || ownerMember || superuser || bypassRLS || createRole || schemaCreate {
-		t.Fatalf("runtime admission drift: user=%q metadata=%q generation=%q owner_member=%v super=%v bypass=%v createrole=%v schema_create=%v", currentUser, metadataRuntime, generation, ownerMember, superuser, bypassRLS, createRole, schemaCreate)
+	if currentUser != runtimeRole || metadataRuntime != runtimeRole || metadataCleanupAuthorizer != cleanupAuthorizerRole || generation != "temporal-frontier-v1" || ownerMember || cleanupAuthorizerMember || superuser || bypassRLS || createRole || schemaCreate {
+		t.Fatalf("runtime admission drift: user=%q metadata=%q cleanup_authorizer=%q generation=%q owner_member=%v cleanup_member=%v super=%v bypass=%v createrole=%v schema_create=%v", currentUser, metadataRuntime, metadataCleanupAuthorizer, generation, ownerMember, cleanupAuthorizerMember, superuser, bypassRLS, createRole, schemaCreate)
 	}
 
 	var triggerCount int
@@ -381,7 +437,7 @@ func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.D
 		JOIN pg_proc p ON p.oid=t.tgfoid
 		JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 		WHERE n.nspname=$1
-		  AND c.relname IN ('events','event_deliveries','event_receipts')
+		  AND c.relname IN ('runs','events','event_deliveries','event_receipts','dead_letters','entity_mutations','entity_state','timers','agent_sessions','agent_turns','agent_conversation_audits','reply_contexts','activity_attempts','selected_fork_lineage')
 		  AND NOT t.tgisinternal
 		  AND t.tgenabled='A'
 		  AND p.prosecdef
@@ -390,34 +446,38 @@ func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.D
 	`, schema, owner).Scan(&triggerCount); err != nil {
 		t.Fatalf("inspect temporal triggers: %v", err)
 	}
-	if triggerCount != 3 {
-		t.Fatalf("admitted temporal trigger count = %d, want 3", triggerCount)
+	if triggerCount != 14 {
+		t.Fatalf("admitted temporal trigger count = %d, want 14", triggerCount)
 	}
 
-	var eventInsert, eventUpdate, eventDelete, historyDML, helperExecute bool
+	var eventInsert, eventUpdate, eventDelete, runInsert, historyDML, helperExecute bool
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT has_table_privilege(current_user,'%[1]s.events','INSERT'),
 		       has_table_privilege(current_user,'%[1]s.events','UPDATE'),
 		       has_table_privilege(current_user,'%[1]s.events','DELETE'),
+		       has_table_privilege(current_user,'%[1]s.runs','INSERT'),
 		       has_table_privilege(current_user,'%[1]s.event_delivery_history','INSERT,UPDATE,DELETE'),
 		       has_function_privilege(current_user,'%[1]s.swarm_next_temporal_ordinal(uuid)','EXECUTE')
-	`, qSchema)).Scan(&eventInsert, &eventUpdate, &eventDelete, &historyDML, &helperExecute); err != nil {
+	`, qSchema)).Scan(&eventInsert, &eventUpdate, &eventDelete, &runInsert, &historyDML, &helperExecute); err != nil {
 		t.Fatalf("inspect temporal grants: %v", err)
 	}
-	if !eventInsert || eventUpdate || eventDelete || historyDML || helperExecute {
-		t.Fatalf("runtime grant drift: event_insert=%v event_update=%v event_delete=%v history_dml=%v helper_execute=%v", eventInsert, eventUpdate, eventDelete, historyDML, helperExecute)
+	if !eventInsert || eventUpdate || eventDelete || runInsert || historyDML || helperExecute {
+		t.Fatalf("runtime grant drift: event_insert=%v event_update=%v event_delete=%v run_insert=%v history_dml=%v helper_execute=%v", eventInsert, eventUpdate, eventDelete, runInsert, historyDML, helperExecute)
 	}
 	functionGrants := []struct {
 		signature string
 		want      bool
 	}{
 		{signature: "swarm_claim_temporal_runs(uuid[])", want: true},
-		{signature: "swarm_destroy_run(uuid,text)", want: true},
-		{signature: "swarm_declare_temporal_runs(uuid[],text)", want: false},
+		{signature: "swarm_create_run(uuid,text)", want: true},
+		{signature: "swarm_authorize_run_cleanup(uuid,text,text,uuid[],uuid[])", want: false},
+		{signature: "swarm_claim_authorized_run_cleanup(uuid)", want: true},
+		{signature: "swarm_delete_authorized_runs(uuid)", want: true},
+		{signature: "swarm_declare_temporal_runs(uuid[],uuid[])", want: false},
 		{signature: "swarm_next_temporal_ordinal(uuid)", want: false},
-		{signature: "swarm_guard_events()", want: false},
-		{signature: "swarm_guard_event_deliveries()", want: false},
-		{signature: "swarm_guard_event_receipts()", want: false},
+		{signature: "swarm_resolve_temporal_run(jsonb,text,text)", want: false},
+		{signature: "swarm_guard_append_fact()", want: false},
+		{signature: "swarm_guard_mutable_fact()", want: false},
 	}
 	for _, grant := range functionGrants {
 		var got bool
@@ -430,37 +490,62 @@ func assertTemporalRuntimeAdmission(t *testing.T, ctx context.Context, db *sql.D
 	}
 }
 
+func assertTemporalCleanupAuthorizerAdmission(t *testing.T, ctx context.Context, db *sql.DB, schema string) {
+	t.Helper()
+	qSchema := quoteTemporalIdent(schema)
+	var schemaCreate, factInsert, authorityDML, authorizeExecute, claimExecute bool
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT has_schema_privilege(current_user,$1,'CREATE'),
+		       has_table_privilege(current_user,'%[1]s.events','INSERT,UPDATE,DELETE'),
+		       has_table_privilege(current_user,'%[1]s.run_cleanup_authorizations','INSERT,UPDATE,DELETE'),
+		       has_function_privilege(current_user,'%[1]s.swarm_authorize_run_cleanup(uuid,text,text,uuid[],uuid[])','EXECUTE'),
+		       has_function_privilege(current_user,'%[1]s.swarm_claim_authorized_run_cleanup(uuid)','EXECUTE')
+	`, qSchema), schema).Scan(&schemaCreate, &factInsert, &authorityDML, &authorizeExecute, &claimExecute); err != nil {
+		t.Fatalf("inspect cleanup authorizer admission: %v", err)
+	}
+	if schemaCreate || factInsert || authorityDML || !authorizeExecute || claimExecute {
+		t.Fatalf("cleanup authorizer grant drift: schema_create=%v fact_insert=%v authority_dml=%v authorize=%v claim=%v", schemaCreate, factInsert, authorityDML, authorizeExecute, claimExecute)
+	}
+}
+
 func assertTemporalPrivilegeDenials(t *testing.T, ctx context.Context, db *sql.DB, schema, owner string) {
 	t.Helper()
 	qSchema := quoteTemporalIdent(schema)
 	assertTemporalExecFails(t, ctx, db, `SET ROLE `+quoteTemporalIdent(owner), "assume schema owner")
 	assertTemporalExecFails(t, ctx, db, `ALTER TABLE `+qSchema+`.events DISABLE TRIGGER ALL`, "disable temporal trigger")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.event_delivery_history(run_id,revision,ordinal,operation,fact_id) VALUES ('00000000-0000-0000-0000-000000000000',1,1,'insert','forged')`, qSchema), "write temporal history")
-	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.run_temporal_transactions(transaction_id,run_ids,mode) VALUES (pg_current_xact_id(),ARRAY['00000000-0000-0000-0000-000000000000'::uuid],'normal')`, qSchema), "write temporal transaction authority")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.run_temporal_transactions(transaction_id) VALUES (pg_current_xact_id())`, qSchema), "write temporal transaction authority")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.run_temporal_transaction_runs(transaction_id,run_id,disposition) VALUES (pg_current_xact_id(),'00000000-0000-0000-0000-000000000000','normal')`, qSchema), "write temporal transaction run authority")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`UPDATE %s.run_temporal_frontiers SET current_revision=current_revision+1`, qSchema), "write temporal frontier authority")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`DELETE FROM %s.run_temporal_revisions`, qSchema), "write temporal revision authority")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`DELETE FROM %s.runtime_store_migrations`, qSchema), "write temporal migration ledger")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`UPDATE %s.runtime_store_metadata SET schema_generation='forged'`, qSchema), "write temporal metadata")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`DELETE FROM %s.run_deletion_tombstones`, qSchema), "write temporal deletion evidence")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.run_cleanup_authorizations(authorization_id,operation_id,actor_evidence,destructive_run_ids) VALUES (gen_random_uuid(),'forged','forged',ARRAY['00000000-0000-0000-0000-000000000000'::uuid])`, qSchema), "write cleanup authorization")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`INSERT INTO %s.runs(run_id,status) VALUES ('00000000-0000-0000-0000-000000000000','running')`, qSchema), "insert run outside creation owner")
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`SELECT * FROM %s.swarm_next_temporal_ordinal('00000000-0000-0000-0000-000000000000'::uuid)`, qSchema), "invoke ordinal bypass")
-	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_declare_temporal_runs(ARRAY['00000000-0000-0000-0000-000000000000'::uuid],'destructive')`, qSchema), "invoke destructive declaration bypass")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_declare_temporal_runs('{}'::uuid[],ARRAY['00000000-0000-0000-0000-000000000000'::uuid])`, qSchema), "invoke destructive declaration bypass")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_authorize_run_cleanup(gen_random_uuid(),'forged','forged','{}'::uuid[],ARRAY['00000000-0000-0000-0000-000000000000'::uuid])`, qSchema), "mint cleanup authorization from runtime")
+	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_claim_authorized_run_cleanup('00000000-0000-0000-0000-000000000000')`, qSchema), "claim unknown cleanup authorization")
 }
 
-func seedTemporalVersionedRuns(t *testing.T, ctx context.Context, db *sql.DB, schema, owner string, runIDs ...string) {
+func assertTemporalCreatedRuns(t *testing.T, ctx context.Context, db *sql.DB, schema string, runIDs ...string) {
 	t.Helper()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin temporal run seed: %v", err)
-	}
-	defer tx.Rollback()
-	mustExecTemporal(t, ctx, tx, `SET LOCAL ROLE `+quoteTemporalIdent(owner))
 	qSchema := quoteTemporalIdent(schema)
 	for _, runID := range runIDs {
-		mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.runs(run_id,status) VALUES ($1,'running')`, qSchema), runID)
-		mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.run_temporal_frontiers(run_id,model_version,current_revision,history_complete) VALUES ($1,1,0,true)`, qSchema), runID)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit temporal run seed: %v", err)
+		var model int
+		var revision int64
+		var historyCount int
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`
+			SELECT f.model_version,f.current_revision,
+			       (SELECT count(*) FROM %[1]s.run_lifecycle_history h WHERE h.run_id=f.run_id AND h.operation='insert')
+			FROM %[1]s.run_temporal_frontiers f WHERE f.run_id=$1
+		`, qSchema), runID).Scan(&model, &revision, &historyCount); err != nil {
+			t.Fatalf("read restricted-runtime-created run %s: %v", runID, err)
+		}
+		if model != 1 || revision != 1 || historyCount != 1 {
+			t.Fatalf("created run %s = model:%d revision:%d history:%d, want 1/1/1", runID, model, revision, historyCount)
+		}
 	}
 }
 
@@ -553,35 +638,82 @@ func assertTemporalUndeclaredDeliveryMutationRejected(t *testing.T, ctx context.
 	assertTemporalExecFails(t, ctx, db, fmt.Sprintf(`DELETE FROM %s.event_deliveries WHERE delivery_id=$1`, qSchema), "undeclared delivery delete", deliveryID)
 }
 
-func assertTemporalOwnershipMove(t *testing.T, ctx context.Context, db *sql.DB, schema, deliveryID, runA, runB string) {
+func assertTemporalDeliveryLineageMismatchRejected(t *testing.T, ctx context.Context, db *sql.DB, schema, deliveryID, runA, runB string) {
 	t.Helper()
 	qSchema := quoteTemporalIdent(schema)
+	eventB := "b0000000-0000-0000-0000-000000000002"
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		t.Fatalf("begin incomplete ownership move: %v", err)
+		t.Fatalf("begin second-run event insert: %v", err)
 	}
 	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid])`, qSchema), runB)
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.event_deliveries SET run_id=$1 WHERE delivery_id=$2`, qSchema), runB, deliveryID); err == nil {
-		t.Fatal("ownership move with NEW run only unexpectedly succeeded")
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.events(event_id,run_id) VALUES ($1,$2)`, qSchema), eventB, runB)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit second-run event insert: %v", err)
+	}
+
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin delivery lineage mismatch insert: %v", err)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid])`, qSchema), runA)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s.event_deliveries(delivery_id,run_id,event_id,status) VALUES ('d0000000-0000-0000-0000-000000000099',$1,$2,'pending')`, qSchema), runA, eventB); err == nil {
+		t.Fatal("delivery insert with mismatched event lineage unexpectedly succeeded")
 	}
 	_ = tx.Rollback()
 
 	tx, err = db.BeginTx(ctx, nil)
 	if err != nil {
-		t.Fatalf("begin complete ownership move: %v", err)
+		t.Fatalf("begin delivery lineage mismatch update: %v", err)
 	}
-	defer tx.Rollback()
-	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid,$2::uuid])`, qSchema), runB, runA)
-	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`UPDATE %s.event_deliveries SET run_id=$1 WHERE delivery_id=$2`, qSchema), runB, deliveryID)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid,$2::uuid])`, qSchema), runA, runB)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.event_deliveries SET run_id=$1 WHERE delivery_id=$2`, qSchema), runB, deliveryID); err == nil {
+		t.Fatal("delivery moved away from authoritative event lineage")
+	}
+	_ = tx.Rollback()
+
+	entityID := "b0000000-0000-0000-0000-000000000003"
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin direct mutable fixture: %v", err)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid])`, qSchema), runA)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.entity_state(entity_id,run_id,value) VALUES ($1,$2,'owned-a')`, qSchema), entityID, runA)
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit complete ownership move: %v", err)
+		t.Fatalf("commit direct mutable fixture: %v", err)
 	}
-	var gotRun string
-	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT run_id::text FROM %s.event_deliveries WHERE delivery_id=$1`, qSchema), deliveryID).Scan(&gotRun); err != nil {
-		t.Fatalf("read moved delivery: %v", err)
+
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin incomplete direct ownership move: %v", err)
 	}
-	if gotRun != runB {
-		t.Fatalf("moved delivery run = %s, want %s", gotRun, runB)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid])`, qSchema), runB)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.entity_state SET run_id=$1 WHERE entity_id=$2`, qSchema), runB, entityID); err == nil {
+		t.Fatal("direct ownership move with only NEW run unexpectedly succeeded")
+	}
+	_ = tx.Rollback()
+
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin complete direct ownership move: %v", err)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid,$2::uuid])`, qSchema), runB, runA)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`UPDATE %s.entity_state SET run_id=$1,value='owned-b' WHERE entity_id=$2`, qSchema), runB, entityID)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit complete direct ownership move: %v", err)
+	}
+	var movedRun string
+	var oldRunHistory, newRunHistory int
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT e.run_id::text,
+		       (SELECT count(*) FROM %[1]s.entity_state_history WHERE fact_id=$1 AND run_id=$2::uuid),
+		       (SELECT count(*) FROM %[1]s.entity_state_history WHERE fact_id=$1 AND run_id=$3::uuid)
+		FROM %[1]s.entity_state e WHERE entity_id=$1::uuid
+	`, qSchema), entityID, runA, runB).Scan(&movedRun, &oldRunHistory, &newRunHistory); err != nil {
+		t.Fatalf("read complete direct ownership move: %v", err)
+	}
+	if movedRun != runB || oldRunHistory == 0 || newRunHistory == 0 {
+		t.Fatalf("direct ownership move = run:%s old_history:%d new_history:%d", movedRun, oldRunHistory, newRunHistory)
 	}
 }
 
@@ -611,9 +743,146 @@ func assertTemporalDeclaredDeliveryDelete(t *testing.T, ctx context.Context, db 
 	}
 }
 
+func assertTemporalAllGuardedFamilies(t *testing.T, ctx context.Context, db *sql.DB, schema, runID, eventID string) {
+	t.Helper()
+	qSchema := quoteTemporalIdent(schema)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin all-family restricted runtime proof: %v", err)
+	}
+	defer tx.Rollback()
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid])`, qSchema), runID)
+
+	appendStatements := []struct {
+		query string
+		arg   string
+	}{
+		{query: fmt.Sprintf(`INSERT INTO %s.entity_mutations(mutation_id,run_id,value) VALUES ('41000000-0000-0000-0000-000000000001',$1,'inserted')`, qSchema), arg: runID},
+		{query: fmt.Sprintf(`INSERT INTO %s.dead_letters(dead_letter_id,original_event_id,value) VALUES ('42000000-0000-0000-0000-000000000001',$1,'inserted')`, qSchema), arg: eventID},
+		{query: fmt.Sprintf(`INSERT INTO %s.agent_turns(turn_id,run_id,value) VALUES ('43000000-0000-0000-0000-000000000001',$1,'inserted')`, qSchema), arg: runID},
+		{query: fmt.Sprintf(`INSERT INTO %s.selected_fork_lineage(lineage_id,run_id,value) VALUES ('44000000-0000-0000-0000-000000000001',$1,'inserted')`, qSchema), arg: runID},
+	}
+	for _, stmt := range appendStatements {
+		mustExecTemporal(t, ctx, tx, stmt.query, stmt.arg)
+	}
+
+	mutableFamilies := []struct {
+		table        string
+		idColumn     string
+		id           string
+		historyTable string
+	}{
+		{table: "timers", idColumn: "timer_id", id: "51000000-0000-0000-0000-000000000001", historyTable: "timer_history"},
+		{table: "entity_state", idColumn: "entity_id", id: "52000000-0000-0000-0000-000000000001", historyTable: "entity_state_history"},
+		{table: "agent_sessions", idColumn: "session_id", id: "53000000-0000-0000-0000-000000000001", historyTable: "agent_session_history"},
+		{table: "agent_conversation_audits", idColumn: "audit_id", id: "54000000-0000-0000-0000-000000000001", historyTable: "conversation_audit_history"},
+		{table: "reply_contexts", idColumn: "reply_context_id", id: "55000000-0000-0000-0000-000000000001", historyTable: "reply_context_history"},
+		{table: "activity_attempts", idColumn: "attempt_id", id: "56000000-0000-0000-0000-000000000001", historyTable: "activity_attempt_history"},
+	}
+	for _, family := range mutableFamilies {
+		mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.%s(%s,run_id,value) VALUES ($1,$2,'inserted')`, qSchema, quoteTemporalIdent(family.table), quoteTemporalIdent(family.idColumn)), family.id, runID)
+		mustExecTemporal(t, ctx, tx, fmt.Sprintf(`UPDATE %s.%s SET value='updated' WHERE %s=$1`, qSchema, quoteTemporalIdent(family.table), quoteTemporalIdent(family.idColumn)), family.id)
+		mustExecTemporal(t, ctx, tx, fmt.Sprintf(`DELETE FROM %s.%s WHERE %s=$1`, qSchema, quoteTemporalIdent(family.table), quoteTemporalIdent(family.idColumn)), family.id)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`UPDATE %s.runs SET status='paused' WHERE run_id=$1`, qSchema), runID)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit all-family restricted runtime proof: %v", err)
+	}
+
+	for _, family := range mutableFamilies {
+		var count int
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM %s.%s WHERE fact_id=$1 AND operation IN ('insert','update','delete')`, qSchema, quoteTemporalIdent(family.historyTable)), family.id).Scan(&count); err != nil {
+			t.Fatalf("count %s typed history: %v", family.table, err)
+		}
+		if count != 3 {
+			t.Fatalf("%s typed history count = %d, want 3", family.table, count)
+		}
+	}
+	for _, family := range []struct {
+		table string
+		idCol string
+		id    string
+	}{
+		{table: "entity_mutations", idCol: "mutation_id", id: "41000000-0000-0000-0000-000000000001"},
+		{table: "dead_letters", idCol: "dead_letter_id", id: "42000000-0000-0000-0000-000000000001"},
+		{table: "agent_turns", idCol: "turn_id", id: "43000000-0000-0000-0000-000000000001"},
+		{table: "selected_fork_lineage", idCol: "lineage_id", id: "44000000-0000-0000-0000-000000000001"},
+	} {
+		var revision int64
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT temporal_revision FROM %s.%s WHERE %s=$1`, qSchema, quoteTemporalIdent(family.table), quoteTemporalIdent(family.idCol)), family.id).Scan(&revision); err != nil {
+			t.Fatalf("read %s temporal stamp: %v", family.table, err)
+		}
+		if revision <= 0 {
+			t.Fatalf("%s temporal revision = %d, want positive", family.table, revision)
+		}
+	}
+}
+
+func authorizeTemporalCleanup(t *testing.T, ctx context.Context, db *sql.DB, schema, authorizationID, operationID, actor string, normalRuns, destructiveRuns []string) {
+	t.Helper()
+	if normalRuns == nil {
+		normalRuns = []string{}
+	}
+	mustExecTemporal(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_authorize_run_cleanup($1,$2,$3,$4::uuid[],$5::uuid[])`, quoteTemporalIdent(schema)), authorizationID, operationID, actor, pq.Array(normalRuns), pq.Array(destructiveRuns))
+}
+
+func assertTemporalAuthorizedMixedCleanup(t *testing.T, ctx context.Context, cleanupAuthorizerDB, runtimeDB *sql.DB, schema, survivorRun, deletedRun string) {
+	t.Helper()
+	qSchema := quoteTemporalIdent(schema)
+	authorizationID := "61000000-0000-0000-0000-000000000001"
+	timerID := "61000000-0000-0000-0000-000000000002"
+	tx, err := runtimeDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin mixed-cleanup fixture: %v", err)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_temporal_runs(ARRAY[$1::uuid,$2::uuid])`, qSchema), survivorRun, deletedRun)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.timers(timer_id,run_id,value) VALUES ($1,$2,'before-cleanup')`, qSchema), timerID, survivorRun)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`INSERT INTO %s.events(event_id,run_id) VALUES ('61000000-0000-0000-0000-000000000003',$1)`, qSchema), deletedRun)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit mixed-cleanup fixture: %v", err)
+	}
+	authorizeTemporalCleanup(t, ctx, cleanupAuthorizerDB, schema, authorizationID, "runtime.nuke/operation-1", "operator-token:7", []string{survivorRun}, []string{deletedRun})
+
+	tx, err = runtimeDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin authorized mixed cleanup: %v", err)
+	}
+	defer tx.Rollback()
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_authorized_run_cleanup($1)`, qSchema), authorizationID)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`UPDATE %s.timers SET value='reference-severed' WHERE timer_id=$1`, qSchema), timerID)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_delete_authorized_runs($1)`, qSchema), authorizationID)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit authorized mixed cleanup: %v", err)
+	}
+
+	var deletedCount, survivorHistory int
+	var actor string
+	if err := runtimeDB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT (SELECT count(*) FROM %[1]s.runs WHERE run_id=$1),
+		       (SELECT count(*) FROM %[1]s.timer_history WHERE fact_id=$2 AND operation='update'),
+		       (SELECT deleted_by FROM %[1]s.run_deletion_tombstones WHERE run_id=$1)
+	`, qSchema), deletedRun, timerID).Scan(&deletedCount, &survivorHistory, &actor); err != nil {
+		t.Fatalf("read authorized mixed cleanup proof: %v", err)
+	}
+	var authorizer string
+	if err := cleanupAuthorizerDB.QueryRowContext(ctx, `SELECT current_user`).Scan(&authorizer); err != nil {
+		t.Fatalf("read cleanup authorizer identity: %v", err)
+	}
+	if deletedCount != 0 || survivorHistory != 1 || actor != authorizer+":operator-token:7" {
+		t.Fatalf("mixed cleanup = deleted:%d survivor_history:%d actor:%q", deletedCount, survivorHistory, actor)
+	}
+}
+
 func assertTemporalRollbackPublishesNothing(t *testing.T, ctx context.Context, db *sql.DB, schema, runID string) {
 	t.Helper()
 	qSchema := quoteTemporalIdent(schema)
+	var beforeFrontier, beforeRevisions int
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT current_revision,(SELECT count(*) FROM %[1]s.run_temporal_revisions WHERE run_id=$1)
+		FROM %[1]s.run_temporal_frontiers WHERE run_id=$1
+	`, qSchema), runID).Scan(&beforeFrontier, &beforeRevisions); err != nil {
+		t.Fatalf("read pre-rollback temporal authority: %v", err)
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin temporal rollback proof: %v", err)
@@ -632,8 +901,8 @@ func assertTemporalRollbackPublishesNothing(t *testing.T, ctx context.Context, d
 	`, qSchema), runID).Scan(&frontier, &revisionCount, &eventCount); err != nil {
 		t.Fatalf("read rollback temporal authority: %v", err)
 	}
-	if frontier != 0 || revisionCount != 0 || eventCount != 0 {
-		t.Fatalf("rollback published frontier=%d revisions=%d events=%d", frontier, revisionCount, eventCount)
+	if frontier != beforeFrontier || revisionCount != beforeRevisions || eventCount != 0 {
+		t.Fatalf("rollback published frontier=%d/%d revisions=%d/%d events=%d", frontier, beforeFrontier, revisionCount, beforeRevisions, eventCount)
 	}
 }
 
@@ -659,7 +928,7 @@ func assertTemporalRunlessLineage(t *testing.T, ctx context.Context, db *sql.DB,
 	}
 }
 
-func assertTemporalUnversionedDestruction(t *testing.T, ctx context.Context, db *sql.DB, schema, runID, eventID, deliveryID, receiptID string) {
+func assertTemporalUnversionedDestruction(t *testing.T, ctx context.Context, cleanupAuthorizerDB, db *sql.DB, schema, runID, eventID, deliveryID, receiptID string) {
 	t.Helper()
 	qSchema := quoteTemporalIdent(schema)
 	tx, err := db.BeginTx(ctx, nil)
@@ -671,7 +940,17 @@ func assertTemporalUnversionedDestruction(t *testing.T, ctx context.Context, db 
 	}
 	_ = tx.Rollback()
 
-	mustExecTemporal(t, ctx, db, fmt.Sprintf(`SELECT %s.swarm_destroy_run($1,'conformance')`, qSchema), runID)
+	authorizationID := "62000000-0000-0000-0000-000000000001"
+	authorizeTemporalCleanup(t, ctx, cleanupAuthorizerDB, schema, authorizationID, "runtime.nuke/legacy", "operator-token:legacy", nil, []string{runID})
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin authorized unversioned cleanup: %v", err)
+	}
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_claim_authorized_run_cleanup($1)`, qSchema), authorizationID)
+	mustExecTemporal(t, ctx, tx, fmt.Sprintf(`SELECT %s.swarm_delete_authorized_runs($1)`, qSchema), authorizationID)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit authorized unversioned cleanup: %v", err)
+	}
 	var tombstoneVersion int
 	var lastRevision sql.NullInt64
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT source_model_version,last_revision FROM %s.run_deletion_tombstones WHERE run_id=$1`, qSchema), runID).Scan(&tombstoneVersion, &lastRevision); err != nil {
@@ -809,6 +1088,84 @@ func temporalPrototypeChecksum() string {
 	return hex.EncodeToString(digest[:])
 }
 
+const temporalRegisteredLegacyCatalogChecksum = "12323dcc1333b52314fe166dbf5db811560e287ca4b247beac2bab766b46e01e"
+
+func temporalCatalogChecksum(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, schema, owner, runtimeRole string) (string, error) {
+	queries := []string{
+		`SELECT 'relation',c.relkind::text,c.relname,r.rolname,COALESCE(c.relacl::text,'')
+		 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner
+		 WHERE n.nspname=$1 AND c.relkind IN ('r','S','i')`,
+		`SELECT 'column',c.relname,a.attnum::text,a.attname,
+		        format_type(a.atttypid,a.atttypmod),a.attnotnull::text,
+		        COALESCE(pg_get_expr(d.adbin,d.adrelid),'')
+		 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+		 JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+		 LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+		 WHERE n.nspname=$1 AND c.relkind IN ('r','S')`,
+		`SELECT 'constraint',c.relname,con.contype::text,con.conname,pg_get_constraintdef(con.oid,true)
+		 FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+		 WHERE n.nspname=$1`,
+		`SELECT 'index',tablename,indexname,indexdef
+		 FROM pg_indexes WHERE schemaname=$1`,
+		`SELECT 'trigger',c.relname,t.tgname,t.tgenabled::text,p.proname,pg_get_triggerdef(t.oid,true)
+		 FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+		 JOIN pg_proc p ON p.oid=t.tgfoid WHERE n.nspname=$1 AND NOT t.tgisinternal`,
+		`SELECT 'function',p.proname,pg_get_function_identity_arguments(p.oid),p.prosecdef::text,r.rolname,
+		        COALESCE(array_to_string(p.proconfig,','),''),COALESCE(p.proacl::text,''),pg_get_functiondef(p.oid)
+		 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_roles r ON r.oid=p.proowner
+		 WHERE n.nspname=$1`,
+		`SELECT 'schema',n.nspname,r.rolname,COALESCE(n.nspacl::text,'')
+		 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE n.nspname=$1`,
+	}
+	var entries []string
+	for _, query := range queries {
+		rows, err := db.QueryContext(ctx, query, schema)
+		if err != nil {
+			return "", err
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			return "", err
+		}
+		for rows.Next() {
+			values := make([]sql.NullString, len(columns))
+			dest := make([]any, len(columns))
+			for i := range values {
+				dest[i] = &values[i]
+			}
+			if err := rows.Scan(dest...); err != nil {
+				rows.Close()
+				return "", err
+			}
+			parts := make([]string, len(values))
+			for i, value := range values {
+				if value.Valid {
+					parts[i] = value.String
+				}
+			}
+			entry := strings.Join(parts, "\x1f")
+			entry = strings.ReplaceAll(entry, quoteTemporalIdent(schema), "<schema>")
+			entry = strings.ReplaceAll(entry, schema+".", "<schema>.")
+			entry = strings.ReplaceAll(entry, schema, "<schema>")
+			entry = strings.ReplaceAll(entry, owner, "<owner>")
+			entry = strings.ReplaceAll(entry, runtimeRole, "<runtime>")
+			entries = append(entries, entry)
+		}
+		if err := rows.Close(); err != nil {
+			return "", err
+		}
+		if err := rows.Err(); err != nil {
+			return "", err
+		}
+	}
+	sort.Strings(entries)
+	digest := sha256.Sum256([]byte(strings.Join(entries, "\n")))
+	return hex.EncodeToString(digest[:]), nil
+}
+
 func temporalLegacyDDL(schema string) string {
 	return fmt.Sprintf(temporalLegacySchemaTemplate, schema)
 }
@@ -821,8 +1178,8 @@ func temporalFunctionsDDL(schema string) string {
 	return fmt.Sprintf(temporalPrototypeFunctionsTemplate, schema)
 }
 
-func temporalGrantDDL(schema, runtimeRole string) string {
-	return fmt.Sprintf(temporalPrototypeGrantTemplate, schema, runtimeRole)
+func temporalGrantDDL(schema, runtimeRole, cleanupAuthorizerRole string) string {
+	return fmt.Sprintf(temporalPrototypeGrantTemplate, schema, runtimeRole, cleanupAuthorizerRole)
 }
 
 const temporalLegacySchemaTemplate = `
@@ -835,11 +1192,12 @@ const temporalLegacySchemaTemplate = `
 	INSERT INTO %[1]s.runtime_store_metadata(id,swarm_version,platform_version) VALUES (1,'conformance','0.7.0');
 	CREATE TABLE %[1]s.runs (
 		run_id UUID PRIMARY KEY,
-		status TEXT NOT NULL CHECK (status IN ('running','paused','completed','failed','cancelled','forked'))
+		status TEXT NOT NULL CHECK (status IN ('running','paused','completed','failed','cancelled','forked')),
+		value TEXT NOT NULL DEFAULT ''
 	);
 	CREATE TABLE %[1]s.events (
 		event_id UUID PRIMARY KEY,
-		run_id UUID REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		run_id UUID REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 	);
 	CREATE TABLE %[1]s.event_deliveries (
@@ -853,24 +1211,83 @@ const temporalLegacySchemaTemplate = `
 		event_id UUID NOT NULL REFERENCES %[1]s.events(event_id) ON DELETE CASCADE,
 		outcome TEXT NOT NULL
 	);
+	CREATE TABLE %[1]s.dead_letters (
+		dead_letter_id UUID PRIMARY KEY,
+		original_event_id UUID NOT NULL REFERENCES %[1]s.events(event_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.entity_mutations (
+		mutation_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.entity_state (
+		entity_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.timers (
+		timer_id UUID PRIMARY KEY,
+		run_id UUID REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.agent_sessions (
+		session_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.agent_turns (
+		turn_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.agent_conversation_audits (
+		audit_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.reply_contexts (
+		reply_context_id UUID PRIMARY KEY,
+		run_id UUID REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.activity_attempts (
+		attempt_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE %[1]s.selected_fork_lineage (
+		lineage_id UUID PRIMARY KEY,
+		run_id UUID NOT NULL REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		value TEXT NOT NULL DEFAULT ''
+	);
 `
 
 const temporalPrototypeSchemaTemplate = `
 	ALTER TABLE %[1]s.runtime_store_metadata
 		ADD COLUMN schema_generation TEXT,
 		ADD COLUMN schema_ddl_sha256 TEXT,
+		ADD COLUMN schema_catalog_sha256 TEXT,
 		ADD COLUMN schema_owner_role TEXT,
-		ADD COLUMN runtime_role TEXT;
-	ALTER TABLE %[1]s.events
-		ADD COLUMN temporal_revision BIGINT,
-		ADD COLUMN temporal_ordinal INTEGER;
-	ALTER TABLE %[1]s.event_deliveries
-		ADD COLUMN temporal_revision BIGINT,
-		ADD COLUMN temporal_ordinal INTEGER;
+		ADD COLUMN runtime_role TEXT,
+		ADD COLUMN cleanup_authorizer_role TEXT;
+	ALTER TABLE %[1]s.runs ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.events ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.event_deliveries ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
 	ALTER TABLE %[1]s.event_receipts
 		ADD COLUMN temporal_run_id UUID REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
 		ADD COLUMN temporal_revision BIGINT,
 		ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.dead_letters ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.entity_mutations ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.entity_state ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.timers ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.agent_sessions ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.agent_turns ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.agent_conversation_audits ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.reply_contexts ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.activity_attempts ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
+	ALTER TABLE %[1]s.selected_fork_lineage ADD COLUMN temporal_revision BIGINT, ADD COLUMN temporal_ordinal INTEGER;
 	UPDATE %[1]s.event_receipts AS receipt
 	SET temporal_run_id=event.run_id
 	FROM %[1]s.events AS event
@@ -878,13 +1295,16 @@ const temporalPrototypeSchemaTemplate = `
 
 	CREATE TABLE %[1]s.run_temporal_transactions (
 		transaction_id XID8 PRIMARY KEY,
-		run_ids UUID[] NOT NULL,
-		mode TEXT NOT NULL CHECK (mode IN ('normal','destructive')),
-		declared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-		CHECK (cardinality(run_ids) > 0)
+		declared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+	);
+	CREATE TABLE %[1]s.run_temporal_transaction_runs (
+		transaction_id XID8 NOT NULL REFERENCES %[1]s.run_temporal_transactions(transaction_id) ON DELETE CASCADE,
+		run_id UUID NOT NULL,
+		disposition TEXT NOT NULL CHECK (disposition IN ('normal','destructive')),
+		PRIMARY KEY (transaction_id,run_id)
 	);
 	CREATE TABLE %[1]s.run_temporal_frontiers (
-		run_id UUID PRIMARY KEY REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE,
+		run_id UUID PRIMARY KEY REFERENCES %[1]s.runs(run_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
 		model_version INTEGER NOT NULL CHECK (model_version IN (0,1)),
 		current_revision BIGINT NOT NULL DEFAULT 0 CHECK (current_revision >= 0),
 		history_complete BOOLEAN NOT NULL DEFAULT FALSE,
@@ -905,10 +1325,23 @@ const temporalPrototypeSchemaTemplate = `
 		from_generation TEXT NOT NULL,
 		to_generation TEXT NOT NULL,
 		ddl_sha256 TEXT NOT NULL CHECK (ddl_sha256 ~ '^[0-9a-f]{64}$'),
+		catalog_sha256 TEXT NOT NULL CHECK (catalog_sha256 ~ '^[0-9a-f]{64}$'),
 		schema_owner_role TEXT NOT NULL,
 		runtime_role TEXT NOT NULL,
+		cleanup_authorizer_role TEXT NOT NULL,
 		applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-		CHECK (schema_owner_role <> runtime_role)
+		CHECK (schema_owner_role<>runtime_role AND schema_owner_role<>cleanup_authorizer_role AND runtime_role<>cleanup_authorizer_role)
+	);
+	CREATE TABLE %[1]s.run_cleanup_authorizations (
+		authorization_id UUID PRIMARY KEY,
+		operation_id TEXT NOT NULL UNIQUE,
+		actor_evidence TEXT NOT NULL CHECK (btrim(actor_evidence)<>''),
+		authorized_by TEXT NOT NULL CHECK (btrim(authorized_by)<>''),
+		normal_run_ids UUID[] NOT NULL DEFAULT '{}',
+		destructive_run_ids UUID[] NOT NULL,
+		authorized_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+		claimed_transaction_id XID8 UNIQUE,
+		CHECK (cardinality(destructive_run_ids)>0)
 	);
 	CREATE TABLE %[1]s.run_deletion_tombstones (
 		deletion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -952,7 +1385,7 @@ const temporalPrototypeSchemaTemplate = `
 `
 
 const temporalPrototypeFunctionsTemplate = `
-	CREATE FUNCTION %[1]s.swarm_declare_temporal_runs(requested_run_ids UUID[], requested_mode TEXT)
+	CREATE FUNCTION %[1]s.swarm_declare_temporal_runs(normal_run_ids UUID[], destructive_run_ids UUID[])
 	RETURNS VOID
 	LANGUAGE plpgsql
 	SECURITY DEFINER
@@ -960,36 +1393,53 @@ const temporalPrototypeFunctionsTemplate = `
 	AS $function$
 	DECLARE
 		current_xid XID8 := pg_current_xact_id();
-		normalized UUID[];
-		existing_run_ids UUID[];
-		existing_mode TEXT;
+		normalized_normal UUID[];
+		normalized_destructive UUID[];
+		existing_normal UUID[];
+		existing_destructive UUID[];
 		target_run UUID;
+		target_disposition TEXT;
 		target_model INTEGER;
 		target_history_complete BOOLEAN;
 		next_revision BIGINT;
 	BEGIN
-		IF requested_mode NOT IN ('normal','destructive') THEN
-			RAISE EXCEPTION 'unsupported temporal declaration mode %%', requested_mode;
-		END IF;
 		SELECT array_agg(run_id ORDER BY run_id)
-		INTO normalized
-		FROM (SELECT DISTINCT unnest(requested_run_ids) AS run_id) declared
+		INTO normalized_normal
+		FROM (SELECT DISTINCT unnest(COALESCE(normal_run_ids,'{}'::uuid[])) AS run_id) declared
 		WHERE run_id IS NOT NULL;
-		IF normalized IS NULL OR cardinality(normalized)=0 THEN
+		SELECT array_agg(run_id ORDER BY run_id)
+		INTO normalized_destructive
+		FROM (SELECT DISTINCT unnest(COALESCE(destructive_run_ids,'{}'::uuid[])) AS run_id) declared
+		WHERE run_id IS NOT NULL;
+		normalized_normal=COALESCE(normalized_normal,'{}'::uuid[]);
+		normalized_destructive=COALESCE(normalized_destructive,'{}'::uuid[]);
+		IF cardinality(normalized_normal)+cardinality(normalized_destructive)=0 THEN
 			RAISE EXCEPTION 'temporal declaration requires at least one run';
 		END IF;
-		SELECT run_ids,mode INTO existing_run_ids,existing_mode
-		FROM %[1]s.run_temporal_transactions
+		IF EXISTS (SELECT 1 FROM unnest(normalized_normal) n JOIN unnest(normalized_destructive) d ON n=d) THEN
+			RAISE EXCEPTION 'temporal declaration dispositions overlap';
+		END IF;
+		SELECT COALESCE(array_agg(run_id ORDER BY run_id) FILTER (WHERE disposition='normal'),'{}'::uuid[]),
+		       COALESCE(array_agg(run_id ORDER BY run_id) FILTER (WHERE disposition='destructive'),'{}'::uuid[])
+		INTO existing_normal,existing_destructive
+		FROM %[1]s.run_temporal_transaction_runs
 		WHERE transaction_id=current_xid;
+		PERFORM 1 FROM %[1]s.run_temporal_transactions WHERE transaction_id=current_xid;
 		IF FOUND THEN
-			IF existing_run_ids<>normalized OR existing_mode<>requested_mode THEN
+			IF existing_normal<>normalized_normal OR existing_destructive<>normalized_destructive THEN
 				RAISE EXCEPTION 'temporal declaration is sealed for this transaction';
 			END IF;
 			RETURN;
 		END IF;
-		INSERT INTO %[1]s.run_temporal_transactions(transaction_id,run_ids,mode)
-		VALUES (current_xid,normalized,requested_mode);
-		FOREACH target_run IN ARRAY normalized LOOP
+		INSERT INTO %[1]s.run_temporal_transactions(transaction_id) VALUES (current_xid);
+		INSERT INTO %[1]s.run_temporal_transaction_runs(transaction_id,run_id,disposition)
+		SELECT current_xid,run_id,'normal' FROM unnest(normalized_normal) AS normal_runs(run_id)
+		UNION ALL
+		SELECT current_xid,run_id,'destructive' FROM unnest(normalized_destructive) AS destructive_runs(run_id);
+		FOR target_run,target_disposition IN
+			SELECT run_id,disposition FROM %[1]s.run_temporal_transaction_runs
+			WHERE transaction_id=current_xid ORDER BY run_id
+		LOOP
 			SELECT model_version,history_complete
 			INTO target_model,target_history_complete
 			FROM %[1]s.run_temporal_frontiers
@@ -998,7 +1448,7 @@ const temporalPrototypeFunctionsTemplate = `
 			IF NOT FOUND THEN
 				RAISE EXCEPTION 'run %% has no temporal frontier', target_run;
 			END IF;
-			IF requested_mode='normal' THEN
+			IF target_disposition='normal' THEN
 				IF target_model<>1 OR NOT target_history_complete THEN
 					RAISE EXCEPTION 'run %% temporal history is unproven', target_run;
 				END IF;
@@ -1013,6 +1463,32 @@ const temporalPrototypeFunctionsTemplate = `
 	END
 	$function$;
 
+	CREATE FUNCTION %[1]s.swarm_create_run(target_run UUID, initial_status TEXT)
+	RETURNS VOID
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = pg_catalog, %[1]s
+	AS $function$
+	DECLARE
+		stamp RECORD;
+		created_row JSONB;
+	BEGIN
+		IF initial_status NOT IN ('running','paused') THEN
+			RAISE EXCEPTION 'unsupported initial run status %%', initial_status;
+		END IF;
+		INSERT INTO %[1]s.run_temporal_frontiers(run_id,model_version,current_revision,history_complete)
+		VALUES (target_run,1,0,true);
+		PERFORM %[1]s.swarm_declare_temporal_runs(ARRAY[target_run],'{}'::uuid[]);
+		SELECT * INTO stamp FROM %[1]s.swarm_next_temporal_ordinal(target_run);
+		INSERT INTO %[1]s.runs(run_id,status,temporal_revision,temporal_ordinal)
+		VALUES (target_run,initial_status,stamp.temporal_revision,stamp.temporal_ordinal);
+		SELECT to_jsonb(run_row) INTO STRICT created_row
+		FROM %[1]s.runs AS run_row WHERE run_id=target_run;
+		INSERT INTO %[1]s.run_lifecycle_history(run_id,revision,ordinal,operation,fact_id,after_state)
+		VALUES (target_run,stamp.temporal_revision,stamp.temporal_ordinal,'insert',target_run::text,created_row);
+	END
+	$function$;
+
 	CREATE FUNCTION %[1]s.swarm_claim_temporal_runs(requested_run_ids UUID[])
 	RETURNS VOID
 	LANGUAGE plpgsql
@@ -1020,7 +1496,102 @@ const temporalPrototypeFunctionsTemplate = `
 	SET search_path = pg_catalog, %[1]s
 	AS $function$
 	BEGIN
-		PERFORM %[1]s.swarm_declare_temporal_runs(requested_run_ids,'normal');
+		PERFORM %[1]s.swarm_declare_temporal_runs(requested_run_ids,'{}'::uuid[]);
+	END
+	$function$;
+
+	CREATE FUNCTION %[1]s.swarm_authorize_run_cleanup(target_authorization UUID, target_operation TEXT, target_actor TEXT, requested_normal UUID[], requested_destructive UUID[])
+	RETURNS VOID
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = pg_catalog, %[1]s
+	AS $function$
+	DECLARE
+		normalized_normal UUID[];
+		normalized_destructive UUID[];
+	BEGIN
+		IF btrim(COALESCE(target_operation,''))='' OR btrim(COALESCE(target_actor,''))='' THEN
+			RAISE EXCEPTION 'cleanup authorization requires operation and actor evidence';
+		END IF;
+		SELECT COALESCE(array_agg(run_id ORDER BY run_id),'{}'::uuid[])
+		INTO normalized_normal
+		FROM (SELECT DISTINCT unnest(COALESCE(requested_normal,'{}'::uuid[])) AS run_id) declared
+		WHERE run_id IS NOT NULL;
+		SELECT COALESCE(array_agg(run_id ORDER BY run_id),'{}'::uuid[])
+		INTO normalized_destructive
+		FROM (SELECT DISTINCT unnest(COALESCE(requested_destructive,'{}'::uuid[])) AS run_id) declared
+		WHERE run_id IS NOT NULL;
+		IF cardinality(normalized_destructive)=0
+		   OR EXISTS (SELECT 1 FROM unnest(normalized_normal) n JOIN unnest(normalized_destructive) d ON n=d) THEN
+			RAISE EXCEPTION 'cleanup authorization requires disjoint sets and at least one destructive run';
+		END IF;
+		INSERT INTO %[1]s.run_cleanup_authorizations(
+			authorization_id,operation_id,actor_evidence,authorized_by,normal_run_ids,destructive_run_ids
+		) VALUES (
+			target_authorization,target_operation,target_actor,session_user,normalized_normal,normalized_destructive
+		);
+	END
+	$function$;
+
+	CREATE FUNCTION %[1]s.swarm_claim_authorized_run_cleanup(target_authorization UUID)
+	RETURNS VOID
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = pg_catalog, %[1]s
+	AS $function$
+	DECLARE
+		normalized_normal UUID[];
+		normalized_destructive UUID[];
+		claimed XID8;
+		current_xid XID8 := pg_current_xact_id();
+	BEGIN
+		SELECT normal_run_ids,destructive_run_ids,claimed_transaction_id
+		INTO STRICT normalized_normal,normalized_destructive,claimed
+		FROM %[1]s.run_cleanup_authorizations
+		WHERE authorization_id=target_authorization
+		FOR UPDATE;
+		IF normalized_normal<>ARRAY(SELECT DISTINCT x FROM unnest(normalized_normal) x ORDER BY x)
+		   OR normalized_destructive<>ARRAY(SELECT DISTINCT x FROM unnest(normalized_destructive) x ORDER BY x)
+		   OR EXISTS (SELECT 1 FROM unnest(normalized_normal) n JOIN unnest(normalized_destructive) d ON n=d) THEN
+			RAISE EXCEPTION 'cleanup authorization run sets are not sealed canonical sets';
+		END IF;
+		IF claimed IS NOT NULL AND claimed<>current_xid THEN
+			RAISE EXCEPTION 'cleanup authorization already consumed';
+		END IF;
+		UPDATE %[1]s.run_cleanup_authorizations
+		SET claimed_transaction_id=current_xid
+		WHERE authorization_id=target_authorization;
+		PERFORM %[1]s.swarm_declare_temporal_runs(normalized_normal,normalized_destructive);
+	END
+	$function$;
+
+	CREATE FUNCTION %[1]s.swarm_delete_authorized_runs(target_authorization UUID)
+	RETURNS VOID
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = pg_catalog, %[1]s
+	AS $function$
+	DECLARE
+		cleanup_runs UUID[];
+		actor TEXT;
+		authorizer TEXT;
+		target_run UUID;
+		model INTEGER;
+		frontier BIGINT;
+	BEGIN
+		SELECT destructive_run_ids,actor_evidence,authorized_by
+		INTO STRICT cleanup_runs,actor,authorizer
+		FROM %[1]s.run_cleanup_authorizations
+		WHERE authorization_id=target_authorization
+		  AND claimed_transaction_id=pg_current_xact_id();
+		FOREACH target_run IN ARRAY cleanup_runs LOOP
+			SELECT model_version,current_revision INTO STRICT model,frontier
+			FROM %[1]s.run_temporal_frontiers WHERE run_id=target_run;
+			INSERT INTO %[1]s.run_deletion_tombstones(run_id,source_model_version,last_revision,transaction_id,deleted_by)
+			VALUES (target_run,model,CASE WHEN model=0 THEN NULL ELSE frontier END,pg_current_xact_id(),authorizer||':'||actor);
+			DELETE FROM %[1]s.runs WHERE run_id=target_run;
+			IF NOT FOUND THEN RAISE EXCEPTION 'authorized cleanup run %% does not exist', target_run; END IF;
+		END LOOP;
 	END
 	$function$;
 
@@ -1032,12 +1603,12 @@ const temporalPrototypeFunctionsTemplate = `
 	AS $function$
 	DECLARE
 		current_xid XID8 := pg_current_xact_id();
-		declared_mode TEXT;
+		declared_disposition TEXT;
 	BEGIN
-		SELECT mode INTO declared_mode
-		FROM %[1]s.run_temporal_transactions
-		WHERE transaction_id=current_xid AND target_run=ANY(run_ids);
-		IF NOT FOUND OR declared_mode<>'normal' THEN
+		SELECT disposition INTO declared_disposition
+		FROM %[1]s.run_temporal_transaction_runs
+		WHERE transaction_id=current_xid AND run_id=target_run;
+		IF NOT FOUND OR declared_disposition<>'normal' THEN
 			RAISE EXCEPTION 'run %% is not in the sealed normal temporal declaration', target_run;
 		END IF;
 		UPDATE %[1]s.run_temporal_revisions
@@ -1051,7 +1622,27 @@ const temporalPrototypeFunctionsTemplate = `
 	END
 	$function$;
 
-	CREATE FUNCTION %[1]s.swarm_guard_events()
+	CREATE FUNCTION %[1]s.swarm_resolve_temporal_run(row_data JSONB, lineage_kind TEXT, lineage_field TEXT)
+	RETURNS UUID
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = pg_catalog, %[1]s
+	AS $function$
+	DECLARE
+		resolved UUID;
+	BEGIN
+		IF lineage_kind='direct' THEN
+			RETURN NULLIF(row_data->>lineage_field,'')::uuid;
+		ELSIF lineage_kind='event' THEN
+			SELECT run_id INTO STRICT resolved FROM %[1]s.events
+			WHERE event_id=NULLIF(row_data->>lineage_field,'')::uuid;
+			RETURN resolved;
+		END IF;
+		RAISE EXCEPTION 'unsupported temporal lineage kind %%', lineage_kind;
+	END
+	$function$;
+
+	CREATE FUNCTION %[1]s.swarm_guard_append_fact()
 	RETURNS TRIGGER
 	LANGUAGE plpgsql
 	SECURITY DEFINER
@@ -1059,98 +1650,34 @@ const temporalPrototypeFunctionsTemplate = `
 	AS $function$
 	DECLARE
 		stamp RECORD;
-		allowed BOOLEAN;
-	BEGIN
-		IF TG_OP='UPDATE' THEN
-			RAISE EXCEPTION 'events are immutable';
-		ELSIF TG_OP='DELETE' THEN
-			IF OLD.run_id IS NULL THEN
-				RAISE EXCEPTION 'runless event deletion has no destructive authority';
-			END IF;
-			SELECT EXISTS (
-				SELECT 1 FROM %[1]s.run_temporal_transactions
-				WHERE transaction_id=pg_current_xact_id() AND mode='destructive' AND OLD.run_id=ANY(run_ids)
-			) INTO allowed;
-			IF NOT allowed THEN
-				RAISE EXCEPTION 'event deletion requires sealed destructive run authority';
-			END IF;
-			RETURN OLD;
-		END IF;
-		IF NEW.run_id IS NULL THEN
-			NEW.temporal_revision=NULL;
-			NEW.temporal_ordinal=NULL;
-			RETURN NEW;
-		END IF;
-		SELECT * INTO stamp FROM %[1]s.swarm_next_temporal_ordinal(NEW.run_id);
-		NEW.temporal_revision=stamp.temporal_revision;
-		NEW.temporal_ordinal=stamp.temporal_ordinal;
-		RETURN NEW;
-	END
-	$function$;
-
-	CREATE FUNCTION %[1]s.swarm_guard_event_deliveries()
-	RETURNS TRIGGER
-	LANGUAGE plpgsql
-	SECURITY DEFINER
-	SET search_path = pg_catalog, %[1]s
-	AS $function$
-	DECLARE
-		old_stamp RECORD;
-		new_stamp RECORD;
+		fact_run UUID;
 		destructive BOOLEAN;
 	BEGIN
+		IF TG_OP='UPDATE' THEN
+			RAISE EXCEPTION 'append-only temporal fact %% is immutable', TG_TABLE_NAME;
+		END IF;
 		IF TG_OP='DELETE' THEN
-			IF OLD.run_id IS NULL THEN RETURN OLD; END IF;
+			fact_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(OLD),TG_ARGV[1],TG_ARGV[2]);
+			IF fact_run IS NULL THEN RAISE EXCEPTION 'runless append-only fact cannot be deleted'; END IF;
 			SELECT EXISTS (
-				SELECT 1 FROM %[1]s.run_temporal_transactions
-				WHERE transaction_id=pg_current_xact_id() AND mode='destructive' AND OLD.run_id=ANY(run_ids)
+				SELECT 1 FROM %[1]s.run_temporal_transaction_runs
+				WHERE transaction_id=pg_current_xact_id() AND run_id=fact_run AND disposition='destructive'
 			) INTO destructive;
-			IF destructive THEN RETURN OLD; END IF;
-			SELECT * INTO old_stamp FROM %[1]s.swarm_next_temporal_ordinal(OLD.run_id);
-			INSERT INTO %[1]s.event_delivery_history(run_id,revision,ordinal,operation,fact_id,before_state)
-			VALUES (OLD.run_id,old_stamp.temporal_revision,old_stamp.temporal_ordinal,'delete',OLD.delivery_id::text,to_jsonb(OLD));
+			IF NOT destructive THEN RAISE EXCEPTION 'append-only fact deletion requires authorized destructive disposition'; END IF;
 			RETURN OLD;
-		ELSIF TG_OP='INSERT' THEN
-			IF NEW.run_id IS NULL THEN
-				NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL; RETURN NEW;
-			END IF;
-			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(NEW.run_id);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_delivery_history(run_id,revision,ordinal,operation,fact_id,after_state)
-			VALUES (NEW.run_id,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'insert',NEW.delivery_id::text,to_jsonb(NEW));
+		END IF;
+		fact_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(NEW),TG_ARGV[1],TG_ARGV[2]);
+		IF fact_run IS NULL THEN
+			NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',NULL,'temporal_ordinal',NULL));
 			RETURN NEW;
 		END IF;
-		IF OLD.run_id IS NOT DISTINCT FROM NEW.run_id THEN
-			IF NEW.run_id IS NULL THEN
-				NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL; RETURN NEW;
-			END IF;
-			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(NEW.run_id);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_delivery_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (NEW.run_id,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'update',NEW.delivery_id::text,to_jsonb(OLD),to_jsonb(NEW));
-			RETURN NEW;
-		END IF;
-		IF OLD.run_id IS NOT NULL THEN
-			SELECT * INTO old_stamp FROM %[1]s.swarm_next_temporal_ordinal(OLD.run_id);
-			INSERT INTO %[1]s.event_delivery_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (OLD.run_id,old_stamp.temporal_revision,old_stamp.temporal_ordinal,'update',OLD.delivery_id::text,to_jsonb(OLD),to_jsonb(NEW));
-		END IF;
-		IF NEW.run_id IS NOT NULL THEN
-			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(NEW.run_id);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_delivery_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (NEW.run_id,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'update',NEW.delivery_id::text,to_jsonb(OLD),to_jsonb(NEW));
-		ELSE
-			NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL;
-		END IF;
+		SELECT * INTO stamp FROM %[1]s.swarm_next_temporal_ordinal(fact_run);
+		NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',stamp.temporal_revision,'temporal_ordinal',stamp.temporal_ordinal));
 		RETURN NEW;
 	END
 	$function$;
 
-	CREATE FUNCTION %[1]s.swarm_guard_event_receipts()
+	CREATE FUNCTION %[1]s.swarm_guard_mutable_fact()
 	RETURNS TRIGGER
 	LANGUAGE plpgsql
 	SECURITY DEFINER
@@ -1159,95 +1686,118 @@ const temporalPrototypeFunctionsTemplate = `
 	DECLARE
 		old_run UUID;
 		new_run UUID;
+		asserted_run UUID;
 		old_stamp RECORD;
 		new_stamp RECORD;
 		destructive BOOLEAN;
+		fact_id TEXT;
+		history_table TEXT := TG_ARGV[3];
 	BEGIN
-		IF TG_OP<>'INSERT' THEN old_run=OLD.temporal_run_id; END IF;
+		IF TG_OP<>'INSERT' THEN
+			fact_id=COALESCE(to_jsonb(OLD)->>TG_ARGV[0],'');
+			IF TG_ARGV[1]='event' THEN
+				old_run=NULLIF(to_jsonb(OLD)->>'temporal_run_id','')::uuid;
+			ELSIF TG_ARGV[1]='asserted_event' THEN
+				asserted_run=NULLIF(to_jsonb(OLD)->>'run_id','')::uuid;
+				IF TG_OP='DELETE' THEN
+					old_run=asserted_run;
+				ELSE
+					old_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(OLD),'event',TG_ARGV[2]);
+					IF old_run IS DISTINCT FROM asserted_run THEN RAISE EXCEPTION 'stored run identity disagrees with event lineage'; END IF;
+				END IF;
+			ELSE
+				old_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(OLD),'direct',TG_ARGV[2]);
+			END IF;
+		END IF;
 		IF TG_OP<>'DELETE' THEN
-			SELECT run_id INTO STRICT new_run FROM %[1]s.events WHERE event_id=NEW.event_id;
-			NEW.temporal_run_id=new_run;
+			fact_id=COALESCE(to_jsonb(NEW)->>TG_ARGV[0],'');
+			IF TG_ARGV[1]='event' THEN
+				new_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(NEW),'event',TG_ARGV[2]);
+				NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_run_id',new_run));
+			ELSIF TG_ARGV[1]='asserted_event' THEN
+				new_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(NEW),'event',TG_ARGV[2]);
+				asserted_run=NULLIF(to_jsonb(NEW)->>'run_id','')::uuid;
+				IF new_run IS DISTINCT FROM asserted_run THEN RAISE EXCEPTION 'stored run identity disagrees with event lineage'; END IF;
+			ELSE
+				new_run=%[1]s.swarm_resolve_temporal_run(to_jsonb(NEW),'direct',TG_ARGV[2]);
+			END IF;
 		END IF;
 		IF TG_OP='DELETE' THEN
 			IF old_run IS NULL THEN RETURN OLD; END IF;
 			SELECT EXISTS (
-				SELECT 1 FROM %[1]s.run_temporal_transactions
-				WHERE transaction_id=pg_current_xact_id() AND mode='destructive' AND old_run=ANY(run_ids)
+				SELECT 1 FROM %[1]s.run_temporal_transaction_runs
+				WHERE transaction_id=pg_current_xact_id() AND run_id=old_run AND disposition='destructive'
 			) INTO destructive;
 			IF destructive THEN RETURN OLD; END IF;
 			SELECT * INTO old_stamp FROM %[1]s.swarm_next_temporal_ordinal(old_run);
-			INSERT INTO %[1]s.event_receipt_history(run_id,revision,ordinal,operation,fact_id,before_state)
-			VALUES (old_run,old_stamp.temporal_revision,old_stamp.temporal_ordinal,'delete',OLD.receipt_id::text,to_jsonb(OLD));
+			EXECUTE format('INSERT INTO %%I.%%I(run_id,revision,ordinal,operation,fact_id,before_state) VALUES ($1,$2,$3,''delete'',$4,$5)',TG_TABLE_SCHEMA,history_table)
+			USING old_run,old_stamp.temporal_revision,old_stamp.temporal_ordinal,fact_id,to_jsonb(OLD);
 			RETURN OLD;
 		ELSIF TG_OP='INSERT' THEN
 			IF new_run IS NULL THEN
-				NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL; RETURN NEW;
+				NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',NULL,'temporal_ordinal',NULL)); RETURN NEW;
 			END IF;
 			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(new_run);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_receipt_history(run_id,revision,ordinal,operation,fact_id,after_state)
-			VALUES (new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'insert',NEW.receipt_id::text,to_jsonb(NEW));
+			NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',new_stamp.temporal_revision,'temporal_ordinal',new_stamp.temporal_ordinal));
+			EXECUTE format('INSERT INTO %%I.%%I(run_id,revision,ordinal,operation,fact_id,after_state) VALUES ($1,$2,$3,''insert'',$4,$5)',TG_TABLE_SCHEMA,history_table)
+			USING new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,fact_id,to_jsonb(NEW);
 			RETURN NEW;
 		END IF;
 		IF old_run IS NOT DISTINCT FROM new_run THEN
 			IF new_run IS NULL THEN
-				NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL; RETURN NEW;
+				NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',NULL,'temporal_ordinal',NULL)); RETURN NEW;
 			END IF;
 			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(new_run);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_receipt_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'update',NEW.receipt_id::text,to_jsonb(OLD),to_jsonb(NEW));
+			NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',new_stamp.temporal_revision,'temporal_ordinal',new_stamp.temporal_ordinal));
+			EXECUTE format('INSERT INTO %%I.%%I(run_id,revision,ordinal,operation,fact_id,before_state,after_state) VALUES ($1,$2,$3,''update'',$4,$5,$6)',TG_TABLE_SCHEMA,history_table)
+			USING new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,fact_id,to_jsonb(OLD),to_jsonb(NEW);
 			RETURN NEW;
 		END IF;
 		IF old_run IS NOT NULL THEN
 			SELECT * INTO old_stamp FROM %[1]s.swarm_next_temporal_ordinal(old_run);
-			INSERT INTO %[1]s.event_receipt_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (old_run,old_stamp.temporal_revision,old_stamp.temporal_ordinal,'update',OLD.receipt_id::text,to_jsonb(OLD),to_jsonb(NEW));
+			EXECUTE format('INSERT INTO %%I.%%I(run_id,revision,ordinal,operation,fact_id,before_state,after_state) VALUES ($1,$2,$3,''update'',$4,$5,$6)',TG_TABLE_SCHEMA,history_table)
+			USING old_run,old_stamp.temporal_revision,old_stamp.temporal_ordinal,fact_id,to_jsonb(OLD),to_jsonb(NEW);
 		END IF;
 		IF new_run IS NOT NULL THEN
 			SELECT * INTO new_stamp FROM %[1]s.swarm_next_temporal_ordinal(new_run);
-			NEW.temporal_revision=new_stamp.temporal_revision;
-			NEW.temporal_ordinal=new_stamp.temporal_ordinal;
-			INSERT INTO %[1]s.event_receipt_history(run_id,revision,ordinal,operation,fact_id,before_state,after_state)
-			VALUES (new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,'update',NEW.receipt_id::text,to_jsonb(OLD),to_jsonb(NEW));
+			NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',new_stamp.temporal_revision,'temporal_ordinal',new_stamp.temporal_ordinal));
+			EXECUTE format('INSERT INTO %%I.%%I(run_id,revision,ordinal,operation,fact_id,before_state,after_state) VALUES ($1,$2,$3,''update'',$4,$5,$6)',TG_TABLE_SCHEMA,history_table)
+			USING new_run,new_stamp.temporal_revision,new_stamp.temporal_ordinal,fact_id,to_jsonb(OLD),to_jsonb(NEW);
 		ELSE
-			NEW.temporal_revision=NULL; NEW.temporal_ordinal=NULL;
+			NEW=jsonb_populate_record(NEW,jsonb_build_object('temporal_revision',NULL,'temporal_ordinal',NULL));
 		END IF;
 		RETURN NEW;
 	END
 	$function$;
 
-	CREATE FUNCTION %[1]s.swarm_destroy_run(target_run UUID, deletion_actor TEXT)
-	RETURNS VOID
-	LANGUAGE plpgsql
-	SECURITY DEFINER
-	SET search_path = pg_catalog, %[1]s
-	AS $function$
-	DECLARE
-		model INTEGER;
-		frontier BIGINT;
-	BEGIN
-		PERFORM %[1]s.swarm_declare_temporal_runs(ARRAY[target_run],'destructive');
-		SELECT model_version,current_revision INTO STRICT model,frontier
-		FROM %[1]s.run_temporal_frontiers WHERE run_id=target_run;
-		INSERT INTO %[1]s.run_deletion_tombstones(run_id,source_model_version,last_revision,transaction_id,deleted_by)
-		VALUES (target_run,model,CASE WHEN model=0 THEN NULL ELSE frontier END,pg_current_xact_id(),deletion_actor);
-		DELETE FROM %[1]s.runs WHERE run_id=target_run;
-		IF NOT FOUND THEN RAISE EXCEPTION 'run %% does not exist', target_run; END IF;
-	END
-	$function$;
-
-	CREATE TRIGGER temporal_events_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.events
-	FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_events();
-	CREATE TRIGGER temporal_event_deliveries_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.event_deliveries
-	FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_event_deliveries();
-	CREATE TRIGGER temporal_event_receipts_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.event_receipts
-	FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_event_receipts();
+	CREATE TRIGGER temporal_runs_guard BEFORE UPDATE OR DELETE ON %[1]s.runs FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('run_id','direct','run_id','run_lifecycle_history');
+	CREATE TRIGGER temporal_events_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.events FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_append_fact('event_id','direct','run_id');
+	CREATE TRIGGER temporal_event_deliveries_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.event_deliveries FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('delivery_id','asserted_event','event_id','event_delivery_history');
+	CREATE TRIGGER temporal_event_receipts_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.event_receipts FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('receipt_id','event','event_id','event_receipt_history');
+	CREATE TRIGGER temporal_dead_letters_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.dead_letters FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_append_fact('dead_letter_id','event','original_event_id');
+	CREATE TRIGGER temporal_entity_mutations_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.entity_mutations FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_append_fact('mutation_id','direct','run_id');
+	CREATE TRIGGER temporal_entity_state_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.entity_state FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('entity_id','direct','run_id','entity_state_history');
+	CREATE TRIGGER temporal_timers_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.timers FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('timer_id','direct','run_id','timer_history');
+	CREATE TRIGGER temporal_agent_sessions_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.agent_sessions FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('session_id','direct','run_id','agent_session_history');
+	CREATE TRIGGER temporal_agent_turns_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.agent_turns FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_append_fact('turn_id','direct','run_id');
+	CREATE TRIGGER temporal_agent_conversation_audits_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.agent_conversation_audits FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('audit_id','direct','run_id','conversation_audit_history');
+	CREATE TRIGGER temporal_reply_contexts_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.reply_contexts FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('reply_context_id','direct','run_id','reply_context_history');
+	CREATE TRIGGER temporal_activity_attempts_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.activity_attempts FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_mutable_fact('attempt_id','direct','run_id','activity_attempt_history');
+	CREATE TRIGGER temporal_selected_fork_lineage_guard BEFORE INSERT OR UPDATE OR DELETE ON %[1]s.selected_fork_lineage FOR EACH ROW EXECUTE FUNCTION %[1]s.swarm_guard_append_fact('lineage_id','direct','run_id');
+	ALTER TABLE %[1]s.runs ENABLE ALWAYS TRIGGER temporal_runs_guard;
 	ALTER TABLE %[1]s.events ENABLE ALWAYS TRIGGER temporal_events_guard;
 	ALTER TABLE %[1]s.event_deliveries ENABLE ALWAYS TRIGGER temporal_event_deliveries_guard;
 	ALTER TABLE %[1]s.event_receipts ENABLE ALWAYS TRIGGER temporal_event_receipts_guard;
+	ALTER TABLE %[1]s.dead_letters ENABLE ALWAYS TRIGGER temporal_dead_letters_guard;
+	ALTER TABLE %[1]s.entity_mutations ENABLE ALWAYS TRIGGER temporal_entity_mutations_guard;
+	ALTER TABLE %[1]s.entity_state ENABLE ALWAYS TRIGGER temporal_entity_state_guard;
+	ALTER TABLE %[1]s.timers ENABLE ALWAYS TRIGGER temporal_timers_guard;
+	ALTER TABLE %[1]s.agent_sessions ENABLE ALWAYS TRIGGER temporal_agent_sessions_guard;
+	ALTER TABLE %[1]s.agent_turns ENABLE ALWAYS TRIGGER temporal_agent_turns_guard;
+	ALTER TABLE %[1]s.agent_conversation_audits ENABLE ALWAYS TRIGGER temporal_agent_conversation_audits_guard;
+	ALTER TABLE %[1]s.reply_contexts ENABLE ALWAYS TRIGGER temporal_reply_contexts_guard;
+	ALTER TABLE %[1]s.activity_attempts ENABLE ALWAYS TRIGGER temporal_activity_attempts_guard;
+	ALTER TABLE %[1]s.selected_fork_lineage ENABLE ALWAYS TRIGGER temporal_selected_fork_lineage_guard;
 `
 
 const temporalPrototypeGrantTemplate = `
@@ -1256,6 +1806,7 @@ const temporalPrototypeGrantTemplate = `
 	REVOKE ALL ON ALL SEQUENCES IN SCHEMA %[1]s FROM PUBLIC;
 	REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %[1]s FROM PUBLIC;
 	GRANT USAGE ON SCHEMA %[1]s TO %[2]s;
+	GRANT USAGE ON SCHEMA %[1]s TO %[3]s;
 	GRANT SELECT ON
 		%[1]s.runtime_store_metadata,
 		%[1]s.runtime_store_migrations,
@@ -1263,7 +1814,18 @@ const temporalPrototypeGrantTemplate = `
 		%[1]s.events,
 		%[1]s.event_deliveries,
 		%[1]s.event_receipts,
+		%[1]s.dead_letters,
+		%[1]s.entity_mutations,
+		%[1]s.entity_state,
+		%[1]s.timers,
+		%[1]s.agent_sessions,
+		%[1]s.agent_turns,
+		%[1]s.agent_conversation_audits,
+		%[1]s.reply_contexts,
+		%[1]s.activity_attempts,
+		%[1]s.selected_fork_lineage,
 		%[1]s.run_temporal_transactions,
+		%[1]s.run_temporal_transaction_runs,
 		%[1]s.run_temporal_frontiers,
 		%[1]s.run_temporal_revisions,
 		%[1]s.run_deletion_tombstones,
@@ -1277,8 +1839,12 @@ const temporalPrototypeGrantTemplate = `
 		%[1]s.reply_context_history,
 		%[1]s.activity_attempt_history
 	TO %[2]s;
-	GRANT INSERT ON %[1]s.events TO %[2]s;
-	GRANT INSERT,UPDATE,DELETE ON %[1]s.event_deliveries,%[1]s.event_receipts TO %[2]s;
+	GRANT INSERT ON %[1]s.events,%[1]s.dead_letters,%[1]s.entity_mutations,%[1]s.agent_turns,%[1]s.selected_fork_lineage TO %[2]s;
+	GRANT UPDATE ON %[1]s.runs TO %[2]s;
+	GRANT INSERT,UPDATE,DELETE ON %[1]s.event_deliveries,%[1]s.event_receipts,%[1]s.entity_state,%[1]s.timers,%[1]s.agent_sessions,%[1]s.agent_conversation_audits,%[1]s.reply_contexts,%[1]s.activity_attempts TO %[2]s;
+	GRANT EXECUTE ON FUNCTION %[1]s.swarm_create_run(UUID,TEXT) TO %[2]s;
 	GRANT EXECUTE ON FUNCTION %[1]s.swarm_claim_temporal_runs(UUID[]) TO %[2]s;
-	GRANT EXECUTE ON FUNCTION %[1]s.swarm_destroy_run(UUID,TEXT) TO %[2]s;
+	GRANT EXECUTE ON FUNCTION %[1]s.swarm_claim_authorized_run_cleanup(UUID) TO %[2]s;
+	GRANT EXECUTE ON FUNCTION %[1]s.swarm_delete_authorized_runs(UUID) TO %[2]s;
+	GRANT EXECUTE ON FUNCTION %[1]s.swarm_authorize_run_cleanup(UUID,TEXT,TEXT,UUID[],UUID[]) TO %[3]s;
 `

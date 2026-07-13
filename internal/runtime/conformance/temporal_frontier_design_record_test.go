@@ -58,7 +58,7 @@ type temporalFrontierSelectors struct {
 type temporalFrontierTransaction struct {
 	DeclarationTable                     string   `yaml:"declaration_table"`
 	XIDType                              string   `yaml:"xid_type"`
-	Modes                                []string `yaml:"modes"`
+	Dispositions                         []string `yaml:"dispositions"`
 	SealedFields                         []string `yaml:"sealed_fields"`
 	LockOrder                            []string `yaml:"lock_order"`
 	OrdinaryRevisionOnDestructiveCleanup bool     `yaml:"ordinary_revision_on_destructive_cleanup"`
@@ -83,8 +83,9 @@ type temporalFrontierRole struct {
 type temporalFrontierGrants struct {
 	RuntimeExecute                []string `yaml:"runtime_execute"`
 	RuntimeDeniedExecute          []string `yaml:"runtime_denied_execute"`
+	CleanupAuthorizerExecute      []string `yaml:"cleanup_authorizer_execute"`
 	RuntimeInsertOnly             []string `yaml:"runtime_insert_only"`
-	RuntimeGuardedInsertUpdate    []string `yaml:"runtime_guarded_insert_update"`
+	RuntimeGuardedUpdate          []string `yaml:"runtime_guarded_update"`
 	RuntimeGuardedDML             []string `yaml:"runtime_guarded_dml"`
 	RuntimeDeniedDML              []string `yaml:"runtime_denied_dml"`
 	RuntimeDeniedDirectOperations []string `yaml:"runtime_denied_direct_operations"`
@@ -108,6 +109,7 @@ type temporalFrontierMigration struct {
 	MetadataUpdatedLast             bool     `yaml:"metadata_updated_last"`
 	RollbackIsAtomic                bool     `yaml:"rollback_is_atomic"`
 	Reapply                         string   `yaml:"reapply"`
+	LegacyAdmission                 string   `yaml:"legacy_admission"`
 	ServeSchemaMutation             string   `yaml:"serve_schema_mutation"`
 }
 
@@ -300,12 +302,12 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	if record.Transaction.OrdinalStart != 1 || record.Transaction.HeaderRetention != "referenced_by_revision_or_tombstone" {
 		problems = append(problems, "transaction ordinal/header retention contract drifted")
 	}
-	problems = append(problems, requireExactSet("transaction modes", record.Transaction.Modes, []string{"normal", "destructive"})...)
+	problems = append(problems, requireExactSet("transaction dispositions", record.Transaction.Dispositions, []string{"normal", "destructive"})...)
 	problems = append(problems, requireExactOrder("transaction lock order", record.Transaction.LockOrder, []string{"nonlocking_identity_snapshot", "sealed_frontier_declaration", "sorted_frontier_locks", "deterministic_fact_locks", "identity_revalidation", "captured_fact_mutation"})...)
 
-	requiredTables := []string{"run_temporal_transactions", "run_temporal_frontiers", "run_temporal_revisions", "runtime_store_migrations", "run_deletion_tombstones"}
+	requiredTables := []string{"run_temporal_transactions", "run_temporal_transaction_runs", "run_temporal_frontiers", "run_temporal_revisions", "runtime_store_migrations", "run_cleanup_authorizations", "run_deletion_tombstones"}
 	requiredHistory := []string{"run_lifecycle_history", "event_delivery_history", "event_receipt_history", "timer_history", "entity_state_history", "agent_session_history", "conversation_audit_history", "reply_context_history", "activity_attempt_history"}
-	requiredFunctions := []string{"swarm_declare_temporal_runs", "swarm_claim_temporal_runs", "swarm_next_temporal_ordinal", "swarm_guard_events", "swarm_guard_event_deliveries", "swarm_guard_event_receipts", "swarm_destroy_run"}
+	requiredFunctions := []string{"swarm_declare_temporal_runs", "swarm_create_run", "swarm_claim_temporal_runs", "swarm_authorize_run_cleanup", "swarm_claim_authorized_run_cleanup", "swarm_delete_authorized_runs", "swarm_next_temporal_ordinal", "swarm_resolve_temporal_run", "swarm_guard_append_fact", "swarm_guard_mutable_fact"}
 	problems = append(problems, requireExactSet("tables", record.Objects.Tables, requiredTables)...)
 	problems = append(problems, requireExactSet("history tables", record.Objects.HistoryTables, requiredHistory)...)
 	problems = append(problems, requireExactSet("functions", record.Objects.Functions, requiredFunctions)...)
@@ -313,16 +315,21 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 
 	migrationRole, migrationOK := record.Roles["migration"]
 	runtimeRole, runtimeOK := record.Roles["runtime"]
+	cleanupAuthorizerRole, cleanupAuthorizerOK := record.Roles["cleanup_authorizer"]
 	if !migrationOK || migrationRole.Kind != "schema_owner_login" || !migrationRole.DistinctFromRuntime || !strings.HasPrefix(migrationRole.Invocation, "swarm schema apply ") {
 		problems = append(problems, "migration role/invocation contract is incomplete")
 	}
 	if !runtimeOK || runtimeRole.Kind != "restricted_login" || runtimeRole.Invocation != "swarm serve --config <runtime-config>" {
 		problems = append(problems, "runtime role/invocation contract is incomplete")
 	}
-	problems = append(problems, requireExactSet("runtime denied direct operations", record.Grants.RuntimeDeniedDirectOperations, []string{"events.UPDATE", "events.DELETE", "runs.DELETE"})...)
-	problems = append(problems, requireExactSet("runtime guarded insert update", record.Grants.RuntimeGuardedInsertUpdate, []string{"runs"})...)
-	problems = append(problems, requireExactSet("runtime execute", record.Grants.RuntimeExecute, []string{"swarm_claim_temporal_runs", "swarm_destroy_run"})...)
-	problems = append(problems, requireSet("runtime denied execute", record.Grants.RuntimeDeniedExecute, []string{"swarm_declare_temporal_runs", "swarm_next_temporal_ordinal", "swarm_guard_events", "swarm_guard_event_deliveries", "swarm_guard_event_receipts"})...)
+	if !cleanupAuthorizerOK || cleanupAuthorizerRole.Kind != "restricted_cleanup_authorizer_login" || !cleanupAuthorizerRole.DistinctFromRuntime || cleanupAuthorizerRole.Invocation != "canonical destructive-reset plan/quiescence/directive owner" {
+		problems = append(problems, "cleanup authorizer role/invocation contract is incomplete")
+	}
+	problems = append(problems, requireExactSet("runtime denied direct operations", record.Grants.RuntimeDeniedDirectOperations, []string{"events.UPDATE", "events.DELETE", "runs.INSERT", "runs.DELETE"})...)
+	problems = append(problems, requireExactSet("runtime guarded update", record.Grants.RuntimeGuardedUpdate, []string{"runs"})...)
+	problems = append(problems, requireExactSet("runtime execute", record.Grants.RuntimeExecute, []string{"swarm_create_run", "swarm_claim_temporal_runs", "swarm_claim_authorized_run_cleanup", "swarm_delete_authorized_runs"})...)
+	problems = append(problems, requireSet("runtime denied execute", record.Grants.RuntimeDeniedExecute, []string{"swarm_declare_temporal_runs", "swarm_authorize_run_cleanup", "swarm_next_temporal_ordinal", "swarm_resolve_temporal_run", "swarm_guard_append_fact", "swarm_guard_mutable_fact"})...)
+	problems = append(problems, requireExactSet("cleanup authorizer execute", record.Grants.CleanupAuthorizerExecute, []string{"swarm_authorize_run_cleanup"})...)
 
 	requiredFacts := []string{"runs", "events", "event_deliveries", "event_receipts", "dead_letters", "entity_mutations", "entity_state", "timers", "agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "activity_attempts", "selected_fork_lineage", "routing_rules", "runless_events"}
 	facts := make([]string, 0, len(record.FactFamilies))
@@ -333,7 +340,7 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 		}
 	}
 	problems = append(problems, requireExactSet("fact families", facts, requiredFacts)...)
-	for _, operation := range []string{"event_insert", "event_update", "event_delete", "mutable_insert", "mutable_update", "mutable_delete", "whole_run_delete"} {
+	for _, operation := range []string{"run_insert", "event_insert", "event_update", "event_delete", "mutable_insert", "mutable_update", "mutable_delete", "whole_run_delete", "mixed_cleanup", "derived_lineage"} {
 		if strings.TrimSpace(record.Operations[operation]) == "" {
 			problems = append(problems, "operations missing "+operation)
 		}
@@ -348,13 +355,16 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	if record.Migration.HeuristicBackfill != "forbidden" {
 		problems = append(problems, "migration heuristic backfill is not forbidden")
 	}
+	if record.Migration.LegacyAdmission != "complete_registered_catalog_checksum" || record.Migration.Reapply != "full_catalog_revalidation_then_exact_checksum_noop_else_fail_closed" {
+		problems = append(problems, "migration catalog admission/reapply contract drifted")
+	}
 	if record.Migration.Isolation != "SERIALIZABLE" || !record.Migration.MetadataUpdatedLast || !record.Migration.RollbackIsAtomic || record.Migration.ServeSchemaMutation != "forbidden" {
 		problems = append(problems, "migration atomicity/admission contract drifted")
 	}
 	problems = append(problems, requireExactSet("active statuses", record.Migration.ActiveStatuses, []string{"running", "paused"})...)
 	problems = append(problems, requireExactSet("deployment locks", record.Migration.DeploymentLocks, []string{"runtime_shared_session_advisory", "migration_exclusive_advisory", "first_upgrade_access_exclusive_tables"})...)
 
-	requiredAssertions := []string{"fresh_schema_creation", "active_legacy_run_rejected_without_ddl", "failed_migration_rolls_back_schema_and_metadata", "exact_reapply_is_idempotent", "runtime_shared_lock_excludes_migration", "runtime_cannot_assume_owner_or_disable_trigger", "runtime_cannot_mutate_authority_or_history_tables", "undeclared_insert_update_delete_rejected", "declared_delete_writes_typed_history", "destructive_declaration_not_runtime_callable", "event_delivery_receipt_share_revision_and_ordinals", "rollback_publishes_no_revision", "update_move_requires_old_and_new_runs", "runless_lineage_remains_unversioned", "unversioned_destructive_cleanup_creates_no_revision", "reverse_order_claims_serialize_frontier_first", "trigger_functions_are_not_runtime_bypass_surfaces", "second_runtime_boot_is_read_only"}
+	requiredAssertions := []string{"fresh_schema_creation", "restricted_runtime_atomic_run_creation", "active_legacy_run_rejected_without_ddl", "complete_legacy_catalog_drift_rejected", "failed_migration_rolls_back_schema_and_metadata", "exact_reapply_is_idempotent", "drifted_target_reapply_rejected", "runtime_shared_lock_excludes_migration", "runtime_cannot_assume_owner_or_disable_trigger", "runtime_cannot_mutate_authority_or_history_tables", "undeclared_insert_update_delete_rejected", "every_guarded_fact_family_insert_update_delete_proven", "derived_lineage_mismatch_rejected", "destructive_declaration_not_runtime_callable", "event_delivery_receipt_share_revision_and_ordinals", "rollback_publishes_no_revision", "update_move_requires_old_and_new_runs", "runless_lineage_remains_unversioned", "authorized_unversioned_destructive_cleanup_creates_no_revision", "arbitrary_run_deletion_rejected", "cleanup_authorization_is_not_runtime_mintable", "cleanup_authorizer_has_no_fact_or_schema_privileges", "mixed_cleanup_revisions_survivors_and_tombstones_deleted_runs", "reverse_order_claims_serialize_frontier_first", "trigger_functions_are_not_runtime_bypass_surfaces", "second_runtime_boot_is_read_only"}
 	if record.Prototype.Test != "TestTemporalFrontierPostgresDesignConformance" || record.Prototype.RunnerOwner != "platform-spec.yaml#run_model.fork.temporal_frontier.required_conformance.runner" || record.Prototype.ProofProjection != "required-full" {
 		problems = append(problems, "prototype test/runner owner/proof projection does not match the dedicated supported command")
 	}

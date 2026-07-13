@@ -22,8 +22,8 @@ selectors:
 transaction:
   declaration_table: run_temporal_transactions
   xid_type: xid8
-  modes: [normal, destructive]
-  sealed_fields: [transaction_id, sorted_unique_run_ids, mode]
+  dispositions: [normal, destructive]
+  sealed_fields: [transaction_id, sorted_unique_normal_run_ids, sorted_unique_destructive_run_ids, per_run_disposition]
   lock_order:
     - nonlocking_identity_snapshot
     - sealed_frontier_declaration
@@ -37,9 +37,11 @@ transaction:
 objects:
   tables:
     - run_temporal_transactions
+    - run_temporal_transaction_runs
     - run_temporal_frontiers
     - run_temporal_revisions
     - runtime_store_migrations
+    - run_cleanup_authorizations
     - run_deletion_tombstones
   history_tables:
     - run_lifecycle_history
@@ -53,12 +55,15 @@ objects:
     - activity_attempt_history
   functions:
     - swarm_declare_temporal_runs
+    - swarm_create_run
     - swarm_claim_temporal_runs
+    - swarm_authorize_run_cleanup
+    - swarm_claim_authorized_run_cleanup
+    - swarm_delete_authorized_runs
     - swarm_next_temporal_ordinal
-    - swarm_guard_events
-    - swarm_guard_event_deliveries
-    - swarm_guard_event_receipts
-    - swarm_destroy_run
+    - swarm_resolve_temporal_run
+    - swarm_guard_append_fact
+    - swarm_guard_mutable_fact
   trigger_properties:
     - security_definer
     - owner_controlled
@@ -70,20 +75,26 @@ roles:
   migration:
     kind: schema_owner_login
     distinct_from_runtime: true
-    invocation: swarm schema apply --runtime-role <postgres-role> --config <explicit-migration-config>
+    invocation: swarm schema apply --runtime-role <postgres-role> --cleanup-authorizer-role <postgres-role> --config <explicit-migration-config>
     attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS]
   runtime:
     kind: restricted_login
     invocation: swarm serve --config <runtime-config>
     attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner]
+  cleanup_authorizer:
+    kind: restricted_cleanup_authorizer_login
+    distinct_from_runtime: true
+    invocation: canonical destructive-reset plan/quiescence/directive owner
+    attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner]
 grants:
-  runtime_execute: [swarm_claim_temporal_runs, swarm_destroy_run]
-  runtime_denied_execute: [swarm_declare_temporal_runs, swarm_next_temporal_ordinal, swarm_guard_events, swarm_guard_event_deliveries, swarm_guard_event_receipts]
-  runtime_insert_only: [events]
-  runtime_guarded_insert_update: [runs]
+  runtime_execute: [swarm_create_run, swarm_claim_temporal_runs, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs]
+  runtime_denied_execute: [swarm_declare_temporal_runs, swarm_authorize_run_cleanup, swarm_next_temporal_ordinal, swarm_resolve_temporal_run, swarm_guard_append_fact, swarm_guard_mutable_fact]
+  cleanup_authorizer_execute: [swarm_authorize_run_cleanup]
+  runtime_insert_only: [events, entity_mutations, dead_letters, agent_turns, selected_fork_lineage]
+  runtime_guarded_update: [runs]
   runtime_guarded_dml: [event_deliveries, event_receipts, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
-  runtime_denied_dml: [run_temporal_transactions, run_temporal_frontiers, run_temporal_revisions, runtime_store_migrations, run_deletion_tombstones, temporal_history, runtime_store_metadata]
-  runtime_denied_direct_operations: [events.UPDATE, events.DELETE, runs.DELETE]
+  runtime_denied_dml: [run_temporal_transactions, run_temporal_transaction_runs, run_temporal_frontiers, run_temporal_revisions, runtime_store_migrations, run_cleanup_authorizations, run_deletion_tombstones, temporal_history, runtime_store_metadata]
+  runtime_denied_direct_operations: [events.UPDATE, events.DELETE, runs.INSERT, runs.DELETE]
 fact_families:
   - {name: runs, disposition: typed_transition_history}
   - {name: events, disposition: immutable_append_revision}
@@ -102,13 +113,16 @@ fact_families:
   - {name: routing_rules, disposition: global_current_config_not_run_history}
   - {name: runless_events, disposition: null_revision_and_ordinal}
 operations:
+  run_insert: owner_function_creates_run_frontier_revision_and_history_atomically
   event_insert: declared_normal_run_overwrites_caller_stamp
   event_update: always_rejected
   event_delete: destructive_whole_run_only
   mutable_insert: every_nonnull_derived_run_declared
   mutable_update: every_distinct_old_and_new_nonnull_run_declared
   mutable_delete: old_nonnull_run_declared_and_typed_history_written
-  whole_run_delete: destructive_declaration_tombstone_then_cascade
+  whole_run_delete: sealed_authorization_claim_then_owner_delete_wrapper
+  mixed_cleanup: normal_survivors_revisioned_and_destructive_runs_tombstoned_in_one_transaction
+  derived_lineage: persisted_and_derived_run_identity_must_agree
 migration:
   generation: temporal-frontier-v1
   migration_id: temporal-frontier-v1
@@ -121,7 +135,8 @@ migration:
   deployment_locks: [runtime_shared_session_advisory, migration_exclusive_advisory, first_upgrade_access_exclusive_tables]
   metadata_updated_last: true
   rollback_is_atomic: true
-  reapply: exact_checksum_noop_else_fail_closed
+  reapply: full_catalog_revalidation_then_exact_checksum_noop_else_fail_closed
+  legacy_admission: complete_registered_catalog_checksum
   serve_schema_mutation: forbidden
 prototype:
   test: TestTemporalFrontierPostgresDesignConformance
@@ -129,20 +144,28 @@ prototype:
   proof_projection: required-full
   assertions:
     - fresh_schema_creation
+    - restricted_runtime_atomic_run_creation
     - active_legacy_run_rejected_without_ddl
+    - complete_legacy_catalog_drift_rejected
     - failed_migration_rolls_back_schema_and_metadata
     - exact_reapply_is_idempotent
+    - drifted_target_reapply_rejected
     - runtime_shared_lock_excludes_migration
     - runtime_cannot_assume_owner_or_disable_trigger
     - runtime_cannot_mutate_authority_or_history_tables
     - undeclared_insert_update_delete_rejected
-    - declared_delete_writes_typed_history
+    - every_guarded_fact_family_insert_update_delete_proven
+    - derived_lineage_mismatch_rejected
     - destructive_declaration_not_runtime_callable
     - event_delivery_receipt_share_revision_and_ordinals
     - rollback_publishes_no_revision
     - update_move_requires_old_and_new_runs
     - runless_lineage_remains_unversioned
-    - unversioned_destructive_cleanup_creates_no_revision
+    - authorized_unversioned_destructive_cleanup_creates_no_revision
+    - arbitrary_run_deletion_rejected
+    - cleanup_authorization_is_not_runtime_mintable
+    - cleanup_authorizer_has_no_fact_or_schema_privileges
+    - mixed_cleanup_revisions_survivors_and_tombstones_deleted_runs
     - reverse_order_claims_serialize_frontier_first
     - trigger_functions_are_not_runtime_bypass_surfaces
     - second_runtime_boot_is_read_only
@@ -154,3 +177,10 @@ manifestations:
   - {id: owner_is_runtime_bypass, issue: 2049, status: design_locked_here}
   - {id: unguarded_temporal_delete, issue: 2050, status: design_locked_and_prototyped_here}
   - {id: new_only_ownership_move_guard, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: restricted_runtime_run_bootstrap_cycle, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: transaction_wide_destructive_mode_conflict, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: unrestricted_runtime_run_deletion, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: partial_fact_family_guards, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: delivery_event_lineage_mismatch, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: drifted_target_reapply_accepted, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: incomplete_legacy_catalog_admitted, issue: 2050, status: design_locked_and_prototyped_here}
