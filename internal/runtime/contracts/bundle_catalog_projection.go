@@ -258,8 +258,8 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) map[string]any {
 		addStringField(def, "role", entry.Role)
 		addStringField(def, "type", firstNonEmpty(entry.Type, entry.NodeType))
 		addStringField(def, "model", entry.Model)
-		addStringField(def, "mode", entry.ConversationMode)
-		addStringField(def, "session_scope", entry.SessionScope)
+		def["memory"] = entry.MemoryPlan.Enabled
+		addStringField(def, "memory_source", string(entry.MemoryPlan.Source))
 		addStringField(def, "prompt_path", entry.PromptRef)
 		if source, ok := bundle.AgentContractSource(agentID); ok {
 			addStringField(def, "flow_instance", source.FlowID)

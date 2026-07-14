@@ -1,6 +1,5 @@
 tool-agent:
   model: regular
-  mode: task
   tools:
     - lookup_data
   permissions:

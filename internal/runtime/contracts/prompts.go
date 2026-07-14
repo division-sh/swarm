@@ -350,7 +350,7 @@ func resolveBundlePromptAgentID(bundle *WorkflowContractBundle, cfg models.Agent
 	if role == "" {
 		return "", false
 	}
-	mode := canonicalPromptLookupValue(cfg.Mode)
+	mode := canonicalPromptLookupValue(cfg.FlowID)
 	for _, record := range bundleAgentRecords(bundle) {
 		if canonicalPromptLookupValue(record.Entry.Role) != role {
 			continue
@@ -790,7 +790,7 @@ func promptReservedConfigKeys() map[string]bool {
 		"flow_path":          true,
 		"manager_fallback":   true,
 		"model":              true,
-		"conversation_mode":  true,
+		"memory":             true,
 		"max_turns_per_task": true,
 		"constraints":        true,
 		"tools":              true,

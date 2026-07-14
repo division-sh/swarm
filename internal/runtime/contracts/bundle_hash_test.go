@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 func TestBundleHashV1GoldenCorpus(t *testing.T) {
@@ -189,13 +191,14 @@ agents:
 	bundle.Semantics.Version = "1.0.0"
 	bundle.Agents = map[string]AgentRegistryEntry{
 		"reviewer": {
-			Role:             "review",
-			Type:             "managed",
-			Model:            "cheap",
-			PromptRef:        "flows/alpha/prompts/reviewer.md",
-			Subscriptions:    []string{"scan.requested"},
-			Tools:            []string{"web_search"},
-			ConversationMode: "session",
+			Role:          "review",
+			Type:          "managed",
+			Model:         "cheap",
+			PromptRef:     "flows/alpha/prompts/reviewer.md",
+			Subscriptions: []string{"scan.requested"},
+			Tools:         []string{"web_search"},
+			Memory:        true,
+			MemoryPlan:    mustAgentMemoryPlan(t, true),
 		},
 	}
 
@@ -267,6 +270,15 @@ agents:
 	if got, want := projection.Metadata["package_extra"], map[string]string{"colony.division.sh/display_name": "Projection Fixture"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("metadata package_extra = %#v, want %#v", got, want)
 	}
+}
+
+func mustAgentMemoryPlan(t *testing.T, enabled bool) agentmemory.Plan {
+	t.Helper()
+	plan, err := agentmemory.NewPlan(enabled, agentmemory.SourceAuthored)
+	if err != nil {
+		t.Fatalf("agent memory plan: %v", err)
+	}
+	return plan
 }
 
 func TestBundleCatalogProjectionStableForEquivalentCanonicalContent(t *testing.T) {
@@ -472,7 +484,6 @@ researcher:
   id: researcher
   role: research
   model: regular
-  mode: task
   subscriptions:
     - scan.requested
 `)
@@ -499,7 +510,7 @@ researcher:
 	}
 	agents := projection.ParsedJSON["agents"].(map[string]any)
 	researcher := agents["researcher"].(map[string]any)
-	if researcher["model"] != "regular" || researcher["mode"] != "task" {
+	if researcher["model"] != "regular" || researcher["memory"] != false || researcher["memory_source"] != "platform_default" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 	if _, ok := researcher["status"]; ok {

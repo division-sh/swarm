@@ -3,7 +3,6 @@ package sessions
 import (
 	"context"
 	"log"
-	"strings"
 	"sync"
 	"time"
 )
@@ -13,19 +12,17 @@ const (
 	maxLeaseHeartbeatInterval = 45 * time.Second
 )
 
-func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, runtimeMode RuntimeMode) func() {
-	return StartLeaseHeartbeatWithErrorHandler(ctx, sessions, lease, runtimeMode, nil)
+func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease) func() {
+	return StartLeaseHeartbeatWithErrorHandler(ctx, sessions, lease, nil)
 }
 
-func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, runtimeMode RuntimeMode, onError func(error)) func() {
+func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, onError func(error)) func() {
 	if sessions == nil || lease == nil {
 		return func() {}
 	}
-	agentID := strings.TrimSpace(lease.AgentID)
-	lockOwner := strings.TrimSpace(lease.LockOwner)
-	scopeKey := strings.TrimSpace(lease.ScopeKey)
-	sessionScope := lease.SessionScope
-	if agentID == "" || lockOwner == "" || runtimeMode == "" {
+	identity := lease.Identity.Normalize()
+	lockOwner := lease.LockOwner
+	if identity.Validate() != nil || lockOwner == "" {
 		return func() {}
 	}
 
@@ -45,12 +42,12 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
+				refreshed, err := sessions.Acquire(ctx, identity, lockOwner)
 				if err != nil {
 					if onError != nil {
 						onError(err)
 					} else {
-						log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode.String(), err)
+						log.Printf("agent memory lease heartbeat failed: agent=%s run=%s flow_instance=%s err=%v", identity.AgentID, identity.RunID, identity.FlowInstance, err)
 					}
 					continue
 				}

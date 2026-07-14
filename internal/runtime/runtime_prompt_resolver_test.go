@@ -65,7 +65,6 @@ worker-agent:
   id: worker-agent
   role: worker
   model: regular
-  mode: task
 `)
 	writeRuntimePromptResolverFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
 	writeRuntimePromptResolverFixtureFile(t, filepath.Join(root, "flows", "worker", "prompts", "worker-agent.md"), "threshold={{threshold}}\n")

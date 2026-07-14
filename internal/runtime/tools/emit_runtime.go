@@ -212,7 +212,7 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	if r.source == nil {
 		return EmitSchema{}, false
 	}
-	flowID := strings.TrimSpace(actor.Mode)
+	flowID := strings.TrimSpace(actor.FlowID)
 	if flowID == "" {
 		return EmitSchema{}, false
 	}
@@ -274,7 +274,7 @@ func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []err
 			if _, ok := validatedTools[toolName]; ok {
 				continue
 			}
-			flowID := strings.TrimSpace(actor.Mode)
+			flowID := strings.TrimSpace(actor.FlowID)
 			if flowID == "" {
 				continue
 			}
@@ -301,7 +301,7 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 		key := strings.Join([]string{
 			strings.TrimSpace(actor.ID),
 			strings.TrimSpace(actor.Role),
-			strings.TrimSpace(actor.Mode),
+			strings.TrimSpace(actor.FlowID),
 			strings.Join(UniqueNonEmpty(actor.EmitEvents), ","),
 		}, "|")
 		if key == "" {
@@ -316,25 +316,24 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 	for _, scope := range source.ProjectScopes() {
 		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
 			entry := scope.Agents[id]
-			proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+			proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
 				AgentID:         id,
 				ProjectScopeKey: scope.Key,
 			})
 			appendActor(models.AgentConfig{
-				ID:               strings.TrimSpace(id),
-				Type:             strings.TrimSpace(entry.Type),
-				Role:             strings.TrimSpace(entry.Role),
-				Mode:             strings.TrimSpace(proof.OwningFlowID),
-				Model:            strings.TrimSpace(entry.Model),
-				ConversationMode: strings.TrimSpace(entry.ConversationMode),
-				SessionScope:     strings.TrimSpace(entry.SessionScope),
-				MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-				Subscriptions:    UniqueNonEmpty(entry.Subscriptions),
-				EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
-				Criteria:         UniqueNonEmpty(entry.Criteria),
-				Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
-				Permissions:      UniqueNonEmpty(entry.Permissions),
-				FlowPath:         strings.Trim(strings.TrimSpace(proof.FlowPath), "/"),
+				ID:              strings.TrimSpace(id),
+				Type:            strings.TrimSpace(entry.Type),
+				Role:            strings.TrimSpace(entry.Role),
+				FlowID:          strings.TrimSpace(proof.OwningFlowID),
+				Model:           strings.TrimSpace(entry.Model),
+				Memory:          entry.MemoryPlan,
+				MaxTurnsPerTask: entry.MaxTurnsPerTask,
+				Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
+				EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
+				Criteria:        UniqueNonEmpty(entry.Criteria),
+				Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
+				Permissions:     UniqueNonEmpty(entry.Permissions),
+				FlowPath:        strings.Trim(strings.TrimSpace(proof.FlowPath), "/"),
 			})
 		}
 	}
@@ -342,38 +341,36 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
 			entry := scope.Agents[id]
 			appendActor(models.AgentConfig{
-				ID:               strings.TrimSpace(id),
-				Type:             strings.TrimSpace(entry.Type),
-				Role:             strings.TrimSpace(entry.Role),
-				Mode:             strings.TrimSpace(scope.ID),
-				Model:            strings.TrimSpace(entry.Model),
-				ConversationMode: strings.TrimSpace(entry.ConversationMode),
-				SessionScope:     strings.TrimSpace(entry.SessionScope),
-				MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-				Subscriptions:    UniqueNonEmpty(entry.Subscriptions),
-				EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
-				Criteria:         UniqueNonEmpty(entry.Criteria),
-				Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
-				Permissions:      UniqueNonEmpty(entry.Permissions),
-				FlowPath:         strings.Trim(strings.TrimSpace(scope.Path), "/"),
+				ID:              strings.TrimSpace(id),
+				Type:            strings.TrimSpace(entry.Type),
+				Role:            strings.TrimSpace(entry.Role),
+				FlowID:          strings.TrimSpace(scope.ID),
+				Model:           strings.TrimSpace(entry.Model),
+				Memory:          entry.MemoryPlan,
+				MaxTurnsPerTask: entry.MaxTurnsPerTask,
+				Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
+				EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
+				Criteria:        UniqueNonEmpty(entry.Criteria),
+				Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
+				Permissions:     UniqueNonEmpty(entry.Permissions),
+				FlowPath:        strings.Trim(strings.TrimSpace(scope.Path), "/"),
 			})
 		}
 	}
 	for _, id := range sortedEmitSchemaAgentIDs(source.AgentEntries()) {
 		entry := source.AgentEntries()[id]
 		appendActor(models.AgentConfig{
-			ID:               strings.TrimSpace(id),
-			Type:             strings.TrimSpace(entry.Type),
-			Role:             strings.TrimSpace(entry.Role),
-			Model:            strings.TrimSpace(entry.Model),
-			ConversationMode: strings.TrimSpace(entry.ConversationMode),
-			SessionScope:     strings.TrimSpace(entry.SessionScope),
-			MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-			Subscriptions:    UniqueNonEmpty(entry.Subscriptions),
-			EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
-			Criteria:         UniqueNonEmpty(entry.Criteria),
-			Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
-			Permissions:      UniqueNonEmpty(entry.Permissions),
+			ID:              strings.TrimSpace(id),
+			Type:            strings.TrimSpace(entry.Type),
+			Role:            strings.TrimSpace(entry.Role),
+			Model:           strings.TrimSpace(entry.Model),
+			Memory:          entry.MemoryPlan,
+			MaxTurnsPerTask: entry.MaxTurnsPerTask,
+			Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
+			EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
+			Criteria:        UniqueNonEmpty(entry.Criteria),
+			Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
+			Permissions:     UniqueNonEmpty(entry.Permissions),
 		})
 	}
 	return actors

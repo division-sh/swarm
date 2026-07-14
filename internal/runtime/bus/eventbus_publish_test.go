@@ -436,7 +436,7 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 		Config: runtimeactors.AgentConfig{
 			ID:     agentID,
 			Role:   "observer",
-			Mode:   "global",
+			FlowID: "global",
 			Type:   "stub",
 			Model:  "regular",
 			Config: []byte(`{}`),

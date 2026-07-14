@@ -189,7 +189,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	}
 	for _, want := range []string{
 		"mode: static as implicit coordinator declaration",
-		"agent mode or derived session_scope memory",
+		"agent memory intent as lifecycle or coordinator authority",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, coordinator, "non_authoritative_paths"), want) {
 			t.Fatalf("singleton_coordinator_model.non_authoritative_paths missing %q", want)

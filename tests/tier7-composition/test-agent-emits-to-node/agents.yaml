@@ -1,7 +1,6 @@
 test-agent:
   id: test-agent
   model: regular
-  mode: task
   subscriptions:
     - task.assigned
   emit_events:

@@ -568,6 +568,8 @@ type conversationForkSourceFixture struct {
 	turn2At   time.Time
 }
 
+const conversationForkSourceFlowInstance = "review"
+
 func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
@@ -586,29 +588,29 @@ func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) co
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, conversation_mode)
-		VALUES ($1, 'researcher', 'haiku', 'session')
-	`, source.agentID); err != nil {
+		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
+		VALUES ($1, $2, 'researcher', 'cheap', TRUE, 'authored')
+	`, source.agentID, conversationForkSourceFlowInstance); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope,
-			runtime_mode, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, 'global', 'global', 'session', 'active', $4, $4)
-	`, source.sessionID, source.runID, source.agentID, base.Add(-3*time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, TRUE, 'authored', 'active', $5, $5)
+	`, source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source,
 			trigger_event_id, trigger_event_type, parse_ok, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, 'task.ready', true, $6),
-			($7::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $8::uuid, 'task.done', true, $9)
-	`, source.turn1ID, source.runID, source.agentID, source.sessionID, source.event1ID, source.turn1At, source.turn2ID, source.event2ID, source.turn2At); err != nil {
+			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', true, $7),
+			($8::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $9::uuid, 'task.done', true, $10)
+	`, source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, source.turn1At, source.turn2ID, source.event2ID, source.turn2At); err != nil {
 		t.Fatalf("seed turns: %v", err)
 	}
 	return source

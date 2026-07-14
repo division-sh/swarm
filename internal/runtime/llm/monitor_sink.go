@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 const defaultMonitorDir = "/tmp/runtime-monitor"
@@ -16,9 +18,8 @@ type MonitorTurnMeta struct {
 	AgentID                  string
 	Runtime                  string
 	SessionID                string
-	ScopeKey                 string
-	SessionScope             string
-	ConversationMode         string
+	Memory                   agentmemory.Plan
+	MemoryIdentity           agentmemory.Identity
 	InputRole                string
 	InputText                string
 	TargetName               string
@@ -82,10 +83,11 @@ func (s *fileMonitorSink) OpenTurn(_ context.Context, meta MonitorTurnMeta) (Mon
 	}
 	w := &fileMonitorTurnWriter{file: f}
 	w.WriteNotice(
-		"turn.start runtime=%s session=%s scope=%s role=%s target=%s input=%s",
+		"turn.start runtime=%s session=%s memory=%t flow_instance=%s role=%s target=%s input=%s",
 		strings.TrimSpace(meta.Runtime),
 		strings.TrimSpace(meta.SessionID),
-		strings.TrimSpace(meta.ScopeKey),
+		meta.Memory.Enabled,
+		strings.TrimSpace(meta.MemoryIdentity.FlowInstance),
 		strings.TrimSpace(meta.InputRole),
 		strings.TrimSpace(meta.TargetName),
 		snippetForLog(meta.InputText, 240),

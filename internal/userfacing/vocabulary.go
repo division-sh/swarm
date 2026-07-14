@@ -31,7 +31,6 @@ var profileTerms = map[VocabularyProfile][]ForbiddenTerm{
 		{Text: "heuristic"},
 		{Text: "quiescence"},
 		{Text: "runtime_state"},
-		{Text: "session_scope"},
 		{Text: "blocking_layer"},
 		{Text: "blocking_reason"},
 		{Text: "current_session_ref"},

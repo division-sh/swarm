@@ -460,41 +460,10 @@ role: researcher
 type: managed
 model: regular
 model_tier: sonnet
-mode: task
 subscriptions: [scan.requested]
 `), &entry)
 	if err == nil || !strings.Contains(err.Error(), "model_tier is retired") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired model_tier rejection", err)
-	}
-}
-
-func TestAgentRegistryEntryDerivesRuntimeScopeFromAuthoredMode(t *testing.T) {
-	tests := []struct {
-		name      string
-		mode      string
-		wantScope string
-	}{
-		{name: "task", mode: "task"},
-		{name: "session", mode: "session", wantScope: "flow"},
-		{name: "session_per_entity", mode: "session_per_entity", wantScope: "entity"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(`
-role: researcher
-type: managed
-model: regular
-mode: `+tt.mode+`
-subscriptions: [scan.requested]
-`), &entry)
-			if err != nil {
-				t.Fatalf("yaml.Unmarshal: %v", err)
-			}
-			if entry.Mode != tt.mode || entry.ConversationMode != tt.mode || entry.SessionScope != tt.wantScope {
-				t.Fatalf("entry mode/scope = (%q, %q, %q), want (%q, %q, %q)", entry.Mode, entry.ConversationMode, entry.SessionScope, tt.mode, tt.mode, tt.wantScope)
-			}
-		})
 	}
 }
 
@@ -512,8 +481,8 @@ subscriptions: [scan.requested]
 	if effective.Type != DefaultAgentType {
 		t.Fatalf("type = %q, want %q", effective.Type, DefaultAgentType)
 	}
-	if effective.Mode != DefaultAgentMode || effective.ConversationMode != DefaultAgentMode || effective.SessionScope != "" {
-		t.Fatalf("mode/conversation/session = (%q, %q, %q), want task/task/empty", effective.Mode, effective.ConversationMode, effective.SessionScope)
+	if effective.MemoryPlan.Enabled {
+		t.Fatalf("memory enabled = true, want false")
 	}
 	if effective.MaxTurnsPerTask != DefaultAgentMaxTurnsPerTask {
 		t.Fatalf("max_turns_per_task = %d, want %d", effective.MaxTurnsPerTask, DefaultAgentMaxTurnsPerTask)
@@ -521,7 +490,7 @@ subscriptions: [scan.requested]
 	if effective.WorkspaceClass != "" {
 		t.Fatalf("workspace_class = %q, want empty", effective.WorkspaceClass)
 	}
-	for _, field := range []string{"type", "mode", "max_turns_per_task", "workspace_class"} {
+	for _, field := range []string{"type", "memory", "max_turns_per_task", "workspace_class"} {
 		if got := effective.EffectiveSourceForField(field); got != AgentFieldSourcePlatformDefault {
 			t.Fatalf("%s source = %q, want %q", field, got, AgentFieldSourcePlatformDefault)
 		}
@@ -537,7 +506,7 @@ func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
 		body     string
 		contains string
 	}{
-		{name: "empty_mode", body: "mode:\n", contains: "mode is required"},
+		{name: "invalid_memory", body: "memory: sometimes\n", contains: "cannot unmarshal"},
 		{name: "zero_max_turns", body: "max_turns_per_task: 0\n", contains: "max_turns_per_task must be positive"},
 		{name: "negative_max_turns", body: "max_turns_per_task: -1\n", contains: "max_turns_per_task must be positive"},
 	}
@@ -563,11 +532,11 @@ func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T
 		contains string
 	}{
 		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "conversation_mode is retired"},
-		{name: "session_scope", body: "mode: session\nsession_scope: flow\n", contains: "session_scope is runtime-derived from mode"},
-		{name: "session_scope_authority", body: "mode: session\nsession_scope_authority: platform_internal\n", contains: "session_scope_authority is platform-internal"},
-		{name: "mode_global", body: "mode: global\n", contains: "reserved"},
-		{name: "mode_unknown", body: "mode: forever\n", contains: "invalid mode"},
-		{name: "mode_stateless", body: "mode: stateless\n", contains: "retired"},
+		{name: "session_scope", body: "session_scope: flow\n", contains: "session_scope is retired"},
+		{name: "session_scope_authority", body: "session_scope_authority: platform_internal\n", contains: "session_scope_authority is retired"},
+		{name: "mode_global", body: "mode: global\n", contains: "mode is retired"},
+		{name: "mode_unknown", body: "mode: forever\n", contains: "mode is retired"},
+		{name: "mode_stateless", body: "mode: stateless\n", contains: "mode is retired"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -904,7 +873,6 @@ func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
 role: researcher
 type: managed
 model: regular
-mode: task
 subscriptions: [scan.requested]
 `+tt.body), &entry)
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {

@@ -798,8 +798,8 @@ func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settleme
 }
 
 func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.AgentID) {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.AgentID})
+	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.Identity.AgentID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.Identity.AgentID})
 	}
 	var epoch, generation int64
 	var phase string
@@ -816,8 +816,8 @@ func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req c
 }
 
 func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.AgentID) {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.AgentID})
+	if !req.Token.Valid() || strings.TrimSpace(req.Token.AgentID) != strings.TrimSpace(req.Identity.AgentID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_id": req.Identity.AgentID})
 	}
 	var epoch, generation int64
 	var phase string
@@ -839,15 +839,15 @@ func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req completion
 		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object('provider_session_id', $1::text),
 		    updated_at = $2
 		WHERE session_id = $3::uuid
-		  AND agent_id = $4
-		  AND runtime_mode = $5
-		  AND scope_key = $6
+		  AND run_id = $4::uuid
+		  AND agent_id = $5
+		  AND flow_instance = $6
 		  AND status = 'active'
 		  AND lease_holder = $7
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at > $2
 		  AND COALESCE(runtime_state->>'provider_session_id', '') = $8
-	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.AgentID), strings.TrimSpace(req.RuntimeMode), strings.TrimSpace(req.ScopeKey), strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead))
+	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), req.Identity.RunID, req.Identity.AgentID, req.Identity.FlowInstance, strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead))
 	if err != nil {
 		return fmt.Errorf("promote provider head: %w", err)
 	}
@@ -873,15 +873,15 @@ func promoteProviderHeadSQLiteTx(ctx context.Context, tx *sql.Tx, req completion
 		SET runtime_state = json_set(COALESCE(runtime_state, '{}'), '$.provider_session_id', ?),
 		    updated_at = ?
 		WHERE session_id = ?
+		  AND run_id = ?
 		  AND agent_id = ?
-		  AND runtime_mode = ?
-		  AND scope_key = ?
+		  AND flow_instance = ?
 		  AND status = 'active'
 		  AND lease_holder = ?
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at > ?
 		  AND COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') = ?
-	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.AgentID), strings.TrimSpace(req.RuntimeMode), strings.TrimSpace(req.ScopeKey), strings.TrimSpace(req.LockOwner), req.Now.UTC(), strings.TrimSpace(req.ExpectedProviderHead))
+	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), req.Identity.RunID, req.Identity.AgentID, req.Identity.FlowInstance, strings.TrimSpace(req.LockOwner), req.Now.UTC(), strings.TrimSpace(req.ExpectedProviderHead))
 	if err != nil {
 		return fmt.Errorf("promote sqlite provider head: %w", err)
 	}

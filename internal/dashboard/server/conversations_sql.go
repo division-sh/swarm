@@ -64,17 +64,17 @@ func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.
 
 func conversationSummaryFromOperator(item store.OperatorConversationSummary) ConversationSummary {
 	return ConversationSummary{
-		SessionID:   strings.TrimSpace(item.SessionID),
-		AgentID:     strings.TrimSpace(item.AgentID),
-		Kind:        strings.TrimSpace(item.Kind),
-		ScopeKey:    strings.TrimSpace(item.ScopeKey),
-		Scope:       strings.TrimSpace(item.Scope),
-		RuntimeMode: strings.TrimSpace(item.RuntimeMode),
-		Status:      strings.TrimSpace(item.Status),
-		TurnCount:   item.TurnCount,
-		Summary:     strings.TrimSpace(item.Summary),
-		UpdatedAt:   formatTime(item.UpdatedAt),
-		Metadata:    conversationMetadataFromOperator(item.Metadata),
+		SessionID:    strings.TrimSpace(item.SessionID),
+		AgentID:      strings.TrimSpace(item.AgentID),
+		Kind:         strings.TrimSpace(item.Kind),
+		FlowInstance: strings.TrimSpace(item.FlowInstance),
+		Memory:       item.Memory,
+		MemorySource: strings.TrimSpace(item.MemorySource),
+		Status:       strings.TrimSpace(item.Status),
+		TurnCount:    item.TurnCount,
+		Summary:      strings.TrimSpace(item.Summary),
+		UpdatedAt:    formatTime(item.UpdatedAt),
+		Metadata:     conversationMetadataFromOperator(item.Metadata),
 	}
 }
 

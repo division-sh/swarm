@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -268,8 +269,8 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if err := am.validateNativeToolAdmission(ctx, rec.Config); err != nil {
 		return err
 	}
-	if _, err := sessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
-		return fmt.Errorf("invalid agent session scope: %w", err)
+	if err := agentmemory.ValidateFlowOwnership(rec.Config.Memory, rec.Config.CanonicalFlowPath()); err != nil {
+		return fmt.Errorf("invalid agent memory plan: %w", err)
 	}
 	a, err := am.buildAgent(rec.Config)
 	if err != nil {
@@ -419,7 +420,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {
-	if !sessions.IsLiveSessionRuntimeMode(strings.TrimSpace(current.ConversationMode)) {
+	if !current.Memory.Enabled {
 		return sessions.LifecycleMutationPlan{Action: sessions.LifecycleMutationNone}
 	}
 	plan := sessions.LifecycleMutationPlan{
@@ -427,11 +428,7 @@ func reconfigureSessionMutationPlan(current, updated models.AgentConfig) session
 		TerminationReason: sessions.TerminationReasonNormal,
 		TerminationDetail: "agent_reconfigured_identity_changed",
 	}
-	if !sessions.IsLiveSessionRuntimeMode(strings.TrimSpace(updated.ConversationMode)) {
-		return plan
-	}
-	if sessions.NormalizeConversationRuntimeMode(current.ConversationMode) != sessions.NormalizeConversationRuntimeMode(updated.ConversationMode) ||
-		sessions.NormalizeSessionScope(current.SessionScope) != sessions.NormalizeSessionScope(updated.SessionScope) {
+	if !updated.Memory.Enabled {
 		return plan
 	}
 	return sessions.LifecycleMutationPlan{

@@ -7,24 +7,22 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type persistedAgentRuntimeDescriptor struct {
-	Type                  string                         `json:"type,omitempty"`
-	Mode                  string                         `json:"mode,omitempty"`
-	Model                 string                         `json:"model,omitempty"`
-	ResolvedModel         string                         `json:"resolved_model,omitempty"`
-	ResolvedLLMProvider   string                         `json:"resolved_llm_provider,omitempty"`
-	ResolvedLLMTransport  string                         `json:"resolved_llm_transport,omitempty"`
-	SessionScope          string                         `json:"session_scope,omitempty"`
-	SessionScopeAuthority string                         `json:"session_scope_authority,omitempty"`
-	MaxTurnsPerTask       int                            `json:"max_turns_per_task,omitempty"`
-	NativeTools           runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
-	WorkspaceClass        string                         `json:"workspace_class,omitempty"`
-	ManagerFallback       string                         `json:"manager_fallback,omitempty"`
+	Type                 string                         `json:"type,omitempty"`
+	FlowID               string                         `json:"flow_id,omitempty"`
+	Model                string                         `json:"model,omitempty"`
+	ResolvedModel        string                         `json:"resolved_model,omitempty"`
+	ResolvedLLMProvider  string                         `json:"resolved_llm_provider,omitempty"`
+	ResolvedLLMTransport string                         `json:"resolved_llm_transport,omitempty"`
+	MaxTurnsPerTask      int                            `json:"max_turns_per_task,omitempty"`
+	NativeTools          runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
+	WorkspaceClass       string                         `json:"workspace_class,omitempty"`
+	ManagerFallback      string                         `json:"manager_fallback,omitempty"`
 }
 
 type persistedAgentProjection struct {
@@ -33,7 +31,8 @@ type persistedAgentProjection struct {
 	Role              string
 	Model             string
 	LLMBackend        string
-	ConversationMode  string
+	MemoryEnabled     bool
+	MemorySource      string
 	ParentAgentID     string
 	EntityID          string
 	ConfigJSON        []byte
@@ -56,6 +55,7 @@ var runtimeConfigKeys = map[string]struct{}{
 	"conversation_mode":       {},
 	"session_scope":           {},
 	"session_scope_authority": {},
+	"memory":                  {},
 	"max_turns_per_task":      {},
 	"subscriptions":           {},
 	"emit_events":             {},
@@ -65,22 +65,28 @@ var runtimeConfigKeys = map[string]struct{}{
 	"workspace_class":         {},
 	"manager_fallback":        {},
 	"flow_path":               {},
+	"flow_id":                 {},
 	"flow_instance":           {},
 }
 
-var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
-	"type":                    {},
+var retiredAgentMemoryConfigKeys = map[string]struct{}{
 	"mode":                    {},
-	"model":                   {},
-	"resolved_model":          {},
-	"resolved_llm_provider":   {},
-	"resolved_llm_transport":  {},
+	"conversation_mode":       {},
 	"session_scope":           {},
 	"session_scope_authority": {},
-	"max_turns_per_task":      {},
-	"native_tools":            {},
-	"workspace_class":         {},
-	"manager_fallback":        {},
+}
+
+var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
+	"type":                   {},
+	"flow_id":                {},
+	"model":                  {},
+	"resolved_model":         {},
+	"resolved_llm_provider":  {},
+	"resolved_llm_transport": {},
+	"max_turns_per_task":     {},
+	"native_tools":           {},
+	"workspace_class":        {},
+	"manager_fallback":       {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -92,11 +98,31 @@ func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 	if len(raw) > 0 && json.Valid(raw) {
 		_ = json.Unmarshal(raw, &obj)
 	}
+	retired := make([]string, 0)
+	for key := range retiredAgentMemoryConfigKeys {
+		if _, exists := obj[key]; exists {
+			retired = append(retired, key)
+		}
+	}
+	if constraints, ok := obj["constraints"].(map[string]any); ok {
+		for key := range retiredAgentMemoryConfigKeys {
+			if _, exists := constraints[key]; exists {
+				retired = append(retired, "constraints."+key)
+			}
+		}
+	}
+	if len(retired) > 0 {
+		sort.Strings(retired)
+		return nil, fmt.Errorf("retired agent memory fields are not accepted: %s; use memory", strings.Join(retired, ", "))
+	}
 	for key := range runtimeConfigKeys {
 		delete(obj, key)
 	}
 	if constraints, ok := obj["constraints"].(map[string]any); ok {
 		delete(constraints, "conversation_mode")
+		delete(constraints, "session_scope")
+		delete(constraints, "session_scope_authority")
+		delete(constraints, "memory")
 		delete(constraints, "max_turns_per_task")
 		if len(constraints) == 0 {
 			delete(obj, "constraints")
@@ -117,9 +143,12 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return persistedAgentProjection{}, err
 	}
-	conversationMode, err := agentConversationMode(cfg)
+	memory, err := cfg.Memory.Normalize()
 	if err != nil {
-		return persistedAgentProjection{}, fmt.Errorf("invalid conversation mode: %w", err)
+		return persistedAgentProjection{}, fmt.Errorf("invalid memory plan: %w", err)
+	}
+	if err := agentmemory.ValidateFlowOwnership(memory, cfg.FlowPath); err != nil {
+		return persistedAgentProjection{}, err
 	}
 	llmBackend, err := agentLLMBackend(cfg)
 	if err != nil {
@@ -139,7 +168,8 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		Role:              strings.TrimSpace(cfg.Role),
 		Model:             modelAlias,
 		LLMBackend:        llmBackend,
-		ConversationMode:  conversationMode.String(),
+		MemoryEnabled:     memory.Enabled,
+		MemorySource:      string(memory.Source),
 		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
 		EntityID:          cfg.EffectiveEntityID(),
 		ConfigJSON:        configJSON,
@@ -171,9 +201,9 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid llm_backend %q: %w", strings.TrimSpace(row.AgentID), llmBackend, err)
 	}
 	llmBackend = profile.ID
-	conversationMode, err := runtimesessions.ParseConversationRuntimeMode(row.ConversationMode)
+	memory, err := agentmemory.NewPlan(row.MemoryEnabled, agentmemory.Source(row.MemorySource))
 	if err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), strings.TrimSpace(row.ConversationMode), err)
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid memory plan: %w", strings.TrimSpace(row.AgentID), err)
 	}
 	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid opaque config: %w", strings.TrimSpace(row.AgentID), err)
@@ -182,59 +212,50 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid runtime_descriptor: %w", strings.TrimSpace(row.AgentID), err)
 	}
-	sessionScope, err := runtimesessions.ValidateSessionScopeIntent(conversationMode, desc.SessionScope)
-	if err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid session scope: %w", strings.TrimSpace(row.AgentID), err)
-	}
-
 	cfg := runtimeactors.AgentConfig{
-		ID:                    strings.TrimSpace(row.AgentID),
-		Type:                  desc.Type,
-		Role:                  strings.TrimSpace(row.Role),
-		Mode:                  desc.Mode,
-		Model:                 modelAlias,
-		LLMBackend:            llmBackend,
-		ResolvedModel:         strings.TrimSpace(desc.ResolvedModel),
-		ResolvedLLMProvider:   strings.TrimSpace(desc.ResolvedLLMProvider),
-		ResolvedLLMTransport:  strings.TrimSpace(desc.ResolvedLLMTransport),
-		ConversationMode:      conversationMode.String(),
-		SessionScope:          sessionScope.String(),
-		SessionScopeAuthority: desc.SessionScopeAuthority,
-		MaxTurnsPerTask:       desc.MaxTurnsPerTask,
-		Subscriptions:         decodeJSONStringList(row.SubscriptionsJSON),
-		EmitEvents:            decodeJSONStringList(row.EmitEventsJSON),
-		Tools:                 decodeJSONStringList(row.ToolsJSON),
-		Permissions:           decodeJSONStringList(row.PermissionsJSON),
-		NativeTools:           desc.NativeTools,
-		WorkspaceClass:        desc.WorkspaceClass,
-		ManagerFallback:       desc.ManagerFallback,
-		FlowPath:              strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
-		EntityID:              strings.TrimSpace(row.EntityID),
-		ParentAgent:           strings.TrimSpace(row.ParentAgentID),
-		Config:                append(json.RawMessage(nil), row.ConfigJSON...),
+		ID:                   strings.TrimSpace(row.AgentID),
+		Type:                 desc.Type,
+		Role:                 strings.TrimSpace(row.Role),
+		FlowID:               desc.FlowID,
+		Model:                modelAlias,
+		LLMBackend:           llmBackend,
+		ResolvedModel:        strings.TrimSpace(desc.ResolvedModel),
+		ResolvedLLMProvider:  strings.TrimSpace(desc.ResolvedLLMProvider),
+		ResolvedLLMTransport: strings.TrimSpace(desc.ResolvedLLMTransport),
+		Memory:               memory,
+		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
+		Subscriptions:        decodeJSONStringList(row.SubscriptionsJSON),
+		EmitEvents:           decodeJSONStringList(row.EmitEventsJSON),
+		Tools:                decodeJSONStringList(row.ToolsJSON),
+		Permissions:          decodeJSONStringList(row.PermissionsJSON),
+		NativeTools:          desc.NativeTools,
+		WorkspaceClass:       desc.WorkspaceClass,
+		ManagerFallback:      desc.ManagerFallback,
+		FlowPath:             strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
+		EntityID:             strings.TrimSpace(row.EntityID),
+		ParentAgent:          strings.TrimSpace(row.ParentAgentID),
+		Config:               append(json.RawMessage(nil), row.ConfigJSON...),
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
-	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid session scope: %w", strings.TrimSpace(row.AgentID), err)
+	if err := agentmemory.ValidateFlowOwnership(cfg.Memory, cfg.FlowPath); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid memory plan: %w", strings.TrimSpace(row.AgentID), err)
 	}
 	return cfg, nil
 }
 
 func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias string) ([]byte, error) {
 	desc := persistedAgentRuntimeDescriptor{
-		Type:                  agentPersistedType(cfg, modelAlias),
-		Mode:                  strings.TrimSpace(cfg.Mode),
-		Model:                 strings.TrimSpace(modelAlias),
-		ResolvedModel:         strings.TrimSpace(cfg.ResolvedModel),
-		ResolvedLLMProvider:   strings.TrimSpace(cfg.ResolvedLLMProvider),
-		ResolvedLLMTransport:  strings.TrimSpace(cfg.ResolvedLLMTransport),
-		SessionScope:          strings.TrimSpace(cfg.SessionScope),
-		SessionScopeAuthority: strings.TrimSpace(cfg.SessionScopeAuthority),
-		MaxTurnsPerTask:       cfg.MaxTurnsPerTask,
-		NativeTools:           cfg.NativeTools,
-		WorkspaceClass:        strings.TrimSpace(cfg.WorkspaceClass),
-		ManagerFallback:       strings.TrimSpace(cfg.ManagerFallback),
+		Type:                 agentPersistedType(cfg, modelAlias),
+		FlowID:               strings.TrimSpace(cfg.FlowID),
+		Model:                strings.TrimSpace(modelAlias),
+		ResolvedModel:        strings.TrimSpace(cfg.ResolvedModel),
+		ResolvedLLMProvider:  strings.TrimSpace(cfg.ResolvedLLMProvider),
+		ResolvedLLMTransport: strings.TrimSpace(cfg.ResolvedLLMTransport),
+		MaxTurnsPerTask:      cfg.MaxTurnsPerTask,
+		NativeTools:          cfg.NativeTools,
+		WorkspaceClass:       strings.TrimSpace(cfg.WorkspaceClass),
+		ManagerFallback:      strings.TrimSpace(cfg.ManagerFallback),
 	}
 	if !desc.NativeTools.Any() {
 		desc.NativeTools = runtimeactors.NativeToolConfig{}
@@ -261,18 +282,13 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDes
 		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("decode runtime_descriptor: %w", err)
 	}
 	desc.Type = strings.TrimSpace(desc.Type)
-	desc.Mode = strings.TrimSpace(desc.Mode)
+	desc.FlowID = strings.TrimSpace(desc.FlowID)
 	desc.Model = strings.TrimSpace(desc.Model)
 	desc.ResolvedModel = strings.TrimSpace(desc.ResolvedModel)
 	desc.ResolvedLLMProvider = strings.TrimSpace(desc.ResolvedLLMProvider)
 	desc.ResolvedLLMTransport = strings.TrimSpace(desc.ResolvedLLMTransport)
-	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
-	desc.SessionScopeAuthority = strings.TrimSpace(desc.SessionScopeAuthority)
 	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
 	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
-	if desc.SessionScopeAuthority != "" && desc.SessionScopeAuthority != runtimeactors.SessionScopeAuthorityPlatformInternal {
-		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("unsupported session_scope_authority %q", desc.SessionScopeAuthority)
-	}
 	if desc.Type == "" {
 		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("missing type")
 	}
@@ -359,7 +375,7 @@ func validateOpaqueAgentConfig(raw []byte) error {
 		}
 	}
 	if constraints, ok := obj["constraints"].(map[string]any); ok {
-		for _, key := range []string{"conversation_mode", "max_turns_per_task"} {
+		for _, key := range []string{"conversation_mode", "session_scope", "session_scope_authority", "memory", "max_turns_per_task"} {
 			if _, exists := constraints[key]; exists {
 				conflicts = append(conflicts, "constraints."+key)
 			}

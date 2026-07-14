@@ -66,11 +66,6 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 		t.Fatalf("many active err = %v, want ambiguous", err)
 	}
 
-	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000301", "agent-null", "")
-	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, "agent-null", "")
-	if !errors.Is(err, runtimeagentcontrol.ErrAmbiguousRunTarget) {
-		t.Fatalf("null run active err = %v, want ambiguous", err)
-	}
 }
 
 func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *PostgresStore) {
@@ -93,15 +88,13 @@ func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *Postg
 		);
 		CREATE TABLE agent_sessions (
 			session_id UUID PRIMARY KEY,
-			run_id UUID REFERENCES runs(run_id),
+			run_id UUID NOT NULL REFERENCES runs(run_id),
 			agent_id TEXT NOT NULL,
-			entity_id UUID,
-			flow_instance TEXT,
-			scope_key TEXT NOT NULL,
-			scope TEXT NOT NULL DEFAULT 'global',
+			flow_instance TEXT NOT NULL,
+			memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			memory_source TEXT NOT NULL DEFAULT 'authored',
 			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
 			turn_count INTEGER NOT NULL DEFAULT 0,
-			runtime_mode TEXT NOT NULL DEFAULT 'session',
 			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
 			lease_holder TEXT,
 			lease_expires_at TIMESTAMPTZ,
@@ -127,18 +120,9 @@ func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, ru
 
 func insertDirectiveSession(t *testing.T, ctx context.Context, pg *PostgresStore, sessionID, agentID, runID string) {
 	t.Helper()
-	if runID == "" {
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO agent_sessions (session_id, agent_id, scope_key, scope, runtime_mode, status)
-			VALUES ($1::uuid, $2, 'global', 'global', 'session', 'active')
-		`, sessionID, agentID); err != nil {
-			t.Fatalf("insert session %s: %v", sessionID, err)
-		}
-		return
-	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status)
-		VALUES ($1::uuid, $2::uuid, $3, 'global', 'global', 'session', 'active')
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+		VALUES ($1::uuid, $2::uuid, $3, 'directive', TRUE, 'authored', 'active')
 	`, sessionID, runID, agentID); err != nil {
 		t.Fatalf("insert session %s: %v", sessionID, err)
 	}

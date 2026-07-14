@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 const (
@@ -58,11 +56,10 @@ func conversationWatchdogThresholds(turnTimeout time.Duration) (time.Duration, t
 }
 
 func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter, store ConversationPersistence, events EventPublisher, meta MonitorTurnMeta) MonitorTurnWriter {
-	if store == nil || strings.TrimSpace(meta.AgentID) == "" || strings.TrimSpace(meta.SessionID) == "" || strings.TrimSpace(meta.ConversationMode) == "" {
+	if store == nil || strings.TrimSpace(meta.AgentID) == "" || strings.TrimSpace(meta.SessionID) == "" || !meta.Memory.Enabled {
 		return base
 	}
-	mode, err := sessions.ParseConversationRuntimeMode(meta.ConversationMode)
-	if err != nil || mode.IsStateless() {
+	if err := meta.MemoryIdentity.Validate(); err != nil {
 		return base
 	}
 	longRunningAfter := meta.WatchdogLongRunningAfter
@@ -186,12 +183,10 @@ func (w *sessionWatchdogMonitorWriter) emit(state, action, outcome string, lastO
 		payload.LastOutputAt = lastOutputAt.UTC().Format(time.RFC3339Nano)
 	}
 	if err := w.store.UpdateLiveSessionWatchdog(w.ctx, ConversationWatchdogUpdate{
-		SessionID:    strings.TrimSpace(w.meta.SessionID),
-		AgentID:      strings.TrimSpace(w.meta.AgentID),
-		SessionScope: strings.TrimSpace(w.meta.SessionScope),
-		ScopeKey:     strings.TrimSpace(w.meta.ScopeKey),
-		Mode:         strings.TrimSpace(w.meta.ConversationMode),
-		Watchdog:     payload,
+		SessionID: strings.TrimSpace(w.meta.SessionID),
+		AgentID:   strings.TrimSpace(w.meta.AgentID),
+		Identity:  w.meta.MemoryIdentity.Normalize(),
+		Watchdog:  payload,
 	}); err != nil {
 		logPublisherRuntime(w.ctx, w.events, "warn", "persist_session_watchdog_failed", "Persisting live session watchdog state failed", strings.TrimSpace(w.meta.AgentID), strings.TrimSpace(w.meta.SessionID), "", map[string]any{
 			"watchdog_state":  payload.State,

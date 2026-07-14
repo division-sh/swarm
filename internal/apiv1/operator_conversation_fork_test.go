@@ -630,7 +630,7 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	r.actorModel = actor.Model
 	r.authority, _ = runtimeeffects.CompletionAuthorityFromContext(ctx)
-	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID, RuntimeMode: "task"}, nil
+	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID}, nil
 }
 
 func (r *forkChatScriptedRuntime) ContinueSession(_ context.Context, _ *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {

@@ -37,7 +37,7 @@ func TestAgentViewJSONPreservesAPIResultShape(t *testing.T) {
 		t.Fatalf("decode stdout: %v\n%s", err, stdout.String())
 	}
 	agent, ok := decoded["agent"].(map[string]any)
-	if !ok || agent["agent_id"] != "agent-1" || agent["status"] != "running" || agent["mode"] != "task" {
+	if !ok || agent["agent_id"] != "agent-1" || agent["status"] != "running" || agent["memory"] != false || agent["memory_source"] != "platform_default" {
 		t.Fatalf("agent machine shape = %#v", decoded["agent"])
 	}
 	if _, ok := decoded["current_session_ref"].(map[string]any); !ok {

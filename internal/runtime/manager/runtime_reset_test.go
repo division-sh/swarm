@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -49,17 +50,17 @@ type resetTestRegistry struct {
 	summary sessions.ResetSummary
 }
 
-func (*resetTestRegistry) Acquire(context.Context, string, sessions.RuntimeMode, sessions.SessionScope, string, string) (*sessions.Lease, error) {
+func (*resetTestRegistry) Acquire(context.Context, agentmemory.Identity, string) (*sessions.Lease, error) {
 	return nil, nil
 }
 func (*resetTestRegistry) Release(context.Context, *sessions.Lease) error { return nil }
-func (*resetTestRegistry) Rotate(context.Context, string, sessions.RuntimeMode, sessions.SessionScope, string, sessions.RotationMetadata, string) (*sessions.Lease, error) {
+func (*resetTestRegistry) Rotate(context.Context, agentmemory.Identity, string, sessions.RotationMetadata) (*sessions.Lease, error) {
 	return nil, nil
 }
-func (*resetTestRegistry) IncrementTurn(context.Context, string, sessions.RuntimeMode, sessions.SessionScope, string, string) error {
+func (*resetTestRegistry) IncrementTurn(context.Context, agentmemory.Identity, string) error {
 	return nil
 }
-func (r *resetTestRegistry) ResetAll(sessions.RuntimeMode, sessions.ResetMetadata) (sessions.ResetSummary, error) {
+func (r *resetTestRegistry) ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error) {
 	return r.summary, nil
 }
 
@@ -103,8 +104,8 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 		OrphanedSessions: []sessions.ResetDisposition{{
 			SessionID:         "sess-1",
 			AgentID:           "agent-a",
-			RuntimeMode:       sessions.RuntimeModeSession,
-			ScopeKey:          "global",
+			RunID:             "run-1",
+			FlowInstance:      "support/inst-1",
 			PreviousStatus:    "active",
 			TerminationReason: sessions.TerminationReasonOrphaned.String(),
 			TerminationDetail: "admin_cli",
@@ -112,8 +113,7 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 	}}
 
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
-		RuntimeMode: "session",
-		Sessions:    registry,
+		Sessions: registry,
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)

@@ -527,11 +527,62 @@ pins:
       chat_id: "{{input.chat_id}}"
       text: "{{input.text}}"
 `, toolURL),
-		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot-{instance_id}\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  mode: session_per_entity\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
+		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot-{instance_id}\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
 		"flows/telegram-chat/prompts/phrase-bot.md": "Reply to each Telegram message by emitting telegram.reply_requested with the same chat_id.\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, filepath.ToSlash(name), source)
+	}
+	return root
+}
+
+// CopyStandingTelegramMemoryServe extends the supported Telegram route with a
+// standing singleton so memory continuity is proven for both flow modes.
+func CopyStandingTelegramMemoryServe(t testing.TB, telegramBaseURL string) string {
+	t.Helper()
+	root := CopyStandingTelegramServe(t, telegramBaseURL)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "  - {id: telegram-chat, flow: telegram-chat, mode: template}\n", `  - {id: telegram-chat, flow: telegram-chat, mode: template}
+  - id: memory-singleton
+    flow: memory-singleton
+    mode: singleton
+    activation: standing
+`)
+	files := map[string]string{
+		"flows/memory-singleton/schema.yaml": `name: memory-singleton
+mode: singleton
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - {name: memory_ping, event: memory.ping, source: external}
+  outputs: {events: []}
+`,
+		"flows/memory-singleton/events.yaml": "memory.ping:\n  text: text\n",
+		"flows/memory-singleton/agents.yaml": `memory-bot:
+  id: memory-bot
+  role: memory_bot
+  prompt_ref: memory-bot
+  model: regular
+  memory: true
+  subscriptions: [memory.ping]
+`,
+		"flows/memory-singleton/prompts/memory-bot.md": "Remember each singleton ping and answer with observed.\n",
+		"flows/memory-singleton/types.yaml":            "{}\n",
+		"flows/memory-singleton/entities.yaml": `memory_state:
+  last_ping:
+    type: text
+    initial: ""
+  pings:
+    type: map[text]json
+    initial: {}
+`,
+		"flows/memory-singleton/nodes.yaml":  "{}\n",
+		"flows/memory-singleton/tools.yaml":  "{}\n",
+		"flows/memory-singleton/policy.yaml": "{}\n",
+	}
+	for name, source := range files {
+		writeClosedVariantFile(t, root, name, source)
 	}
 	return root
 }

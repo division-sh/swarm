@@ -266,8 +266,8 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(harness.Context("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
+	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

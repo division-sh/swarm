@@ -331,7 +331,6 @@ flows:
   role: strict_schema_agent
   prompt_ref: strict-schema-agent
   model: regular
-  mode: task
   subscriptions: [task.assigned]
   emit_events: [missing.event]
 `)
@@ -408,7 +407,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n  swarm:\n    source: external\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  prompt_ref: "+agentID+"\n  model: regular\n  mode: task\n  subscriptions: [agent.requested]\n")
+	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  prompt_ref: "+agentID+"\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")
 	for _, file := range []string{"policy.yaml", "tools.yaml", "entities.yaml"} {
 		writeClosedVariantFile(t, root, file, "{}\n")

@@ -5,23 +5,24 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath(t *testing.T) {
-	source := loadPackageBackedRuntimeSessionScopeSource(t)
-	assertRuntimeStartCarriesFlowPath(t, source)
+func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
+	source := loadPackageBackedRuntimeAgentMemorySource(t)
+	assertRuntimeStartCarriesMemoryIdentity(t, source)
 }
 
-func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath(t *testing.T) {
-	source := loadSoleParentFlowRuntimeSessionScopeSource(t)
-	assertRuntimeStartCarriesFlowPath(t, source)
+func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
+	source := loadSoleParentFlowRuntimeAgentMemorySource(t)
+	assertRuntimeStartCarriesMemoryIdentity(t, source)
 }
 
-func assertRuntimeStartCarriesFlowPath(t *testing.T, source semanticview.Source) {
+func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.Source) {
 	t.Helper()
 	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -47,15 +48,18 @@ func assertRuntimeStartCarriesFlowPath(t *testing.T, source semanticview.Source)
 	if cfg.FlowPath != "support" {
 		t.Fatalf("FlowPath = %q, want support", cfg.FlowPath)
 	}
-	if cfg.Mode != "support" {
-		t.Fatalf("Mode = %q, want support", cfg.Mode)
+	if cfg.FlowID != "support" {
+		t.Fatalf("FlowID = %q, want support", cfg.FlowID)
+	}
+	if cfg.Memory != agentmemory.Authored(true) {
+		t.Fatalf("Memory = %#v, want authored true", cfg.Memory)
 	}
 }
 
-func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
+func loadPackageBackedRuntimeAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeSessionScope(t, canonicalrouting.RuntimeSessionScopePackageBacked)
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -64,10 +68,10 @@ func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Sourc
 	return semanticview.Wrap(bundle)
 }
 
-func loadSoleParentFlowRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
+func loadSoleParentFlowRuntimeAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeSessionScope(t, canonicalrouting.RuntimeSessionScopeSoleParent)
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemorySoleParent)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

@@ -98,7 +98,8 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 				session_id,
 				run_id,
 				'live_session' AS session_kind,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				memory_enabled,
+				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_sessions
@@ -107,7 +108,8 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 				session_id,
 				run_id,
 				'turn_audit' AS session_kind,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				memory_enabled,
+				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_conversation_audits
@@ -119,10 +121,10 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.failure, 'null'), COALESCE(d.retry_count, 0),
 				COALESCE(d.active_session_id, ''),
 				d.created_at, d.started_at, d.delivered_at,
-			COALESCE(ses.session_id, ''), COALESCE(ses.session_kind, ''), COALESCE(ses.runtime_mode, ''),
+			COALESCE(ses.session_id, ''), COALESCE(ses.session_kind, ''), COALESCE(ses.memory_enabled, 0), COALESCE(ses.memory_source, ''),
 			COALESCE(ses.status, ''), ses.updated_at,
 			COALESCE(t.turn_id, ''), COALESCE(t.trigger_event_id, ''), COALESCE(t.trigger_event_type, ''),
-			COALESCE(t.runtime_mode, ''), COALESCE(t.scope_key, ''), COALESCE(t.entity_id, ''),
+			COALESCE(t.flow_instance, ''), COALESCE(t.memory_enabled, 0), COALESCE(t.memory_source, ''), COALESCE(t.entity_id, ''),
 			COALESCE(t.task_id, ''), COALESCE(t.parse_ok, 0), COALESCE(t.retry_count, 0),
 			COALESCE(t.failure, 'null'), t.created_at
 		FROM events e
@@ -163,10 +165,10 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			&row.DeliveryID, &row.SubscriberType, &row.SubscriberID,
 			&row.DeliveryStatus, &row.DeliveryReasonCode, &rawDeliveryFailure, &row.DeliveryRetryCount, &row.ActiveSessionID,
 			&deliveryCreatedRaw, &deliveryStartedRaw, &deliveryDeliveredRaw,
-			&row.SessionID, &row.SessionKind, &row.SessionRuntimeMode,
+			&row.SessionID, &row.SessionKind, &row.SessionMemory, &row.SessionMemorySource,
 			&row.SessionStatus, &sessionUpdatedRaw,
 			&row.TurnID, &row.TurnTriggerEventID, &row.TurnTriggerEventType,
-			&row.TurnRuntimeMode, &row.TurnScopeKey, &row.TurnEntityID,
+			&row.TurnFlowInstance, &row.TurnMemory, &row.TurnMemorySource, &row.TurnEntityID,
 			&row.TurnTaskID, &row.TurnParseOK, &row.TurnRetryCount,
 			&rawTurnFailure, &turnCreatedRaw,
 		); err != nil {

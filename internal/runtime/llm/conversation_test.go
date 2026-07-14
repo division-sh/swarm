@@ -47,7 +47,7 @@ func requireConversationFailureValue(t testing.TB, value any, class runtimefailu
 }
 
 func (f *fakeRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-1", AgentID: agentID, RuntimeMode: "api"}, nil
+	return &Session{ID: "sess-1", AgentID: agentID}, nil
 }
 
 func (f *fakeRuntime) ContinueSession(_ context.Context, s *Session, message Message) (*Response, error) {
@@ -76,7 +76,7 @@ type scriptedRuntime struct {
 }
 
 func (s *scriptedRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-scripted", AgentID: agentID, RuntimeMode: "api"}, nil
+	return &Session{ID: "sess-scripted", AgentID: agentID}, nil
 }
 
 func (s *scriptedRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
@@ -100,7 +100,7 @@ type managedRoundRuntime struct {
 }
 
 func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "managed-session", AgentID: agentID, RuntimeMode: "api"}, nil
+	return &Session{ID: "managed-session", AgentID: agentID}, nil
 }
 
 func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _ Message) (*Response, error) {
@@ -116,8 +116,11 @@ func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _
 	if err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"turn": r.calls + 1}},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
-		AgentTurn:  &runtimeeffects.CompletionAgentTurn{TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID, RuntimeMode: target.RuntimeMode},
-		Spend:      runtimeeffects.CompletionSpend{FlowInstance: "global", AgentID: target.AgentID, Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http", ResolvedModel: "test-model", InvocationType: "task"},
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
+			Memory: target.Memory, FlowInstance: target.FlowInstance,
+		},
+		Spend: runtimeeffects.CompletionSpend{FlowInstance: "global", AgentID: target.AgentID, Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http", ResolvedModel: "test-model", InvocationType: "task"},
 	}); err != nil {
 		return nil, err
 	}
@@ -292,7 +295,7 @@ type relayRuntime struct {
 }
 
 func (r *relayRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-relay", AgentID: agentID, RuntimeMode: "cli_test"}, nil
+	return &Session{ID: "sess-relay", AgentID: agentID}, nil
 }
 
 func (r *relayRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
@@ -372,7 +375,7 @@ func testAsString(v any) string {
 func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	rt := &fakeRuntime{}
 	te := &fakeToolExec{}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
 
 	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
@@ -407,7 +410,7 @@ func TestConversationStep_SeparatesManagedProviderRoundsAndToolCalls(t *testing.
 	harness := effecttest.New()
 	runtime := &managedRoundRuntime{harness: harness}
 	tools := &managedEffectToolExecutor{harness: harness}
-	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, SessionScoped, 10, runtime)
+	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, testMemory(), 10, runtime)
 	conversation.SetToolExecutor(tools)
 
 	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{ID: "effect-test-agent", Role: "analysis"})
@@ -429,7 +432,7 @@ func TestConversationStep_AttachesCanonicalToolCapabilitySetToExecutionContext(t
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{
 		{Name: "echo"},
 		{Name: "emit_scan_requested"},
-	}, SessionScoped, 10, rt)
+	}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
@@ -449,7 +452,7 @@ func TestConversationStep_AttachesCanonicalToolCapabilitySetToExecutionContext(t
 
 func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing.T) {
 	te := &emptyTurnCapabilityToolExec{}
-	c := NewConversation("market-research-agent", "t1", "sys", nil, SessionScoped, 10, &scriptedRuntime{})
+	c := NewConversation("market-research-agent", "t1", "sys", nil, testMemory(), 10, &scriptedRuntime{})
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
@@ -475,7 +478,7 @@ func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing
 
 func TestConversationStep_NoExecutorReturnsInitialToolCall(t *testing.T) {
 	rt := &fakeRuntime{}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, testMemory(), 10, rt)
 
 	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
@@ -491,7 +494,7 @@ func TestConversationStep_NoExecutorReturnsInitialToolCall(t *testing.T) {
 
 func TestConversation_MiscHelpers(t *testing.T) {
 	rt := &fakeRuntime{}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 10, rt)
 
 	c.SetMaxToolRounds(-1)
 	if c.maxToolRounds <= 0 {
@@ -526,7 +529,7 @@ func TestConversation_MiscHelpers(t *testing.T) {
 }
 
 func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(panicToolExec{})
 
 	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
@@ -542,7 +545,7 @@ func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
 
 func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
@@ -568,7 +571,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadPreservesLargeValidati
 	if len(rawPayload) < 40*1024 || len(rawPayload) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
 		t.Fatalf("payload size = %d, want >=40KB and <=%d", len(rawPayload), toolresultpolicy.MaxCompleteTypedReadResultBytes)
 	}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -596,7 +599,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFieldPreservesComplete
 		"problem_statement":  strings.Repeat("problem statement ", 900),
 		"technical_approach": strings.Repeat("technical approach ", 900),
 	}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case_mvp_spec"}}, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case_mvp_spec"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: field})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -616,7 +619,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFieldPreservesComplete
 
 func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarge(t *testing.T) {
 	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes+1024)}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -637,7 +640,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarg
 func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t *testing.T) {
 	overhead := len(`{"blob":""}`)
 	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes-overhead)}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -659,7 +662,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t 
 
 func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_custom_report"}}, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_custom_report"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -676,7 +679,7 @@ func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyP
 
 func TestConversation_ExecuteToolCalls_PreservesLargeReadFileResultOnSupportedRelayPath(t *testing.T) {
 	huge := strings.Repeat("x", maxToolMessageBytes+8*1024)
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{
 		"content":    huge,
 		"size_bytes": len(huge),
@@ -707,8 +710,8 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t 
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/sql-execute-1.json"}
 	tools := []ToolDefinition{{Name: "sql_execute"}, {Name: "read_file"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -743,8 +746,8 @@ func TestConversation_ExecuteToolCalls_SuppressesRuntimeReadFileFollowUpWithoutR
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/query-entities-1.json"}
 	tools := []ToolDefinition{{Name: "query_entities"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -775,8 +778,8 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
 	tools := []ToolDefinition{{Name: "read_file"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{
 		"content":    huge,
 		"size_bytes": len(huge),
@@ -817,8 +820,8 @@ func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompa
 	huge := strings.Repeat("x", maxReadFileResultBytes-1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
 	tools := []ToolDefinition{{Name: "read_file"}, {Name: "emit_category_assessed"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(&selectiveToolExec{
 		results: map[string]any{
 			"read_file": map[string]any{
@@ -869,8 +872,8 @@ func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompa
 func TestConversation_ExecuteToolCalls_PreservesRelayReadFileResultsForHelperRuntime(t *testing.T) {
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test"}
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1"}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{
 		"content":    huge,
 		"size_bytes": len(huge),
@@ -903,8 +906,8 @@ func TestConversation_ExecuteToolCalls_SuppressesReadFileRelayWhenObservedSurfac
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
 	tools := []ToolDefinition{{Name: "read_file"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{
 		"content":    huge,
 		"size_bytes": len(huge),
@@ -938,8 +941,8 @@ func TestConversation_ExecuteToolCalls_FailsClosedWhenHelperRelayWriteFails(t *t
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayErr: errors.New("workspace boom")}
 	tools := []ToolDefinition{{Name: "sql_execute"}, {Name: "read_file"}}
-	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
-	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c := NewConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
@@ -971,7 +974,7 @@ func TestConversationStep_TerminatesAfterSuccessfulEmitToolCalls(t *testing.T) {
 			"emit_scan_requested": map[string]any{"event_id": "evt-1", "status": "published"},
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
 
 	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
@@ -1004,9 +1007,9 @@ func TestConversationStep_ContinuesWhenAnyNonEmitToolIsPresent(t *testing.T) {
 			"echo":                map[string]any{"ok": true},
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
-	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+	c.Session = &Session{ID: "sess-1", AgentID: "a1"}
 
 	initial := &Response{
 		Message: Message{Role: "assistant", Content: "doing work"},
@@ -1041,9 +1044,9 @@ func TestConversationStep_ContinuesWhenEmitToolFails(t *testing.T) {
 			"emit_scan_requested": errors.New("publish failed"),
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
-	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+	c.Session = &Session{ID: "sess-1", AgentID: "a1"}
 
 	initial := &Response{
 		Message: Message{Role: "assistant", Content: "doing work"},
@@ -1073,9 +1076,9 @@ func TestConversationStep_DoesNotExecuteEmitAfterSaveFailureInSameRound(t *testi
 			"save_entity_field": errors.New("cross_flow_write_forbidden"),
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", nil, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
-	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+	c.Session = &Session{ID: "sess-1", AgentID: "a1"}
 
 	initial := &Response{
 		Message: Message{Role: "assistant", Content: "doing work"},
@@ -1094,7 +1097,7 @@ func TestConversationStep_DoesNotExecuteEmitAfterSaveFailureInSameRound(t *testi
 
 func TestExecuteToolCalls_UsesCapabilityKindForTerminalBehavior(t *testing.T) {
 	te := &capabilityAwareToolExec{}
-	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, &fakeRuntime{})
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, &fakeRuntime{})
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"})

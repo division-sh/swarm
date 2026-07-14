@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -66,23 +67,27 @@ func logSessionRuntime(ctx context.Context, sink any, action, message, agentID, 
 	}
 }
 
-func LogSessionRotatedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey, reason string, turnCount, parseFailures int) {
-	logSessionRuntime(ctx, sink, "session_rotated", "LLM session was rotated", agentID, newSessionID, map[string]any{
-		"runtime_mode":   strings.TrimSpace(runtimeMode),
+func LogSessionRotatedForRun(ctx context.Context, sink any, identity agentmemory.Identity, oldSessionID, newSessionID, reason string, turnCount, parseFailures int) {
+	identity = identity.Normalize()
+	logSessionRuntime(ctx, sink, "session_rotated", "LLM session was rotated", identity.AgentID, newSessionID, map[string]any{
+		"memory_enabled": true,
+		"run_id":         identity.RunID,
+		"flow_instance":  identity.FlowInstance,
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),
-		"scope_key":      strings.TrimSpace(scopeKey),
 		"reason":         strings.TrimSpace(reason),
 		"turn_count":     turnCount,
 		"parse_failures": parseFailures,
 	})
 }
 
-func LogSessionAdoptedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey string) {
-	logSessionRuntime(ctx, sink, "session_adopted", "LLM session was adopted", agentID, newSessionID, map[string]any{
-		"runtime_mode":   strings.TrimSpace(runtimeMode),
+func LogSessionAdoptedForRun(ctx context.Context, sink any, identity agentmemory.Identity, oldSessionID, newSessionID string) {
+	identity = identity.Normalize()
+	logSessionRuntime(ctx, sink, "session_adopted", "LLM session was adopted", identity.AgentID, newSessionID, map[string]any{
+		"memory_enabled": true,
+		"run_id":         identity.RunID,
+		"flow_instance":  identity.FlowInstance,
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),
-		"scope_key":      strings.TrimSpace(scopeKey),
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -567,7 +568,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 func selectedAgentTurnTarget(runID string) runtimeeffects.UsageTarget {
 	return runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
-		AgentID: "selected-agent", SessionID: uuid.NewString(), RuntimeMode: "task", ScopeKey: "selected-test",
+		AgentID: "selected-agent", SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "selected-test",
 	}
 }
 
@@ -582,12 +583,12 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RuntimeMode: target.RuntimeMode, ScopeKey: target.ScopeKey, ParseOK: true,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.ScopeKey, AgentID: target.AgentID, Model: "test-model", ModelAlias: "regular",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, Model: "test-model", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "test", Transport: "http", ResolvedModel: "test-model", CostUSD: 0.01,
-			InvocationType: target.RuntimeMode,
+			InvocationType: "agent_turn",
 		},
 		Now: now,
 	})

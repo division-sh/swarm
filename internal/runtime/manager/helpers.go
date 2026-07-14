@@ -135,8 +135,8 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.Role != "" {
 		out.Role = patch.Role
 	}
-	if patch.Mode != "" {
-		out.Mode = patch.Mode
+	if patch.FlowID != "" {
+		out.FlowID = patch.FlowID
 	}
 	if patch.LLMBackend != "" {
 		out.LLMBackend = patch.LLMBackend
@@ -144,14 +144,8 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.Model != "" {
 		out.Model = patch.Model
 	}
-	if patch.ConversationMode != "" {
-		out.ConversationMode = patch.ConversationMode
-		if strings.TrimSpace(patch.ConversationMode) == "task" {
-			out.SessionScope = ""
-		}
-	}
-	if patch.SessionScope != "" {
-		out.SessionScope = patch.SessionScope
+	if strings.TrimSpace(string(patch.Memory.Source)) != "" {
+		out.Memory = patch.Memory
 	}
 	if patch.MaxTurnsPerTask > 0 {
 		out.MaxTurnsPerTask = patch.MaxTurnsPerTask

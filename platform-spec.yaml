@@ -94,7 +94,7 @@ vocabulary:
         has_prompt: false
         has_model: false
       agent:
-        description: LLM-powered. Has a system prompt, provider-resolved model alias, conversation mode. Subscribes to events, reasons about
+        description: LLM-powered. Has a system prompt, provider-resolved model alias, and presence-aware memory plan. Subscribes to events, reasons about
           them, calls tools. Can own workflow transitions where the stage change requires LLM judgment (e.g. promote/kill
           decisions, build readiness). Agents produce events that may also trigger transitions owned by system nodes.
         execution: llm
@@ -4121,9 +4121,12 @@ engine:
         persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
           persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
           MUST NOT independently reinterpret authored subscriber templates.
-        recovery: Startup recovery of active flow-instance routes MUST reconstruct the same activation variable set from the
-          persisted flow instance config, or recover from persisted rendered route truth. It MUST fail closed rather than
-          re-render route subscribers from route identity alone.
+        recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
+          active `flow_instances` row identified by the persisted route's instance path. That projection owns the validated
+          stored instance identity, including deterministic entity and parent facts, plus the cloned activation config. Its
+          derived route MUST exactly equal the persisted route before installation. Recovery MUST NOT read `entity_state`,
+          synthesize or choose a run, fall back to current-state loading, or re-render route subscribers from route identity
+          alone. Missing, inactive, terminated, malformed, or identity-mismatched projections fail startup closed.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the instance is fully started. Duplicate create failures MUST NOT auto-emit. This bootstraps
         the flow without requiring an external trigger.
@@ -5070,9 +5073,10 @@ engine:
       node handler atomic boundary — it is a standalone event publication.
     turn_budget: Each agent session has a max_turns_per_task (from agents.yaml). If the agent exceeds this budget, the session
       is terminated. The platform may emit a timeout or budget_exceeded event.
-    agent_invocation: 'Agents are invoked via claude -p (CLI) or equivalent LLM API call. The platform constructs the invocation:
-      system prompt + event context + tool schemas. Agents are short-lived and task-scoped. No persistent memory between sessions.
-      Context from previous interactions is provided via event payload and entity state.'
+    agent_invocation: 'Agents are invoked via claude -p (CLI) or an equivalent LLM API call. The platform constructs each
+      short-lived invocation from the system prompt, event context, and tool schemas. With memory false, every invocation
+      starts with fresh provider/in-process conversation state. With memory true, prior turns are hydrated only through the
+      exact run, agent, and flow-instance identity. Event payload and entity state remain separate application context.'
     llm_provider_adapter_contract:
       description: Runtime LLM provider adapters are the canonical boundary between platform agent execution and provider-specific
         API or CLI transports. A provider adapter is production-ready only when it declares and satisfies the full adjacency
@@ -5088,7 +5092,7 @@ engine:
           - Platform tool results must be returned through the provider adapter in a normalized message form.
         session_lifecycle:
           rules:
-          - The adapter must preserve task, session, and session_per_entity conversation modes.
+          - The adapter must consume the canonical memory plan. Memory-disabled invocations reset provider/in-process conversation state; memory-enabled invocations use the exact run, agent, and flow-instance identity.
           - Platform session IDs remain platform-owned; external provider session IDs, when present, are stored only as provider
             implementation details.
           - Session rotation and retry lineage must be accounted for by the adapter contract.
@@ -5119,8 +5123,8 @@ engine:
           - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
         persistence:
           rules:
-          - Agent turns and task-mode audits must be persisted consistently across adapters.
-          - Conversation snapshots for reusable session modes must be explicit adapter behavior.
+          - Agent turns and stateless execution audits must be persisted consistently across adapters.
+          - Conversation snapshots for memory-enabled execution must consume the canonical memory plan and exact identity.
         budget:
           rules:
           - The adapter must declare whether usage accounting is exact provider-reported usage or an estimate.
@@ -5336,7 +5340,7 @@ engine:
             - Preserve raw Responses payloads for turn and audit persistence.
             - Treat provider built-in tool output as unsupported until a separate native-tool gate promotes it.
           session_lifecycle:
-            - Preserve task, session, and session_per_entity conversation modes through platform-managed transcript state.
+            - Consume the canonical memory plan through platform-managed transcript state without provider-local mode or scope interpretation.
             - Persist provider response IDs only as provider metadata until previous_response_id continuity is separately promoted.
           persistence:
             - Persist authored model alias, backend profile id openai_responses, provider identity openai, transport api, concrete
@@ -5418,7 +5422,8 @@ engine:
         reusing config/runtime-mode strings.
       - Runtime audit must persist resolved backend/provider/concrete model at write time, and readers must consume persisted
         facts rather than re-resolving against current config.
-      - Agent/session conversation scope remains owned by agent_sessions.runtime_mode and is orthogonal to llm_backend.
+      - Agent conversation memory is owned by the presence-aware memory plan and exact `(run_id, agent_id, flow_instance)`
+        identity defined by agent_memory; backend selection is orthogonal to that identity.
       split_boundaries:
       - '#1127 is source-authority/spec/tracker only and MUST NOT change runtime/config/store/verify/CLI behavior.'
       - '#1128 owns backend selection/config discovery, --backend precedence, env selector retirement, and backend id migration.'
@@ -5476,19 +5481,36 @@ engine:
         are separate owners and MUST NOT consume this section as their authority.
       - OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, provider-specific quota discovery, and dynamic provider
         adaptation remain separate provider-matrix gates.
-    conversation_modes:
-      description: How the platform manages agent session context across invocations. Public authored agent contracts
-        use the field `mode`; the runtime persists the derived value in the internal `conversation_mode` column.
-      modes:
-        task: 'New session per event. No memory between invocations. Stateless.'
-        session: 'Session persists across events for the agent. Authored normal agents declare `mode: session`; the runtime
-          derives session_scope flow. session_scope global is reserved for platform-owned/internal system services and
-          historical/read-only runtime rows.'
-        session_per_entity: 'One session per entity the agent works on. Authored normal agents declare `mode: session_per_entity`;
-          the runtime derives session_scope entity. Agent retains
-          context across multiple events for the same entity but has separate sessions for different entities. Useful for
-          agents that need continuity (e.g., research agent building a brief over multiple turns).'
-      default: task
+    agent_memory:
+      description: One presence-aware authored fact controls whether a normal agent reloads prior conversation turns.
+        Memory identity is exact and flow-instance-owned; mode/scope strings are not memory authority.
+      authored_field:
+        name: memory
+        type: boolean
+        omitted: false with provenance platform_default
+        explicit_false: false with provenance authored
+        explicit_true: true with provenance authored
+      semantics:
+        'false': Every invocation starts with fresh in-process/provider conversation state. Append-only turn and audit
+          evidence may remain durable but is never hydrated into later requests.
+        'true': Prior conversation is acquired and hydrated by exact `(run_id, agent_id, flow_instance)` identity.
+      identity:
+        fields: [run_id, agent_id, flow_instance]
+        rules:
+        - All three fields are required before reusable-memory lookup or creation.
+        - Root agents without a flow-instance owner cannot enable memory.
+        - Template instances and runs never share memory.
+        - Event entity/task identifiers and provider-local state are not memory selectors.
+      lifecycle:
+        owner: agent_lifecycle_authority
+        rules:
+        - false to true creates fresh memory on first later use; terminated rows are never revived.
+        - true to false terminates the complete active/suspended set before successor config publication.
+        - true to true reconfiguration rotates the complete current set before successor config publication.
+        - fire and teardown terminate the complete current set.
+      retired_fields: [mode, conversation_mode, session_scope, session_scope_authority]
+      compatibility_policy: Old fields, schemas, rows, aliases, and global-memory authority are rejected. There is no
+        migration, backfill, dual reader/writer, export, purge, or fallback path.
     platform_defaults:
       description: Agent contracts have a contracts-owned effective view before boot verification, generated/expanded
         views, catalog/read surfaces, and runtime materialization consume them. Layer 1 defaults add no authored
@@ -5504,10 +5526,10 @@ engine:
           default: generic
           rationale: Promotes the historical runtime fallback in generic agent construction into contracts-owned
             effective semantics.
-        mode:
-          default: task
-          rationale: Consumes the public `mode` owner and derives runtime `conversation_mode` / `session_scope`
-            from the effective value.
+        memory:
+          default: false
+          provenance: platform_default
+          rationale: Omission is explicit stateless execution; authored false/true preserve authored provenance.
         max_turns_per_task:
           default: 100
           authored_constraint: When explicitly authored, the value MUST be positive.
@@ -5520,8 +5542,7 @@ engine:
         manager_fallback: No platform default in Layer 1; explicit value only.
       generated_view:
         rule: Generated/expanded views MUST show each effective Layer 1 field value and whether it was authored
-          directly or platform-defaulted. Derived runtime session fields may be shown as derived from the effective
-          `mode`.
+          directly or platform-defaulted, including the `memory` fact and provenance.
       unsupported_layer_syntax:
         rule: Authored `agent_defaults`, named `profile`, `agent_profiles`, and `runtime_id_template` syntax is not
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
@@ -5558,16 +5579,16 @@ engine:
       universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message
         and mailbox_send. Generated emit tools are derived from emit_events. Entity tools are governed by
         contract_formats.persistence_model.role_scoped_entity_tools and tool_model.agent_tool_filtering, not by prompt prose.'
-    task_mode_audit: 'Agents in task mode do NOT create agent_sessions rows. Task mode is
-      stateless — no live session, no session lookup, no session persistence. The conversation transcript
+    stateless_memory_audit: 'Agents with memory false do NOT create agent_sessions rows. Stateless execution has
+      no live memory lookup or persistence. The conversation transcript
       (reasoning, tool calls, results) is persisted after each invocation to agent_conversation_audits
       (write-only audit table) and agent_turns (per-turn append-only log). The transcript is NEVER loaded
-      back for subsequent invocations. Each event invocation starts with a fresh context. Task mode means
+      back for subsequent invocations. Each event invocation starts with a fresh context. Memory false means
       "no memory between invocations" AND "no live session row." The persisted audit snapshot enables the
       builder Run tab to show agent reasoning details. Rows may be archived per retention policy.'
     provider_session_ids: 'External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in
-      runtime_state.provider_session_id — in agent_sessions for session/session_per_entity modes, in
-      agent_conversation_audits for task mode. NOT in session_id or audit_id. Those are platform-owned
+      runtime_state.provider_session_id in agent_sessions for memory-enabled invocations. Stateless execution does not
+      retain provider conversation state. NOT in session_id or audit_id. Those are platform-owned
       UUID primary keys. The provider ID is an implementation detail that may change if the provider is swapped.'
     session_termination_metadata:
       description: 'Structured termination metadata for live reusable sessions. Stale live-session meanings
@@ -5576,9 +5597,8 @@ engine:
         successor_session_id links a terminated session to its replacement when one exists.'
       uniqueness_model:
         description: 'The database uniqueness model for agent_sessions applies only to non-terminated rows.
-          Terminated rows are historical lineage and may coexist for the same scope.'
-        old_constraint: UNIQUE (agent_id, scope_key)
-        new_constraint: 'UNIQUE INDEX agent_sessions_nonterminated_unique ON agent_sessions(agent_id, scope_key)
+          Terminated rows are historical lineage and may coexist for the same exact memory identity.'
+        constraint: 'UNIQUE INDEX agent_sessions_nonterminated_unique ON agent_sessions(run_id, agent_id, flow_instance)
           WHERE status <> ''terminated'''
         live_owner_query: 'Live runtime ownership queries MUST filter status = ''active''.'
         resumable_owner_query: 'Resumable-owner queries MUST filter status IN (''active'', ''suspended'').'
@@ -5590,17 +5610,16 @@ engine:
           - failed
           - orphaned
           - contaminated
-          - legacy
-          semantics: 'legacy is reserved for migration backfill only. The runtime MUST NOT set legacy on new terminations.'
+          semantics: New stores accept only current runtime termination reasons; there is no legacy backfill value.
         termination_detail: Optional human-readable detail for diagnostics/operator UI.
-        successor_session_id: 'UUID link to the successor session in the same agent/scope/scope_key lineage. A session is
+        successor_session_id: 'UUID link to the successor session in the same run/agent/flow-instance lineage. A session is
           superseded iff successor_session_id IS NOT NULL.'
         terminated_at: Timestamp set when status transitions to terminated.
       invariants:
       - 'status IN (active, suspended) → termination_reason, termination_detail, successor_session_id, terminated_at are NULL.'
       - 'status = terminated → termination_reason and terminated_at are required.'
       - 'successor_session_id IS NOT NULL → status = terminated.'
-      - 'successor_session_id must reference a different session_id with the same agent_id, scope, and scope_key.'
+      - 'successor_session_id must reference a different session_id with the same run_id, agent_id, and flow_instance.'
       - 'successor_session_id lineage must be acyclic.'
       - 'terminated sessions are never resurrected to active or suspended.'
       transitions:
@@ -5609,85 +5628,26 @@ engine:
       - 'active → terminated'
       - 'suspended → terminated'
       - 'terminated rows may receive successor_session_id later, but status and termination_reason do not change.'
-      migration:
-      - 'Add nullable termination_reason, termination_detail, successor_session_id, terminated_at columns.'
-      - 'Replace old UNIQUE (agent_id, scope_key) with the partial non-terminated unique index.'
-      - 'Backfill legacy terminated rows to termination_reason = legacy and terminated_at = COALESCE(updated_at, created_at).'
-      - 'Enable invariant enforcement only after the legacy backfill.'
-    agent_memory_mode_values:
-      task: 'Stateless between invocations. No agent_sessions row. Audit snapshot persisted to
-        agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
-        Each invocation starts fresh.'
-      session: 'Persistent session across events. Live session row in agent_sessions. Requires explicit
-        authored `mode: session`; the runtime derives session_scope flow for authored normal agents. session_scope global
-        is reserved for platform-owned/internal system services and historical/read-only runtime rows. Conversation history maintained and reused. Agent
-        accumulates context.'
-      session_per_entity: 'One session per agent × entity. Live session row in agent_sessions per entity.
-        Requires explicit authored `mode: session_per_entity`; the runtime derives session_scope entity. Context preserved and reused per entity.'
-      stateless: Retired alias for task. Authored YAML, tool/API mutation payloads, and generated public inputs MUST reject
-        stateless rather than normalize it.
-    session_scope_intent:
-      description: 'Runtime-derived session scope for authored normal agent contracts. Authored contracts and tool/API
-        mutation payloads do not declare session_scope directly.'
-      contract_field:
-        field: mode
-        location: Agent declaration in agents.yaml and dynamic agent_hire/agent_reconfigure memory-mode mutation payloads.
-        type: string
-        authored_normal_agent_values:
-        - task
-        - session
-        - session_per_entity
-        derived_runtime_scope:
-          task: absent
-          session: flow
-          session_per_entity: entity
-        retired_authored_fields:
-        - conversation_mode
-        - session_scope
-        - session_scope_authority
-        values:
-        - task
-        - session
-        - session_per_entity
-        value_notes:
-          global: Reserved for platform-owned/internal system services and historical/read-only persisted runtime rows.
-            Product-authored normal agents in agents.yaml and runtime mutation payloads MUST NOT declare or derive global.
-        internal_authority_marker: 'Platform-owned/internal services that require session_scope global must carry the
-          runtime-only persisted descriptor field session_scope_authority: platform_internal. This marker is not an
-          agents.yaml/API/tool-input field and MUST NOT be inferable from authored type, role, mode, tools, or opaque config.'
-      canonical_rules:
-        task: 'mode task: session_scope is absent and no session lookup/row is performed.'
-        session_global: 'Internal runtime state only: conversation_mode session + session_scope global means one session per agent across
-          the system. scope_key = "global". This is valid only for platform-owned/internal system-service runtime
-          state and historical/read-only rows; authored normal agents MUST NOT declare it.'
-        session_flow: 'mode session derives conversation_mode session + session_scope flow: one session per agent per
-          flow instance. scope_key = flow_instance path.'
-        session_per_entity: 'mode session_per_entity derives conversation_mode session_per_entity + session_scope entity: one reusable
-          session per agent per entity within the same flow instance. scope_key = entity_id.'
-      invalid_combinations:
-        retired_conversation_mode: 'Authored conversation_mode is a load/tool/API error; use mode.'
-        retired_session_scope: 'Authored session_scope is a load/tool/API error; scope is runtime-derived from mode.'
-        forged_session_scope_authority: 'Authored agents and runtime tool payloads cannot set session_scope_authority.
-          Any appearance in top-level payloads, config, constraints, opaque config, or runtime descriptor paths is invalid runtime-owned metadata.'
-        mode_global: 'Authored mode global is invalid. Global reusable sessions are reserved for platform-owned/internal system-service runtime state.'
-        unknown_mode: 'Any authored mode outside task/session/session_per_entity is invalid.'
-        stateless_alias: 'Authored stateless is invalid; use mode task.'
-      boot_validation:
-        description: Enforced at boot, not at first runtime session acquisition.
-        rules:
-        - Validate authored mode against task/session/session_per_entity and derive runtime conversation_mode/session_scope from that single owner.
-        - Authored normal agents MUST NOT declare conversation_mode, session_scope, or session_scope_authority. Runtime
-          mutators such as agent_hire and agent_reconfigure must enforce the same rejection and must not accept old fields
-          or runtime authority through top-level payloads, config, constraints, opaque config, or runtime descriptor paths.
-        - No compatibility aliases. stateless, global, and unknown mode values fail closed.
-        - Derived session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
-          Root-level agents cannot declare session_scope flow.
-        - Derived session_scope entity requires a flow that manages entities (has initial_state). Stateless
-          flows cannot declare session_scope entity.
-      lookup_rules:
-        global: scope_key = "global"
-        flow: scope_key = flow_instance path of the agent
-        entity: scope_key = entity_id from the triggering event within the agent's flow instance
+    agent_memory_contract:
+      canonical_plan:
+        fields: [enabled, source]
+        sources: [authored, platform_default]
+        owner: Effective contract normalization compiles the authored field once; all runtime and read consumers carry
+          the typed plan rather than reinterpreting source YAML or persisted strings.
+      normal_identity:
+        type: AgentMemoryIdentity
+        fields: [run_id, agent_id, flow_instance]
+        lookup: Exact equality on all fields plus explicit active/suspended status predicates.
+        forbidden_selectors: [entity_id, task_id, provider_session_id, latest_row, empty_run_fallback]
+      mutation:
+        agent_hire: Omitted memory is platform-default false.
+        agent_reconfigure: Omitted memory retains the current plan; explicit false or true is authored.
+        caller_identity: Run, flow instance, scope, scope key, and authority are runtime-owned and rejected in public payloads.
+      verification:
+      - Root memory true fails with a teaching error because no flow-instance owner exists.
+      - Retired fields fail at every YAML, nested config, dynamic tool, descriptor, API, and generated input boundary.
+      - Stateless execution resets local/provider conversation state before every invocation, even when event keys repeat.
+      - Old selected-store schemas fail admission with fresh-store remediation.
     flow_data_access:
       description: Optional flow-scoped agent contract field. Declares immutable deploy-time reference files under the
         owning flow package's data/ subtree that the agent may read with the generated read_flow_data tool. This is static
@@ -5883,9 +5843,9 @@ engine:
         - Environment variables from the credential store are NOT exposed to native tools. Agents access credentials through
           platform tools (HTTP tool credential substitution, MCP server auth), not via env vars in bash.
       audit:
-        description: All native tool usage is captured for observability. Task-mode agents persist transcripts (write-only)
-          which ensures provider-native tool calls are always recorded regardless of conversation mode.
-        provider_native: Provider-native tool usage is captured in the agent session transcript. For task-mode agents, the
+        description: All native tool usage is captured for observability. Memory-disabled agents persist transcripts (write-only)
+          so provider-native tool calls are always recorded regardless of whether prior turns are loaded.
+        provider_native: Provider-native tool usage is captured in the agent session transcript. For memory-disabled agents, the
           transcript is persisted (write-only) but never reloaded — providing a full audit trail without breaking stateless
           semantics.
         surface_truth: On CLI, persisted available_tools and MCP-visible turn facts must describe only the tools that were
@@ -8830,7 +8790,7 @@ flow_model:
       - schema.yaml entity as a singleton entity selector
       - template instance.by / on_missing / on_conflict for singleton ownership
       - static multi-entity flow ownership
-      - agent mode or derived session_scope memory
+      - agent memory intent as lifecycle or coordinator authority
       - parent connect to contained map/list items
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     standing_activation_model:
@@ -8877,6 +8837,9 @@ flow_model:
         standing instance uses the ordinary canonical flow-instance identity owner: its bundle digest is the logical
         instance_id and its instance_path is derived from the declared flow scope plus that instance_id. A special standing
         path segment or alternate route matcher is forbidden.
+        Standing-activated flow agents are materialized only by that canonical flow-instance activation. Ordinary static-agent
+        and static flow-required-agent bootstraps MUST exclude standing-activated flows so they cannot publish a predecessor
+        agent config keyed to the unmaterialized flow scope before the standing instance exists.
         Admission discovers every active persisted standing owner independently of candidate declarations, then requires each
         predecessor bundle hash/source pair to be in the complete candidate bundle set. Removing or renaming the declaration,
         renaming package or flow identity, or changing standing to non-standing MUST NOT hide persisted predecessor authority.
@@ -11150,12 +11113,10 @@ platform_tables:
         agent_id remains the authored contract slug and current global live/runtime identity described by
         agent_identity_model.current_supported_posture; duplicate authored agent slugs across live loaded/boot-pinned
         bundles are unsupported until the #977 UUID-internal migration is separately promoted and implemented. Carries the full persisted runtime descriptor:
-        role/model/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
+        role/model/llm_backend/memory_enabled/memory_source/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
         as JSONB arrays, and runtime_descriptor JSONB for the remaining control-plane fields that do not already have a
-        first-class persisted column (for example type, mode, session_scope, session_scope_authority, workspace_class,
-        manager_fallback, max_turns_per_task, native_tools). session_scope_authority is a runtime-owned descriptor
-        whose only valid value is platform_internal and is required for platform-owned/internal agents that intentionally
-        use session_scope global. config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
+        first-class persisted column (for example type, flow_id, workspace_class,
+        manager_fallback, max_turns_per_task, native_tools). config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
         for runtime control semantics. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
@@ -11163,12 +11124,10 @@ platform_tables:
         are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), openai_compatible (Chat Completions-compatible
         HTTP transport), and openai_responses (native OpenAI Responses API transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
         config/operator inputs. mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
-        deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property, not
-        a session property. agent_sessions.runtime_mode tracks conversation scope only.'
+        deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model             TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK\
-        \ (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'openai_responses', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
-        \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
+        \ (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'openai_responses', 'mock', 'local')),\n    memory_enabled    BOOLEAN NOT NULL DEFAULT FALSE,\n    memory_source     TEXT NOT NULL DEFAULT 'platform_default' CHECK (memory_source IN ('authored', 'platform_default')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
         \ NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    lifecycle_phase   TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'terminated', 'failed')),\n    lifecycle_generation BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_generation >= 0),\n    lifecycle_runtime_epoch BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_runtime_epoch >= 0),\n    lifecycle_config_revision TEXT NOT NULL DEFAULT '',\n    lifecycle_run_mode TEXT NOT NULL DEFAULT 'stopped' CHECK (lifecycle_run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),\n    lifecycle_last_transition_id UUID,\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
@@ -11177,42 +11136,23 @@ platform_tables:
         \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\
         \ WHERE parent_agent_id IS NOT NULL\n);"
     agent_sessions:
-      description: 'Live reusable agent conversation sessions keyed by the current global agent_id identity. Used ONLY by session and session_per_entity
-        conversation modes. Task mode does NOT create rows here — task-mode audit goes to
-        agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
-        flow (one session per agent × flow instance), global (one session per agent, shared across all
-        entities). For authored normal agents, scope is derived from declared mode and MUST NOT be
-        global. The global value is retained for platform-owned/internal system-service runtime state and historical/read-only
-        persisted rows. scope_key is the lookup key.
+      description: 'Live reusable agent conversation memory keyed exactly by run_id, agent_id, and flow_instance.
+        Rows exist only for memory true. Stateless audit evidence goes to agent_conversation_audits instead.
         lease_holder/lease_expires_at for distributed session locking. Termination metadata captures WHY
         a row is terminated and WHETHER it was replaced; stale session meanings are not encoded as extra
         status values.'
       ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
-        \            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
-        \    entity_id         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT NOT NULL,\n    scope         \
-        \    TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n    conversation      JSONB NOT\
-        \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL\
-        \ CHECK (runtime_mode IN ('session', 'session_per_entity')),\n    runtime_state     JSONB NOT NULL\
+        \            UUID NOT NULL REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
+        \    flow_instance     TEXT NOT NULL,\n    memory_enabled    BOOLEAN NOT NULL DEFAULT TRUE CHECK (memory_enabled = TRUE),\n    memory_source     TEXT NOT NULL DEFAULT 'authored' CHECK (memory_source = 'authored'),\n    conversation      JSONB NOT\
+        \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_state     JSONB NOT NULL\
         \ DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n    status            TEXT NOT\
         \ NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    termination_reason TEXT\
-        \ CHECK (termination_reason IS NULL OR termination_reason IN ('normal', 'cancelled', 'failed', 'orphaned', 'contaminated', 'legacy')),\n\
+        \ CHECK (termination_reason IS NULL OR termination_reason IN ('normal', 'cancelled', 'failed', 'orphaned', 'contaminated')),\n\
         \    termination_detail TEXT,\n    successor_session_id UUID REFERENCES agent_sessions(session_id),\n    terminated_at TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ\
         \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status IN ('active', 'suspended') AND termination_reason IS NULL AND termination_detail IS NULL AND successor_session_id IS NULL AND terminated_at IS NULL) OR (status = 'terminated' AND termination_reason IS NOT NULL AND terminated_at IS NOT NULL)),\n    CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL),\n    CHECK (successor_session_id IS NULL OR status = 'terminated'),\n    CHECK (successor_session_id IS NULL OR successor_session_id <> session_id),\n\
-        \    UNIQUE INDEX agent_sessions_nonterminated_unique (agent_id, scope_key) WHERE status <> 'terminated',\n    INDEX idx_sessions_run (run_id) WHERE run_id IS NOT NULL,\n    INDEX idx_sessions_agent (agent_id, status),\n\
-        \    INDEX idx_sessions_entity (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_sessions_scope (scope, status),\n\
+        \    UNIQUE INDEX agent_sessions_nonterminated_unique (run_id, agent_id, flow_instance) WHERE status <> 'terminated',\n    INDEX idx_sessions_run (run_id),\n    INDEX idx_sessions_agent (agent_id, status),\n\
         \    INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL,\n    INDEX idx_sessions_terminated_reason (termination_reason, terminated_at) WHERE status = 'terminated'\n);"
-      scope_rules:
-        entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
-        flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
-        global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
-          Reserved for platform-owned/internal system services and historical/read-only persisted rows, not product-authored
-          normal agents.
-      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key) with explicit status filtering.
-        The scope_key is derived from conversation_mode: task → no session lookup, no agent_sessions row
-        (audit goes to agent_conversation_audits). session_per_entity + session_scope entity → scope_key =
-        entity_id. session + session_scope flow → scope_key = flow_instance. session + session_scope global
-        → scope_key = "global" only for platform-owned/internal system-service runtime state and historical/read-only
-        rows. No actor-shape inference.'
+      lookup_pattern: Runtime acquires memory via exact `(run_id, agent_id, flow_instance)` equality with explicit status filtering.
       lifecycle_authority: 'The agents lifecycle cell/token is the sole admission and mutable-projection authority for live sessions. Lifecycle replace/destroy transitions own the complete active+suspended exact-agent set in the same selected-store transaction as the lifecycle cell and durable outcome. Standalone registry termination is non-authoritative.'
       exact_acquire_hydrate: 'Persistent provider startup must lease and hydrate one exact session_id atomically under the current lifecycle token. A separate latest-active conversation read, hydration fallback to empty history, or provider start after hydration failure is forbidden.'
       mutable_projection: 'Every live-session mutation revalidates the current lifecycle token in the same transaction. Superseded AppendAgentTurn stores append-only agent_turns evidence but returns stale_projection_refused and does not change this table.'
@@ -11228,17 +11168,18 @@ platform_tables:
         platform.runtime_log stream plus turn-local publish/tool transcript context. turn_blocks MUST include exactly one
         canonical turn_summary block when assistant-visible output, outcome, reasoning blocks, progress updates, or tool
         results are present for the turn. The turn_summary block is the canonical persisted read-model surface for dashboard/debug
-        consumers; readers MUST NOT reconstruct those fields from raw transcript payloads. Used by all conversation modes.
-        For task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this
+        consumers; readers MUST NOT reconstruct those fields from raw transcript payloads. Used by all memory plans.
+        For memory false, this is the primary per-turn audit record (no agent_sessions row exists). For memory true, this
         complements the live session with a queryable historical record.'
       ddl: |
         CREATE TABLE agent_turns (
             turn_id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            run_id                          UUID REFERENCES runs(run_id),
+            run_id                          UUID NOT NULL REFERENCES runs(run_id),
             agent_id                        TEXT NOT NULL,
             session_id                      UUID NOT NULL,
-            runtime_mode                    TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),
-            scope_key                       TEXT,
+            flow_instance                   TEXT,
+            memory_enabled                  BOOLEAN NOT NULL,
+            memory_source                   TEXT NOT NULL CHECK (memory_source IN ('authored', 'platform_default')),
             entity_id                       UUID,
             trigger_event_id                UUID,
             trigger_event_type              TEXT,
@@ -11283,32 +11224,29 @@ platform_tables:
             INDEX idx_agent_turns_completion_attempt (completion_attempt_id) WHERE completion_attempt_id IS NOT NULL
         );
     agent_conversation_audits:
-      description: 'Write-only audit table for task-mode conversation snapshots. One row per task-mode
+      description: 'Write-only audit table for memory-false conversation snapshots. One row per stateless
         agent invocation. The conversation transcript is persisted here after each invocation for debugging
         and the builder Run tab. This table is NEVER read back for subsequent invocations — it is purely
-        for audit/debug. Dashboard/readers distinguish live sessions (agent_sessions) from task audits
+        for audit/debug. Dashboard/readers distinguish live memory (agent_sessions) from stateless audits
         (agent_conversation_audits) by table, not by convention.'
       ddl: "CREATE TABLE agent_conversation_audits (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n\
-        \    run_id            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL,\n    entity_id\
-        \         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT,\n    scope             TEXT\
-        \ NOT NULL DEFAULT 'global' CHECK (scope IN ('entity', 'flow', 'global')),\n    conversation      JSONB NOT NULL\
-        \ DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT\
-        \ 'task' CHECK (runtime_mode = 'task'),\n    runtime_state     JSONB NOT NULL DEFAULT '{}',\n    status\
+        \    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL,\n    entity_id\
+        \         UUID,\n    flow_instance     TEXT,\n    memory_enabled    BOOLEAN NOT NULL DEFAULT FALSE CHECK (memory_enabled = FALSE),\n    memory_source     TEXT NOT NULL CHECK (memory_source IN ('authored', 'platform_default')),\n    conversation      JSONB NOT NULL\
+        \ DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_state     JSONB NOT NULL DEFAULT '{}',\n    status\
         \            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    INDEX idx_audits_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_audits_agent (agent_id,\
         \ created_at),\n    INDEX idx_audits_entity (entity_id) WHERE entity_id IS NOT NULL\n);"
-      primary_key: 'session_id — shared identifier with agent_turns.session_id. Task-mode turns reference
+      primary_key: 'session_id — shared identifier with agent_turns.session_id. Stateless turns reference
         the audit row via the same session_id, matching the runtime''s existing linking model.'
-      status_lifecycle: 'Task audit rows remain active for dashboard/reader visibility. The status values
+      status_lifecycle: 'Stateless audit rows remain active for dashboard/reader visibility. The status values
         (active, suspended, terminated) match the agent_sessions status model for consistency. Dashboard
-        readers query status = active to find visible task-mode audit records. The runtime does NOT
-        transition task audits to completed/failed — they stay active as part of the visible audit surface.'
-      scope_model: 'scope_key is nullable. scope defaults to global. Task-mode invocations may produce
-        audit rows without a specific scope key (e.g., root-level agents with no entity or flow context).
-        When entity_id or flow_instance is available, the runtime sets scope_key and scope accordingly.'
+        readers query status = active to find visible stateless audit records. The runtime does NOT
+        transition stateless audits to completed/failed — they stay active as part of the visible audit surface.'
+      identity_model: 'run_id and agent_id are required evidence identity. flow_instance and entity_id remain explicit
+        nullable execution facts for root-level stateless invocations; neither is used to reload conversation context.'
       write_only: 'This table is append/update only from the runtime perspective. The runtime writes the
-        audit row after each task-mode invocation. It is NEVER read back to construct agent context.
+        audit row after each memory-disabled invocation. It is NEVER read back to construct agent context.
         Readers are: dashboard API, flight recorder queries, debug tools.'
       relationship_to_agent_turns: 'agent_conversation_audits holds the full conversation snapshot per
         invocation. agent_turns holds the per-turn structured execution log. Both are audit surfaces.
@@ -12422,7 +12360,7 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor. It consumes
       runtime.run_fork.selected_contract_recipient_planning as the only selected-fork recipient truth, factors ordinary
       static contract-agent materialization semantics for ID rendering, subscriptions, emit events, permissions, native
-      tools, flow path, role/model/session scope, prompt resolution, and runtime descriptor normalization, and constructs
+      tools, flow path, role/model/memory plan, prompt resolution, and runtime descriptor normalization, and constructs
       ephemeral fork-local handlers through the normal AgentManager/buildAgent/applyContractPrompt/factory execution
       path before selected fork publish. It may register only fork-local in-memory handler channels and runtime-active
       descriptors for the selected-fork EventBus; it MUST NOT persist those handlers into ordinary current-runtime
@@ -13266,7 +13204,7 @@ multi_bundle_persistence:
       parsed_json: >
         Definition-only JSON projection with projection_version, workflow name/version, canonical input labels/policies,
         and agent definitions. Agent definitions may include agent_id, flow_instance, role, type, model,
-        mode, session_scope, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
+        memory, memory_source, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
         runtime_state, queues, active task, watchdog, last_tool_outcome, pending deliveries, and delivery lifecycle are
         forbidden.
       metadata: >
@@ -14084,8 +14022,8 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string (nullable)
-        mode: string
-        session_scope: string (nullable)
+        memory_enabled: boolean
+        memory_source: string (authored | platform_default)
         model: string
         llm_backend: string
         resolved_llm_provider: string
@@ -15706,8 +15644,7 @@ workspace_model:
       - per-agent — private to one agent, invisible to others
       - per-flow-instance — shared by all agents in the same flow instance, isolated across instances
       lifecycle:
-        per-agent: Created at agent registration. Cleaned on agent termination. Persists across sessions for session/session_per_entity
-          conversation modes. Ephemeral for task mode.
+        per-agent: Created at agent registration and cleaned on agent termination. Workspace availability and lifecycle are owned by the workspace class and lifecycle owner; agent memory does not alter either.
         per-flow-instance: Created on create_flow_instance. Preserved on instance termination (for post-mortem). Archival is
           an operational concern.
     /data:
@@ -15751,7 +15688,7 @@ workspace_model:
       (read-only bind mount, or equivalent). Platform-managed host file operations enforce read-only /data and
       /opt/swarm/contracts through logical path authority. Trusted host native commands are full host-user shell execution
       and do not provide Docker-equivalent read-only mount isolation.
-    - The runtime MUST NOT vary mount availability based on conversation_mode, model, or any other agent property. Workspace
+    - The runtime MUST NOT vary mount availability based on agent memory, model, or any other agent property. Workspace
       class is the sole determinant of /workspace scope.
   boot_validation:
     description: The platform verifies workspace infrastructure at boot.
@@ -15775,8 +15712,8 @@ workspace_model:
       /opt/swarm/contracts: Read-only volume populated by init container or bind mount.
     production:
       /data: Network-attached storage (NFS, EFS, GCS FUSE) mounted read-only. Consistent across all compute nodes.
-      /workspace: 'Storage persistence follows conversation_mode. task mode: ephemeral (tmpfs acceptable). session modes: persistent
-        storage required.'
+      /workspace: 'Storage persistence follows the selected workspace class and its lifecycle owner. Agent memory does not
+        change workspace scope, availability, or persistence.'
       /opt/swarm/contracts: Read-only volume from deployment artifact.
     portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
       Mount paths are invariant. Only the backing storage implementation changes.
@@ -16594,7 +16531,7 @@ test_specification:
     - No runtime/backend/provider implementation is promoted by this section.
     - No active `mock` or `local` LLM backend profile is promoted.
     - The runner does not satisfy, weaken, or bypass internal/runtime/llm.ProviderContract.
-    - The runner does not prove live agent sessions, tool-call translation, conversation modes, turn/audit persistence,
+    - The runner does not prove live agent sessions, tool-call translation, agent-memory behavior, turn/audit persistence,
       retry lineage, native-tool capability truth, or spend/budget accounting.
     - The runner must not execute arbitrary inline Python, JavaScript, shell, subprocesses, network calls, filesystem reads,
       imports, or mutable global code from scenario files.
@@ -18053,12 +17990,9 @@ cli_specification:
             agent_status:
               machine_owner: components.schemas.AgentStatus and operatorAgentProjection.v1Status
               phrases: {idle: idle, running: running, paused: paused, failed: failed, terminated: terminated}
-            conversation_mode:
-              machine_owner: internal/runtime/sessions.RuntimeMode and components.schemas.ConversationMode
-              phrases: {task: task, session: session, session_per_entity: session per entity}
-            session_scope:
-              machine_owner: internal/runtime/sessions.SessionScope and components.schemas.SessionScope
-              phrases: {global: global, flow: flow, entity: entity}
+            memory_source:
+              machine_owner: internal/runtime/agentmemory.Source and persisted memory_source
+              phrases: {authored: authored, platform_default: platform default}
             delivery_status:
               machine_owner: persisted event_deliveries.status contract and components.schemas.DeliveryStatus
               phrases: {pending: pending, in_progress: in progress, delivered: delivered, failed: failed, dead_letter: dead letter}
@@ -18168,7 +18102,6 @@ cli_specification:
             - heuristic
             - quiescence
             - runtime_state
-            - session_scope
             - blocking_layer
             - blocking_reason
             - current_session_ref
@@ -22856,10 +22789,13 @@ api_specification:
             type: string
           llm_backend:
             type: string
-          mode:
+          memory:
+            type: boolean
+          memory_source:
             type: string
-          session_scope:
-            type: string
+            enum:
+            - authored
+            - platform_default
           prompt_path:
             type: string
           subscriptions:
@@ -24186,18 +24122,11 @@ api_specification:
           idempotency_replayed:
             type: boolean
             description: False for first execution; true when returned from the API idempotency replay path.
-      ConversationMode:
+      AgentMemorySource:
         type: string
         enum:
-        - task
-        - session
-        - session_per_entity
-      SessionScope:
-        type: string
-        enum:
-        - global
-        - flow
-        - entity
+        - authored
+        - platform_default
       AgentStatus:
         type: string
         enum:
@@ -24214,7 +24143,8 @@ api_specification:
         - role
         - type
         - model
-        - mode
+        - memory
+        - memory_source
         - status
         properties:
           agent_id:
@@ -24225,11 +24155,15 @@ api_specification:
             type: string
           model:
             type: string
-          mode:
-            $ref: '#/components/schemas/ConversationMode'
-          session_scope:
-            $ref: '#/components/schemas/SessionScope'
-            description: Present only for scoped agent modes. Omitted for mode=task because task agents have no live runtime session scope.
+          memory:
+            type: boolean
+            description: Whether prior turns are loaded for this agent's exact run and flow instance. False does not imply that diagnostic turn evidence is absent.
+          memory_source:
+            $ref: '#/components/schemas/AgentMemorySource'
+          flow_instance:
+            type: string
+            minLength: 1
+            description: Present when the agent is owned by a flow instance.
           status:
             $ref: '#/components/schemas/AgentStatus'
       SessionRef:
@@ -24455,8 +24389,8 @@ api_specification:
         additionalProperties: false
         description: |
           Narrow runtime-state container for agent.diagnose watchdog evidence.
-          The diagnosis owner reads the most-recent active agent_sessions row
-          for session/session_per_entity modes using the same active-session
+          The diagnosis owner reads the most-recent active memory-enabled agent_sessions row
+          using the same active-session
           selector as LoadOperatorAgentDiagnosis, ordered by updated_at DESC then
           created_at DESC then session_id ASC. It ignores inactive or terminated rows, omits
           runtime_state when there is no active live session or no watchdog
@@ -24475,7 +24409,7 @@ api_specification:
         description: |
           Selected active-session latest-turn refs for agent.diagnose. This
           object is present only when the diagnosis owner selects an active
-          live agent_sessions row for session/session_per_entity modes and that
+          memory-enabled agent_sessions row and that
           selected session has a latest agent_turns row. It is persisted
           selected-turn evidence, not proof of actual in-flight work. turn_id is
           the selected latest turn. task_id is the same selected latest
@@ -24501,7 +24435,7 @@ api_specification:
         description: |
           Compact selected-turn last-tool evidence for agent.diagnose. This
           object is present only when the diagnosis owner selects an active
-          live agent_sessions row for session/session_per_entity modes, that
+          memory-enabled agent_sessions row, that
           selected session has a latest agent_turns row, and that turn has a
           canonical turn_summary.tool_results entry. turn_id is the same
           selected latest turn used by AgentDiagnosisActive. tool_name,
@@ -25426,8 +25360,13 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           session_kind:
             type: string
-          session_runtime_mode:
+          session_memory:
+            type: boolean
+          session_memory_source:
             type: string
+            enum:
+            - authored
+            - platform_default
           session_status:
             type: string
           session_updated_at:
@@ -25438,10 +25377,15 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           turn_trigger_event_type:
             type: string
-          turn_runtime_mode:
+          turn_flow_instance:
             type: string
-          turn_scope_key:
+          turn_memory:
+            type: boolean
+          turn_memory_source:
             type: string
+            enum:
+            - authored
+            - platform_default
           turn_entity_id:
             $ref: '#/components/schemas/OpaqueId'
           turn_task_id:
@@ -28940,7 +28884,7 @@ agent_lifecycle_authority:
         identity: The normalized subordinate plan is part of the lifecycle request hash. Unknown actions or changed-plan replay under one operation_id fail closed.
       current_set: The complete exact-agent agent_sessions set with status active or suspended is selected and locked inside the lifecycle transition. A session acquisition committed before selection is included; an old-token acquisition after transition commit is rejected.
       atomicity: The lifecycle cell, candidate config, complete subordinate mutation set, immutable transition fact, durable operation outcome including exact affected and successor session IDs, and diagnostic outbox commit or roll back together.
-      rotation: Every selected live or suspended row is terminated and linked to a deterministic successor derived from operation_id plus predecessor session_id. Successors preserve scope, runtime mode, run/entity/flow identity, and prior active/suspended status while clearing conversation, provider-session, turn-count, watchdog, lease, and other mutable execution state.
+      rotation: Every selected live or suspended row is terminated and linked to a deterministic successor derived from operation_id plus predecessor session_id. Successors preserve exact run/agent/flow-instance memory identity and prior active/suspended status while clearing conversation, provider-session, turn-count, watchdog, lease, and other mutable execution state.
       termination: Every selected live or suspended row is terminated with no successor. No separately committing registry transaction or manager-side MarkAgentTerminated fallback may interpret lifecycle teardown.
       replay: Exact operation replay returns the stored action, affected rows, and successor mapping byte-for-byte and performs no subordinate mutation.
   exact_live_session_acquire_hydrate:

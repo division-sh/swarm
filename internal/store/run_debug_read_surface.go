@@ -202,14 +202,16 @@ type RunDebugTraceRow struct {
 	DeliveryDeliveredAt       *time.Time                        `json:"delivery_delivered_at,omitempty"`
 	SessionID                 string                            `json:"session_id,omitempty"`
 	SessionKind               string                            `json:"session_kind,omitempty"`
-	SessionRuntimeMode        string                            `json:"session_runtime_mode,omitempty"`
+	SessionMemory             bool                              `json:"session_memory"`
+	SessionMemorySource       string                            `json:"session_memory_source,omitempty"`
 	SessionStatus             string                            `json:"session_status,omitempty"`
 	SessionUpdatedAt          *time.Time                        `json:"session_updated_at,omitempty"`
 	TurnID                    string                            `json:"turn_id,omitempty"`
 	TurnTriggerEventID        string                            `json:"turn_trigger_event_id,omitempty"`
 	TurnTriggerEventType      string                            `json:"turn_trigger_event_type,omitempty"`
-	TurnRuntimeMode           string                            `json:"turn_runtime_mode,omitempty"`
-	TurnScopeKey              string                            `json:"turn_scope_key,omitempty"`
+	TurnFlowInstance          string                            `json:"turn_flow_instance,omitempty"`
+	TurnMemory                bool                              `json:"turn_memory"`
+	TurnMemorySource          string                            `json:"turn_memory_source,omitempty"`
 	TurnEntityID              string                            `json:"turn_entity_id,omitempty"`
 	TurnTaskID                string                            `json:"turn_task_id,omitempty"`
 	TurnParseOK               bool                              `json:"turn_parse_ok,omitempty"`
@@ -989,14 +991,16 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			d.delivered_at,
 			COALESCE(sess.session_id::text, ''),
 			COALESCE(sess.session_kind, ''),
-			COALESCE(sess.runtime_mode, ''),
+			COALESCE(sess.memory_enabled, false),
+			COALESCE(sess.memory_source, ''),
 			COALESCE(sess.status, ''),
 			sess.updated_at,
 			COALESCE(t.turn_id::text, ''),
 			COALESCE(t.trigger_event_id::text, ''),
 			COALESCE(t.trigger_event_type, ''),
-			COALESCE(t.runtime_mode, ''),
-			COALESCE(t.scope_key, ''),
+			COALESCE(t.flow_instance, ''),
+			COALESCE(t.memory_enabled, false),
+			COALESCE(t.memory_source, ''),
 			COALESCE(t.entity_id::text, ''),
 			COALESCE(t.task_id, ''),
 			COALESCE(t.parse_ok, false),
@@ -1078,14 +1082,16 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			&deliveryDeliveredAt,
 			&item.SessionID,
 			&item.SessionKind,
-			&item.SessionRuntimeMode,
+			&item.SessionMemory,
+			&item.SessionMemorySource,
 			&item.SessionStatus,
 			&sessionUpdatedAt,
 			&item.TurnID,
 			&item.TurnTriggerEventID,
 			&item.TurnTriggerEventType,
-			&item.TurnRuntimeMode,
-			&item.TurnScopeKey,
+			&item.TurnFlowInstance,
+			&item.TurnMemory,
+			&item.TurnMemorySource,
 			&item.TurnEntityID,
 			&item.TurnTaskID,
 			&item.TurnParseOK,
@@ -1201,7 +1207,8 @@ func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
 				session_id,
 				`+runIDExpr+`,
 				'live_session' AS session_kind,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				memory_enabled,
+				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_sessions
@@ -1217,7 +1224,8 @@ func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
 				session_id,
 				`+runIDExpr+`,
 				'turn_audit' AS session_kind,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				memory_enabled,
+				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_conversation_audits
@@ -1229,7 +1237,8 @@ func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
 				NULL::uuid AS session_id,
 				NULL::uuid AS run_id,
 				''::text AS session_kind,
-				''::text AS runtime_mode,
+				false AS memory_enabled,
+				''::text AS memory_source,
 				''::text AS status,
 				NULL::timestamptz AS updated_at
 			WHERE FALSE

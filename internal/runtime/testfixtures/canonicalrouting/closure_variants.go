@@ -5,22 +5,22 @@ import (
 	"testing"
 )
 
-type RuntimeSessionScopeVariant uint8
+type RuntimeAgentMemoryVariant uint8
 
 const (
-	RuntimeSessionScopePackageBacked RuntimeSessionScopeVariant = iota + 1
-	RuntimeSessionScopeSoleParent
+	RuntimeAgentMemoryPackageBacked RuntimeAgentMemoryVariant = iota + 1
+	RuntimeAgentMemorySoleParent
 )
 
-func CopyRuntimeSessionScope(t testing.TB, variant RuntimeSessionScopeVariant) string {
+func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 	packageBody := "name: session-scope-validation\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: support\n    flow: support\n    mode: static\n"
-	if variant == RuntimeSessionScopeSoleParent {
+	if variant == RuntimeAgentMemorySoleParent {
 		packageBody = "name: session-scope-validation\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\npackages:\n  - path: extras\nflows:\n  - id: support\n    flow: support\n    mode: static\n"
-	} else if variant != RuntimeSessionScopePackageBacked {
-		t.Fatalf("unsupported runtime session-scope variant %d", variant)
+	} else if variant != RuntimeAgentMemoryPackageBacked {
+		t.Fatalf("unsupported runtime agent-memory variant %d", variant)
 	}
 	writeClosedVariantFile(t, root, "package.yaml", packageBody)
 	writeClosedVariantFile(t, root, "entities.yaml", "item:\n  item_id:\n    type: string\n    _unused_reason: startup scope fixture field\n")
@@ -32,8 +32,8 @@ func CopyRuntimeSessionScope(t testing.TB, variant RuntimeSessionScopeVariant) s
 	writeClosedVariantFile(t, root, "flows/support/schema.yaml", "name: support\ninitial_state: waiting\nstates:\n  - waiting\n")
 	writeClosedVariantFile(t, root, "flows/support/policy.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "flows/support/events.yaml", "support/item.created:\n  entity_id: string\n")
-	agentBody := "backend:\n  id: backend-{vertical_id}\n  type: generic\n  role: backend\n  model: regular\n  mode: session\n  subscriptions:\n    - support/item.created\n  emit_events:\n    - support/item.created\n"
-	if variant == RuntimeSessionScopePackageBacked {
+	agentBody := "backend:\n  id: backend-{vertical_id}\n  type: generic\n  role: backend\n  model: regular\n  memory: true\n  subscriptions:\n    - support/item.created\n  emit_events:\n    - support/item.created\n"
+	if variant == RuntimeAgentMemoryPackageBacked {
 		writeClosedVariantFile(t, root, "flows/support/package.yaml", "name: support\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 		writeClosedVariantFile(t, root, "flows/support/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "flows/support/agents.yaml", agentBody)
@@ -76,10 +76,10 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		taskDoneSwarm = "    source: worker\n"
 	case EventMetadataAuthorityTaskProducerAgent:
 		taskDoneSwarm = "    producer: reviewer\n"
-		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  mode: task\n  emit_events: [task.done]\n"
+		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  emit_events: [task.done]\n"
 	case EventMetadataAuthorityTaskConsumerAgent:
 		taskDoneSwarm = "    consumer: reviewer\n"
-		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  mode: task\n  subscriptions: [task.done]\n"
+		agents = "reviewer-agent:\n  id: reviewer-agent\n  role: reviewer\n  subscriptions: [task.done]\n"
 	case EventMetadataAuthorityTaskProducerTimer:
 		taskDoneSwarm = "    producer: reminder\n"
 		timerBlock = "  timers:\n    - id: reminder\n      owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
@@ -214,7 +214,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	writeClosedVariantFile(t, root, "flows/support/policy.yaml", "{}\n")
 	agents := "{}\n"
 	if settings.flowAgent {
-		agents = "reminder-agent:\n  model: regular\n  mode: task\n  subscriptions: [timer.reminder]\n  emit_events: []\n"
+		agents = "reminder-agent:\n  model: regular\n  memory: false\n  subscriptions: [timer.reminder]\n  emit_events: []\n"
 	}
 	writeClosedVariantFile(t, root, "flows/support/agents.yaml", agents)
 	closedSource := ""
@@ -373,7 +373,7 @@ func CopyPinRoutingProducerRoute(t testing.TB, variant PinRoutingProducerRouteVa
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", "producer.start:\n  entity_id: text\nshared.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "flows/producer/entities.yaml", "producer:\n  entity_id: text\n")
 	if agent {
-		writeClosedVariantFile(t, root, "flows/producer/agents.yaml", "producer-agent:\n  id: producer-agent\n  role: producer\n  mode: task\n  emit_events:\n    - shared.ready\n")
+		writeClosedVariantFile(t, root, "flows/producer/agents.yaml", "producer-agent:\n  id: producer-agent\n  role: producer\n  memory: false\n  emit_events:\n    - shared.ready\n")
 		writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", "{}\n")
 	} else {
 		handler := "      emit:\n        event: shared.ready\n        fields:\n          entity_id: payload.entity_id\n"
@@ -465,7 +465,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	writeClosedVariantFile(t, root, "flows/child/schema.yaml", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\n")
 	writeClosedVariantFile(t, root, "flows/child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "flows/child/policy.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/child/agents.yaml", fmt.Sprintf("worker:\n  id: worker\n  type: factory\n  role: worker\n  prompt_ref: worker\n  model: %s\n  mode: task\n  subscriptions: [task.assigned]\n", model))
+	writeClosedVariantFile(t, root, "flows/child/agents.yaml", fmt.Sprintf("worker:\n  id: worker\n  type: factory\n  role: worker\n  prompt_ref: worker\n  model: %s\n  memory: false\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "flows/child/events.yaml", "task.assigned:\n  swarm:\n    source: external (verify model alias test)\n")
 	writeClosedVariantFile(t, root, "flows/child/nodes.yaml", "closer:\n  id: closer\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "flows/child/prompts/worker.md", "Handle the task.\n")

@@ -81,22 +81,17 @@ func TestResolvePromptFileForContractAgent_UsesCanonicalCandidateSet(t *testing.
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 prompt-ref-agent:
   role: prompt_ref_role
-  mode: task
   prompt_ref: shared-prompt
 entry-id-agent:
   id: concrete-template
   role: entry_id_role
-  mode: task
 mode-agent:
   role: mode_role
-  mode: task
 workspace-role-agent:
   role: ops_lead
-  mode: task
   workspace_class: factory
 parent-agent:
   role: parent_role
-  mode: task
 `, "\n"))...)
 	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
 		t.Fatalf("write %s: %v", agentsPath, err)
@@ -242,6 +237,7 @@ func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
 		FlowPath: "flows/demo/inst-1",
 		Config: mustPromptJSON(t, map[string]any{
 			"team_name": "instance",
+			"memory":    true,
 			"fields": map[string]any{
 				"team_name": "entity",
 				"score":     7,
@@ -267,6 +263,9 @@ func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
 	}
 	if got := vars["flow_instance_path"]; got != "flows/demo/inst-1" {
 		t.Fatalf("flow_instance_path = %#v, want flows/demo/inst-1", got)
+	}
+	if _, ok := vars["memory"]; ok {
+		t.Fatalf("runtime-owned memory leaked into prompt variables: %#v", vars["memory"])
 	}
 }
 
@@ -360,7 +359,7 @@ func TestLoadPromptForAgent_FailsClosedWhenRuntimeCriteriaWidensContractDelivery
 			},
 		},
 		Agents: map[string]AgentRegistryEntry{
-			"cto-agent": {Role: "cto", Mode: "task"},
+			"cto-agent": {Role: "cto"},
 		},
 	}
 	root := &FlowContractView{Children: []FlowContractView{flow}}

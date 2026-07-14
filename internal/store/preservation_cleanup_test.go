@@ -24,8 +24,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	ctx := context.Background()
 	now := time.Date(2026, 5, 27, 9, 30, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, conversation_mode)
-		VALUES ('agent-a', 'operator', 'default', 'session')
+		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
+		VALUES ('agent-a', 'preservation', 'operator', 'regular', TRUE, 'authored')
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			t.Fatalf("seed retryable failed delivery %s: %v", source, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status)
-			VALUES ($1::uuid, $2::uuid, 'agent-a', $2::text, 'flow', 'session', 'active')
+			INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+			VALUES ($1::uuid, $2::uuid, 'agent-a', 'preservation', TRUE, 'authored', 'active')
 		`, sessionID, runID); err != nil {
 			t.Fatalf("seed session %s: %v", source, err)
 		}

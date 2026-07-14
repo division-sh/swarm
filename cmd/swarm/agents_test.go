@@ -46,7 +46,7 @@ func TestAgentsListUsesV1RPCWithFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"AGENT_ID", "agent-1", "researcher", "worker", "running", "default", "task", "agent-2", "idle"} {
+	for _, want := range []string{"AGENT_ID", "MEMORY", "MEMORY_SOURCE", "agent-1", "researcher", "worker", "running", "default", "false", "platform default", "agent-2", "idle"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -120,7 +120,7 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 		"Agent agent-1  running",
 		"identity   role reviewer, type worker",
 		"model      default",
-		"mode       task",
+		"memory     false (platform default)",
 		"session    session-1, started 2026-05-18T03:00:00Z",
 		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed true",
 	} {
@@ -147,8 +147,8 @@ func TestAgentDetailHumanOutputPreservesCanonicalLastTurnFailure(t *testing.T) {
 			Role:         "reviewer",
 			Type:         "worker",
 			Model:        "default",
-			Mode:         "task",
-			SessionScope: "global",
+			Memory:       false,
+			MemorySource: "platform_default",
 			Status:       "failed",
 		},
 		LastTurnRef: &agentTurnRef{
@@ -325,12 +325,13 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 
 func agentSummaryResult(agentID, role, status string) map[string]any {
 	return map[string]any{
-		"agent_id": agentID,
-		"role":     role,
-		"type":     "worker",
-		"model":    "default",
-		"mode":     "task",
-		"status":   status,
+		"agent_id":      agentID,
+		"role":          role,
+		"type":          "worker",
+		"model":         "default",
+		"memory":        false,
+		"memory_source": "platform_default",
+		"status":        status,
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -291,19 +292,27 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()
+	runID := uuid.NewString()
+	flowInstance := "global"
 	leaseHolder := "completion-worker"
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,role,model,llm_backend,conversation_mode,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,'worker','regular','claude_cli','session','active',1,1,'running',?)`, agentID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES (?,'running',?)`, runID, now); err != nil {
+			t.Fatalf("seed completion run: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?)`, agentID, flowInstance, now); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,agent_id,scope_key,scope,conversation,turn_count,runtime_mode,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,'global','global','[]',0,'session',?,?,?,'active',?,?)`, sessionID, agentID, `{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`, sessionID, runID, agentID, flowInstance, `{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now, now); err != nil {
 			t.Fatalf("seed completion session: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,role,model,llm_backend,conversation_mode,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,'worker','regular','claude_cli','session','active',1,1,'running',$2)`, agentID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$2)`, runID, now); err != nil {
+			t.Fatalf("seed completion run: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,$2,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$3)`, agentID, flowInstance, now); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,agent_id,scope_key,scope,conversation,turn_count,runtime_mode,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2,'global','global','[]'::jsonb,0,'session',$3::jsonb,$4,$5,'active',$6,$6)`, sessionID, agentID, `{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,TRUE,'authored','[]'::jsonb,0,$5::jsonb,$6,$7,'active',$8,$8)`, sessionID, runID, agentID, flowInstance, `{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now); err != nil {
 			t.Fatalf("seed completion session: %v", err)
 		}
 	}
@@ -311,7 +320,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	authority := runtimeeffects.NormalAgentAuthority(token, leaseHolder, now.Add(10*time.Minute))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: agentID,
-		SessionID: sessionID, RuntimeMode: "session", ScopeKey: "global",
+		RunID: runID, SessionID: sessionID, Memory: agentmemory.Authored(true), FlowInstance: flowInstance,
 	}
 	authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
 	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(store))
@@ -346,16 +355,16 @@ func completionSettlementForTest(target runtimeeffects.UsageTarget, fixture comp
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RuntimeMode: target.RuntimeMode, ScopeKey: target.ScopeKey, ParseOK: true,
+			RunID: target.RunID, Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.ScopeKey, AgentID: target.AgentID, Model: "regular", ModelAlias: "regular",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, Model: "regular", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "claude-test",
-			CostUSD: 0.25, InvocationType: target.RuntimeMode,
+			CostUSD: 0.25, InvocationType: "agent_turn",
 		},
 		ProviderHead: &runtimeeffects.CompletionProviderHead{
-			AgentID: fixture.agentID, RuntimeMode: target.RuntimeMode, SessionID: fixture.sessionID,
-			ScopeKey: target.ScopeKey, LockOwner: fixture.leaseHolder,
+			Identity:  agentmemory.Identity{RunID: target.RunID, AgentID: fixture.agentID, FlowInstance: target.FlowInstance},
+			SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder,
 			ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
 		},
 		Now: time.Now().UTC(),

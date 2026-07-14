@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -235,7 +235,7 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	in, err := decodeAgentMutationInput("agent_hire", input, true)
+	in, err := decodeAgentMutationInput("agent_hire", input)
 	if err != nil {
 		return nil, err
 	}
@@ -247,11 +247,17 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 		in.Config.EntityID = in.EntityID
 	}
 	in.Config.NormalizeEntityID()
-	if in.Config.Mode == "" {
-		in.Config.Mode = coalesce(actor.Mode, "entity")
+	if in.Config.FlowID == "" {
+		in.Config.FlowID = strings.TrimSpace(actor.FlowID)
 	}
-	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(in.Config); err != nil {
-		return nil, fmt.Errorf("invalid agent session scope: %w", err)
+	if in.Config.FlowPath == "" {
+		in.Config.FlowPath = actor.CanonicalFlowPath()
+	}
+	if strings.TrimSpace(string(in.Config.Memory.Source)) == "" {
+		in.Config.Memory, _ = agentmemory.NewPlan(false, agentmemory.SourcePlatformDefault)
+	}
+	if in.Config.Memory.Enabled && in.Config.CanonicalFlowPath() == "" {
+		return nil, fmt.Errorf("memory: true requires a flow-instance owner")
 	}
 	if err := authorizeManage(e.authority, actor, in.Config, manager); err != nil {
 		return nil, err
@@ -306,7 +312,7 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	in, err := decodeAgentMutationInput("agent_reconfigure", input, false)
+	in, err := decodeAgentMutationInput("agent_reconfigure", input)
 	if err != nil {
 		return nil, err
 	}
@@ -320,11 +326,13 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	sessionCfg := mergeAgentSessionScopeConfig(targetCfg, in.Config)
-	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(sessionCfg); err != nil {
-		return nil, fmt.Errorf("invalid agent session scope: %w", err)
-	}
 	updatedCfg := mergeDelegablePrivilegeConfig(targetCfg, in.Config)
+	if strings.TrimSpace(string(in.Config.Memory.Source)) != "" {
+		updatedCfg.Memory = in.Config.Memory
+	}
+	if updatedCfg.Memory.Enabled && updatedCfg.CanonicalFlowPath() == "" {
+		return nil, fmt.Errorf("memory: true requires a flow-instance owner")
+	}
 	if err := authorizeDelegableAgentConfig(actor, targetCfg, updatedCfg, e.authority, e.emitRegistry); err != nil {
 		return nil, err
 	}
@@ -349,7 +357,7 @@ type agentMutationInput struct {
 	Config   models.AgentConfig
 }
 
-func decodeAgentMutationInput(toolName string, input any, requireMode bool) (agentMutationInput, error) {
+func decodeAgentMutationInput(toolName string, input any) (agentMutationInput, error) {
 	normalized := canonicalRuntimeToolInput(toolName, input)
 	var payload map[string]any
 	if err := decodeToolInput(normalized, &payload); err != nil {
@@ -358,7 +366,7 @@ func decodeAgentMutationInput(toolName string, input any, requireMode bool) (age
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	if err := rejectAgentMemoryModeForgery(payload, "input", true); err != nil {
+	if err := rejectAgentMemoryForgery(payload, "input", true); err != nil {
 		return agentMutationInput{}, err
 	}
 
@@ -366,18 +374,22 @@ func decodeAgentMutationInput(toolName string, input any, requireMode bool) (age
 	if err != nil {
 		return agentMutationInput{}, err
 	}
-	topMode := strings.TrimSpace(asString(payload["mode"]))
-	configMode := strings.TrimSpace(asString(configMap["mode"]))
+	topMemory, topPresent, err := optionalBool(payload, "memory")
+	if err != nil {
+		return agentMutationInput{}, err
+	}
+	configMemory, configPresent, err := optionalBool(configMap, "memory")
+	if err != nil {
+		return agentMutationInput{}, err
+	}
 	switch {
-	case topMode != "" && configMode != "" && topMode != configMode:
-		return agentMutationInput{}, fmt.Errorf("mode mismatch between input.mode and input.config.mode")
-	case configMode != "":
-		topMode = configMode
+	case topPresent && configPresent && topMemory != configMemory:
+		return agentMutationInput{}, fmt.Errorf("memory mismatch between input.memory and input.config.memory")
+	case configPresent:
+		topMemory, topPresent = configMemory, true
 	}
-	if requireMode && topMode == "" {
-		return agentMutationInput{}, fmt.Errorf("config.mode is required")
-	}
-	delete(configMap, "mode")
+	delete(payload, "memory")
+	delete(configMap, "memory")
 	payload["config"] = configMap
 
 	var decoded struct {
@@ -388,13 +400,8 @@ func decodeAgentMutationInput(toolName string, input any, requireMode bool) (age
 	if err := decodeToolInput(payload, &decoded); err != nil {
 		return agentMutationInput{}, err
 	}
-	if topMode != "" {
-		mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(topMode)
-		if err != nil {
-			return agentMutationInput{}, fmt.Errorf("invalid mode: %w", err)
-		}
-		decoded.Config.ConversationMode = mode.String()
-		decoded.Config.SessionScope = scope.String()
+	if topPresent {
+		decoded.Config.Memory, _ = agentmemory.NewPlan(topMemory, agentmemory.SourceAuthored)
 	}
 	return agentMutationInput{
 		AgentID:  decoded.AgentID,
@@ -417,7 +424,19 @@ func agentMutationConfigMap(raw any) (map[string]any, error) {
 	return config, nil
 }
 
-func rejectAgentMemoryModeForgery(value any, path string, allowMode bool) error {
+func optionalBool(values map[string]any, field string) (bool, bool, error) {
+	raw, ok := values[field]
+	if !ok {
+		return false, false, nil
+	}
+	value, ok := raw.(bool)
+	if !ok {
+		return false, true, fmt.Errorf("%s must be a boolean", field)
+	}
+	return value, true, nil
+}
+
+func rejectAgentMemoryForgery(value any, path string, allowMemory bool) error {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, item := range typed {
@@ -427,52 +446,29 @@ func rejectAgentMemoryModeForgery(value any, path string, allowMode bool) error 
 			}
 			fieldPath := path + "." + field
 			switch field {
-			case "conversation_mode":
-				return fmt.Errorf("%s is retired; use mode", fieldPath)
-			case "session_scope":
-				return fmt.Errorf("%s is runtime-derived from mode", fieldPath)
-			case "session_scope_authority":
-				return fmt.Errorf("%s is platform-internal runtime state", fieldPath)
-			case "mode":
-				if !allowMode {
-					return fmt.Errorf("%s is only supported as the agent memory mode field", fieldPath)
+			case "mode", "conversation_mode", "session_scope", "session_scope_authority":
+				return fmt.Errorf("%s is retired; use memory", fieldPath)
+			case "run_id", "flow_id", "flow_path", "flow_instance", "scope", "scope_key", "authority", "memory_plan":
+				return fmt.Errorf("%s is runtime-owned and cannot be supplied by agent mutation callers", fieldPath)
+			case "memory":
+				if !allowMemory {
+					return fmt.Errorf("%s is only supported at input.memory or input.config.memory", fieldPath)
 				}
 			}
-			childAllowMode := false
+			childAllowMemory := false
 			if path == "input" && field == "config" {
-				childAllowMode = true
+				childAllowMemory = true
 			}
-			if err := rejectAgentMemoryModeForgery(item, fieldPath, childAllowMode); err != nil {
+			if err := rejectAgentMemoryForgery(item, fieldPath, childAllowMemory); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for i, item := range typed {
-			if err := rejectAgentMemoryModeForgery(item, fmt.Sprintf("%s[%d]", path, i), false); err != nil {
+			if err := rejectAgentMemoryForgery(item, fmt.Sprintf("%s[%d]", path, i), false); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
-}
-
-func mergeAgentSessionScopeConfig(base, patch models.AgentConfig) models.AgentConfig {
-	out := base
-	if strings.TrimSpace(patch.ConversationMode) != "" {
-		out.ConversationMode = strings.TrimSpace(patch.ConversationMode)
-		if out.ConversationMode == runtimesessions.RuntimeModeTask.String() {
-			out.SessionScope = ""
-		}
-	}
-	if strings.TrimSpace(patch.SessionScope) != "" {
-		out.SessionScope = strings.TrimSpace(patch.SessionScope)
-	}
-	if strings.TrimSpace(patch.FlowPath) != "" {
-		out.FlowPath = strings.TrimSpace(patch.FlowPath)
-	}
-	if strings.TrimSpace(patch.EntityID) != "" {
-		out.EntityID = strings.TrimSpace(patch.EntityID)
-	}
-	out.NormalizeRuntimeDescriptor()
-	return out
 }

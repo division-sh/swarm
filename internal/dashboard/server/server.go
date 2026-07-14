@@ -12,6 +12,7 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -42,17 +43,17 @@ type EntityReader interface {
 }
 
 type ConversationSummary struct {
-	SessionID   string                      `json:"session_id,omitempty"`
-	AgentID     string                      `json:"agent_id"`
-	Kind        string                      `json:"kind,omitempty"`
-	ScopeKey    string                      `json:"scope_key,omitempty"`
-	Scope       string                      `json:"scope,omitempty"`
-	RuntimeMode string                      `json:"runtime_mode,omitempty"`
-	Status      string                      `json:"status,omitempty"`
-	TurnCount   int                         `json:"turn_count,omitempty"`
-	Summary     string                      `json:"summary,omitempty"`
-	UpdatedAt   string                      `json:"updated_at,omitempty"`
-	Metadata    ConversationSummaryMetadata `json:"metadata,omitempty"`
+	SessionID    string                      `json:"session_id,omitempty"`
+	AgentID      string                      `json:"agent_id"`
+	Kind         string                      `json:"kind,omitempty"`
+	FlowInstance string                      `json:"flow_instance,omitempty"`
+	Memory       bool                        `json:"memory"`
+	MemorySource string                      `json:"memory_source,omitempty"`
+	Status       string                      `json:"status,omitempty"`
+	TurnCount    int                         `json:"turn_count,omitempty"`
+	Summary      string                      `json:"summary,omitempty"`
+	UpdatedAt    string                      `json:"updated_at,omitempty"`
+	Metadata     ConversationSummaryMetadata `json:"metadata,omitempty"`
 }
 
 type ConversationSummaryMetadata struct {
@@ -247,9 +248,11 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 
 type genericAgent struct {
 	ID                  string            `json:"id"`
+	FlowInstance        string            `json:"flow_instance,omitempty"`
 	Type                string            `json:"type,omitempty"`
 	Role                string            `json:"role,omitempty"`
-	Mode                string            `json:"mode,omitempty"`
+	Memory              bool              `json:"memory"`
+	MemorySource        string            `json:"memory_source"`
 	Status              string            `json:"status,omitempty"`
 	State               string            `json:"state,omitempty"`
 	BlockingLayer       string            `json:"blocking_layer,omitempty"`
@@ -962,11 +965,16 @@ func formatTime(ts time.Time) string {
 }
 
 func toGenericAgent(row runtimemanager.PersistedAgent) genericAgent {
+	memory, err := row.Config.Memory.Normalize()
+	if err != nil {
+		memory = agentmemory.PlatformDefault()
+	}
 	return genericAgent{
 		ID:              strings.TrimSpace(row.Config.ID),
 		Type:            strings.TrimSpace(row.Config.Type),
 		Role:            strings.TrimSpace(row.Config.Role),
-		Mode:            strings.TrimSpace(row.Config.ConversationMode),
+		Memory:          memory.Enabled,
+		MemorySource:    string(memory.Source),
 		Status:          strings.TrimSpace(row.Status),
 		EntityID:        strings.TrimSpace(row.Config.EffectiveEntityID()),
 		ParentAgentID:   strings.TrimSpace(row.ParentAgentID),
@@ -983,9 +991,11 @@ func toGenericAgent(row runtimemanager.PersistedAgent) genericAgent {
 func genericAgentFromOperatorSummary(row store.OperatorAgentSummary) genericAgent {
 	return genericAgent{
 		ID:                  strings.TrimSpace(row.AgentID),
+		FlowInstance:        strings.TrimSpace(row.FlowInstance),
 		Type:                strings.TrimSpace(row.Type),
 		Role:                strings.TrimSpace(row.Role),
-		Mode:                strings.TrimSpace(row.Mode),
+		Memory:              row.Memory,
+		MemorySource:        strings.TrimSpace(row.MemorySource),
 		Status:              firstString(strings.TrimSpace(row.DashboardStatus), strings.TrimSpace(row.Status)),
 		State:               strings.TrimSpace(row.DashboardState),
 		BlockingLayer:       strings.TrimSpace(row.BlockingLayer),

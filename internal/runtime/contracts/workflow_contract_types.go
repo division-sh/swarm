@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1914,9 +1914,8 @@ type AgentRegistryEntry struct {
 	ManagerFallback        string                          `yaml:"manager_fallback"`
 	NodeType               string                          `yaml:"node_type"`
 	Model                  string                          `yaml:"model"`
-	Mode                   string                          `yaml:"mode"`
-	ConversationMode       string                          `yaml:"conversation_mode"`
-	SessionScope           string                          `yaml:"session_scope"`
+	Memory                 bool                            `yaml:"memory"`
+	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
 	PromptInputs           []string                        `yaml:"prompt_inputs" json:"prompt_inputs,omitempty"`
 	Subscriptions          []string                        `yaml:"subscriptions"`
@@ -1957,15 +1956,6 @@ func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 	if authoredFields["max_turns_per_task"] && decoded.MaxTurnsPerTask <= 0 {
 		return fmt.Errorf("agent field max_turns_per_task must be positive when authored")
 	}
-	if authoredFields["mode"] {
-		mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(decoded.Mode)
-		if err != nil {
-			return fmt.Errorf("agent field mode: %w", err)
-		}
-		decoded.Mode = mode.String()
-		decoded.ConversationMode = mode.String()
-		decoded.SessionScope = scope.String()
-	}
 	*e = AgentRegistryEntry(decoded)
 	e.AuthoredFields = authoredFields
 	return nil
@@ -1980,12 +1970,14 @@ func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, er
 			switch field {
 			case "model_tier":
 				return nil, fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
+			case "mode":
+				return nil, fmt.Errorf("RETIRED: agent field mode is retired; use memory: true or memory: false")
 			case "conversation_mode":
-				return nil, fmt.Errorf("RETIRED: agent field conversation_mode is retired; use mode")
+				return nil, fmt.Errorf("RETIRED: agent field conversation_mode is retired; use memory")
 			case "session_scope":
-				return nil, fmt.Errorf("RETIRED: agent field session_scope is runtime-derived from mode")
+				return nil, fmt.Errorf("RETIRED: agent field session_scope is retired; memory identity is the current run, agent, and flow instance")
 			case "session_scope_authority":
-				return nil, fmt.Errorf("RETIRED: agent field session_scope_authority is platform-internal runtime state")
+				return nil, fmt.Errorf("RETIRED: agent field session_scope_authority is retired; use memory")
 			case "tools_tier2":
 				return nil, fmt.Errorf("RETIRED: agent field tools_tier2 is retired; use tools")
 			case "subscriptions_bootstrap":
@@ -2016,7 +2008,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"manager_fallback":   {},
 	"node_type":          {},
 	"model":              {},
-	"mode":               {},
+	"memory":             {},
 	"max_turns_per_task": {},
 	"subscriptions":      {},
 	"prompt_inputs":      {},

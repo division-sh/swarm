@@ -44,7 +44,7 @@ type ProviderToolSchemaContract struct {
 type ProviderSessionLifecycleContract struct {
 	StartsSessions            bool
 	ContinuesSessions         bool
-	SupportsConversationModes bool
+	SupportsMemoryPlans       bool
 	ProviderSessionIDStrategy string
 	RotatesSessions           bool
 	PreservesRetryLineage     bool
@@ -68,7 +68,7 @@ type ProviderNativeToolContract struct {
 type ProviderPersistenceContract struct {
 	PersistsTurns                 bool
 	PersistsConversationSnapshots bool
-	PersistsTaskModeAudit         bool
+	PersistsStatelessAudit        bool
 }
 
 type ProviderBudgetContract struct {
@@ -156,8 +156,8 @@ func (c ProviderContract) Validate() error {
 	if !c.SessionLifecycle.StartsSessions || !c.SessionLifecycle.ContinuesSessions {
 		return fmt.Errorf("llm provider contract %s must own start and continue session behavior", c.RuntimeMode)
 	}
-	if !c.SessionLifecycle.SupportsConversationModes {
-		return fmt.Errorf("llm provider contract %s must preserve conversation mode semantics", c.RuntimeMode)
+	if !c.SessionLifecycle.SupportsMemoryPlans {
+		return fmt.Errorf("llm provider contract %s must consume the canonical memory plan", c.RuntimeMode)
 	}
 	if strings.TrimSpace(c.SessionLifecycle.ProviderSessionIDStrategy) == "" {
 		return fmt.Errorf("llm provider contract %s must declare provider session id strategy", c.RuntimeMode)
@@ -186,8 +186,8 @@ func (c ProviderContract) Validate() error {
 	if !c.Persistence.PersistsConversationSnapshots {
 		return fmt.Errorf("llm provider contract %s must persist conversation snapshots", c.RuntimeMode)
 	}
-	if !c.Persistence.PersistsTaskModeAudit {
-		return fmt.Errorf("llm provider contract %s must preserve task-mode audit", c.RuntimeMode)
+	if !c.Persistence.PersistsStatelessAudit {
+		return fmt.Errorf("llm provider contract %s must persist stateless execution audit", c.RuntimeMode)
 	}
 	switch c.Budget.UsageAccounting {
 	case BudgetUsageExact, BudgetUsageEstimated:

@@ -400,8 +400,8 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 		t.Fatalf("census reparsed authoritative YAML: parse count %d -> %d", afterBundle, afterCensus)
 	}
 	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", filepath.Join(fixture, "nodes.yaml"), 14)
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", filepath.Join(fixture, "agents.yaml"), 6)
-	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 8)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", filepath.Join(fixture, "agents.yaml"), 5)
+	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 7)
 }
 
 type endpointSourceFiles struct {

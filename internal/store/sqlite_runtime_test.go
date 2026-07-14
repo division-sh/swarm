@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -62,13 +63,13 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "operator",
-			Mode:             "global",
-			Model:            "regular",
-			LLMBackend:       "anthropic",
-			ConversationMode: "task",
-			Config:           json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
+			ID:         "agent-1",
+			Role:       "operator",
+			FlowID:     "global",
+			Model:      "regular",
+			LLMBackend: "anthropic",
+			Memory:     agentmemory.PlatformDefault(),
+			Config:     json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -382,13 +383,13 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-in-pipeline-tx",
-			Role:             "worker",
-			Mode:             "global",
-			Model:            "regular",
-			LLMBackend:       "anthropic",
-			ConversationMode: "task",
-			Config:           json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
+			ID:         "agent-in-pipeline-tx",
+			Role:       "worker",
+			FlowID:     "global",
+			Model:      "regular",
+			LLMBackend: "anthropic",
+			Memory:     agentmemory.PlatformDefault(),
+			Config:     json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
@@ -1444,18 +1445,22 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Now().UTC()
 	store.SetNowFnForTest(func() time.Time { return now })
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:                    "agent-1",
-			Role:                  "operator",
-			Mode:                  "global",
-			Model:                 "regular",
-			LLMBackend:            "anthropic",
-			ConversationMode:      "session",
-			SessionScope:          "global",
-			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
-			Config:                json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+			ID:         "agent-1",
+			Role:       "operator",
+			FlowID:     "global",
+			Model:      "regular",
+			LLMBackend: "anthropic",
+			Memory:     agentmemory.Authored(true),
+			FlowPath:   "global",
+			Config:     json.RawMessage(`{"system_prompt":"test","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
@@ -1481,36 +1486,36 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		t.Fatalf("release successor startup lease: %v", err)
 	}
 
-	lease, err := store.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "")
+	identity := agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "global"}
+	lease, err := store.Acquire(ctx, identity, "owner-1")
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
 	}
-	if lease.ScopeKey != "global" {
-		t.Fatalf("session scope key = %q, want global", lease.ScopeKey)
+	if lease.Identity != identity {
+		t.Fatalf("session identity = %+v, want %+v", lease.Identity, identity)
 	}
-	if _, err := store.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-2", ""); !errors.Is(err, runtimesessions.ErrSessionLeased) {
+	if _, err := store.Acquire(ctx, identity, "owner-2"); !errors.Is(err, runtimesessions.ErrSessionLeased) {
 		t.Fatalf("competing Acquire error = %v, want ErrSessionLeased", err)
 	}
-	if err := store.AdoptSessionID(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "provider-session-1", "global"); err != nil {
+	if err := store.AdoptSessionID(ctx, identity, "owner-1", "provider-session-1"); err != nil {
 		t.Fatalf("AdoptSessionID: %v", err)
 	}
-	if err := store.IncrementTurn(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, lease.SessionID, "global"); err != nil {
+	if err := store.IncrementTurn(ctx, identity, lease.SessionID); err != nil {
 		t.Fatalf("IncrementTurn: %v", err)
 	}
 	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID:    lease.SessionID,
-		AgentID:      "agent-1",
-		SessionScope: "global",
-		ScopeKey:     "global",
-		Mode:         "session",
-		Messages:     []runtimellm.Message{{Role: "user", Content: "hello"}},
-		Summary:      "greeting",
-		TurnCount:    1,
-		Status:       "active",
+		SessionID: lease.SessionID,
+		AgentID:   identity.AgentID,
+		Identity:  identity,
+		Memory:    agentmemory.Authored(true),
+		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
+		Summary:   "greeting",
+		TurnCount: 1,
+		Status:    "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	conversation, ok, err := store.LoadActiveConversation(ctx, "agent-1", "session", "global", "global")
+	conversation, ok, err := store.LoadActiveConversation(ctx, identity)
 	if err != nil {
 		t.Fatalf("LoadActiveConversation: %v", err)
 	}
@@ -1518,8 +1523,6 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		t.Fatalf("conversation = %+v ok=%v, want persisted greeting", conversation, ok)
 	}
 
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
 	if err := store.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
 
@@ -1534,10 +1537,10 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",
-		RuntimeMode:      "session",
+		Memory:           agentmemory.Authored(true),
 		SessionID:        lease.SessionID,
-		ScopeKey:         "global",
 		RunID:            runID,
+		FlowInstance:     identity.FlowInstance,
 		TriggerEventID:   eventID,
 		TriggerEventType: "trace.visible",
 		RequestPayload:   []byte(`{"prompt":"hello"}`),
@@ -1580,15 +1583,18 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 }
 
-func TestSQLiteRuntimeStore_TaskAuditAppendThenUpsertUsesGlobalScope(t *testing.T) {
+func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		RuntimeMode:    "task",
+		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
 		RunID:          runID,
 		RequestPayload: []byte(`{"kind":"task"}`),
@@ -1596,75 +1602,61 @@ func TestSQLiteRuntimeStore_TaskAuditAppendThenUpsertUsesGlobalScope(t *testing.
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn(task): %v", err)
-	}
-	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: sessionID,
-		AgentID:   "task-agent",
-		RunID:     runID,
-		Mode:      "task",
-		Messages: []runtimellm.Message{
-			{Role: "user", Content: "one-shot"},
-			{Role: "assistant", Content: "done"},
-		},
-		TurnCount: 1,
-		Status:    "active",
-	}); err != nil {
-		t.Fatalf("UpsertConversation(task): %v", err)
-	}
-	if rec, ok, err := store.LoadActiveConversation(ctx, "task-agent", "task", "", ""); err != nil || ok || rec.AgentID != "" {
-		t.Fatalf("LoadActiveConversation(task) ok=%v err=%v rec=%+v", ok, err, rec)
+		t.Fatalf("AppendAgentTurn(stateless): %v", err)
 	}
 
 	var count int
-	var scope, scopeKey, entityID, flowInstance, conversation, persistedRunID, status string
+	var entityID, flowInstance, conversation, persistedRunID, status, memorySource string
+	var memoryEnabled bool
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(MAX(scope), ''), COALESCE(MAX(scope_key), ''),
-		       COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), ''), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), '')
+		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
+		       COALESCE(MAX(conversation), ''), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), ''),
+		       MAX(memory_enabled), COALESCE(MAX(memory_source), '')
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &scope, &scopeKey, &entityID, &flowInstance, &conversation, &persistedRunID, &status); err != nil {
-		t.Fatalf("read task audit row: %v", err)
+	`, sessionID).Scan(&count, &entityID, &flowInstance, &conversation, &persistedRunID, &status, &memoryEnabled, &memorySource); err != nil {
+		t.Fatalf("read stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if scope != "global" || scopeKey != "" || entityID != "" || flowInstance != "" {
-		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want global/no identity", scope, scopeKey, entityID, flowInstance)
+	if entityID != "" || flowInstance != "" || memoryEnabled || memorySource != "platform_default" {
+		t.Fatalf("audit identity entity_id=%q flow_instance=%q memory=%v source=%q", entityID, flowInstance, memoryEnabled, memorySource)
 	}
 	if persistedRunID != runID || status != "active" {
 		t.Fatalf("audit run/status = %q/%q, want %q/active", persistedRunID, status, runID)
 	}
-	if !strings.Contains(conversation, "done") {
-		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	if conversation != "[]" {
+		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
 	}
 
 	var turns int
 	if err := store.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
-		WHERE session_id = ? AND runtime_mode = 'task'
+		WHERE session_id = ? AND memory_enabled = 0
 	`, sessionID).Scan(&turns); err != nil {
-		t.Fatalf("count task turns: %v", err)
+		t.Fatalf("count stateless turns: %v", err)
 	}
 	if turns != 1 {
 		t.Fatalf("task turn count = %d, want 1", turns)
 	}
 }
 
-func TestSQLiteRuntimeStore_TaskAuditEntityScopeSurvivesConversationUpsert(t *testing.T) {
+func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		RuntimeMode:    "task",
+		Memory:         agentmemory.Authored(false),
 		SessionID:      sessionID,
-		ScopeKey:       "noncanonical-task-key",
 		RunID:          runID,
 		EntityID:       entityID,
 		RequestPayload: []byte(`{"kind":"task"}`),
@@ -1672,70 +1664,57 @@ func TestSQLiteRuntimeStore_TaskAuditEntityScopeSurvivesConversationUpsert(t *te
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn(task entity): %v", err)
-	}
-	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: sessionID,
-		AgentID:   "task-agent",
-		ScopeKey:  "snapshot-task-key",
-		RunID:     runID,
-		Mode:      "task",
-		Messages: []runtimellm.Message{
-			{Role: "user", Content: "entity task"},
-			{Role: "assistant", Content: "entity done"},
-		},
-		TurnCount: 1,
-		Status:    "active",
-	}); err != nil {
-		t.Fatalf("UpsertConversation(task entity): %v", err)
+		t.Fatalf("AppendAgentTurn(stateless entity): %v", err)
 	}
 
 	var count int
-	var scope, scopeKey, gotEntityID, flowInstance, conversation string
+	var gotEntityID, flowInstance, conversation, memorySource string
+	var memoryEnabled bool
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(MAX(scope), ''), COALESCE(MAX(scope_key), ''),
-		       COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), '')
+		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
+		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &scope, &scopeKey, &gotEntityID, &flowInstance, &conversation); err != nil {
-		t.Fatalf("read entity task audit row: %v", err)
+	`, sessionID).Scan(&count, &gotEntityID, &flowInstance, &conversation, &memoryEnabled, &memorySource); err != nil {
+		t.Fatalf("read entity stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if scope != "entity" || scopeKey != entityID || gotEntityID != entityID || flowInstance != "" {
-		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want entity %s", scope, scopeKey, gotEntityID, flowInstance, entityID)
+	if gotEntityID != entityID || flowInstance != "" || memoryEnabled || memorySource != "authored" {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", gotEntityID, flowInstance, memoryEnabled, memorySource)
 	}
-	if !strings.Contains(conversation, "entity done") {
-		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	if conversation != "[]" {
+		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
 	}
 
 	var linkedTurns int
 	if err := store.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
-		WHERE session_id = ? AND runtime_mode = 'task' AND entity_id = ?
+		WHERE session_id = ? AND memory_enabled = 0 AND entity_id = ?
 	`, sessionID, entityID).Scan(&linkedTurns); err != nil {
-		t.Fatalf("count linked task turns: %v", err)
+		t.Fatalf("count linked stateless turns: %v", err)
 	}
 	if linkedTurns != 1 {
 		t.Fatalf("linked task turn count = %d, want 1", linkedTurns)
 	}
 }
 
-func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *testing.T) {
+func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
-		RuntimeMode:    "task",
+		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
-		ScopeKey:       "noncanonical-task-key",
 		RunID:          runID,
 		FlowInstance:   flowInstance,
 		RequestPayload: []byte(`{"kind":"task"}`),
@@ -1743,52 +1722,37 @@ func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *test
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn(task flow): %v", err)
-	}
-	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: sessionID,
-		AgentID:   "task-agent",
-		ScopeKey:  "snapshot-task-key",
-		RunID:     runID,
-		Mode:      "task",
-		Messages: []runtimellm.Message{
-			{Role: "user", Content: "flow task"},
-			{Role: "assistant", Content: "flow done"},
-		},
-		TurnCount: 1,
-		Status:    "active",
-	}); err != nil {
-		t.Fatalf("UpsertConversation(task flow): %v", err)
+		t.Fatalf("AppendAgentTurn(stateless flow): %v", err)
 	}
 
 	var count int
-	var scope, scopeKey, entityID, gotFlowInstance, conversation string
+	var entityID, gotFlowInstance, conversation, memorySource string
+	var memoryEnabled bool
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(MAX(scope), ''), COALESCE(MAX(scope_key), ''),
-		       COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(conversation), '')
+		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
+		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
 		FROM agent_conversation_audits
 		WHERE session_id = ?
-	`, sessionID).Scan(&count, &scope, &scopeKey, &entityID, &gotFlowInstance, &conversation); err != nil {
-		t.Fatalf("read flow task audit row: %v", err)
+	`, sessionID).Scan(&count, &entityID, &gotFlowInstance, &conversation, &memoryEnabled, &memorySource); err != nil {
+		t.Fatalf("read flow stateless audit row: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("audit row count = %d, want 1", count)
 	}
-	if scope != "flow" || scopeKey != flowInstance || gotFlowInstance != flowInstance || entityID != "" {
-		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want flow %s", scope, scopeKey, entityID, gotFlowInstance, flowInstance)
+	if gotFlowInstance != flowInstance || entityID != "" || memoryEnabled || memorySource != "platform_default" {
+		t.Fatalf("audit entity=%q flow_instance=%q memory=%v source=%q", entityID, gotFlowInstance, memoryEnabled, memorySource)
 	}
-	if !strings.Contains(conversation, "flow done") {
-		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	if conversation != "[]" {
+		t.Fatalf("conversation = %s, want empty stateless audit snapshot", conversation)
 	}
 
 	var linkedTurns int
 	if err := store.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
-		WHERE session_id = ? AND runtime_mode = 'task'
+		WHERE session_id = ? AND memory_enabled = 0
 	`, sessionID).Scan(&linkedTurns); err != nil {
-		t.Fatalf("count linked task turns: %v", err)
+		t.Fatalf("count linked stateless turns: %v", err)
 	}
 	if linkedTurns != 1 {
 		t.Fatalf("linked task turn count = %d, want 1", linkedTurns)
@@ -1800,49 +1764,55 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
+	runID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:                    "agent-cleanup-1",
-			Role:                  "operator",
-			Mode:                  "global",
-			Model:                 "regular",
-			LLMBackend:            "anthropic",
-			ConversationMode:      "session",
-			SessionScope:          "global",
-			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
-			Config:                json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+			ID:         "agent-cleanup-1",
+			Role:       "operator",
+			FlowID:     "global",
+			Model:      "regular",
+			LLMBackend: "anthropic",
+			Memory:     agentmemory.Authored(true),
+			FlowPath:   "global",
+			Config:     json.RawMessage(`{"system_prompt":"test","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	lease, err := store.Acquire(ctx, "agent-cleanup-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "")
+	identity := agentmemory.Identity{RunID: runID, AgentID: "agent-cleanup-1", FlowInstance: "global"}
+	lease, err := store.Acquire(ctx, identity, "owner-1")
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
 	}
 	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID:    lease.SessionID,
-		AgentID:      "agent-cleanup-1",
-		SessionScope: "global",
-		ScopeKey:     "global",
-		Mode:         "session",
-		Messages:     []runtimellm.Message{{Role: "user", Content: "hello"}},
-		Summary:      "session",
-		TurnCount:    1,
-		Status:       "active",
+		SessionID: lease.SessionID,
+		AgentID:   identity.AgentID,
+		Identity:  identity,
+		Memory:    agentmemory.Authored(true),
+		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
+		Summary:   "session",
+		TurnCount: 1,
+		Status:    "active",
 	}); err != nil {
-		t.Fatalf("UpsertConversation(session): %v", err)
+		t.Fatalf("UpsertConversation(memory): %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO agent_conversation_audits (
-			session_id, agent_id, scope_key, scope, conversation, turn_count,
-			runtime_mode, runtime_state, status, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, '[]', 0, 'task', '{}', 'active', ?, ?)
-	`, uuid.NewString(), "agent-cleanup-1", "global", "global", now, now); err != nil {
-		t.Fatalf("seed task audit: %v", err)
+	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		SessionID:      uuid.NewString(),
+		AgentID:        identity.AgentID,
+		RunID:          identity.RunID,
+		FlowInstance:   identity.FlowInstance,
+		Memory:         agentmemory.PlatformDefault(),
+		RequestPayload: []byte(`{"kind":"stateless"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+	}); err != nil {
+		t.Fatalf("seed stateless audit: %v", err)
 	}
 
 	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{

@@ -66,7 +66,7 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 }
 
 func criteriaRefsForActor(source semanticview.Source, actor models.AgentConfig) (string, []string) {
-	flowID := strings.TrimSpace(actor.Mode)
+	flowID := strings.TrimSpace(actor.FlowID)
 	if source == nil {
 		return flowID, UniqueNonEmpty(actor.Criteria)
 	}

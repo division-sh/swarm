@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -51,6 +52,7 @@ type BackgroundWorkflowExecutorProvider interface {
 type WorkflowInstancePersistence interface {
 	Enabled() bool
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
+	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstanceRouteRecoveryProjection, error)
 	List(ctx context.Context) ([]WorkflowInstance, error)
 	SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error)
 	Create(ctx context.Context, instance WorkflowInstance) error

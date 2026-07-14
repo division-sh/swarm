@@ -164,10 +164,9 @@ vertical:
 
 func TestToolDefinitionsForActor_RetireSameNameEntityToolOverrideWithoutActorContract(t *testing.T) {
 	lifecycle := models.AgentConfig{
-		ID:           "lifecycle-coordinator",
-		Role:         "lifecycle-coordinator",
-		SessionScope: "global",
-		Tools:        []string{"get_entity"},
+		ID:    "lifecycle-coordinator",
+		Role:  "lifecycle-coordinator",
+		Tools: []string{"get_entity"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"lifecycle": {

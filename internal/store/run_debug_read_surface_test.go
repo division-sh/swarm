@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -15,14 +16,16 @@ import (
 	"github.com/google/uuid"
 )
 
-func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string) {
+func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string, memory agentmemory.Plan, flowPath string) {
 	t.Helper()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:       agentID,
 			Role:     agentID,
-			Mode:     "operating",
+			FlowID:   "operating",
 			Model:    "regular",
+			Memory:   memory,
+			FlowPath: flowPath,
 			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"You are a trace test agent.","tools":[],"subscriptions":["trace.*"]}`),
 		},
@@ -358,20 +361,20 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		t.Fatalf("seed timers: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, created_at)
-		VALUES ('quiescence-agent', 'worker', 'standard', 'mock', 'session', now())
+		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, created_at)
+		VALUES ('quiescence-agent', 'quiescence', 'worker', 'regular', 'mock', TRUE, 'authored', now())
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
-			(gen_random_uuid(), $1::uuid, 'quiescence-agent', 'global', 'global', 'session', '{}'::jsonb,
+			(gen_random_uuid(), $1::uuid, 'quiescence-agent', 'quiescence', TRUE, 'authored', '{}'::jsonb,
 				'worker-1', now() + interval '1 minute', 'active', now(), now()),
-			(gen_random_uuid(), $2::uuid, 'quiescence-agent', 'global-ready', 'global', 'session', '{}'::jsonb,
+			(gen_random_uuid(), $2::uuid, 'quiescence-agent', 'quiescence', TRUE, 'authored', '{}'::jsonb,
 				'worker-1', now() - interval '1 minute', 'active', now(), now())
 	`, blockedRunID, readyRunID); err != nil {
 		t.Fatalf("seed sessions: %v", err)
@@ -425,19 +428,19 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	`, runID, eventID, entityID, now); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID)
+	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'flow-a', 'entity:' || $3::text, 'entity',
-			'[]'::jsonb, 1, 'session', '{}'::jsonb,
-			NULL, NULL, 'active', $4, $5
+			$1::uuid, $2::uuid, 'agent-source', 'flow-a', TRUE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb,
+			NULL, NULL, 'active', $3, $4
 		)
-	`, sessionID, runID, entityID, now.Add(1*time.Second), now.Add(3*time.Second)); err != nil {
+	`, sessionID, runID, now.Add(1*time.Second), now.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -456,13 +459,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'session', 'entity:' || $4::text, $4::uuid,
+			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
 			$5::uuid, 'scan.requested', 'task-1', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			'{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, $6
@@ -494,8 +497,11 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.DeliveryPayloadProjection == nil || got.DeliveryPayloadProjection.Fields()["validation_case_id"] != projectedInstanceID {
 		t.Fatalf("delivery payload projection = %#v, want validation_case_id %q", got.DeliveryPayloadProjection, projectedInstanceID)
 	}
-	if got.SessionID != sessionID || got.SessionKind != "live_session" || got.SessionRuntimeMode != "session" {
+	if got.SessionID != sessionID || got.SessionKind != "live_session" || !got.SessionMemory || got.SessionMemorySource != "authored" {
 		t.Fatalf("session trace = %#v", got)
+	}
+	if !got.TurnMemory || got.TurnMemorySource != "authored" || got.TurnFlowInstance != "flow-a" {
+		t.Fatalf("turn memory trace = %#v", got)
 	}
 	if got.TurnID != turnID || got.TurnTriggerEventID != eventID || got.TurnTaskID != "task-1" || got.TurnRetryCount != 1 {
 		t.Fatalf("turn trace = %#v", got)
@@ -533,19 +539,19 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	`, runID, eventID, entityID, base); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID)
+	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'flow-a', 'entity:' || $3::text, 'entity',
-			'[]'::jsonb, 1, 'session', '{}'::jsonb,
-			NULL, NULL, 'active', $4, $5
+			$1::uuid, $2::uuid, 'agent-late', 'flow-a', TRUE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb,
+			NULL, NULL, 'active', $3, $4
 		)
-	`, sessionID, runID, entityID, base.Add(2*time.Second), base.Add(2*time.Second)); err != nil {
+	`, sessionID, runID, base.Add(2*time.Second), base.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -561,13 +567,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'session', 'entity:' || $4::text, $4::uuid,
+			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
 			$5::uuid, 'scan.requested', 'task-late', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			'{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, $6
@@ -616,15 +622,15 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	`, runID, eventID, entityID, now); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID)
+	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, agent_id, entity_id, flow_instance, scope_key, scope, conversation,
-			turn_count, runtime_mode, runtime_state, run_id, status, created_at, updated_at
+			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source, conversation,
+			turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, 'agent-task', $2::uuid, 'flow-a', 'entity:' || $2::text, 'entity', '[]'::jsonb,
-			1, 'task', '{}'::jsonb, $3::uuid, 'active', $4, $5
+			$1::uuid, $3::uuid, 'agent-task', $2::uuid, 'flow-a', FALSE, 'platform_default', '[]'::jsonb,
+			1, '{}'::jsonb, 'active', $4, $5
 		)
 	`, sessionID, entityID, runID, now.Add(1*time.Second), now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed audit session: %v", err)
@@ -641,13 +647,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-task', $3::uuid, 'task', 'entity:' || $4::text, $4::uuid,
+			$1::uuid, $2::uuid, 'agent-task', $3::uuid, 'flow-a', FALSE, 'platform_default', $4::uuid,
 			$5::uuid, 'task.started', 'task-2', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			'{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, $6
@@ -664,8 +670,11 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("trace len = %d, want 1", len(rows))
 	}
 	got := rows[0]
-	if got.SessionID != sessionID || got.SessionKind != "turn_audit" || got.SessionRuntimeMode != "task" {
+	if got.SessionID != sessionID || got.SessionKind != "turn_audit" || got.SessionMemory || got.SessionMemorySource != "platform_default" {
 		t.Fatalf("task audit trace = %#v", got)
+	}
+	if got.TurnMemory || got.TurnMemorySource != "platform_default" || got.TurnFlowInstance != "flow-a" {
+		t.Fatalf("stateless turn trace = %#v", got)
 	}
 }
 

@@ -1871,12 +1871,11 @@ func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.
 	bundle.FlowSchemas["child"] = schema
 	bundle.Semantics.FlowAgents["child"] = append([]runtimecontracts.FlowRequiredAgent(nil), schema.RequiredAgents...)
 	worker := runtimecontracts.AgentRegistryEntry{
-		ID:               "worker",
-		Role:             "worker",
-		Model:            "small",
-		ConversationMode: "task",
-		Subscriptions:    []string{"work.requested"},
-		EmitEvents:       []string{"work.completed"},
+		ID:            "worker",
+		Role:          "worker",
+		Model:         "small",
+		Subscriptions: []string{"work.requested"},
+		EmitEvents:    []string{"work.completed"},
 	}
 	bundle.Agents["worker"] = worker
 	if view := bundle.FlowTree.ByID["child"]; view != nil {
@@ -1904,12 +1903,11 @@ func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
-				ID:               "worker",
-				Role:             "worker",
-				Model:            "small",
-				ConversationMode: "task",
-				Subscriptions:    []string{"task.requested"},
-				EmitEvents:       []string{"task.completed"},
+				ID:            "worker",
+				Role:          "worker",
+				Model:         "small",
+				Subscriptions: []string{"task.requested"},
+				EmitEvents:    []string{"task.completed"},
 			},
 		},
 	}
@@ -2662,25 +2660,25 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsRootAgentFlowSessionScope(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, `
+func TestRun_RejectsRootAgentMemory(t *testing.T) {
+	root := writeAgentMemoryValidationFixture(t, `
 root-flow:
   id: root-flow
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - item.created
 `, "", "")
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
-	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope flow requires flow-scoped declaration") {
-		t.Fatalf("expected session_scope flow declaration error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "invalid_field_detection", "memory true requires a flow-scoped declaration") {
+		t.Fatalf("expected root memory declaration error, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DefaultsOmittedAgentModeButKeepsModelExplicit(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, `
+func TestRun_DefaultsOmittedAgentMemoryButKeepsModelExplicit(t *testing.T) {
+	root := writeAgentMemoryValidationFixture(t, `
 root-defaulted:
   id: root-defaulted
   model: regular
@@ -2688,47 +2686,47 @@ root-defaulted:
     - item.created
 `, "", "")
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
-	if reportContains(report.Errors(), "invalid_field_detection", "missing required field mode") {
-		t.Fatalf("unexpected missing mode error with platform default: %#v", report.Errors())
+	if reportContains(report.Errors(), "invalid_field_detection", "memory") {
+		t.Fatalf("unexpected memory error with platform default: %#v", report.Errors())
 	}
 
-	root = writeSessionScopeValidationFixture(t, `
+	root = writeAgentMemoryValidationFixture(t, `
 root-missing-model:
   id: root-missing-model
   subscriptions:
     - item.created
 `, "", "")
 
-	report = Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report = Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
 	if !reportContains(report.Errors(), "invalid_field_detection", "model is required") {
 		t.Fatalf("expected missing model error to remain explicit, got %#v", report.Errors())
 	}
 }
 
-func TestRun_RejectsEntitySessionScopeInStatelessFlow(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, "{}\n", `
+func TestRun_AcceptsFlowAgentMemoryInStatelessFlow(t *testing.T) {
+	root := writeAgentMemoryValidationFixture(t, "{}\n", `
 name: support
 `, `
 entity-agent:
   id: entity-agent
   model: regular
-  mode: session_per_entity
+  memory: true
   subscriptions:
     - item.created
 `)
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
-	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope entity requires stateful flow support") {
-		t.Fatalf("expected stateful flow session_scope error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "invalid_field_detection", "memory") {
+		t.Fatalf("unexpected flow-agent memory error: %#v", report.Errors())
 	}
 }
 
-func TestRun_AcceptsExplicitSessionScopeDeclarations(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, "{}\n", `
+func TestRun_AcceptsExplicitFlowAgentMemoryDeclarations(t *testing.T) {
+	root := writeAgentMemoryValidationFixture(t, "{}\n", `
 name: support
 initial_state: waiting
 states:
@@ -2738,32 +2736,32 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
   model: regular
-  mode: session_per_entity
+  memory: true
   subscriptions:
     - support/item.created
 `)
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
 	for _, finding := range report.Errors() {
-		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "session_scope") {
-			t.Fatalf("unexpected session_scope error: %#v", report.Errors())
+		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "memory") {
+			t.Fatalf("unexpected memory error: %#v", report.Errors())
 		}
 	}
 }
 
-func TestRun_RejectsAuthoredGlobalSessionScope(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, `
+func TestRun_RejectsRetiredAuthoredSessionScope(t *testing.T) {
+	root := writeAgentMemoryValidationFixture(t, `
 root-global:
   id: root-global
   model: regular
-  mode: session
+  memory: true
   session_scope: global
   subscriptions:
     - item.created
@@ -2771,13 +2769,13 @@ root-global:
 
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "agent field session_scope is runtime-derived from mode") {
+	if err == nil || !strings.Contains(err.Error(), "agent field session_scope is retired") {
 		t.Fatalf("expected retired session_scope load error, got %v", err)
 	}
 }
 
-func TestRun_AcceptsPackageBackedFlowSessionScopeDeclarations(t *testing.T) {
-	root := writePackageBackedSessionScopeValidationFixture(t, `
+func TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations(t *testing.T) {
+	root := writePackageBackedAgentMemoryValidationFixture(t, `
 name: support
 initial_state: waiting
 states:
@@ -2787,43 +2785,43 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
   model: regular
-  mode: session_per_entity
+  memory: true
   subscriptions:
     - support/item.created
 `)
 
-	source := loadSessionScopeValidationFixture(t, root)
+	source := loadAgentMemoryValidationFixture(t, root)
 	report := Run(context.Background(), source, Options{})
 
 	for _, finding := range report.Errors() {
-		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "session_scope") {
-			t.Fatalf("unexpected package-backed session_scope error: %#v", report.Errors())
+		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "memory") {
+			t.Fatalf("unexpected package-backed memory error: %#v", report.Errors())
 		}
 	}
 }
 
-func TestRun_RejectsPackageBackedEntitySessionScopeInStatelessFlow(t *testing.T) {
-	root := writePackageBackedSessionScopeValidationFixture(t, `
+func TestRun_AcceptsPackageBackedFlowAgentMemoryInStatelessFlow(t *testing.T) {
+	root := writePackageBackedAgentMemoryValidationFixture(t, `
 name: support
 `, `
 entity-agent:
   id: entity-agent
   model: regular
-  mode: session_per_entity
+  memory: true
   subscriptions:
     - support/item.created
 `)
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
 
-	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope entity requires stateful flow support") {
-		t.Fatalf("expected stateful flow session_scope error for package-backed flow, got %#v", report.Errors())
+	if reportContains(report.Errors(), "invalid_field_detection", "memory") {
+		t.Fatalf("unexpected package-backed flow-agent memory error: %#v", report.Errors())
 	}
 }
 
@@ -4672,7 +4670,6 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4702,7 +4699,6 @@ func TestRun_ReportsPromptCreateEntityWithoutEntityWritesAuthorization(t *testin
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4726,7 +4722,6 @@ func TestRun_ReportsPromptSaveEntityFieldWithoutMatchingEntityWritesAuthorizatio
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4757,7 +4752,6 @@ func TestRun_PromptSaveEntityFieldAllowsDeclaredDottedPathAuthorizedByRootField(
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4789,7 +4783,6 @@ func TestRun_ReportsPromptSaveEntityFieldDottedPathWithoutRootAuthorization(t *t
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4825,7 +4818,6 @@ func TestRun_ReportsPromptSaveEntityFieldMultilineDottedPathWithoutRootAuthoriza
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4861,7 +4853,6 @@ func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPath(t *testing.T) {
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4893,7 +4884,6 @@ func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPathWithAllAuthorizatio
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4924,7 +4914,6 @@ func TestRun_ReportsPromptSaveEntityFieldReadOnlyListSelectorWithAllAuthorizatio
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4955,7 +4944,6 @@ func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *test
 writer:
   id: writer
   role: writer
-  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -5002,7 +4990,6 @@ writer:
   role: writer
   prompt_ref: writer
   model: regular
-  mode: task
   subscriptions: []
   entity_writes:
     case:
@@ -5067,7 +5054,6 @@ writer:
   role: writer
   prompt_ref: writer
   model: regular
-  mode: task
   subscriptions: []
   entity_writes:
     case:
@@ -6422,7 +6408,6 @@ func TestRun_AllowsTimerFireEventWithAgentConsumer(t *testing.T) {
 		flowAgents: `
 reminder-agent:
   model: regular
-  mode: task
   subscriptions: [timer.reminder]
   emit_events: []
 `,
@@ -6854,14 +6839,14 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 	}
 }
 
-func loadSessionScopeValidationFixture(t *testing.T, fixtureRoot string) semanticview.Source {
+func loadAgentMemoryValidationFixture(t *testing.T, fixtureRoot string) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec))
 }
 
-func writeSessionScopeValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
+func writeAgentMemoryValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
 	t.Helper()
 	root := t.TempDir()
 	flows := " []"
@@ -6869,7 +6854,7 @@ func writeSessionScopeValidationFixture(t *testing.T, rootAgents, flowSchema, fl
 		flows = "\n  - id: support\n    flow: support\n    mode: static"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
+name: agent-memory-validation
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 flows:`+flows+`
@@ -6878,7 +6863,7 @@ flows:`+flows+`
 item:
   item_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -6907,12 +6892,12 @@ support/item.created:
 	return root
 }
 
-func writePackageBackedSessionScopeValidationFixture(t *testing.T, flowSchema, packageAgents string) string {
+func writePackageBackedAgentMemoryValidationFixture(t *testing.T, flowSchema, packageAgents string) string {
 	t.Helper()
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
+name: agent-memory-validation
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 flows:
@@ -6924,7 +6909,7 @@ flows:
 item:
   item_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
@@ -6935,6 +6920,7 @@ item.created:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)

@@ -1,6 +1,5 @@
 child-agent:
   model: regular
-  mode: task
   tools:
     - lookup_data
   subscriptions:

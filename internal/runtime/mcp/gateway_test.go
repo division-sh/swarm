@@ -629,7 +629,7 @@ func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 			return models.AgentConfig{
 				ID:          "market-research-agent",
 				Role:        "market_research",
-				Mode:        "discovery",
+				FlowID:      "discovery",
 				EntityID:    "entity-1",
 				Permissions: []string{"schedule"},
 				EmitEvents:  []string{"category.assessed", "market_research.scan_complete"},
@@ -638,16 +638,16 @@ func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 	})
 
 	hydrated := g.hydrateActor(models.AgentConfig{
-		ID:   "market-research-agent",
-		Role: "spoofed_role",
-		Mode: "spoofed_mode",
+		ID:     "market-research-agent",
+		Role:   "spoofed_role",
+		FlowID: "spoofed_mode",
 	})
 
 	if len(hydrated.EmitEvents) != 2 {
 		t.Fatalf("emit_events = %#v, want two resolved events", hydrated.EmitEvents)
 	}
-	if hydrated.Mode != "discovery" {
-		t.Fatalf("mode = %q, want discovery", hydrated.Mode)
+	if hydrated.FlowID != "discovery" {
+		t.Fatalf("flow_id = %q, want discovery", hydrated.FlowID)
 	}
 	if hydrated.Role != "market_research" {
 		t.Fatalf("role = %q, want market_research", hydrated.Role)

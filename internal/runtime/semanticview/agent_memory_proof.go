@@ -6,13 +6,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-type AgentSessionScopeLocator struct {
+type AgentMemoryLocator struct {
 	AgentID         string
 	ProjectScopeKey string
 	FlowID          string
 }
 
-type AgentSessionScopeProof struct {
+type AgentMemoryProof struct {
 	AgentID         string
 	ProjectScopeKey string
 	ContractSource  runtimecontracts.ContractItemSource
@@ -20,8 +20,8 @@ type AgentSessionScopeProof struct {
 	FlowPath        string
 }
 
-func ResolveAgentSessionScopeProof(source Source, locator AgentSessionScopeLocator) AgentSessionScopeProof {
-	proof := AgentSessionScopeProof{
+func ResolveAgentMemoryProof(source Source, locator AgentMemoryLocator) AgentMemoryProof {
+	proof := AgentMemoryProof{
 		AgentID:         strings.TrimSpace(locator.AgentID),
 		ProjectScopeKey: strings.TrimSpace(locator.ProjectScopeKey),
 	}

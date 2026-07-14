@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -77,7 +76,7 @@ func OpenAICompatibleProviderContract() ProviderContract {
 		SessionLifecycle: ProviderSessionLifecycleContract{
 			StartsSessions:            true,
 			ContinuesSessions:         true,
-			SupportsConversationModes: true,
+			SupportsMemoryPlans:       true,
 			ProviderSessionIDStrategy: "platform_managed",
 			RotatesSessions:           true,
 			PreservesRetryLineage:     true,
@@ -94,7 +93,7 @@ func OpenAICompatibleProviderContract() ProviderContract {
 		Persistence: ProviderPersistenceContract{
 			PersistsTurns:                 true,
 			PersistsConversationSnapshots: true,
-			PersistsTaskModeAudit:         true,
+			PersistsStatelessAudit:        true,
 		},
 		Budget: ProviderBudgetContract{
 			UsageAccounting: BudgetUsageExact,
@@ -106,43 +105,20 @@ func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Contex
 	if r.conversations == nil || s == nil {
 		return nil
 	}
-	mode, err := sessions.ParseConversationRuntimeMode(s.ConversationMode)
-	if err != nil {
+	record, persist, err := memoryConversationRecord(s)
+	if err != nil || !persist {
 		return err
 	}
-	if !shouldPersistConversationMode(mode) {
-		return nil
-	}
-	return r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID:    s.ID,
-		AgentID:      s.AgentID,
-		SessionScope: strings.TrimSpace(s.SessionScope),
-		ScopeKey:     strings.TrimSpace(s.ScopeKey),
-		Watchdog:     s.Watchdog,
-		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:         mode.String(),
-		Messages:     s.Messages,
-		Summary:      BuildSessionSummary(s),
-		TurnCount:    s.TurnCount,
-		Status:       "active",
-	})
+	return r.conversations.UpsertConversation(ctx, record)
 }
 
 func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	scope := sessions.ScopeFromContext(ctx)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
-	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(scope.ConversationMode), sessions.NormalizeSessionScope(scope.SessionScope), scope.ScopeKey)
+	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
 	}
-
-	var lease *sessions.Lease
-	var hydrated ConversationRecord
-	if !resolved.Stateless {
-		lease, hydrated, err = acquireLiveSessionAndConversation(ctx, r.sessions, r.conversations, agentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
-		if err != nil {
-			return nil, err
-		}
+	if resolved.Enabled() {
 		if err := r.sessions.Release(ctx, lease); err != nil {
 			return nil, err
 		}
@@ -155,11 +131,9 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 			}
 			return ""
 		}()),
-		AgentID:          agentID,
-		RuntimeMode:      resolved.RuntimeMode.String(),
-		ConversationMode: resolved.RuntimeMode.String(),
-		SessionScope:     resolved.Scope.String(),
-		ScopeKey:         resolved.ScopeKey,
+		AgentID:        agentID,
+		Memory:         resolved.Plan,
+		MemoryIdentity: resolved.Identity,
 		RetryReason: func() string {
 			if lease != nil {
 				return lease.RetryReason
@@ -184,7 +158,7 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 		TurnCount:    hydrated.TurnCount,
 		Watchdog:     hydrated.Watchdog,
 	}
-	if !resolved.Stateless {
+	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
 		s.RetriesFromSessionID = strings.TrimSpace(hydrated.RetriesFromSessionID)
 	}
@@ -199,33 +173,26 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 
-	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
+	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
 	if err != nil {
-		return nil, err
+		return nil, sessionAcquireFailure(err, s.AgentID)
 	}
-	var lease *sessions.Lease
-	if !resolved.Stateless {
-		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
-		if err != nil {
-			return nil, sessionAcquireFailure(err, s.AgentID)
-		}
+	if resolved.Enabled() {
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
-		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
+		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the OpenAI-compatible session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
-				"runtime_mode": resolved.RuntimeMode.String(),
-				"scope_key":    resolved.ScopeKey,
+				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
 			}, heartbeatErr)
 		})
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
-			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), s.ID, lease.SessionID, resolved.ScopeKey)
+			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.ID, lease.SessionID)
 			s.ID = lease.SessionID
 		}
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
-		"runtime_mode": resolved.RuntimeMode.String(),
-		"scope_key":    resolved.ScopeKey,
+		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused openai-compatible session: %w", err)
 	}
@@ -269,7 +236,6 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
 			RequestPayload: reqJSON,
 			ResponseRaw:    rawResp,
@@ -286,8 +252,8 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 		if projectionErr == nil {
 			s.ParseFailures++
 		}
-		if projectionErr == nil && !resolved.Stateless {
-			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
+		if projectionErr == nil && resolved.Enabled() {
+			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
 		}
@@ -302,7 +268,6 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 		err := errors.New("openai-compatible response missing usage")
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
 			RequestPayload: reqJSON,
 			ResponseRaw:    rawResp,
@@ -324,7 +289,6 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
 			RequestPayload: reqJSON,
 			ResponseRaw:    rawResp,
@@ -346,7 +310,6 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 
 	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
-		RuntimeMode:    resolved.RuntimeMode.String(),
 		SessionID:      s.ID,
 		RequestPayload: reqJSON,
 		ResponseRaw:    rawResp,
@@ -364,15 +327,15 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	s.Messages = append(s.Messages, message, resp.Message)
 	s.TurnCount++
 	s.ParseFailures = 0
-	if !resolved.Stateless {
-		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
+	if resolved.Enabled() {
+		if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
 			return nil, err
 		}
 	}
 	r.persistConversation(ctx, s)
 
-	if !resolved.Stateless {
-		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
+	if resolved.Enabled() {
+		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
 			lease = rotated
 		}
 	}
@@ -393,33 +356,18 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Se
 	if r.conversations == nil || s == nil {
 		return
 	}
-	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
+	record, persist, err := memoryConversationRecord(s)
 	if err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_invalid_mode", "Persisting the OpenAI-compatible conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
-			"mode":         strings.TrimSpace(s.ConversationMode),
-			"runtime_mode": strings.TrimSpace(s.RuntimeMode),
-			"scope_key":    strings.TrimSpace(s.ScopeKey),
-		}, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_invalid_memory", "Persisting the OpenAI-compatible conversation was skipped because the memory identity was invalid", s.AgentID, s.ID, "", nil, err)
 		return
 	}
-	if !shouldPersistConversationMode(mode) {
+	if !persist {
 		return
 	}
-	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID:    s.ID,
-		AgentID:      s.AgentID,
-		SessionScope: strings.TrimSpace(s.SessionScope),
-		ScopeKey:     strings.TrimSpace(s.ScopeKey),
-		Watchdog:     s.Watchdog,
-		Mode:         mode.String(),
-		Messages:     s.Messages,
-		Summary:      BuildSessionSummary(s),
-		TurnCount:    s.TurnCount,
-		Status:       "active",
-	}); err != nil {
+	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_failed", "Persisting the OpenAI-compatible conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"mode":      mode.String(),
-			"scope_key": strings.TrimSpace(s.ScopeKey),
+			"run_id":        record.Identity.RunID,
+			"flow_instance": record.Identity.FlowInstance,
 		}, err)
 	}
 }

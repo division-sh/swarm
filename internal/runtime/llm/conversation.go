@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type cliUsableToolsContextKey struct{}
@@ -21,14 +21,6 @@ type cliUsableToolsContextKey struct{}
 type cliUsableToolsContextValue struct {
 	tools []string
 }
-
-type ConversationMode int
-
-const (
-	TaskScoped ConversationMode = iota
-	SessionScoped
-	SessionPerEntityScoped
-)
 
 const defaultMaxToolRounds = 8
 
@@ -74,27 +66,14 @@ type Conversation struct {
 	Tools        []ToolDefinition
 	MaxTurns     int
 	TurnCount    int
-	Mode         ConversationMode
+	Memory       agentmemory.Plan
 
 	runtime       Runtime
 	toolExecutor  CapabilityAwareToolExecutor
 	maxToolRounds int
 }
 
-func ConversationModeString(mode ConversationMode) string {
-	switch mode {
-	case TaskScoped:
-		return sessions.RuntimeModeTask.String()
-	case SessionScoped:
-		return sessions.RuntimeModeSession.String()
-	case SessionPerEntityScoped:
-		return sessions.RuntimeModeSessionPerEntity.String()
-	default:
-		return ""
-	}
-}
-
-func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, mode ConversationMode, maxTurns int, runtime Runtime) *Conversation {
+func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) *Conversation {
 	if maxTurns <= 0 {
 		maxTurns = 25
 	}
@@ -104,7 +83,7 @@ func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinitio
 		SystemPrompt:  systemPrompt,
 		Tools:         tools,
 		MaxTurns:      maxTurns,
-		Mode:          mode,
+		Memory:        memory,
 		runtime:       runtime,
 		maxToolRounds: defaultMaxToolRounds,
 	}
@@ -156,22 +135,6 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	if c.Session != nil {
 		return nil
 	}
-	scope := sessions.ScopeFromContext(ctx)
-	if strings.TrimSpace(scope.ConversationMode) == "" {
-		scope.ConversationMode = ConversationModeString(c.Mode)
-	}
-	if strings.TrimSpace(scope.SessionScope) == "" {
-		if actor, ok := models.ActorFromContext(ctx); ok {
-			scope.SessionScope = strings.TrimSpace(actor.SessionScope)
-		}
-	}
-	if strings.TrimSpace(scope.ScopeKey) == "" {
-		switch c.Mode {
-		case TaskScoped, SessionPerEntityScoped:
-			scope.ScopeKey = strings.TrimSpace(c.TaskID)
-		}
-	}
-	ctx = sessions.WithScope(ctx, scope.ConversationMode, scope.SessionScope, scope.ScopeKey)
 	s, err := c.runtime.StartSession(ctx, c.AgentID, c.SystemPrompt, c.Tools)
 	if err != nil {
 		return err

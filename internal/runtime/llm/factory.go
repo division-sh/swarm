@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -85,7 +86,7 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 type NoopRuntime struct{}
 
 func (NoopRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "noop", AgentID: agentID, RuntimeMode: "noop"}, nil
+	return &Session{ID: "noop", AgentID: agentID, Memory: agentmemory.PlatformDefault()}, nil
 }
 
 func (NoopRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {

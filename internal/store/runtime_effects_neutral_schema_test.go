@@ -142,11 +142,11 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,role,model,llm_backend,conversation_mode,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,'worker','regular','mock','task','active',7,3,'running',?)`, agentID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,'neutral','worker','regular','mock',0,'platform_default','active',7,3,'running',?)`, agentID, now); err != nil {
 			t.Fatalf("seed neutral effect agent: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,role,model,llm_backend,conversation_mode,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,'worker','regular','mock','task','active',7,3,'running',$2)`, agentID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,'neutral','worker','regular','mock',FALSE,'platform_default','active',7,3,'running',$2)`, agentID, now); err != nil {
 			t.Fatalf("seed neutral effect agent: %v", err)
 		}
 	}

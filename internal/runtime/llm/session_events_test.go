@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -73,6 +74,7 @@ func (s *failingConversationStore) UpdateLiveSessionWatchdog(context.Context, Co
 
 type captureConversationStore struct {
 	record         ConversationRecord
+	upsertCount    int
 	load           ConversationRecord
 	loadOK         bool
 	watchdogMu     sync.Mutex
@@ -84,17 +86,16 @@ type atomicLiveSessionTestRegistry struct {
 	hydrated ConversationRecord
 }
 
-func (r atomicLiveSessionTestRegistry) AcquireLiveSession(ctx context.Context, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, scopeKey string) (*sessions.Lease, ConversationRecord, error) {
-	lease, err := r.Registry.Acquire(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
+func (r atomicLiveSessionTestRegistry) AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, ConversationRecord, error) {
+	lease, err := r.Registry.Acquire(ctx, identity, lockOwner)
 	if err != nil {
 		return nil, ConversationRecord{}, err
 	}
 	record := r.hydrated
 	record.SessionID = lease.SessionID
-	record.AgentID = agentID
-	record.Mode = runtimeMode.String()
-	record.SessionScope = sessionScope.String()
-	record.ScopeKey = lease.ScopeKey
+	record.AgentID = identity.AgentID
+	record.Identity = identity
+	record.Memory = testMemory()
 	record.Status = "active"
 	return lease, record, nil
 }
@@ -104,7 +105,7 @@ type exactAcquireFailureRegistry struct {
 	err error
 }
 
-func (r exactAcquireFailureRegistry) AcquireLiveSession(context.Context, string, sessions.RuntimeMode, sessions.SessionScope, string, string) (*sessions.Lease, ConversationRecord, error) {
+func (r exactAcquireFailureRegistry) AcquireLiveSession(context.Context, agentmemory.Identity, string) (*sessions.Lease, ConversationRecord, error) {
 	return nil, ConversationRecord{}, r.err
 }
 
@@ -133,10 +134,9 @@ func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *t
 			publisher := &eventPublisherStub{}
 			registry := exactAcquireFailureRegistry{InMemoryRegistry: sessions.NewInMemoryRegistry(0), err: wantErr}
 			runtime := construct(registry, publisher)
-			ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/instance-1")
+			ctx := withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/instance-1")
 			ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
-				ID: "agent-1", Model: "regular", ConversationMode: sessions.RuntimeModeSession.String(),
-				SessionScope: sessions.SessionScopeFlow.String(), FlowPath: "support/instance-1",
+				ID: "agent-1", Model: "regular", Memory: testMemory(), FlowPath: "support/instance-1",
 			})
 			if _, err := runtime.StartSession(ctx, "agent-1", "system", nil); !errors.Is(err, wantErr) {
 				t.Fatalf("StartSession error = %v, want exact acquire-hydrate failure", err)
@@ -150,6 +150,7 @@ func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *t
 
 func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
 	s.record = rec
+	s.upsertCount++
 	return nil
 }
 
@@ -173,7 +174,7 @@ func (s *captureConversationStore) capturedWatchdogUpdate() ConversationWatchdog
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Model:    "regular",
 		EntityID: "entity-1",
@@ -206,8 +207,11 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["agent_id"]; got != "agent-1" {
 		t.Fatalf("agent_id = %#v, want agent-1", got)
 	}
-	if got := payload["mode"]; got != sessions.RuntimeModeTask.String() {
-		t.Fatalf("mode = %#v, want task", got)
+	if got := payload["memory_enabled"]; got != false {
+		t.Fatalf("memory_enabled = %#v, want false", got)
+	}
+	if got := payload["memory_source"]; got != string(agentmemory.SourceAuthored) {
+		t.Fatalf("memory_source = %#v, want authored", got)
 	}
 	if got := payload["model"]; got != "regular" {
 		t.Fatalf("model = %#v, want regular", got)
@@ -220,7 +224,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
 		ID:    "agent-2",
 		Model: "cheap",
 	})
@@ -259,7 +263,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
-	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := withTestStatelessMemory(unmanagedLLMTestContext())
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
@@ -294,7 +298,7 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurface(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil)
 	ctx := runtimeactors.WithActor(
-		sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1"),
+		withTestStatelessMemory(unmanagedLLMTestContext()),
 		runtimeactors.AgentConfig{
 			ID: "agent-3",
 			NativeTools: runtimeactors.NativeToolConfig{
@@ -351,10 +355,9 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 	})
 
 	publishAgentStarted(ctx, publisher, &Session{
-		ID:               "session-1",
-		AgentID:          "agent-1",
-		ConversationMode: sessions.RuntimeModeTask.String(),
-		RuntimeMode:      sessions.RuntimeModeTask.String(),
+		ID:      "session-1",
+		AgentID: "agent-1",
+		Memory:  agentmemory.Authored(false),
 	}, events.EventType("platform.agent_started"))
 
 	if len(publisher.runtimeLogs) != 1 {
@@ -386,9 +389,8 @@ func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *test
 			{Name: "emit_category_assessed"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, nil)
 
 	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "write_file"}) {
@@ -412,9 +414,8 @@ func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
 	rec := enrichTurnRecord(ctx, &Session{
 		ID: "session-1",
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, nil)
 
 	if rec.FlowInstance != "review/inst-1" {
@@ -438,9 +439,8 @@ func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *test
 			{Name: "emit_category_assessed"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, &Response{
 		VisibleTools: []string{"ExitPlanMode", "emit_category_assessed", "read_file", "write_file"},
 	})
@@ -464,9 +464,8 @@ func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVis
 			{Name: "read_file"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, &Response{
 		MCPServers: map[string]string{
 			"runtime-tools": "failed",
@@ -492,9 +491,8 @@ func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFil
 			{Name: "read_file"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, &Response{
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
@@ -524,9 +522,8 @@ func TestEnrichTurnRecord_NativeBuiltinsDoNotLeakIntoMCPToolsListed(t *testing.T
 			{Name: "web_search"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, nil)
 
 	if !slices.Equal(rec.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
@@ -548,9 +545,8 @@ func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbse
 			{Name: "query_entities"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, &Response{
 		ToolCalls: []ToolCall{
 			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
@@ -572,9 +568,8 @@ func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCal
 			{Name: "emit_category_assessed"},
 		},
 	}, AgentTurnRecord{
-		AgentID:     "analysis-agent",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
-		SessionID:   "session-1",
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
 	}, &Response{
 		ToolCalls: []ToolCall{},
 		ObservedToolCalls: []ToolCall{
@@ -642,8 +637,7 @@ func TestClaudeCLIRuntimePrompt_IncludesWritableEntityPathSummary(t *testing.T) 
 
 func TestEnrichTurnRecordIncludesSessionIdentity(t *testing.T) {
 	record := enrichTurnRecord(unmanagedLLMTestContext(), &Session{
-		ID:          "session-1",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
+		ID: "session-1",
 	}, AgentTurnRecord{AgentID: "agent-1"}, nil)
 
 	if record.SessionID != "session-1" {
@@ -653,8 +647,7 @@ func TestEnrichTurnRecordIncludesSessionIdentity(t *testing.T) {
 
 func TestEnrichTurnRecordDefersTurnBlockCanonicalizationToStore(t *testing.T) {
 	record := enrichTurnRecord(unmanagedLLMTestContext(), &Session{
-		ID:          "session-1",
-		RuntimeMode: sessions.RuntimeModeTask.String(),
+		ID: "session-1",
 	}, AgentTurnRecord{
 		AgentID:        "agent-1",
 		ResponseRaw:    []byte(`{"result":"done"}`),
@@ -679,8 +672,7 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:                "session-1",
 		AgentID:           "agent-1",
-		ConversationMode:  sessions.RuntimeModeTask.String(),
-		RuntimeMode:       sessions.RuntimeModeTask.String(),
+		Memory:            agentmemory.Authored(false),
 		ProviderSessionID: "provider-1",
 	}, events.EventType("platform.agent_started"))
 
@@ -700,10 +692,10 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", &failingConversationStore{err: errors.New("conversation boom")}, publisher)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
-		ID:               "session-3",
-		AgentID:          "agent-3",
-		ConversationMode: sessions.RuntimeModeTask.String(),
-		ScopeKey:         "task-3",
+		ID:             "session-3",
+		AgentID:        "agent-3",
+		Memory:         testMemory(),
+		MemoryIdentity: testMemoryIdentity("agent-3", "review/inst-3"),
 	})
 
 	if len(publisher.runtimeLogs) != 1 {
@@ -714,56 +706,53 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	}
 }
 
-func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
+func TestAnthropicAPIRuntime_PersistConversationIncludesExactMemoryIdentity(t *testing.T) {
 	store := &captureConversationStore{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", store, nil)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
-		ID:               "session-3",
-		AgentID:          "agent-3",
-		ConversationMode: sessions.RuntimeModeSession.String(),
-		SessionScope:     sessions.SessionScopeFlow.String(),
-		ScopeKey:         "review/inst-1",
+		ID:             "session-3",
+		AgentID:        "agent-3",
+		Memory:         testMemory(),
+		MemoryIdentity: testMemoryIdentity("agent-3", "review/inst-1"),
 	})
 
-	if store.record.SessionScope != sessions.SessionScopeFlow.String() {
-		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeFlow)
+	if store.record.Identity != testMemoryIdentity("agent-3", "review/inst-1") || store.record.Memory != testMemory() {
+		t.Fatalf("stored memory = identity=%+v plan=%+v", store.record.Identity, store.record.Memory)
 	}
 }
 
-func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
+func TestClaudeCLIRuntime_PersistConversationIncludesExactMemoryIdentity(t *testing.T) {
 	store := &captureConversationStore{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
-		ID:               "session-4",
-		AgentID:          "agent-4",
-		ConversationMode: sessions.RuntimeModeSessionPerEntity.String(),
-		SessionScope:     sessions.SessionScopeEntity.String(),
-		ScopeKey:         "entity-1",
+		ID:             "session-4",
+		AgentID:        "agent-4",
+		Memory:         testMemory(),
+		MemoryIdentity: testMemoryIdentity("agent-4", "support/inst-4"),
 	})
 
-	if store.record.SessionScope != sessions.SessionScopeEntity.String() {
-		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeEntity)
+	if store.record.Identity != testMemoryIdentity("agent-4", "support/inst-4") || store.record.Memory != testMemory() {
+		t.Fatalf("stored memory = identity=%+v plan=%+v", store.record.Identity, store.record.Memory)
 	}
 }
 
-func TestClaudeCLIRuntime_PersistConversationSuccessDoesNotLogFailure(t *testing.T) {
+func TestClaudeCLIRuntime_StatelessConversationIsNotPersisted(t *testing.T) {
 	store := &captureConversationStore{}
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, publisher)
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
-		ID:               "session-task",
-		AgentID:          "agent-task",
-		ConversationMode: sessions.RuntimeModeTask.String(),
-		ScopeKey:         "task-scope",
-		Messages:         []Message{{Role: "assistant", Content: "done"}},
-		TurnCount:        1,
+		ID:        "session-stateless",
+		AgentID:   "agent-stateless",
+		Memory:    agentmemory.Authored(false),
+		Messages:  []Message{{Role: "assistant", Content: "done"}},
+		TurnCount: 1,
 	})
 
-	if store.record.Mode != sessions.RuntimeModeTask.String() || store.record.SessionID != "session-task" {
-		t.Fatalf("stored conversation = %+v, want task session snapshot", store.record)
+	if store.upsertCount != 0 {
+		t.Fatalf("conversation upserts = %d, want zero for stateless execution", store.upsertCount)
 	}
 	if len(publisher.runtimeLogs) != 0 {
 		t.Fatalf("runtime log count = %d, want 0 after successful task conversation persistence", len(publisher.runtimeLogs))
@@ -782,7 +771,7 @@ func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 		loadOK: true,
 	}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
-	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global")
+	ctx := withTestMemory(unmanagedLLMTestContext(), "agent-4", "review/inst-4")
 
 	s, err := runtime.StartSession(ctx, "agent-4", "system", nil)
 	if err != nil {
@@ -828,13 +817,13 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(effects.Context("anthropic-reused-session"), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:           "agent-1",
-			Model:        "regular",
-			SessionScope: sessions.SessionScopeFlow.String(),
-			FlowPath:     "support/inst-1",
+			ID:       "agent-1",
+			Model:    "regular",
+			Memory:   testMemory(),
+			FlowPath: "support/inst-1",
 		},
 	)
 
@@ -870,13 +859,13 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:           "agent-1",
-			Model:        "regular",
-			SessionScope: sessions.SessionScopeFlow.String(),
-			FlowPath:     "support/inst-1",
+			ID:       "agent-1",
+			Model:    "regular",
+			Memory:   testMemory(),
+			FlowPath: "support/inst-1",
 		},
 	)
 
@@ -904,13 +893,13 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:           "agent-1",
-			Model:        "regular",
-			SessionScope: sessions.SessionScopeFlow.String(),
-			FlowPath:     "support/inst-1",
+			ID:       "agent-1",
+			Model:    "regular",
+			Memory:   testMemory(),
+			FlowPath: "support/inst-1",
 		},
 	)
 
@@ -981,8 +970,7 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
 	session := &Session{
-		ID:       "33333333-3333-3333-3333-333333333333",
-		ScopeKey: "global",
+		ID: "33333333-3333-3333-3333-333333333333",
 		Tools: []ToolDefinition{
 			{Name: "emit_category_assessed"},
 			{Name: "read_file"},
@@ -1001,9 +989,8 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	}
 
 	rec := enrichTurnRecord(ctx, session, AgentTurnRecord{
-		AgentID:     "market-research-agent",
-		RuntimeMode: sessions.RuntimeModeSession.String(),
-		SessionID:   session.ID,
+		AgentID:   "market-research-agent",
+		SessionID: session.ID,
 	}, resp)
 
 	if rec.RunID != "run-123" {

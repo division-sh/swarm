@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -283,15 +284,18 @@ func budgetAccountingSettlement(target runtimeeffects.UsageTarget, exactness run
 		Settlement: runtimeeffects.Settlement{State: state, Evidence: map[string]any{"accounting": exactness}},
 		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
-			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RuntimeMode: target.RuntimeMode, ScopeKey: target.ScopeKey, ParseOK: state == runtimeeffects.StateSettled,
+			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: state == runtimeeffects.StateSettled,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.ScopeKey, AgentID: target.AgentID, Model: "regular", ModelAlias: "regular",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, Model: "regular", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "openai", Transport: "http", ResolvedModel: "budget-test",
-			CostUSD: cost, InvocationType: target.RuntimeMode,
+			CostUSD: cost, InvocationType: "agent_turn",
 		},
 		Now: time.Now().UTC(),
+	}
+	if settlement.AgentTurn.Memory == (agentmemory.Plan{}) {
+		settlement.AgentTurn.Memory = agentmemory.PlatformDefault()
 	}
 	if state != runtimeeffects.StateSettled {
 		failure := runtimefailures.FromError(

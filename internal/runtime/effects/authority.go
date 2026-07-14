@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/google/uuid"
 )
 
@@ -25,15 +26,15 @@ const (
 )
 
 type UsageTarget struct {
-	Kind        UsageTargetKind
-	ID          string
-	Ordinal     int
-	RunID       string
-	AgentID     string
-	SessionID   string
-	RuntimeMode string
-	ScopeKey    string
-	EntityID    string
+	Kind         UsageTargetKind
+	ID           string
+	Ordinal      int
+	RunID        string
+	AgentID      string
+	SessionID    string
+	Memory       agentmemory.Plan
+	FlowInstance string
+	EntityID     string
 }
 
 type BudgetAdmissionScope struct {
@@ -48,7 +49,11 @@ func (t UsageTarget) Valid() bool {
 	}
 	switch t.Kind {
 	case UsageTargetAgentTurn:
-		return t.Ordinal == 0
+		if t.Ordinal != 0 || !nonEmpty(t.RunID, t.AgentID, t.SessionID) {
+			return false
+		}
+		memory, err := t.Memory.Normalize()
+		return err == nil && (!memory.Enabled || strings.TrimSpace(t.FlowInstance) != "")
 	case UsageTargetConversationForkCompletion:
 		return t.Ordinal > 0
 	default:
@@ -148,7 +153,8 @@ func (a Authority) Evidence() map[string]any {
 		evidence["usage_target"] = map[string]any{
 			"kind": a.Target.Kind, "id": a.Target.ID, "ordinal": a.Target.Ordinal,
 			"run_id": a.Target.RunID, "agent_id": a.Target.AgentID, "session_id": a.Target.SessionID,
-			"runtime_mode": a.Target.RuntimeMode, "scope_key": a.Target.ScopeKey, "entity_id": a.Target.EntityID,
+			"memory_enabled": a.Target.Memory.Enabled, "memory_source": a.Target.Memory.Source,
+			"flow_instance": a.Target.FlowInstance, "entity_id": a.Target.EntityID,
 		}
 	}
 	switch a.Kind {

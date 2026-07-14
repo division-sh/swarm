@@ -35,7 +35,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: "lifecycle-agent", Type: "sonnet", Role: "worker", Mode: "global", Model: "regular",
+			ID: "lifecycle-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
 			Config: []byte(`{"system_prompt":"x"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,

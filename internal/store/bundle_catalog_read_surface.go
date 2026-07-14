@@ -61,8 +61,8 @@ type BundleCatalogAgentDefinition struct {
 	Type          string   `json:"type,omitempty"`
 	Model         string   `json:"model,omitempty"`
 	LLMBackend    string   `json:"llm_backend,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
-	SessionScope  string   `json:"session_scope,omitempty"`
+	Memory        bool     `json:"memory"`
+	MemorySource  string   `json:"memory_source"`
 	PromptPath    string   `json:"prompt_path,omitempty"`
 	Subscriptions []string `json:"subscriptions,omitempty"`
 	Tools         []string `json:"tools,omitempty"`
@@ -525,8 +525,8 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 		Type:          stringFromMap(def, "type"),
 		Model:         stringFromMap(def, "model"),
 		LLMBackend:    stringFromMap(def, "llm_backend"),
-		Mode:          stringFromMap(def, "mode"),
-		SessionScope:  stringFromMap(def, "session_scope"),
+		Memory:        boolFromMap(def, "memory"),
+		MemorySource:  stringFromMap(def, "memory_source"),
 		PromptPath:    stringFromMap(def, "prompt_path"),
 		Subscriptions: subscriptions,
 		Tools:         tools,
@@ -551,6 +551,11 @@ var bundleCatalogRuntimeAgentFields = map[string]bool{
 func stringFromMap(values map[string]any, key string) string {
 	value, _ := values[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func boolFromMap(values map[string]any, key string) bool {
+	value, _ := values[key].(bool)
+	return value
 }
 
 func optionalStringListFromMap(values map[string]any, key string) ([]string, error) {

@@ -211,9 +211,9 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		args  []any
 	}{
 		{`INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, []any{source.runID, base.Add(-3 * time.Minute)}},
-		{`INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES (?, 'researcher', 'haiku', 'session')`, []any{source.agentID}},
-		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at) VALUES (?, ?, ?, 'global', 'global', 'session', 'active', ?, ?)`, []any{source.sessionID, source.runID, source.agentID, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
-		{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, 'task.ready', true, ?), (?, ?, ?, ?, 'session', 'global', ?, 'task.done', true, ?)`, []any{source.turn1ID, source.runID, source.agentID, source.sessionID, source.event1ID, source.turn1At, source.turn2ID, source.runID, source.agentID, source.sessionID, source.event2ID, source.turn2At}},
+		{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES (?, ?, 'researcher', 'cheap', 1, 'authored')`, []any{source.agentID, conversationForkSourceFlowInstance}},
+		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`, []any{source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
+		{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', true, ?), (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', true, ?)`, []any{source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, source.turn1At, source.turn2ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event2ID, source.turn2At}},
 	}
 	for _, statement := range statements {
 		if _, err := s.DB.ExecContext(ctx, statement.query, statement.args...); err != nil {

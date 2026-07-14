@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -66,12 +66,12 @@ type OperatorAgentSummary struct {
 	Role         string `json:"role"`
 	Type         string `json:"type"`
 	Model        string `json:"model"`
-	Mode         string `json:"mode"`
-	SessionScope string `json:"session_scope,omitempty"`
+	Memory       bool   `json:"memory"`
+	MemorySource string `json:"memory_source"`
 	Status       string `json:"status"`
 
-	RuntimeDescriptorMode string                              `json:"-"`
-	FlowInstance          string                              `json:"-"`
+	RuntimeFlowID         string                              `json:"-"`
+	FlowInstance          string                              `json:"flow_instance,omitempty"`
 	EntityID              string                              `json:"-"`
 	ParentAgentID         string                              `json:"-"`
 	CoordinatorID         string                              `json:"-"`
@@ -220,13 +220,13 @@ type OperatorConversationSummary struct {
 	MessageCount int        `json:"message_count"`
 	Status       string     `json:"status"`
 
-	Kind        string                              `json:"-"`
-	ScopeKey    string                              `json:"-"`
-	Scope       string                              `json:"-"`
-	RuntimeMode string                              `json:"-"`
-	Summary     string                              `json:"-"`
-	UpdatedAt   time.Time                           `json:"-"`
-	Metadata    OperatorConversationSummaryMetadata `json:"-"`
+	Kind         string                              `json:"-"`
+	FlowInstance string                              `json:"-"`
+	Memory       bool                                `json:"-"`
+	MemorySource string                              `json:"-"`
+	Summary      string                              `json:"-"`
+	UpdatedAt    time.Time                           `json:"-"`
+	Metadata     OperatorConversationSummaryMetadata `json:"-"`
 }
 
 type OperatorConversationSummaryMetadata struct {
@@ -295,8 +295,9 @@ type OperatorConversationTurn struct {
 
 	AgentID                string                           `json:"-"`
 	SessionID              string                           `json:"-"`
-	RuntimeMode            string                           `json:"-"`
-	ScopeKey               string                           `json:"-"`
+	FlowInstance           string                           `json:"-"`
+	Memory                 bool                             `json:"-"`
+	MemorySource           string                           `json:"-"`
 	EntityID               string                           `json:"-"`
 	TaskID                 string                           `json:"-"`
 	AvailableTools         []string                         `json:"-"`
@@ -518,9 +519,9 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 			conversations.agent_id,
 			conversations.run_id,
 			conversations.kind,
-			COALESCE(conversations.scope_key, ''),
-			COALESCE(conversations.scope, ''),
-			COALESCE(conversations.runtime_mode, ''),
+			COALESCE(conversations.flow_instance, ''),
+			conversations.memory_enabled,
+			conversations.memory_source,
 			COALESCE(conversations.status, ''),
 			COALESCE(conversations.turn_count, 0),
 				COALESCE(conversations.message_count, 0),
@@ -671,13 +672,13 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			FROM agent_sessions
 			WHERE agent_id = a.agent_id
 			  AND status = 'active'
-			  AND runtime_mode IN ($1, $2)
+			  AND memory_enabled = TRUE
 			ORDER BY updated_at DESC, created_at DESC, session_id ASC
 			LIMIT 1
 		) sess ON true
 			WHERE a.status NOT IN ('terminated', 'ephemeral')
 			ORDER BY a.created_at ASC, a.agent_id ASC
-		`, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+		`)
 	if err != nil {
 		return nil, fmt.Errorf("query agent operator projections: %w", err)
 	}
@@ -754,20 +755,19 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 }
 
 func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) OperatorAgentSummary {
-	mode := strings.TrimSpace(row.Config.ConversationMode)
-	if mode == "" {
-		mode = runtimesessions.RuntimeModeTask.String()
+	memory, err := row.Config.Memory.Normalize()
+	if err != nil {
+		memory = agentmemory.PlatformDefault()
 	}
-	scope := strings.TrimSpace(row.Config.SessionScope)
 	out := OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
 		Role:                  strings.TrimSpace(row.Config.Role),
 		Type:                  agentPersistedType(row.Config, strings.TrimSpace(row.Config.Model)),
 		Model:                 strings.TrimSpace(row.Config.Model),
-		Mode:                  mode,
-		SessionScope:          scope,
+		Memory:                memory.Enabled,
+		MemorySource:          string(memory.Source),
 		Status:                projection.v1Status(),
-		RuntimeDescriptorMode: strings.TrimSpace(row.Config.Mode),
+		RuntimeFlowID:         strings.TrimSpace(row.Config.FlowID),
 		FlowInstance:          strings.TrimSpace(row.Config.CanonicalFlowPath()),
 		EntityID:              strings.TrimSpace(row.Config.EffectiveEntityID()),
 		ParentAgentID:         strings.TrimSpace(row.ParentAgentID),
@@ -1143,9 +1143,9 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 				agent_id,
 				%s AS run_id,
 				'live_session' AS kind,
-				scope_key,
-				scope,
-				runtime_mode,
+				flow_instance,
+				memory_enabled,
+				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				turn_count,
 				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
@@ -1156,8 +1156,7 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 				updated_at,
 				created_at
 			FROM agent_sessions
-			WHERE status IN ('active', 'terminated')
-			  AND runtime_mode IN ('session', 'session_per_entity')
+			WHERE status IN ('active', 'terminated') AND memory_enabled = TRUE
 		`, sessionRunID))
 	}
 	if caps.Conversations.Audits == SchemaFlavorCanonical {
@@ -1171,9 +1170,9 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 				agent_id,
 				%s AS run_id,
 				'turn_audit' AS kind,
-				COALESCE(scope_key, '') AS scope_key,
-				COALESCE(scope, '') AS scope,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(flow_instance, '') AS flow_instance,
+				memory_enabled,
+				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				COALESCE(turn_count, 0) AS turn_count,
 				jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
@@ -1186,7 +1185,7 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 			FROM (
 				%s
 			) task_conversations
-		`, auditRunID, CanonicalTaskConversationVisibilitySourceSQL(caps.Conversations)))
+		`, auditRunID, CanonicalStatelessConversationVisibilitySourceSQL(caps.Conversations)))
 	}
 	return sources
 }
@@ -1202,9 +1201,9 @@ func scanOperatorConversationSummary(scanner operatorRowScanner) (OperatorConver
 		&item.AgentID,
 		&item.RunID,
 		&item.Kind,
-		&item.ScopeKey,
-		&item.Scope,
-		&item.RuntimeMode,
+		&item.FlowInstance,
+		&item.Memory,
+		&item.MemorySource,
 		&item.Status,
 		&item.TurnCount,
 		&item.MessageCount,

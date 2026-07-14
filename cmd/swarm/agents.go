@@ -140,8 +140,9 @@ type agentSummary struct {
 	Role         string `json:"role"`
 	Type         string `json:"type"`
 	Model        string `json:"model"`
-	Mode         string `json:"mode"`
-	SessionScope string `json:"session_scope,omitempty"`
+	Memory       bool   `json:"memory"`
+	MemorySource string `json:"memory_source"`
+	FlowInstance string `json:"flow_instance,omitempty"`
 	Status       string `json:"status"`
 }
 
@@ -165,16 +166,9 @@ var agentValidStatuses = map[string]struct{}{
 	"terminated": {},
 }
 
-var agentValidConversationModes = map[string]struct{}{
-	"task":               {},
-	"session":            {},
-	"session_per_entity": {},
-}
-
-var agentValidSessionScopes = map[string]struct{}{
-	"global": {},
-	"flow":   {},
-	"entity": {},
+var agentValidMemorySources = map[string]struct{}{
+	"authored":         {},
+	"platform_default": {},
 }
 
 func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
@@ -806,7 +800,7 @@ func validateAgentSummary(agent agentSummary) error {
 		{name: "role", value: agent.Role},
 		{name: "type", value: agent.Type},
 		{name: "model", value: agent.Model},
-		{name: "mode", value: agent.Mode},
+		{name: "memory_source", value: agent.MemorySource},
 		{name: "status", value: agent.Status},
 	} {
 		if strings.TrimSpace(field.value) == "" {
@@ -816,13 +810,8 @@ func validateAgentSummary(agent agentSummary) error {
 	if _, ok := agentValidStatuses[strings.TrimSpace(agent.Status)]; !ok {
 		return fmt.Errorf("status=%q is not a valid AgentStatus", agent.Status)
 	}
-	if _, ok := agentValidConversationModes[strings.TrimSpace(agent.Mode)]; !ok {
-		return fmt.Errorf("mode=%q is not a valid AgentMode", agent.Mode)
-	}
-	if strings.TrimSpace(agent.Mode) != "task" {
-		if _, ok := agentValidSessionScopes[strings.TrimSpace(agent.SessionScope)]; !ok {
-			return fmt.Errorf("session_scope=%q is not a valid SessionScope", agent.SessionScope)
-		}
+	if _, ok := agentValidMemorySources[strings.TrimSpace(agent.MemorySource)]; !ok {
+		return fmt.Errorf("memory_source=%q is not a valid AgentMemorySource", agent.MemorySource)
 	}
 	return nil
 }
@@ -872,8 +861,9 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			agent.Type,
 			formatCLIHumanCode(cliHumanCodeAgentStatus, agent.Status),
 			agent.Model,
-			formatCLIHumanCode(cliHumanCodeConversationMode, agent.Mode),
-			formatCLIHumanCode(cliHumanCodeSessionScope, agent.SessionScope),
+			fmt.Sprintf("%t", agent.Memory),
+			formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource),
+			agent.FlowInstance,
 		})
 	}
 	writeCLITable(out, cliTable{
@@ -883,8 +873,9 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			{Header: "TYPE"},
 			{Header: "STATUS"},
 			{Header: "MODEL"},
-			{Header: "MODE"},
-			{Header: "SCOPE"},
+			{Header: "MEMORY"},
+			{Header: "MEMORY_SOURCE"},
+			{Header: "FLOW_INSTANCE", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 		},
 		Rows:         rows,
 		EmptyMessage: "No agents match the current filters.",
@@ -1016,8 +1007,10 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	rows := []cliLabeledDetailRow{
 		{Label: "identity", Value: fmt.Sprintf("role %s, type %s", agent.Role, agent.Type)},
 		{Label: "model", Value: agent.Model},
-		{Label: "mode", Value: formatCLIHumanCode(cliHumanCodeConversationMode, agent.Mode)},
-		{Label: "scope", Value: formatCLIHumanCode(cliHumanCodeSessionScope, agent.SessionScope)},
+		{Label: "memory", Value: fmt.Sprintf("%t (%s)", agent.Memory, formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource))},
+	}
+	if agent.FlowInstance != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "flow instance", Value: agent.FlowInstance})
 	}
 	if ref := result.CurrentSessionRef; ref != nil {
 		rows = append(rows, cliLabeledDetailRow{Label: "session", Value: fmt.Sprintf("%s, started %s", ref.SessionID, ref.StartedAt)})

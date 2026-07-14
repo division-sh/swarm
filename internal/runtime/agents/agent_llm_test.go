@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -41,10 +42,10 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 
 func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:    "agent-1",
-		Role:  "operator",
-		Mode:  "task",
-		Tools: []string{"schedule", "get_entity", "emit_example"},
+		ID:     "agent-1",
+		Role:   "operator",
+		FlowID: "task",
+		Tools:  []string{"schedule", "get_entity", "emit_example"},
 	}
 	evt := eventtest.RootIngress(
 		"evt-1",
@@ -90,9 +91,9 @@ func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 
 func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:   "agent-1",
-		Role: "operator",
-		Mode: "task",
+		ID:     "agent-1",
+		Role:   "operator",
+		FlowID: "task",
 		NativeTools: models.NativeToolConfig{
 			FileIO: true,
 			Bash:   true,
@@ -125,9 +126,9 @@ func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 
 func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:   "agent-1",
-		Role: "operator",
-		Mode: "task",
+		ID:     "agent-1",
+		Role:   "operator",
+		FlowID: "task",
 	}
 	evt := eventtest.RootIngress(
 		"evt-1",
@@ -264,7 +265,7 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 				"team_name": "Acme Ops",
 			}),
 		},
-		conversation:   llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
+		conversation:   llm.NewConversation("cos-entity-1", "", "", nil, agentmemory.Authored(true), 10, nil),
 		promptCache:    map[string]string{},
 		promptResolver: runtimecontracts.NewBundlePromptResolver(bundle),
 	}
@@ -311,7 +312,6 @@ func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
 ops-lead:
   id: ops-lead
   role: ops_lead
-  mode: task
   manager_fallback: control-plane
   emit_events:
     - item.created
@@ -357,25 +357,6 @@ func copyBundleTree(t *testing.T, srcRoot, dstRoot string) {
 		return os.WriteFile(target, data, info.Mode())
 	}); err != nil {
 		t.Fatalf("copy %s -> %s: %v", srcRoot, dstRoot, err)
-	}
-}
-
-func TestParseConversationMode_AcceptsStatelessAlias(t *testing.T) {
-	mode, ok := parseConversationMode("stateless")
-	if !ok {
-		t.Fatal("expected stateless alias to be accepted")
-	}
-	if mode != llm.TaskScoped {
-		t.Fatalf("parseConversationMode(stateless) = %v, want %v", mode, llm.TaskScoped)
-	}
-}
-
-func TestNewLLMAgent_RejectsInvalidConversationMode(t *testing.T) {
-	if _, err := NewLLMAgent(models.AgentConfig{
-		ID:               "agent-1",
-		ConversationMode: "session-scoped",
-	}, nil, nil, nil); err == nil {
-		t.Fatal("expected invalid conversation mode to fail closed")
 	}
 }
 
@@ -453,9 +434,6 @@ func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt
 	return &llm.Session{
 		ID:                "sess-1",
 		AgentID:           agentID,
-		RuntimeMode:       "api",
-		ConversationMode:  "session",
-		SessionScope:      "global",
 		SystemPrompt:      systemPrompt,
 		Tools:             tools,
 		Messages:          nil,
@@ -671,7 +649,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 	}
 }
 
-func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
+func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:       "entity-agent-1",
@@ -682,8 +660,8 @@ func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
 		nil,
 		nil,
 	)
-	if agent.conversation.Mode != llm.TaskScoped {
-		t.Fatalf("conversation mode = %v, want task", agent.conversation.Mode)
+	if agent.conversation.Memory.Enabled {
+		t.Fatal("conversation memory enabled, want disabled")
 	}
 }
 
@@ -728,9 +706,9 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 	}
 	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, nil, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
-		ID:               "market-research-agent",
-		Role:             "market_research",
-		ConversationMode: "task",
+		ID:     "market-research-agent",
+		Role:   "market_research",
+		Memory: agentmemory.Authored(false),
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You are here.",
 		}),
@@ -779,13 +757,10 @@ func (r *directiveFactoryRuntime) StartSession(_ context.Context, agentID, syste
 		r.startTools = append(r.startTools, strings.TrimSpace(tool.Name))
 	}
 	return &llm.Session{
-		ID:               "sess-" + strings.TrimSpace(agentID),
-		AgentID:          agentID,
-		RuntimeMode:      "api",
-		ConversationMode: "session",
-		SessionScope:     "global",
-		SystemPrompt:     systemPrompt,
-		Tools:            tools,
+		ID:           "sess-" + strings.TrimSpace(agentID),
+		AgentID:      agentID,
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
 	}, nil
 }
 
@@ -912,7 +887,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ID:         "campaign-coordinator",
 		Role:       "campaign_coordinator",
-		Mode:       "campaign-flow",
+		FlowID:     "campaign-flow",
 		FlowPath:   "campaign-flow/inst-1",
 		EmitEvents: []string{"campaign-flow/inst-1/scan.requested"},
 		Config: mustAgentConfigJSON(t, map[string]any{
@@ -969,12 +944,10 @@ type taskRetryRuntime struct {
 func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	r.startCalls++
 	return &llm.Session{
-		ID:               "sess-" + strings.TrimSpace(agentID) + "-" + string(rune('0'+r.startCalls)),
-		AgentID:          agentID,
-		RuntimeMode:      "cli_test",
-		ConversationMode: "task",
-		SystemPrompt:     systemPrompt,
-		Tools:            tools,
+		ID:           "sess-" + strings.TrimSpace(agentID) + "-" + string(rune('0'+r.startCalls)),
+		AgentID:      agentID,
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
 	}, nil
 }
 
@@ -990,14 +963,14 @@ func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ 
 	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
 }
 
-func TestLLMAgent_TaskScopedTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {
+func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {
 	rt := &taskRetryRuntime{}
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:               "spec-reviewer",
-			Role:             "spec_reviewer",
-			EntityID:         "ent-1",
-			ConversationMode: "stateless",
+			ID:       "spec-reviewer",
+			Role:     "spec_reviewer",
+			EntityID: "ent-1",
+			Memory:   agentmemory.Authored(false),
 		},
 		rt,
 		nil,
@@ -1035,7 +1008,7 @@ type runIDCaptureRuntime struct {
 
 func (r *runIDCaptureRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	r.startRunIDs = append(r.startRunIDs, runtimecorrelation.RunIDFromContext(ctx))
-	return &llm.Session{ID: "sess-" + agentID, AgentID: agentID, RuntimeMode: "test"}, nil
+	return &llm.Session{ID: "sess-" + agentID, AgentID: agentID}, nil
 }
 
 func (r *runIDCaptureRuntime) ContinueSession(ctx context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {

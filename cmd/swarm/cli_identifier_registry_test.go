@@ -306,6 +306,7 @@ func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
 func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 	expected := map[string]cliIdentifierFamily{
 		"agents.go\x00AGENT_ID":            cliIdentifierFamilyAgent,
+		"agents.go\x00FLOW_INSTANCE":       cliIdentifierFamilyFlowInstance,
 		"agents.go\x00EVENT ID":            cliIdentifierFamilyEvent,
 		"agents.go\x00RUN":                 cliIdentifierFamilyRun,
 		"agents.go\x00ENTITY":              cliIdentifierFamilyEntity,

@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode sessions.RuntimeMode, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {
+func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || rotateAfter <= 0 {
+		return nil, nil
+	}
+	if !s.Memory.Enabled {
 		return nil, nil
 	}
 	if s.TurnCount < rotateAfter {
@@ -20,9 +24,9 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode sessions.
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, sessions.NormalizeSessionScope(s.SessionScope), lockOwner, sessions.RotationMetadata{
+	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
 		CheckpointSummary: summary,
-	}, strings.TrimSpace(s.ScopeKey))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -33,14 +37,12 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode sessions.
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
 	if sink != nil {
-		LogSessionRotatedForRun(ctx, sink, s.AgentID, runtimeMode.String(), oldSessionID, lease.SessionID, strings.TrimSpace(s.ScopeKey), fmt.Sprintf("turn_limit_reached:%d", rotateAfter), oldTurnCount, oldParseFailures)
+		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("turn_limit_reached:%d", rotateAfter), oldTurnCount, oldParseFailures)
 	} else {
 		LogSessionRotated(
-			s.AgentID,
-			runtimeMode.String(),
+			s.MemoryIdentity,
 			oldSessionID,
 			lease.SessionID,
-			strings.TrimSpace(s.ScopeKey),
 			fmt.Sprintf("turn_limit_reached:%d", rotateAfter),
 			oldTurnCount,
 			oldParseFailures,
@@ -49,8 +51,11 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode sessions.
 	return lease, nil
 }
 
-func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode sessions.RuntimeMode, registry sessions.Registry, lockOwner string, threshold int, sink any) (*sessions.Lease, error) {
+func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, threshold int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || threshold <= 0 {
+		return nil, nil
+	}
+	if !s.Memory.Enabled {
 		return nil, nil
 	}
 	if s.ParseFailures < threshold {
@@ -60,9 +65,9 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode 
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
-	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, sessions.NormalizeSessionScope(s.SessionScope), lockOwner, sessions.RotationMetadata{
+	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
 		CheckpointSummary: summary,
-	}, strings.TrimSpace(s.ScopeKey))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -73,14 +78,12 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode 
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
 	if sink != nil {
-		LogSessionRotatedForRun(ctx, sink, s.AgentID, runtimeMode.String(), oldSessionID, lease.SessionID, strings.TrimSpace(s.ScopeKey), fmt.Sprintf("parse_failures_threshold:%d", threshold), oldTurnCount, oldParseFailures)
+		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("parse_failures_threshold:%d", threshold), oldTurnCount, oldParseFailures)
 	} else {
 		LogSessionRotated(
-			s.AgentID,
-			runtimeMode.String(),
+			s.MemoryIdentity,
 			oldSessionID,
 			lease.SessionID,
-			strings.TrimSpace(s.ScopeKey),
 			fmt.Sprintf("parse_failures_threshold:%d", threshold),
 			oldTurnCount,
 			oldParseFailures,
@@ -124,15 +127,14 @@ func BuildRotationCheckpoint(reason string, s *Session) string {
 	return fmt.Sprintf("rotation_reason=%s\n%s", reason, summary)
 }
 
-func LogSessionRotated(agentID, runtimeMode, oldSessionID, newSessionID, scopeKey, reason string, turnCount, parseFailures int) {
-	agentID = strings.TrimSpace(agentID)
-	runtimeMode = strings.TrimSpace(runtimeMode)
-	scopeKey = strings.TrimSpace(scopeKey)
+func LogSessionRotated(identity agentmemory.Identity, oldSessionID, newSessionID, reason string, turnCount, parseFailures int) {
+	identity = identity.Normalize()
 	reason = snippetForLog(reason, 180)
 	diaglog.ProcessLog("info", "llm-runtime", "session rotated",
-		"agent_id", agentID,
-		"runtime_mode", runtimeMode,
-		"scope_key", scopeKey,
+		"agent_id", identity.AgentID,
+		"memory_enabled", true,
+		"run_id", identity.RunID,
+		"flow_instance", identity.FlowInstance,
 		"reason", reason,
 		"old_session_id", strings.TrimSpace(oldSessionID),
 		"new_session_id", strings.TrimSpace(newSessionID),
@@ -141,11 +143,13 @@ func LogSessionRotated(agentID, runtimeMode, oldSessionID, newSessionID, scopeKe
 	)
 }
 
-func LogSessionAdopted(agentID, runtimeMode, oldSessionID, newSessionID, scopeKey string) {
+func LogSessionAdopted(identity agentmemory.Identity, oldSessionID, newSessionID string) {
+	identity = identity.Normalize()
 	diaglog.ProcessLog("info", "llm-runtime", "session adopted",
-		"agent_id", strings.TrimSpace(agentID),
-		"runtime_mode", strings.TrimSpace(runtimeMode),
-		"scope_key", strings.TrimSpace(scopeKey),
+		"agent_id", identity.AgentID,
+		"memory_enabled", true,
+		"run_id", identity.RunID,
+		"flow_instance", identity.FlowInstance,
 		"old_session_id", strings.TrimSpace(oldSessionID),
 		"new_session_id", strings.TrimSpace(newSessionID),
 	)

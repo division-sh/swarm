@@ -9040,7 +9040,7 @@
       },
       "AgentDiagnosisActive": {
         "additionalProperties": false,
-        "description": "Selected active-session latest-turn refs for agent.diagnose. This\nobject is present only when the diagnosis owner selects an active\nlive agent_sessions row for session/session_per_entity modes and that\nselected session has a latest agent_turns row. It is persisted\nselected-turn evidence, not proof of actual in-flight work. turn_id is\nthe selected latest turn. task_id is the same selected latest\nagent_turns.task_id and is omitted when empty. entity_id is the same\nselected latest agent_turns.entity_id dispatch entity and is omitted\nwhen absent. The owner must not fall back to AgentConfig\nEffectiveEntityID(), task target entity, role-scoped current-entity\ntool context, dashboard projections, conversation API composition, or\nstale/inactive session rows.\n",
+        "description": "Selected active-session latest-turn refs for agent.diagnose. This\nobject is present only when the diagnosis owner selects an active\nmemory-enabled agent_sessions row and that\nselected session has a latest agent_turns row. It is persisted\nselected-turn evidence, not proof of actual in-flight work. turn_id is\nthe selected latest turn. task_id is the same selected latest\nagent_turns.task_id and is omitted when empty. entity_id is the same\nselected latest agent_turns.entity_id dispatch entity and is omitted\nwhen absent. The owner must not fall back to AgentConfig\nEffectiveEntityID(), task target entity, role-scoped current-entity\ntool context, dashboard projections, conversation API composition, or\nstale/inactive session rows.\n",
         "properties": {
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -9060,7 +9060,7 @@
       },
       "AgentDiagnosisLastToolOutcome": {
         "additionalProperties": false,
-        "description": "Compact selected-turn last-tool evidence for agent.diagnose. This\nobject is present only when the diagnosis owner selects an active\nlive agent_sessions row for session/session_per_entity modes, that\nselected session has a latest agent_turns row, and that turn has a\ncanonical turn_summary.tool_results entry. turn_id is the same\nselected latest turn used by AgentDiagnosisActive. tool_name,\noptional tool_use_id, and optional result come from the last\ncanonical tool_results entry. ok is the selected latest\nagent_turns.parse_ok value; it is not a per-tool execution status.\nThe owner must omit last_tool_outcome when no selected active live\nsession, latest turn, canonical summary, or canonical tool result\nexists, and must fail closed on malformed canonical summary or tool\nresult data. It must not fall back to raw response_payload, raw\ntranscript text, dashboard projections, conversation API composition,\nruntime executor telemetry, event/dead-letter data, stale/inactive\nsessions, or richer per-tool status/latency/completion/error\ndiagnostics.\n",
+        "description": "Compact selected-turn last-tool evidence for agent.diagnose. This\nobject is present only when the diagnosis owner selects an active\nmemory-enabled agent_sessions row, that\nselected session has a latest agent_turns row, and that turn has a\ncanonical turn_summary.tool_results entry. turn_id is the same\nselected latest turn used by AgentDiagnosisActive. tool_name,\noptional tool_use_id, and optional result come from the last\ncanonical tool_results entry. ok is the selected latest\nagent_turns.parse_ok value; it is not a per-tool execution status.\nThe owner must omit last_tool_outcome when no selected active live\nsession, latest turn, canonical summary, or canonical tool result\nexists, and must fail closed on malformed canonical summary or tool\nresult data. It must not fall back to raw response_payload, raw\ntranscript text, dashboard projections, conversation API composition,\nruntime executor telemetry, event/dead-letter data, stale/inactive\nsessions, or richer per-tool status/latency/completion/error\ndiagnostics.\n",
         "properties": {
           "ok": {
             "description": "Selected latest agent_turns.parse_ok; not a per-tool execution status.",
@@ -9115,7 +9115,7 @@
       },
       "AgentDiagnosisRuntimeState": {
         "additionalProperties": false,
-        "description": "Narrow runtime-state container for agent.diagnose watchdog evidence.\nThe diagnosis owner reads the most-recent active agent_sessions row\nfor session/session_per_entity modes using the same active-session\nselector as LoadOperatorAgentDiagnosis, ordered by updated_at DESC then\ncreated_at DESC then session_id ASC. It ignores inactive or terminated rows, omits\nruntime_state when there is no active live session or no watchdog\nevidence, and fails closed on malformed runtime_state.watchdog data.\nMultiple active sessions use that same deterministic current-session\nselector; this schema does not promote a broader agent runtime_state\nenum.\n",
+        "description": "Narrow runtime-state container for agent.diagnose watchdog evidence.\nThe diagnosis owner reads the most-recent active memory-enabled agent_sessions row\nusing the same active-session\nselector as LoadOperatorAgentDiagnosis, ordered by updated_at DESC then\ncreated_at DESC then session_id ASC. It ignores inactive or terminated rows, omits\nruntime_state when there is no active live session or no watchdog\nevidence, and fails closed on malformed runtime_state.watchdog data.\nMultiple active sessions use that same deterministic current-session\nselector; this schema does not promote a broader agent runtime_state\nenum.\n",
         "properties": {
           "watchdog": {
             "$ref": "#/components/schemas/AgentDiagnosisWatchdog"
@@ -9173,6 +9173,13 @@
           "recorded_at"
         ],
         "type": "object"
+      },
+      "AgentMemorySource": {
+        "enum": [
+          "authored",
+          "platform_default"
+        ],
+        "type": "string"
       },
       "AgentPendingDelivery": {
         "additionalProperties": false,
@@ -9256,18 +9263,23 @@
           "agent_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
-          "mode": {
-            "$ref": "#/components/schemas/ConversationMode"
+          "flow_instance": {
+            "description": "Present when the agent is owned by a flow instance.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "memory": {
+            "description": "Whether prior turns are loaded for this agent's exact run and flow instance. False does not imply that diagnostic turn evidence is absent.",
+            "type": "boolean"
+          },
+          "memory_source": {
+            "$ref": "#/components/schemas/AgentMemorySource"
           },
           "model": {
             "type": "string"
           },
           "role": {
             "type": "string"
-          },
-          "session_scope": {
-            "$ref": "#/components/schemas/SessionScope",
-            "description": "Present only for scoped agent modes. Omitted for mode=task because task agents have no live runtime session scope."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
@@ -9281,7 +9293,8 @@
           "role",
           "type",
           "model",
-          "mode",
+          "memory",
+          "memory_source",
           "status"
         ],
         "type": "object"
@@ -9491,7 +9504,14 @@
           "llm_backend": {
             "type": "string"
           },
-          "mode": {
+          "memory": {
+            "type": "boolean"
+          },
+          "memory_source": {
+            "enum": [
+              "authored",
+              "platform_default"
+            ],
             "type": "string"
           },
           "model": {
@@ -9501,9 +9521,6 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
-          },
-          "session_scope": {
             "type": "string"
           },
           "subscriptions": {
@@ -10344,14 +10361,6 @@
           "latency_ms"
         ],
         "type": "object"
-      },
-      "ConversationMode": {
-        "enum": [
-          "task",
-          "session",
-          "session_per_entity"
-        ],
-        "type": "string"
       },
       "ConversationSummary": {
         "additionalProperties": false,
@@ -12395,7 +12404,14 @@
           "session_kind": {
             "type": "string"
           },
-          "session_runtime_mode": {
+          "session_memory": {
+            "type": "boolean"
+          },
+          "session_memory_source": {
+            "enum": [
+              "authored",
+              "platform_default"
+            ],
             "type": "string"
           },
           "session_status": {
@@ -12422,8 +12438,21 @@
           "turn_failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
+          "turn_flow_instance": {
+            "type": "string"
+          },
           "turn_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_memory": {
+            "type": "boolean"
+          },
+          "turn_memory_source": {
+            "enum": [
+              "authored",
+              "platform_default"
+            ],
+            "type": "string"
           },
           "turn_parse_ok": {
             "type": "boolean"
@@ -12431,12 +12460,6 @@
           "turn_retry_count": {
             "minimum": 0,
             "type": "integer"
-          },
-          "turn_runtime_mode": {
-            "type": "string"
-          },
-          "turn_scope_key": {
-            "type": "string"
           },
           "turn_task_id": {
             "type": "string"
@@ -12609,14 +12632,6 @@
           "started_at"
         ],
         "type": "object"
-      },
-      "SessionScope": {
-        "enum": [
-          "global",
-          "flow",
-          "entity"
-        ],
-        "type": "string"
       },
       "Sha256Fingerprint": {
         "description": "Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.",

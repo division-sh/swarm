@@ -83,7 +83,7 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:             "other-agent",
 		Role:           "other",
-		Mode:           "support",
+		FlowID:         "support",
 		FlowPath:       "support",
 		FlowDataAccess: []string{"exclusions.yaml"},
 	}
@@ -102,7 +102,7 @@ func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:       "impostor",
 		Role:     "factory_cto",
-		Mode:     "static",
+		FlowID:   "static",
 		FlowPath: "support",
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
@@ -142,7 +142,7 @@ func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
 		t.Fatalf("write other exclusions: %v", err)
 	}
 	actor := flowDataActor()
-	actor.Mode = "other"
+	actor.FlowID = "other"
 	actor.FlowPath = "other"
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
@@ -201,7 +201,7 @@ func flowDataActor() models.AgentConfig {
 	return models.AgentConfig{
 		ID:             "factory-cto",
 		Role:           "factory_cto",
-		Mode:           "support",
+		FlowID:         "support",
 		FlowPath:       "support",
 		FlowDataAccess: []string{"exclusions.yaml"},
 	}
@@ -237,7 +237,6 @@ flows:
 factory-cto:
   id: factory-cto
   role: factory_cto
-  mode: task
 `+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")

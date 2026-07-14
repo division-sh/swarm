@@ -267,6 +267,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workflow instance store is the explicit pipeline instance SQL owner for Postgres/default query forms",
 		},
+		"internal/runtime/pipeline/workflow_instance_route_recovery.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2064,
+			Reason:         "workflow instance route recovery is the run-independent read projection over exact active flow_instances identity and config",
+		},
 		"internal/runtime/pipeline/workflow_instance_store_sqlite.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

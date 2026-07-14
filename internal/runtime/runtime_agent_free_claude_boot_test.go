@@ -65,7 +65,7 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeSessionScopeSource(t)}
+	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
 
 	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -86,7 +86,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeSessionScopeSource(t)}
+	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
 	if got := len(module.SemanticSource().AgentEntries()); got == 0 {
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}

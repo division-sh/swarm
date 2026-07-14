@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 type NativeToolConfig struct {
@@ -44,39 +46,35 @@ func (cfg NativeToolConfig) Names() []string {
 	return names
 }
 
-const SessionScopeAuthorityPlatformInternal = "platform_internal"
-
 // AgentConfig is the runtime-owned actor descriptor used by manager, tools,
 // LLM, and semantic/runtime contract resolution. It is intentionally distinct
 // from persistence-row ownership even when stored verbatim.
 type AgentConfig struct {
-	ID                    string           `json:"id"`
-	Type                  string           `json:"type"`
-	Role                  string           `json:"role"`
-	Mode                  string           `json:"mode"`
-	Model                 string           `json:"model,omitempty"`
-	LLMBackend            string           `json:"llm_backend,omitempty"`
-	ResolvedModel         string           `json:"resolved_model,omitempty"`
-	ResolvedLLMProvider   string           `json:"resolved_llm_provider,omitempty"`
-	ResolvedLLMTransport  string           `json:"resolved_llm_transport,omitempty"`
-	ConversationMode      string           `json:"conversation_mode,omitempty"`
-	SessionScope          string           `json:"session_scope,omitempty"`
-	SessionScopeAuthority string           `json:"-"`
-	MaxTurnsPerTask       int              `json:"max_turns_per_task,omitempty"`
-	Subscriptions         []string         `json:"subscriptions,omitempty"`
-	EmitEvents            []string         `json:"emit_events,omitempty"`
-	Criteria              []string         `json:"criteria,omitempty"`
-	Tools                 []string         `json:"tools,omitempty"`
-	Permissions           []string         `json:"permissions,omitempty"`
-	NativeTools           NativeToolConfig `json:"native_tools,omitempty"`
-	FlowDataAccess        []string         `json:"flow_data_access,omitempty"`
-	WorkspaceClass        string           `json:"workspace_class,omitempty"`
-	ManagerFallback       string           `json:"manager_fallback,omitempty"`
-	FlowPath              string           `json:"flow_path,omitempty"`
-	EntityID              string           `json:"entity_id,omitempty"`
-	ParentAgent           string           `json:"parent_agent_id,omitempty"`
-	Config                json.RawMessage  `json:"config,omitempty"`
-	BudgetEnvelope        float64          `json:"budget_envelope,omitempty"`
+	ID                   string           `json:"id"`
+	Type                 string           `json:"type"`
+	Role                 string           `json:"role"`
+	FlowID               string           `json:"flow_id,omitempty"`
+	Model                string           `json:"model,omitempty"`
+	LLMBackend           string           `json:"llm_backend,omitempty"`
+	ResolvedModel        string           `json:"resolved_model,omitempty"`
+	ResolvedLLMProvider  string           `json:"resolved_llm_provider,omitempty"`
+	ResolvedLLMTransport string           `json:"resolved_llm_transport,omitempty"`
+	Memory               agentmemory.Plan `json:"memory"`
+	MaxTurnsPerTask      int              `json:"max_turns_per_task,omitempty"`
+	Subscriptions        []string         `json:"subscriptions,omitempty"`
+	EmitEvents           []string         `json:"emit_events,omitempty"`
+	Criteria             []string         `json:"criteria,omitempty"`
+	Tools                []string         `json:"tools,omitempty"`
+	Permissions          []string         `json:"permissions,omitempty"`
+	NativeTools          NativeToolConfig `json:"native_tools,omitempty"`
+	FlowDataAccess       []string         `json:"flow_data_access,omitempty"`
+	WorkspaceClass       string           `json:"workspace_class,omitempty"`
+	ManagerFallback      string           `json:"manager_fallback,omitempty"`
+	FlowPath             string           `json:"flow_path,omitempty"`
+	EntityID             string           `json:"entity_id,omitempty"`
+	ParentAgent          string           `json:"parent_agent_id,omitempty"`
+	Config               json.RawMessage  `json:"config,omitempty"`
+	BudgetEnvelope       float64          `json:"budget_envelope,omitempty"`
 }
 
 func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
@@ -95,10 +93,6 @@ func (cfg AgentConfig) CanonicalFlowPath() string {
 	return strings.Trim(strings.TrimSpace(cfg.FlowPath), "/")
 }
 
-func (cfg AgentConfig) HasPlatformInternalSessionScopeAuthority() bool {
-	return strings.TrimSpace(cfg.SessionScopeAuthority) == SessionScopeAuthorityPlatformInternal
-}
-
 func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	if cfg == nil {
 		return
@@ -106,15 +100,15 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.ID = strings.TrimSpace(cfg.ID)
 	cfg.Type = strings.TrimSpace(cfg.Type)
 	cfg.Role = strings.TrimSpace(cfg.Role)
-	cfg.Mode = strings.TrimSpace(cfg.Mode)
+	cfg.FlowID = strings.TrimSpace(cfg.FlowID)
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.LLMBackend = strings.TrimSpace(cfg.LLMBackend)
 	cfg.ResolvedModel = strings.TrimSpace(cfg.ResolvedModel)
 	cfg.ResolvedLLMProvider = strings.TrimSpace(cfg.ResolvedLLMProvider)
 	cfg.ResolvedLLMTransport = strings.TrimSpace(cfg.ResolvedLLMTransport)
-	cfg.ConversationMode = strings.TrimSpace(cfg.ConversationMode)
-	cfg.SessionScope = strings.TrimSpace(cfg.SessionScope)
-	cfg.SessionScopeAuthority = strings.TrimSpace(cfg.SessionScopeAuthority)
+	if plan, err := cfg.Memory.Normalize(); err == nil {
+		cfg.Memory = plan
+	}
 	cfg.WorkspaceClass = strings.TrimSpace(cfg.WorkspaceClass)
 	cfg.ManagerFallback = strings.TrimSpace(cfg.ManagerFallback)
 	cfg.FlowPath = cfg.CanonicalFlowPath()

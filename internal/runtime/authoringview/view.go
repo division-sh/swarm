@@ -879,8 +879,8 @@ func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFi
 		fields := map[string]AgentFieldView{}
 		addAgentField(fields, entry, "type", entry.Type)
 		addAgentField(fields, entry, "model", entry.Model)
-		addAgentField(fields, entry, "mode", entry.Mode)
-		addAgentField(fields, entry, "session_scope", entry.SessionScope)
+		addAgentField(fields, entry, "memory", entry.MemoryPlan.Enabled)
+		addAgentField(fields, entry, "memory_source", entry.MemoryPlan.Source)
 		addAgentField(fields, entry, "max_turns_per_task", entry.MaxTurnsPerTask)
 		addAgentField(fields, entry, "workspace_class", entry.WorkspaceClass)
 		addAgentField(fields, entry, "manager_fallback", entry.ManagerFallback)

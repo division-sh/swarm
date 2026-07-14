@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -249,7 +250,8 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	agentID := "revision-lifecycle-agent"
 	agent := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: agentID, Role: "worker", Type: "sonnet", Model: "regular", Mode: "global",
+			ID: agentID, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
+			Memory: agentmemory.Authored(true),
 			Config: []byte(`{"system_prompt":"revision proof"}`),
 		},
 		Status: "active", HiredBy: "revision-proof", StartedAt: now,
@@ -291,10 +293,10 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope, conversation, turn_count,
-			runtime_mode, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid,$2::uuid,$3,'global','global','[]'::jsonb,0,'session','{}'::jsonb,'active',$4,$4)
-	`, sessionID, runID, agentID, now); err != nil {
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, status, created_at, updated_at
+		) VALUES ($1::uuid,$2::uuid,$3,$4,TRUE,'authored','[]'::jsonb,0,'{}'::jsonb,'active',$5,$5)
+	`, sessionID, runID, agentID, runForkRevisionFlowInstance, now); err != nil {
 		t.Fatalf("seed lifecycle source session: %v", err)
 	}
 	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
@@ -360,7 +362,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	seedRunForkSessionProjection(t, db, runID, agentID, sessionID, "active", at)
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 
-	exerciseRunForkSessionExcludedWriters(t, store, agentID, sessionID)
+	exerciseRunForkSessionExcludedWriters(t, store, runID, agentID, sessionID)
 	var afterExcluded int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterExcluded); err != nil {
 		t.Fatalf("load revision after excluded writers: %v", err)

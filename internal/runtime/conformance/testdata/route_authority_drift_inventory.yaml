@@ -156,7 +156,7 @@ search_dimensions:
     canonical_layer: event_context
   - id: semantic_scope
     pattern: 'EventScope|semantic scope|inferEventScope|Scope\(\)|ScopeEntity|ScopeFlow|ScopeGlobal|scope inference'
-    minimum_matching_files: 42
+    minimum_matching_files: 40
     required_paths:
       - platform-spec.yaml
       - internal/events/types.go
@@ -511,7 +511,7 @@ seam_families:
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
-      - internal/runtime/conformance/session_scope_conformance_test.go
+      - internal/runtime/conformance/agent_memory_conformance_test.go
       - internal/runtime/manager/execution_projection_test.go
       - internal/runtime/manager/flow_activation_test.go
       - internal/runtime/manager/receipts_test.go
