@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"sort"
@@ -338,6 +339,89 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		if status != want {
 			t.Fatalf("lifecycle session revision %d status = %q, want %q", revision, status, want)
 		}
+	}
+}
+
+func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStatusPresence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	store := &PostgresStore{DB: db}
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	agentID := "revision-session-agent"
+	sessionID := uuid.NewString()
+	at := time.Unix(1700000850, 0).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed session projection run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ($1::uuid,$2::uuid,'session.projection','global','platform',$3)`, runID, eventID, at); err != nil {
+		t.Fatalf("seed session projection event: %v", err)
+	}
+	seedRunForkSessionProjection(t, db, runID, agentID, sessionID, "active", at)
+	firstRevision := captureRunForkTestRevision(t, db, runID)
+
+	exerciseRunForkSessionExcludedWriters(t, store, agentID, sessionID)
+	var afterExcluded int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterExcluded); err != nil {
+		t.Fatalf("load revision after excluded writers: %v", err)
+	}
+	if afterExcluded != firstRevision {
+		t.Fatalf("revision after lease/watchdog/turn/provider-session writers = %d, want unchanged %d", afterExcluded, firstRevision)
+	}
+	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin excluded-writer validation: %v", err)
+	}
+	if err := runforkrevision.ValidateComplete(ctx, validationTx, runID); err != nil {
+		_ = validationTx.Rollback()
+		t.Fatalf("validate excluded-writer projection: %v", err)
+	}
+	_ = validationTx.Rollback()
+
+	statusTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin projected status mutation: %v", err)
+	}
+	defer func() { _ = statusTx.Rollback() }()
+	if _, err := statusTx.ExecContext(ctx, `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$2, updated_at=$2 WHERE session_id=$1::uuid`, sessionID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("update projected session status: %v", err)
+	}
+	statusRevisions, err := runforkrevision.CaptureCurrentTransaction(ctx, statusTx)
+	if err != nil {
+		t.Fatalf("capture projected session status: %v", err)
+	}
+	statusRevision := statusRevisions[runID]
+	if statusRevision <= firstRevision {
+		t.Fatalf("projected status revision = %d, want after %d", statusRevision, firstRevision)
+	}
+	if err := statusTx.Commit(); err != nil {
+		t.Fatalf("commit projected session status: %v", err)
+	}
+
+	deleteTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin projected session deletion: %v", err)
+	}
+	defer func() { _ = deleteTx.Rollback() }()
+	if _, err := deleteTx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE session_id=$1::uuid`, sessionID); err != nil {
+		t.Fatalf("delete projected session: %v", err)
+	}
+	deleteRevision, err := runforkrevision.Capture(ctx, deleteTx, runID, runforkrevision.FamilyAgentSessions)
+	if err != nil {
+		t.Fatalf("capture projected session deletion: %v", err)
+	}
+	if deleteRevision <= statusRevision {
+		t.Fatalf("session deletion revision = %d, want after %d", deleteRevision, statusRevision)
+	}
+	if err := deleteTx.Commit(); err != nil {
+		t.Fatalf("commit projected session deletion: %v", err)
+	}
+	var present bool
+	if err := db.QueryRowContext(ctx, `SELECT present FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='agent_sessions' AND fact_key=$2 AND revision=$3`, runID, sessionID, deleteRevision).Scan(&present); err != nil {
+		t.Fatalf("load projected session tombstone: %v", err)
+	}
+	if present {
+		t.Fatal("deleted projected session remained present")
 	}
 }
 

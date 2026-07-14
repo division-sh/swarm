@@ -114,19 +114,38 @@ func CaptureChanges(ctx context.Context, tx *sql.Tx, changes ...Change) (map[str
 		if len(families) == 0 {
 			return nil, fmt.Errorf("run fork revision capture requires at least one fact family")
 		}
+		changedFamilies := make([]Family, 0, len(families))
+		for _, family := range families {
+			changed, err := canonicalProjectionDiffersFromLatest(ctx, tx, runID, family)
+			if err != nil {
+				return nil, fmt.Errorf("compare run fork %s projection: %w", family, err)
+			}
+			if changed {
+				changedFamilies = append(changedFamilies, family)
+			}
+		}
+		if len(changedFamilies) == 0 {
+			revision, ok, err := currentTransactionRevision(ctx, tx, runID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				revision, ok, err = latestRevision(ctx, tx, runID)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if ok {
+				revisions[runID] = revision
+			}
+			continue
+		}
 		revision, err := allocate(ctx, tx, runID)
 		if err != nil {
 			return nil, err
 		}
-		for _, family := range families {
-			query := captureQuery(family)
-			if query == "" {
-				return nil, fmt.Errorf("run fork revision capture has no writer for family %q", family)
-			}
-			if _, err := tx.ExecContext(ctx, query, runID, revision); err != nil {
-				return nil, fmt.Errorf("capture run fork %s facts at revision %d: %w", family, revision, err)
-			}
-			if err := captureRemovedFacts(ctx, tx, runID, revision, family); err != nil {
+		for _, family := range changedFamilies {
+			if err := captureCanonicalProjection(ctx, tx, runID, revision, family); err != nil {
 				return nil, err
 			}
 		}
@@ -301,30 +320,49 @@ func schemaContainsRequirements(columns map[string]map[string]struct{}, required
 	return true
 }
 
-func captureRemovedFacts(ctx context.Context, tx *sql.Tx, runID string, revision int64, family Family) error {
+func captureCanonicalProjection(ctx context.Context, tx *sql.Tx, runID string, revision int64, family Family) error {
+	projection := canonicalProjectionQuery(family)
+	if projection == "" {
+		return fmt.Errorf("run fork revision capture has no projection for family %q", family)
+	}
 	if _, err := tx.ExecContext(ctx, `
-		WITH latest AS (
-			SELECT DISTINCT ON (fact_key) fact_key, present
-			FROM run_fork_fact_revisions
-			WHERE run_id = $1::uuid AND family = $3 AND revision < $2
-			ORDER BY fact_key, revision DESC
+		INSERT INTO run_fork_fact_revisions (
+			run_id, revision, family, fact_key, fact, present, source_transaction_id
 		)
-		INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, present, source_transaction_id)
-		SELECT $1::uuid, $2, $3, latest.fact_key, '{}'::jsonb, FALSE, 0
-		FROM latest
-		WHERE latest.present
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM run_fork_fact_revisions current
-			WHERE current.run_id = $1::uuid
-			  AND current.revision = $2
-			  AND current.family = $3
-			  AND current.fact_key = latest.fact_key
-			  AND current.present
-		  )
+		SELECT $1::uuid, $2, $3, current.fact_key, current.fact, TRUE, current.source_transaction_id
+		FROM (`+projection+`) current
+		ON CONFLICT (run_id, family, fact_key, revision)
+		DO UPDATE SET
+			fact = EXCLUDED.fact,
+			present = TRUE,
+			source_transaction_id = EXCLUDED.source_transaction_id
+	`, runID, revision, family); err != nil {
+		return fmt.Errorf("capture run fork %s facts at revision %d: %w", family, revision, err)
+	}
+	return captureRemovedFacts(ctx, tx, runID, revision, family, projection)
+}
+
+func captureRemovedFacts(ctx context.Context, tx *sql.Tx, runID string, revision int64, family Family, projection string) error {
+	if _, err := tx.ExecContext(ctx, `
+			WITH current_facts AS (`+projection+`),
+			latest AS (
+				SELECT DISTINCT ON (fact_key) fact_key, present
+				FROM run_fork_fact_revisions
+				WHERE run_id = $1::uuid AND family = $3 AND revision <= $2
+				ORDER BY fact_key, revision DESC
+			)
+			INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, present, source_transaction_id)
+			SELECT $1::uuid, $2, $3, latest.fact_key, '{}'::jsonb, FALSE, 0
+			FROM latest
+			WHERE latest.present
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM current_facts current
+				WHERE current.fact_key = latest.fact_key
+			  )
 		ON CONFLICT (run_id, family, fact_key, revision)
 		DO UPDATE SET fact = EXCLUDED.fact, present = FALSE, source_transaction_id = 0
-	`, runID, revision, family); err != nil {
+		`, runID, revision, family); err != nil {
 		return fmt.Errorf("capture removed run fork %s facts at revision %d: %w", family, revision, err)
 	}
 	return nil
@@ -349,8 +387,8 @@ func RunIDForEvent(ctx context.Context, tx *sql.Tx, eventID string) (string, err
 }
 
 // ValidateComplete rejects old, bypassed, or partially deleted projections.
-// PostgreSQL xmin is only a same-row writer stamp; it is never exposed as a
-// fork revision or used to order transactions.
+// PostgreSQL xmin is only used to discover candidate writes in the current
+// transaction; canonical projected fact and presence equality own semantics.
 func ValidateComplete(ctx context.Context, tx *sql.Tx, runID string) error {
 	if tx == nil {
 		return fmt.Errorf("run fork revision validation requires an existing postgres transaction")
@@ -360,34 +398,8 @@ func ValidateComplete(ctx context.Context, tx *sql.Tx, runID string) error {
 		return fmt.Errorf("run fork revision validation requires a UUID run_id: %w", err)
 	}
 	for _, family := range allFamilies {
-		current := currentIdentityQuery(family)
-		if current == "" {
-			return fmt.Errorf("run fork revision validation has no projection for family %q", family)
-		}
-		var drifted bool
-		query := `
-			WITH current_facts AS (` + current + `),
-			latest AS (
-				SELECT DISTINCT ON (fact_key) fact_key, present, source_transaction_id
-				FROM run_fork_fact_revisions
-				WHERE run_id = $1::uuid AND family = $2
-				ORDER BY fact_key, revision DESC
-			)
-			SELECT EXISTS (
-				SELECT 1
-				FROM current_facts current
-				LEFT JOIN latest USING (fact_key)
-				WHERE latest.fact_key IS NULL
-				   OR NOT latest.present
-				   OR latest.source_transaction_id <> current.source_transaction_id
-				UNION ALL
-				SELECT 1
-				FROM latest
-				LEFT JOIN current_facts current USING (fact_key)
-				WHERE latest.present AND current.fact_key IS NULL
-			)
-		`
-		if err := tx.QueryRowContext(ctx, query, runID, family).Scan(&drifted); err != nil {
+		drifted, err := canonicalProjectionDiffersFromLatest(ctx, tx, runID, family)
+		if err != nil {
 			return fmt.Errorf("validate run fork %s projection: %w", family, err)
 		}
 		if drifted {
@@ -397,20 +409,47 @@ func ValidateComplete(ctx context.Context, tx *sql.Tx, runID string) error {
 	return nil
 }
 
+func canonicalProjectionDiffersFromLatest(ctx context.Context, tx *sql.Tx, runID string, family Family) (bool, error) {
+	projection := canonicalProjectionQuery(family)
+	if projection == "" {
+		return false, fmt.Errorf("run fork revision owner has no canonical projection for family %q", family)
+	}
+	var differs bool
+	query := `
+		WITH current_facts AS (` + projection + `),
+		latest AS (
+			SELECT DISTINCT ON (fact_key) fact_key, fact, present
+			FROM run_fork_fact_revisions
+			WHERE run_id = $1::uuid AND family = $2
+			ORDER BY fact_key, revision DESC
+		)
+		SELECT EXISTS (
+			SELECT 1
+			FROM current_facts current
+			LEFT JOIN latest USING (fact_key)
+			WHERE latest.fact_key IS NULL
+			   OR NOT latest.present
+			   OR latest.fact IS DISTINCT FROM current.fact
+			UNION ALL
+			SELECT 1
+			FROM latest
+			LEFT JOIN current_facts current USING (fact_key)
+			WHERE latest.present AND current.fact_key IS NULL
+		)
+	`
+	if err := tx.QueryRowContext(ctx, query, runID, family).Scan(&differs); err != nil {
+		return false, err
+	}
+	return differs, nil
+}
+
 func allocate(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
-	var revision int64
-	err := tx.QueryRowContext(ctx, `
-		SELECT revision
-		FROM run_fork_revisions
-		WHERE run_id = $1::uuid
-		  AND transaction_id = txid_current()
-	`, runID).Scan(&revision)
-	if err == nil {
+	if revision, ok, err := currentTransactionRevision(ctx, tx, runID); err != nil {
+		return 0, err
+	} else if ok {
 		return revision, nil
 	}
-	if err != sql.ErrNoRows {
-		return 0, fmt.Errorf("read current run fork transaction revision: %w", err)
-	}
+	var revision int64
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_revision_heads (run_id)
 		VALUES ($1::uuid)
@@ -436,6 +475,39 @@ func allocate(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
 	return revision, nil
 }
 
+func currentTransactionRevision(ctx context.Context, tx *sql.Tx, runID string) (int64, bool, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `
+			SELECT revision
+			FROM run_fork_revisions
+			WHERE run_id = $1::uuid
+			  AND transaction_id = txid_current()
+		`, runID).Scan(&revision)
+	if err == nil {
+		return revision, true, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, false, fmt.Errorf("read current run fork transaction revision: %w", err)
+	}
+	return 0, false, nil
+}
+
+func latestRevision(ctx context.Context, tx *sql.Tx, runID string) (int64, bool, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT last_revision
+		FROM run_fork_revision_heads
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&revision)
+	if err == nil {
+		return revision, true, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, false, fmt.Errorf("read latest run fork revision: %w", err)
+	}
+	return 0, false, nil
+}
+
 func normalizeFamilies(families []Family) ([]Family, error) {
 	seen := make(map[Family]struct{}, len(families))
 	out := make([]Family, 0, len(families))
@@ -454,72 +526,37 @@ func normalizeFamilies(families []Family) ([]Family, error) {
 	return out, nil
 }
 
-func captureQuery(family Family) string {
+func canonicalProjectionQuery(family Family) string {
 	switch family {
 	case FamilyEvents:
-		return captureEventsSQL
+		return canonicalEventsProjectionSQL
 	case FamilyEntityMutations:
-		return captureEntityMutationsSQL
+		return canonicalEntityMutationsProjectionSQL
 	case FamilyEntityMetadata:
-		return captureEntityMetadataSQL
+		return canonicalEntityMetadataProjectionSQL
 	case FamilyEventDeliveries:
-		return captureEventDeliveriesSQL
+		return canonicalEventDeliveriesProjectionSQL
 	case FamilyEventReceipts:
-		return captureEventReceiptsSQL
+		return canonicalEventReceiptsProjectionSQL
 	case FamilyDeadLetters:
-		return captureDeadLettersSQL
+		return canonicalDeadLettersProjectionSQL
 	case FamilyTimers:
-		return captureTimersSQL
+		return canonicalTimersProjectionSQL
 	case FamilyAgentSessions:
-		return captureAgentSessionsSQL
+		return canonicalAgentSessionsProjectionSQL
 	case FamilyAgentTurns:
-		return captureAgentTurnsSQL
+		return canonicalAgentTurnsProjectionSQL
 	case FamilyAgentConversationAudits:
-		return captureAgentConversationAuditsSQL
+		return canonicalAgentConversationAuditsProjectionSQL
 	case FamilyReplyContexts:
-		return captureReplyContextsSQL
+		return canonicalReplyContextsProjectionSQL
 	default:
 		return ""
 	}
 }
 
-func currentIdentityQuery(family Family) string {
-	switch family {
-	case FamilyEvents:
-		return `SELECT event_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM events WHERE run_id = $1::uuid`
-	case FamilyEntityMutations:
-		return `SELECT mutation_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM entity_mutations WHERE run_id = $1::uuid`
-	case FamilyEntityMetadata:
-		return `SELECT entity_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM entity_state WHERE run_id = $1::uuid`
-	case FamilyEventDeliveries:
-		return `SELECT delivery_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM event_deliveries WHERE run_id = $1::uuid`
-	case FamilyEventReceipts:
-		return `SELECT r.receipt_id::text AS fact_key, r.xmin::text::bigint AS source_transaction_id FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid`
-	case FamilyDeadLetters:
-		return `SELECT d.dead_letter_id::text AS fact_key, d.xmin::text::bigint AS source_transaction_id FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid`
-	case FamilyTimers:
-		return `SELECT timer_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM timers WHERE run_id = $1::uuid`
-	case FamilyAgentSessions:
-		return `SELECT session_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM agent_sessions WHERE run_id = $1::uuid`
-	case FamilyAgentTurns:
-		return `SELECT turn_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM agent_turns WHERE run_id = $1::uuid`
-	case FamilyAgentConversationAudits:
-		return `SELECT session_id::text AS fact_key, xmin::text::bigint AS source_transaction_id FROM agent_conversation_audits WHERE run_id = $1::uuid`
-	case FamilyReplyContexts:
-		return `SELECT reply_context_id AS fact_key, xmin::text::bigint AS source_transaction_id FROM reply_contexts WHERE run_id = $1::uuid`
-	default:
-		return ""
-	}
-}
-
-const captureUpsertSuffix = `
-	ON CONFLICT (run_id, family, fact_key, revision)
-	DO UPDATE SET fact = EXCLUDED.fact, present = TRUE, source_transaction_id = EXCLUDED.source_transaction_id
-`
-
-const captureEventsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT e.run_id, $2, 'events', e.event_id::text,
+const canonicalEventsProjectionSQL = `
+	SELECT e.event_id::text AS fact_key,
 	       jsonb_build_object(
 	           'event_id', e.event_id, 'event_name', e.event_name,
 	           'entity_id', e.entity_id, 'flow_instance', e.flow_instance,
@@ -528,35 +565,32 @@ const captureEventsSQL = `
 	           'chain_depth', e.chain_depth, 'produced_by', e.produced_by,
 	           'produced_by_type', e.produced_by_type, 'handler_node', e.handler_node,
 	           'idempotency_key', e.idempotency_key, 'source_event_id', e.source_event_id,
-	           'created_at', e.created_at), e.xmin::text::bigint
+	           'created_at', e.created_at) AS fact, e.xmin::text::bigint AS source_transaction_id
 	FROM events e
 	WHERE e.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureEntityMutationsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT m.run_id, $2, 'entity_mutations', m.mutation_id::text,
+const canonicalEntityMutationsProjectionSQL = `
+	SELECT m.mutation_id::text AS fact_key,
 	       jsonb_build_object(
 	           'mutation_id', m.mutation_id, 'entity_id', m.entity_id,
 	           'field', m.field, 'new_value', m.new_value,
-	           'caused_by_event', m.caused_by_event, 'created_at', m.created_at), m.xmin::text::bigint
+	           'caused_by_event', m.caused_by_event, 'created_at', m.created_at) AS fact, m.xmin::text::bigint AS source_transaction_id
 	FROM entity_mutations m
 	WHERE m.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureEntityMetadataSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT e.run_id, $2, 'entity_metadata', e.entity_id::text,
+const canonicalEntityMetadataProjectionSQL = `
+	SELECT e.entity_id::text AS fact_key,
 	       jsonb_build_object(
 	           'entity_id', e.entity_id, 'flow_instance', e.flow_instance,
-	           'entity_type', e.entity_type, 'created_at', e.created_at), e.xmin::text::bigint
+	           'entity_type', e.entity_type, 'created_at', e.created_at) AS fact, e.xmin::text::bigint AS source_transaction_id
 	FROM entity_state e
 	WHERE e.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureEventDeliveriesSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT d.run_id, $2, 'event_deliveries', d.delivery_id::text,
+const canonicalEventDeliveriesProjectionSQL = `
+	SELECT d.delivery_id::text AS fact_key,
 	       jsonb_build_object(
 	           'delivery_id', d.delivery_id, 'event_id', d.event_id,
 	           'subscriber_type', d.subscriber_type, 'subscriber_id', d.subscriber_id,
@@ -564,38 +598,35 @@ const captureEventDeliveriesSQL = `
 	           'delivery_context', d.delivery_context, 'status', d.status,
 	           'retry_count', d.retry_count, 'reason_code', d.reason_code,
 	           'active_session_id', d.active_session_id, 'started_at', d.started_at,
-	           'delivered_at', d.delivered_at, 'created_at', d.created_at), d.xmin::text::bigint
+	           'delivered_at', d.delivered_at, 'created_at', d.created_at) AS fact, d.xmin::text::bigint AS source_transaction_id
 	FROM event_deliveries d
 	WHERE d.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureEventReceiptsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT e.run_id, $2, 'event_receipts', r.receipt_id::text,
+const canonicalEventReceiptsProjectionSQL = `
+	SELECT r.receipt_id::text AS fact_key,
 	       jsonb_build_object(
 	           'receipt_id', r.receipt_id, 'event_id', r.event_id,
 	           'subscriber_type', r.subscriber_type, 'subscriber_id', r.subscriber_id,
 	           'outcome', r.outcome, 'reason_code', r.reason_code,
-	           'processed_at', r.processed_at), r.xmin::text::bigint
+	           'processed_at', r.processed_at) AS fact, r.xmin::text::bigint AS source_transaction_id
 	FROM event_receipts r
 	JOIN events e ON e.event_id = r.event_id
 	WHERE e.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureDeadLettersSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT e.run_id, $2, 'dead_letters', d.dead_letter_id::text,
+const canonicalDeadLettersProjectionSQL = `
+	SELECT d.dead_letter_id::text AS fact_key,
 	       jsonb_build_object(
 	           'dead_letter_id', d.dead_letter_id, 'original_event_id', d.original_event_id,
-	           'handler_node', d.handler_node, 'created_at', d.created_at), d.xmin::text::bigint
+	           'handler_node', d.handler_node, 'created_at', d.created_at) AS fact, d.xmin::text::bigint AS source_transaction_id
 	FROM dead_letters d
 	JOIN events e ON e.event_id = d.original_event_id
 	WHERE e.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureTimersSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT t.run_id, $2, 'timers', t.timer_id::text,
+const canonicalTimersProjectionSQL = `
+	SELECT t.timer_id::text AS fact_key,
 	       jsonb_build_object(
 	           'timer_id', t.timer_id, 'timer_name', t.timer_name,
 	           'entity_id', t.entity_id, 'flow_instance', t.flow_instance,
@@ -605,49 +636,45 @@ const captureTimersSQL = `
 	           'recurrence_interval', t.recurrence_interval,
 	           'owner_node', t.owner_node, 'owner_agent', t.owner_agent,
 	           'task_type', t.task_type, 'status', t.status,
-	           'fired_at', t.fired_at, 'created_at', t.created_at), t.xmin::text::bigint
+	           'fired_at', t.fired_at, 'created_at', t.created_at) AS fact, t.xmin::text::bigint AS source_transaction_id
 	FROM timers t
 	WHERE t.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureAgentSessionsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT s.run_id, $2, 'agent_sessions', s.session_id::text,
+const canonicalAgentSessionsProjectionSQL = `
+	SELECT s.session_id::text AS fact_key,
 	       jsonb_build_object(
 	           'session_id', s.session_id, 'status', s.status,
-	           'created_at', s.created_at, 'terminated_at', s.terminated_at), s.xmin::text::bigint
+	           'created_at', s.created_at, 'terminated_at', s.terminated_at) AS fact, s.xmin::text::bigint AS source_transaction_id
 	FROM agent_sessions s
 	WHERE s.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureAgentTurnsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT t.run_id, $2, 'agent_turns', t.turn_id::text,
+const canonicalAgentTurnsProjectionSQL = `
+	SELECT t.turn_id::text AS fact_key,
 	       jsonb_build_object(
 	           'turn_id', t.turn_id, 'session_id', t.session_id,
-	           'created_at', t.created_at), t.xmin::text::bigint
+	           'created_at', t.created_at) AS fact, t.xmin::text::bigint AS source_transaction_id
 	FROM agent_turns t
 	WHERE t.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureAgentConversationAuditsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT a.run_id, $2, 'agent_conversation_audits', a.session_id::text,
+const canonicalAgentConversationAuditsProjectionSQL = `
+	SELECT a.session_id::text AS fact_key,
 	       jsonb_build_object(
 	           'session_id', a.session_id, 'status', a.status,
-	           'created_at', a.created_at, 'updated_at', a.updated_at), a.xmin::text::bigint
+	           'created_at', a.created_at, 'updated_at', a.updated_at) AS fact, a.xmin::text::bigint AS source_transaction_id
 	FROM agent_conversation_audits a
 	WHERE a.run_id = $1::uuid
-` + captureUpsertSuffix
+`
 
-const captureReplyContextsSQL = `
-	INSERT INTO run_fork_fact_revisions (run_id, revision, family, fact_key, fact, source_transaction_id)
-	SELECT r.run_id, $2, 'reply_contexts', r.reply_context_id,
+const canonicalReplyContextsProjectionSQL = `
+	SELECT r.reply_context_id AS fact_key,
 	       jsonb_build_object(
 	           'reply_context_id', r.reply_context_id,
 	           'request_event_id', r.request_event_id, 'state', r.state,
 	           'created_at', r.created_at, 'updated_at', r.updated_at,
-	           'terminal_at', r.terminal_at), r.xmin::text::bigint
+	           'terminal_at', r.terminal_at) AS fact, r.xmin::text::bigint AS source_transaction_id
 	FROM reply_contexts r
 	WHERE r.run_id = $1::uuid
-` + captureUpsertSuffix
+`
