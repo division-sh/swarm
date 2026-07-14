@@ -56,8 +56,8 @@ const (
 	RetiredStaticMissingAcquisition RetiredStaticMutation = "missing_acquisition"
 )
 
-// ParserSnippet is YAML that can only be decoded in memory. It has no method
-// that can write or materialize a workflow bundle.
+// ParserSnippet bounds parser-focused YAML to one document. Its source remains
+// ordinary package evidence for the complete-bundle ownership guard.
 type ParserSnippet struct {
 	document yaml.Node
 }
@@ -66,17 +66,16 @@ func NewParserSnippet(t testing.TB, source string) ParserSnippet {
 	t.Helper()
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(source), &doc); err != nil {
-		t.Fatalf("parse bounded routing snippet: %v", err)
+		t.Fatalf("parse routing snippet: %v", err)
 	}
 	return ParserSnippet{document: doc}
 }
 
-// Decode exposes parser-only YAML as data. ParserSnippet deliberately has no
-// byte/string accessor or filesystem operation, so it cannot become a bundle
-// materialization seam.
+// Decode supplies one parsed document to a parser contract under test. It does
+// not exempt the source document from canonical fixture ownership checks.
 func (snippet ParserSnippet) Decode(target any) error {
 	if len(snippet.document.Content) != 1 {
-		return fmt.Errorf("bounded routing snippet must contain one YAML document")
+		return fmt.Errorf("routing snippet must contain one YAML document")
 	}
 	return snippet.document.Content[0].Decode(target)
 }

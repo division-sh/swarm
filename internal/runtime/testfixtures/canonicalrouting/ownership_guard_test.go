@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -417,7 +416,7 @@ func TestCanonicalRoutingPublicAPIHasNoGenericPositiveMutation(t *testing.T) {
 	}
 }
 
-func TestCanonicalRoutingParserSnippetCannotMaterializeBundle(t *testing.T) {
+func TestCanonicalRoutingParserSnippetDecodesOneDocument(t *testing.T) {
 	snippet := NewParserSnippet(t, "pins: {inputs: {events: []}}\n")
 	var decoded map[string]any
 	if err := snippet.Decode(&decoded); err != nil {
@@ -425,14 +424,6 @@ func TestCanonicalRoutingParserSnippetCannotMaterializeBundle(t *testing.T) {
 	}
 	if _, ok := decoded["pins"]; !ok {
 		t.Fatalf("decoded parser snippet = %#v, want pins", decoded)
-	}
-	typeOfSnippet := reflect.TypeOf(snippet)
-	if typeOfSnippet.NumMethod() != 1 || typeOfSnippet.Method(0).Name != "Decode" {
-		methods := make([]string, 0, typeOfSnippet.NumMethod())
-		for i := 0; i < typeOfSnippet.NumMethod(); i++ {
-			methods = append(methods, typeOfSnippet.Method(i).Name)
-		}
-		t.Fatalf("parser-only snippet exposes methods %v, want Decode only", methods)
 	}
 }
 
@@ -512,6 +503,36 @@ func build() {
   writeFile("schema.yaml", routingDocument())
 }
 `},
+		"parser-selector-name-spoof": {"fixture_test.go": `package fixture
+type parserOwner struct{}
+func (parserOwner) NewParserSnippet(source string) {}
+var canonicalrouting parserOwner
+func build() {
+  canonicalrouting.NewParserSnippet("package.yaml")
+  canonicalrouting.NewParserSnippet("schema.yaml")
+  canonicalrouting.NewParserSnippet("pins: {inputs: {events: [{source: external}]}}")
+}
+`},
+		"parser-decode-materialize": {"fixture_test.go": `package fixture
+import (
+  "os"
+  "testing"
+  "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+  "gopkg.in/yaml.v3"
+)
+func build(t testing.TB) {
+  packageSnippet := canonicalrouting.NewParserSnippet(t, "name: fixture")
+  routingSnippet := canonicalrouting.NewParserSnippet(t, "pins: {inputs: {events: [{source: external}]}}")
+  var packageDocument any
+  var routingDocument any
+  _ = packageSnippet.Decode(&packageDocument)
+  _ = routingSnippet.Decode(&routingDocument)
+  packageBytes, _ := yaml.Marshal(packageDocument)
+  routingBytes, _ := yaml.Marshal(routingDocument)
+  _ = os.WriteFile("package.yaml", packageBytes, 0o600)
+  _ = os.WriteFile("schema.yaml", routingBytes, 0o600)
+}
+`},
 	}
 	for name, files := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -520,16 +541,6 @@ func build() {
 			}
 		})
 	}
-
-	t.Run("parser-only-snippet", func(t *testing.T) {
-		files := map[string]string{"fixture_test.go": `package fixture
-func parse(t T) {
-  canonicalrouting.NewParserSnippet(t, "pins: {inputs: {events: [{source: external}]}}")
-}`}
-		if goPackageContainsCompleteRoutingBundle(files) {
-			t.Fatal("non-materializing parser snippet was classified as a complete bundle")
-		}
-	})
 }
 
 func TestCanonicalRoutingExternalSourceMatchesRuntimeSemantics(t *testing.T) {
@@ -1105,9 +1116,6 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{} {
 	values := map[string]struct{}{}
 	ast.Inspect(node, func(candidate ast.Node) bool {
-		if call, ok := candidate.(*ast.CallExpr); ok && boundedParserSnippetCall(call.Fun) {
-			return false
-		}
 		expression, ok := candidate.(ast.Expr)
 		if !ok {
 			return true
@@ -1119,15 +1127,6 @@ func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{
 		return true
 	})
 	return values
-}
-
-func boundedParserSnippetCall(function ast.Expr) bool {
-	selector, ok := function.(*ast.SelectorExpr)
-	if !ok || selector.Sel.Name != "NewParserSnippet" {
-		return false
-	}
-	pkg, ok := selector.X.(*ast.Ident)
-	return ok && pkg.Name == "canonicalrouting"
 }
 
 func yamlTextContainsCanonicalRoutingAuthority(text string) bool {

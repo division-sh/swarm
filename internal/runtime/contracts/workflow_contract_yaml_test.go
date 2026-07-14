@@ -23,48 +23,7 @@ func containsString(values []string, target string) bool {
 func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
 
 	var doc ProjectPackageDocument
-	snippet := canonicalrouting.NewParserSnippet(t, `
-name: package-boundary
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-requires:
-  inputs: [work.requested]
-  outputs: [work.completed]
-  policy: [provider.threshold]
-  credentials: [provider_token]
-  platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    bind:
-      inputs:
-        work.requested: parent.work_requested
-      outputs:
-        work.completed: parent.work_completed
-      policy:
-        provider.threshold: parent.policy.threshold
-      credentials:
-        provider_token: parent_provider_token
-packages:
-  - path: packages/child
-    bind:
-      inputs:
-        child.requested: parent.child_requested
-      outputs:
-        child.completed: parent.child_completed
-      policy:
-        child.policy: parent.policy.child
-      credentials:
-        child_token: parent_child_token
-connect:
-  - from: worker.work.completed
-    to: worker.work.requested
-    delivery: one
-    map:
-      work_id:
-        source: payload.work_id
-        target: entity.work_id
-`)
+	snippet := canonicalrouting.PackageRequiresBindConnectSnippet(t)
 	if err := snippet.Decode(&doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -787,14 +746,8 @@ packages:
 			wantErr: `bind field "credential" is not supported.`,
 		},
 		{
-			name: "unknown connect field",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-connect:
-  - from: producer.ready
-    to: consumer.ready
-    topic: unsupported
-`),
+			name:    "unknown connect field",
+			body:    canonicalrouting.InvalidPackageConnectFieldSnippet(t),
 			wantErr: `connect field "topic" is not supported.`,
 		},
 	}
@@ -888,53 +841,7 @@ pins:
 func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T) {
 
 	var doc FlowSchemaDocument
-	snippet := canonicalrouting.NewParserSnippet(t, `
-name: resolution-pins
-pins:
-  inputs:
-    events:
-      - name: create_requested
-        event: validation.requested
-        resolution:
-          mode: create
-          instance_key:
-            mint: uuid
-            as: validation_case_id
-        carries:
-          validation_case_id:
-            from: instance.key.validation_case_id
-            type: uuid
-      - name: select_requested
-        event: account.selected
-        resolution:
-          mode: select
-          instance_key: account_id
-      - name: select_or_create_requested
-        event: account.requested
-        resolution:
-          mode: select-or-create
-          instance_key:
-            from: payload.account_id
-      - name: fan_in_requested
-        event: report.ready
-        resolution:
-          mode: fan-in
-          aggregation: stream
-          window: report_period
-          dedup_by: [event.id, payload.operating_id]
-          singleton: portfolio/default
-      - name: fan_out_requested
-        event: operating.requested
-        resolution:
-          mode: fan-out
-          instance_key: operating_id
-      - name: reply_received
-        event: provider.replied
-        resolution:
-          mode: reply
-          replies_to: provider_requested
-          correlation_key: payload.provider_request_id
-`)
+	snippet := canonicalrouting.InputPinResolutionModesSnippet(t)
 	if err := snippet.Decode(&doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -987,49 +894,15 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 	}{
 		{
 			name: "resolution",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid-resolution
-pins:
-  inputs:
-    events:
-      - name: requested
-        event: work.requested
-        resolution:
-          mode: create
-          unsupported: true
-`),
+			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionField),
 		},
 		{
 			name: "instance_key",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid-resolution-instance-key
-pins:
-  inputs:
-    events:
-      - name: requested
-        event: work.requested
-        resolution:
-          mode: create
-          instance_key:
-            mint: uuid
-            as: work_id
-            unsupported: true
-`),
+			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedInstanceKeyField),
 		},
 		{
 			name: "carries",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid-resolution-carries
-pins:
-  inputs:
-    events:
-      - name: requested
-        event: work.requested
-        carries:
-          work_id:
-            from: instance.key.work_id
-            unsupported: true
-`),
+			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionCarry),
 		},
 	}
 	for _, tc := range tests {
