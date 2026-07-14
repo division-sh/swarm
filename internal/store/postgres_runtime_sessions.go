@@ -117,7 +117,7 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, agentID 
 		RetriesFromSessionID: strings.TrimSpace(current.retriesFrom.String), LockOwner: lockOwner,
 		ScopeKey: resolved.ScopeKey, ExpiresAt: current.leaseExpires.Time,
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("commit live session acquire: %w", err)
 	}
 	return lease, record, nil
@@ -127,7 +127,15 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 	if lease == nil {
 		return errors.New("nil lease")
 	}
-	res, err := s.DB.ExecContext(ctx, `
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin live session release: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET lease_holder=NULL, lease_expires_at=NULL, updated_at=now()
 		WHERE agent_id=$1 AND runtime_mode=$2 AND session_id=$3::uuid AND scope_key=$4 AND lease_holder=$5 AND status='active'
 	`, lease.AgentID, lease.RuntimeMode.String(), lease.SessionID, strings.TrimSpace(lease.ScopeKey), lease.LockOwner)
@@ -136,6 +144,9 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active lease to release for agent=%s session=%s", lease.AgentID, lease.SessionID)
+	}
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return fmt.Errorf("commit live session release: %w", err)
 	}
 	return nil
 }
@@ -216,7 +227,7 @@ func (s *PostgresStore) Rotate(ctx context.Context, agentID string, runtimeMode 
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id=$2::uuid, updated_at=$3 WHERE session_id=$1::uuid AND status='terminated'`, currentID, newID, now); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return nil, err
 	}
 	return &runtimesessions.Lease{SessionID: newID, AgentID: agentID, RuntimeMode: resolved.RuntimeMode, SessionScope: resolved.Scope, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ScopeKey: resolved.ScopeKey, ExpiresAt: expires}, nil
@@ -242,7 +253,10 @@ func (s *PostgresStore) IncrementTurn(ctx context.Context, agentID string, runti
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("session not found for turn increment: agent=%s runtime=%s scope=%s session=%s", agentID, runtimeMode, scopeKey, sessionID)
 	}
-	return tx.Commit()
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return fmt.Errorf("commit live session turn increment: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) AdoptSessionID(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, newSessionID, scopeKey string) error {
@@ -277,7 +291,10 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, agentID string, runt
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb)||jsonb_build_object('provider_session_id',$1::text), lease_holder=$2, lease_expires_at=$3, updated_at=$4 WHERE session_id=$5::uuid`, newSessionID, lockOwner, now.Add(s.postgresSessionLockTTL()), now, sessionID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return fmt.Errorf("commit live session provider adoption: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) ResetAll(runtimeMode runtimesessions.RuntimeMode, metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
@@ -286,7 +303,13 @@ func (s *PostgresStore) ResetAll(runtimeMode runtimesessions.RuntimeMode, metada
 	}
 	mode := runtimeMode.String()
 	source := strings.TrimSpace(metadata.Source)
-	rows, err := s.DB.QueryContext(context.Background(), `
+	ctx := context.Background()
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return runtimesessions.ResetSummary{}, fmt.Errorf("begin reset postgres live sessions: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `
 		WITH affected AS (
 			SELECT session_id, agent_id, scope_key, runtime_mode, status
 			FROM agent_sessions
@@ -328,6 +351,12 @@ func (s *PostgresStore) ResetAll(runtimeMode runtimesessions.RuntimeMode, metada
 	}
 	if err := rows.Err(); err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("read postgres live session reset: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return runtimesessions.ResetSummary{}, fmt.Errorf("close postgres live session reset: %w", err)
+	}
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return runtimesessions.ResetSummary{}, fmt.Errorf("commit postgres live session reset: %w", err)
 	}
 	return summary, nil
 }

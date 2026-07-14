@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -231,6 +234,107 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 	}
 	if first.revisions[runIDs[0]]+second.revisions[runIDs[0]] != 3 {
 		t.Fatalf("multi-run revision results = %#v and %#v, want one revision 1 and one revision 2", first.revisions, second.revisions)
+	}
+}
+
+func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	store := &PostgresStore{DB: db}
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	agentID := "revision-lifecycle-agent"
+	agent := runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID: agentID, Role: "worker", Type: "sonnet", Model: "regular", Mode: "global",
+			Config: []byte(`{"system_prompt":"revision proof"}`),
+		},
+		Status: "active", HiredBy: "revision-proof", StartedAt: now,
+	}
+	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "revision-spawn",
+		AgentID: agentID, Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
+		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
+		RunMode: runtimemanager.AgentRunModeStopped, Agent: &agent, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("spawn lifecycle agent: %v", err)
+	}
+	started, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "revision-start",
+		AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
+		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
+		TargetEpoch: spawned.RuntimeEpoch, TargetGeneration: spawned.Generation + 1,
+		TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "revision-1",
+		RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("start lifecycle agent: %v", err)
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin lifecycle source revision: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed lifecycle source run: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ($1::uuid,$2::uuid,'lifecycle.revision','global','platform',$3)`, runID, eventID, now); err != nil {
+		t.Fatalf("seed lifecycle source event: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, scope_key, scope, conversation, turn_count,
+			runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES ($1::uuid,$2::uuid,$3,'global','global','[]'::jsonb,0,'session','{}'::jsonb,'active',$4,$4)
+	`, sessionID, runID, agentID, now); err != nil {
+		t.Fatalf("seed lifecycle source session: %v", err)
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+		t.Fatalf("capture lifecycle source revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit lifecycle source revision: %v", err)
+	}
+
+	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "revision-terminate",
+		AgentID: agentID, Trigger: "terminate", ExpectedEpoch: started.RuntimeEpoch,
+		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
+		TargetEpoch: started.RuntimeEpoch, TargetGeneration: started.Generation + 1,
+		TargetPhase: runtimemanager.AgentLifecycleTerminated, ConfigRevision: "revision-1",
+		RunMode: runtimemanager.AgentRunModeStopped,
+		Subordinate: runtimesessions.LifecycleMutationPlan{
+			Action:            runtimesessions.LifecycleMutationTerminateCurrentSet,
+			TerminationReason: runtimesessions.TerminationReasonNormal,
+		},
+		Now: now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("terminate lifecycle source session: %v", err)
+	}
+
+	var head int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&head); err != nil {
+		t.Fatalf("load lifecycle source revision head: %v", err)
+	}
+	if head != 2 {
+		t.Fatalf("lifecycle source revision head = %d, want 2", head)
+	}
+	for revision, want := range map[int64]string{1: "active", 2: "terminated"} {
+		var status string
+		if err := db.QueryRowContext(ctx, `
+			SELECT fact->>'status'
+			FROM run_fork_fact_revisions
+			WHERE run_id=$1::uuid AND family='agent_sessions' AND fact_key=$2 AND revision=$3 AND present
+		`, runID, sessionID, revision).Scan(&status); err != nil {
+			t.Fatalf("load lifecycle session revision %d: %v", revision, err)
+		}
+		if status != want {
+			t.Fatalf("lifecycle session revision %d status = %q, want %q", revision, status, want)
+		}
 	}
 }
 

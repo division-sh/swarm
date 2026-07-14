@@ -443,11 +443,10 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	return nil
 }
 
-func (s *PostgresStore) ensureTaskConversationAuditRow(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
-	return s.ensureTaskConversationAuditRowTx(ctx, nil, StoreSchemaCapabilities{}, rec)
-}
-
 func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, rec runtimellm.AgentTurnRecord) error {
+	if tx == nil {
+		return fmt.Errorf("task conversation audit persistence requires an existing transaction")
+	}
 	if caps.Conversations.Audits == "" {
 		var err error
 		caps, err = s.schemaCapabilities(ctx)
@@ -463,10 +462,6 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID, "", "", true); err != nil {
 			return err
 		}
-	}
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
 	}
 	q := `
 		INSERT INTO agent_conversation_audits (
@@ -563,7 +558,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			runtimesessions.RuntimeModeTask.String(),
 		}
 	}
-	if _, err := execFn(ctx, q, args...); err != nil {
+	if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 		return fmt.Errorf("ensure task conversation audit row: %w", err)
 	}
 	return nil
@@ -780,11 +775,6 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required for live session conversation persistence")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin live conversation projection: %w", err)
-	}
-	defer tx.Rollback()
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, rec.AgentID, "upsert_conversation", false); err != nil {
 		return err
 	}

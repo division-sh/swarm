@@ -126,7 +126,7 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 	if err := insertPostgresLifecycleEvidence(ctx, tx, req, result); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	return result, nil
