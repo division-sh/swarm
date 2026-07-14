@@ -1794,12 +1794,12 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	}
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
-		if err := supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true); err != nil {
-			return err
-		}
 		var err error
 		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
-		return err
+		if err != nil {
+			return err
+		}
+		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true)
 	})
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
