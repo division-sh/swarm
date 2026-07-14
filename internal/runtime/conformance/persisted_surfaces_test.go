@@ -168,7 +168,8 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	pg := &store.PostgresStore{DB: db}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
+	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
 	sessionID := acquireLiveConversationSession(t, ctx, db, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{

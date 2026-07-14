@@ -64,10 +64,8 @@ func (projectedEmergencyBudgetGuard) IsEmergency(string) bool       { return tru
 func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return true }
 
 func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
-	am := &AgentManager{
-		agentCfg: map[string]runtimeactors.AgentConfig{"agent-a": {ID: "agent-a", EntityID: "entity-a"}},
-		budget:   projectedEmergencyBudgetGuard{},
-	}
+	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
+	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ID: "agent-a", EntityID: "entity-a"})
 	work := eventtest.RootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
 	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
 		t.Fatalf("projected emergency suppression=%v reason=%q", suppressed, reason)
