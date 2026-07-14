@@ -29,6 +29,22 @@ func TestPlanPreservesValueAndProvenance(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsEnabledPlatformDefaultProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		plan Plan
+	}{
+		{name: "explicit platform default", plan: Plan{Enabled: true, Source: SourcePlatformDefault}},
+		{name: "empty source normalizes to platform default", plan: Plan{Enabled: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.plan.Normalize(); err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
+				t.Fatalf("Normalize error = %v, want authored-source requirement", err)
+			}
+		})
+	}
+}
+
 func TestIdentityRequiresExactRunAgentAndFlowInstance(t *testing.T) {
 	valid := Identity{RunID: "run-a", AgentID: "agent-a", FlowInstance: "support/chat-a"}
 	if err := valid.Validate(); err != nil {

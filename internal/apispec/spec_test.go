@@ -62,6 +62,19 @@ func TestPlatformSpecVersionOwnerMatchesRootSpec(t *testing.T) {
 	}
 }
 
+func TestAgentMemoryPlanStateInvariantMatchesFreshSchema(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	engine := mustMappingValue(t, root, "engine")
+	sessionManagement := mustMappingValue(t, engine, "agent_session_management")
+	agentMemory := mustMappingValue(t, sessionManagement, "agent_memory")
+	authoredField := mustMappingValue(t, agentMemory, "authored_field")
+	assertScalarContains(t, mustMappingValue(t, authoredField, "state_invariant"), "Memory true with platform_default provenance is invalid")
+
+	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
+	agentsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "agents"), "ddl")
+	assertScalarContains(t, agentsDDL, "CHECK (NOT memory_enabled OR memory_source = 'authored')")
+}
+
 func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	generated, err := GenerateOpenRPC(api)
