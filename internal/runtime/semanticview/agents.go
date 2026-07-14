@@ -32,15 +32,13 @@ func ResolveAgentRegistryEntry(source Source, cfg models.AgentConfig) (string, r
 	if role == "" {
 		return "", runtimecontracts.AgentRegistryEntry{}, false
 	}
-	mode := canonicalLookupValue(cfg.FlowID)
+	flowID := canonicalLookupValue(cfg.FlowID)
 	for _, record := range agentRecords(source) {
 		if canonicalLookupValue(record.entry.Role) != role {
 			continue
 		}
-		if mode != "" {
-			if flowMode := flowModeByID(source, record.flowID); flowMode != "" && flowMode != mode {
-				continue
-			}
+		if flowID != "" && canonicalLookupValue(record.flowID) != flowID {
+			continue
 		}
 		return strings.TrimSpace(record.logicalID), record.entry, true
 	}
@@ -85,18 +83,6 @@ func agentRecords(source Source) []agentRecord {
 		}
 	}
 	return records
-}
-
-func flowModeByID(source Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" || source == nil {
-		return ""
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return ""
-	}
-	return canonicalLookupValue(scope.Mode)
 }
 
 func registryIDMatches(template, candidate string) bool {
