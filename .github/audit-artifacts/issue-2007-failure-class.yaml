@@ -2148,11 +2148,12 @@ superseded_terminal_decision_card_evidence_reaudit:
   blocking_condition: fresh_independent_gate_required_before_runtime_or_spec_implementation
 
 terminal_run_decision_card_supersession_reaudit:
-  status: approved_post_upstream_expiry_absorbed_implementation_active
-  audit_base: adcfa900
+  status: implementation_frozen_pending_post_rebase_lock_order_gate
+  audit_base: 949a8ff6
   architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
   migration_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
   post_upstream_expiry_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4971103943
+  post_rebase_lock_order_gate: pending
   superseded_migration_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
   supersedes_artifact_commits:
     - bb7c25f9c6bba983d0fcd04e4db88e5cd32c6308
@@ -2168,7 +2169,11 @@ terminal_run_decision_card_supersession_reaudit:
     also writes the same obsolete outbox for automatic human-task expiry, where
     the event is a required executable requester outcome. Removing only the
     terminal producer or table would retain dual ownership or silently break
-    human_task.expired delivery.
+    human_task.expired delivery. Current-master terminal admission also locks an
+    existing active run before revision capture. A concurrent delivery transition
+    can own the same run's revision head before acquiring its required parent-run
+    lock, creating a deterministic PostgreSQL deadlock between event publication
+    and agent delivery-start persistence.
   exact_semantic_concepts:
     - terminal_run_decision_card_state_and_change_atomicity
     - human_task_expiry_state_and_executable_outcome_atomicity
@@ -2182,16 +2187,18 @@ terminal_run_decision_card_supersession_reaudit:
     - unused_standalone_run_supersession_capability_removal
     - pre_1_0_obsolete_outbox_hard_schema_cutoff
     - ordered_batch_event_append_outcome_handoff
+    - run_admission_and_revision_capture_lock_order
     - sqlite_postgres_atomicity_and_observation_parity
   chosen_working_failure_class: terminal_run_decision_card_supersession_state_and_change_atomicity
   absorbed_working_failure_classes:
     - human_task_expiry_state_and_executable_outcome_atomicity
     - canonical_successful_run_completion_admission
     - ordered_same_batch_event_append_outcome_dispatch
+    - run_admission_revision_capture_lock_order_atomicity
   immediate_parent_failure_class: status_specific_terminal_run_state_change_atomicity
   parent_failure_class: declaration_owned_standing_service_reconciliation_terminal_run_decision_card_supersession_state_change_atomicity_and_inbound_publication_operations
   broadest_parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
-  framing_decision: broad_enough_after_absorbing_current_master_human_task_expiry_and_both_review_blockers
+  framing_decision: pending_gate_after_absorbing_current_master_human_task_expiry_and_three_review_blockers
   entry_point_not_boundary: >-
     The outbox release failure was only the entry point. The audit boundary is
     every run-level terminal producer, automatic human-task expiry from due-card
@@ -2200,7 +2207,9 @@ terminal_run_decision_card_supersession_reaudit:
     observation, all outbox producers and releasers, schema compatibility refusal
     and removal, active stage supersession preservation, successful-completion
     admission, ordered batch append outcomes, rollback/retry/concurrency, and
-    both stores.
+    both stores. The selected-contract test failure and delivery-start helper
+    were treated as entry points; the lock-order audit covers every PostgreSQL
+    revision-capture consumer through the shared allocator.
 
   binding_governing_context:
     issue_and_thread: issue_2007_with_state_change_only_and_pre_1_0_hard_cutoff_lead_rulings
@@ -2219,6 +2228,9 @@ terminal_run_decision_card_supersession_reaudit:
       - platform-spec.yaml#engine.runtime_boot.active_run_abandon_quiescence
       - platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke
       - platform-spec.yaml#platform_tables.destructive_reset_cleanup_policy
+      - platform-spec.yaml#contract_formats.event_schema.runtime_event_construction.terminal_run_admission
+      - platform-spec.yaml#platform_tables.run_fork_revision_heads
+      - platform-spec.yaml#platform_tables.run_fork_revisions
     implementation_spec_action: >-
       Remove terminal lifecycle outbox publication and bind run-level terminal
       supersession to card, gate, draft, decision-card change, child quiescence,
@@ -2230,7 +2242,9 @@ terminal_run_decision_card_supersession_reaudit:
       before runtime initialization with explicit database-recreation remediation.
       Move automatic human-task expiry to RunPipelineMutation plus
       PublishInMutation in the same selected-store transaction while preserving
-      the mailbox.card_expired to human_task.expired executable chain.
+      the mailbox.card_expired to human_task.expired executable chain. Bind
+      PostgreSQL revision allocation to acquire the parent runs row before the
+      per-run revision head so every fact-family writer consumes one lock order.
 
   canonical_operation_contract:
     semantic_owner: selected_store_typed_terminal_run_transaction
@@ -2320,11 +2334,15 @@ terminal_run_decision_card_supersession_reaudit:
     human_task_expiry_requester_outcome: existing_handleDecisionCardExpiredEvent_pipeline_transaction
     successful_completion: selected_store_ConvergeNormalRunCompletion
     same_batch_append_results: ordered_per_intent_EventAppendOutcome_handoff
+    run_revision_capture_lock_order: runforkrevision_CaptureChanges_allocate_parent_run_before_revision_head
     owner_judgment: >-
       The terminal transaction is the semantic owner because it alone owns run
       terminality and all affected domain rows. The private helper is consumed
       only inside that transaction. An exported standalone run-supersession
       method, EventBus, outbox, event receipt, or route owner is not authoritative.
+      The shared run-fork revision allocator is the semantic lock-order owner
+      because all PostgreSQL fact-family writers converge there; event append or
+      agent delivery helpers are only local consumers.
 
   terminal_producer_inventory:
     postgres_MarkRunTerminal_failed_cancelled_forked:
@@ -2488,6 +2506,10 @@ terminal_run_decision_card_supersession_reaudit:
       disposition: observe_canonical_store_terminal_state_without_writing_completed
     engine_outbox_append_outcomes:
       disposition: preserve_every_ordered_intent_outcome_until_one_post_commit_consumption
+    runforkrevision_CaptureChanges_allocate:
+      disposition: acquire_parent_runs_row_before_revision_head_for_every_PostgreSQL_fact_writer
+    terminal_event_admission_and_delivery_transition_writers:
+      disposition: consume_the_shared_revision_allocator_without_local_retry_or_lock_order_interpretation
 
   old_non_authoritative_or_invalid_paths:
     - decision_card_lifecycle_outbox_as_terminal_notification_owner
@@ -2503,6 +2525,8 @@ terminal_run_decision_card_supersession_reaudit:
     - terminal_platform_pipeline_receipt_or_delivery_creation
     - bundle_route_planner_dispatch_or_recovery_for_terminal_supersession
     - migration_that_inspects_preserves_converts_settles_or_selectively_deletes_legacy_rows_or_event_graphs
+    - revision_capture_that_owns_run_fork_revision_heads_before_parent_runs_lock
+    - local_deadlock_retry_or_selected_contract_quiescence_workaround
 
   manifestation_and_exact_proof_plan:
     producer_atomicity:
@@ -2564,6 +2588,12 @@ terminal_run_decision_card_supersession_reaudit:
       - requester_chain_commits_one_human_task_expired_and_marks_the_continuation_outcome_dispatched
       - destructive_terminalization_first_creates_no_expiry_while_expiry_first_preserves_its_committed_outcome
       - terminal_run_supersession_still_creates_zero_events
+    run_admission_revision_lock_order:
+      - deterministic_concurrent_active_run_event_append_and_agent_delivery_start_complete_without_40P01
+      - parent_runs_lock_is_acquired_before_run_fork_revision_head_for_every_capture_family
+      - event_delivery_and_event_revision_facts_remain_adjacent_complete_and_fork_readable
+      - selected_contract_fork_local_agent_and_provider_runtime_proofs_complete_on_host_PostgreSQL
+      - no_retry_timeout_sleep_or_quiescence_heuristic_is_added
 
   parent_and_tracker_decisions:
     parent_sibling_probe: >-
@@ -2573,7 +2603,10 @@ terminal_run_decision_card_supersession_reaudit:
       execution, mailbox reads, and API idempotency were rechecked. Only
       run-level pending-card supersession shares the selected state/change
       operation. Generic exact-duplicate event expansion remains a different
-      already-tracked #2007 class and is not evidence for this closure.
+      already-tracked #2007 class and is not evidence for this closure. The
+      post-rebase deadlock is a direct lock-order manifestation of the absorbed
+      terminal event-admission operation and shared revision owner, not a
+      generation-route lifecycle class.
     parent_action: absorb_state_change_class_now_into_issue_2007_no_child
     tracker_state_decision: update_issue_2007_title_body_and_checked_in_artifact_before_coding
     watchlist_backed_promotion_check: >-
@@ -2589,6 +2622,7 @@ terminal_run_decision_card_supersession_reaudit:
     absorbed_review_blockers:
       - completed_terminal_bypass_of_store_owned_gate_eligibility
       - same_ID_intents_losing_append_outcomes_inside_one_outbox_batch
+      - active_run_admission_and_revision_head_lock_order_deadlock
     remaining_tail_estimate: two_explicit_non_blocking_sibling_classes_with_high_confidence
 
   closure_and_supported_surface_proof:
@@ -2598,8 +2632,9 @@ terminal_run_decision_card_supersession_reaudit:
       divergence on SQLite and PostgreSQL, remove every terminal event/outbox/
       releaser and standalone supersession path, move active human-task expiry
       into one selected-store event operation, close canonical successful-run
-      admission and ordered same-batch append outcomes, enforce the pre-1.0 hard
-      schema cutoff, and preserve active-run routable supersession.
+      admission, ordered same-batch append outcomes, and shared revision-capture
+      lock ordering, enforce the pre-1.0 hard schema cutoff, and preserve
+      active-run routable supersession.
     closure_feasibility: >-
       Feasible in this PR because every production terminal producer already
       enters the same private helper inside its selected-store transaction,
@@ -2626,8 +2661,51 @@ terminal_run_decision_card_supersession_reaudit:
       - inserted_duplicate_all_duplicate_conflict_and_distinct_outbox_batch_matrix
       - dual_backend_human_task_expiry_state_event_and_requester_outcome_matrix
       - generic_post_commit_expiry_recovery_without_lifecycle_outbox_or_releaser
+      - deterministic_PostgreSQL_event_append_delivery_start_revision_lock_order_race
+      - selected_contract_fork_local_agent_and_provider_completion_regressions
       - full_go_test_all_with_host_postgres
     parity_issue: true
+
+  post_rebase_run_revision_lock_order_discovery:
+    status: implementation_frozen_pending_independent_gate
+    supersedes_incorrect_classification: https://github.com/division-sh/swarm/issues/2007#issuecomment-4972959490
+    observed_entry_point: selected_contract_fork_local_agent_delivery_start
+    chosen_working_failure_class: run_admission_revision_capture_lock_order_atomicity
+    immediate_parent_failure_class: terminal_event_admission_operation_atomicity
+    parent_failure_class: durable_runtime_mutation_and_revision_projection_atomicity
+    issue_2007_relation: direct_absorbed_manifestation
+    exact_execution_proof: >-
+      PostgreSQL process A appends a new event, locks the active runs row through
+      terminal admission, and then waits while ensuring run_fork_revision_heads.
+      Concurrent process B updates event_deliveries, owns that same revision-head
+      transaction, and then waits for the runs-row foreign-key lock while inserting
+      run_fork_revisions. PostgreSQL reports 40P01 with those exact two statements.
+      AgentManager marked the event in flight before process B began, disproving
+      the earlier selected-runtime shutdown classification.
+    canonical_owner: internal_runtime_runforkrevision_CaptureChanges_allocate
+    binding_lock_order:
+      - acquire_or_validate_parent_runs_row_for_key_share
+      - ensure_and_lock_run_fork_revision_heads
+      - insert_run_fork_revisions
+      - capture_changed_fact_families
+      - commit_caller_owned_transaction
+    systematic_consumers:
+      event_append_and_pipeline_receipt_transactions: moved_to_canonical_owner_by_shared_allocator
+      agent_delivery_transition_transactions: moved_to_canonical_owner_by_shared_allocator
+      node_delivery_and_pipeline_transactions: moved_to_canonical_owner_by_shared_allocator
+      session_turn_timer_reply_and_dead_letter_transactions: moved_to_canonical_owner_by_shared_allocator
+      selected_contract_and_run_fork_mutations: moved_to_canonical_owner_by_shared_allocator
+      sqlite_runtime_mutations: different_serialized_backend_without_run_fork_revision_tables
+    invalid_repairs:
+      - retry_40P01_at_delivery_helper
+      - increase_deadlock_timeout
+      - add_quiescence_polling_or_sleeps
+      - special_case_selected_contract_runtime
+      - acquire_parent_lock_after_revision_head
+    closure_feasibility: true_one_shared_allocator_change_and_deterministic_PostgreSQL_race_proof
+    tracker_state_decision: repair_issue_body_artifact_and_existing_watchlist_before_runtime_coding
+    watchlist_mapping_decision: refine_existing_inbound_publication_operation_ownership_node
+    blocking_condition: independent_absorb_gate_required
 
   post_upstream_human_task_expiry_absorption:
     gate_outcome: approved
