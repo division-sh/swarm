@@ -535,15 +535,14 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if !canonicalRoute.Valid() {
 		return fmt.Errorf("derive canonical route identity for flow path %s", canonicalFlowPath)
 	}
-	am.mu.RLock()
-	agentIDs := make([]string, 0, len(am.agentCfg))
-	for agentID, cfg := range am.agentCfg {
+	configs := am.lifecycle.executionConfigs()
+	agentIDs := make([]string, 0, len(configs))
+	for _, cfg := range configs {
 		if cfg.CanonicalFlowPath() != canonicalFlowPath {
 			continue
 		}
-		agentIDs = append(agentIDs, agentID)
+		agentIDs = append(agentIDs, strings.TrimSpace(cfg.ID))
 	}
-	am.mu.RUnlock()
 	sort.Strings(agentIDs)
 	remover, ok := am.bus.(flowInstanceRouteRemover)
 	if !ok || remover == nil {

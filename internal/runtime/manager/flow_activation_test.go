@@ -559,7 +559,7 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if _, ok := am.GetAgentConfig("reviewer-review/inst-1"); !ok {
-		t.Fatalf("expected flow agent rendered with built-in flow_instance_path, configs=%#v", am.agentCfg)
+		t.Fatalf("expected flow agent rendered with built-in flow_instance_path, configs=%#v", am.ListAgentConfigs())
 	}
 	if len(bus.addedRouteRequests) != 1 {
 		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
@@ -1233,8 +1233,8 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
 		t.Fatal("expected flow agent teardown after post-commit flush")
 	}
-	if len(bus.unsubscribed) != 1 || bus.unsubscribed[0] != "reviewer-inst-1" {
-		t.Fatalf("unsubscribed after post-commit flush = %#v, want reviewer-inst-1", bus.unsubscribed)
+	if len(bus.unsubscribed) != 0 {
+		t.Fatalf("generic unsubscribe used after post-commit flush: %#v", bus.unsubscribed)
 	}
 	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
 		t.Fatalf("agent terminations after post-commit flush = %#v, want reviewer-inst-1", managerStore.terminated)
@@ -1373,14 +1373,15 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}); err != nil {
 		t.Fatalf("Mutate: %v", err)
 	}
-	am.mu.Lock()
-	am.agents["shared-subject-agent"] = flowActivationStubAgent{id: "shared-subject-agent"}
-	am.agentCfg["shared-subject-agent"] = models.AgentConfig{
+	sharedAgent := flowActivationStubAgent{id: "shared-subject-agent"}
+	sharedConfig := models.AgentConfig{
 		ID:       "shared-subject-agent",
 		EntityID: req.Instance.EntityID,
 		FlowPath: "review/other-inst",
 	}
-	am.mu.Unlock()
+	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent); err != nil {
+		t.Fatalf("register shared-subject-agent: %v", err)
+	}
 
 	if err := am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -1516,8 +1517,8 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
 		t.Fatalf("agent terminations after commit = %#v, want reviewer-inst-1", managerStore.terminated)
 	}
-	if len(bus.unsubscribed) != 1 || bus.unsubscribed[0] != "reviewer-inst-1" {
-		t.Fatalf("unsubscribed after commit = %#v, want reviewer-inst-1", bus.unsubscribed)
+	if len(bus.unsubscribed) != 0 {
+		t.Fatalf("generic unsubscribe used after commit: %#v", bus.unsubscribed)
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed routes after commit = %#v, want review/inst-1", bus.removedPairs)

@@ -20,9 +20,6 @@ import (
 
 type AgentManager struct {
 	mu                              sync.RWMutex
-	agents                          map[string]Agent
-	agentCfg                        map[string]models.AgentConfig
-	agentUpAt                       map[string]time.Time
 	workspaces                      workspace.Lifecycle
 	bus                             Bus
 	factory                         AgentFactory
@@ -108,10 +105,9 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 			throttleSuppressPrefixes = append(throttleSuppressPrefixes, prefix)
 		}
 	}
+	lifecycle := newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions)
+	lifecycle.bindRoutes(bus)
 	return &AgentManager{
-		agents:                          make(map[string]Agent),
-		agentCfg:                        make(map[string]models.AgentConfig),
-		agentUpAt:                       make(map[string]time.Time),
 		bus:                             bus,
 		factory:                         factory,
 		store:                           store,
@@ -133,7 +129,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
-		lifecycle:                       newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions),
+		lifecycle:                       lifecycle,
 		poisonPanicCounts:               make(map[string]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
@@ -236,12 +232,11 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 	if cloneAgentID == "" {
 		return errors.New("cloneAgentID is required")
 	}
-	am.mu.RLock()
-	baseCfg, ok := am.agentCfg[baseAgentID]
-	am.mu.RUnlock()
+	baseExecution, ok := am.lifecycle.executionSnapshot(baseAgentID)
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrAgentNotFound, baseAgentID)
 	}
+	baseCfg := baseExecution.Config
 	cloneCfg := baseCfg
 	cloneCfg.ID = cloneAgentID
 	if strings.TrimSpace(cloneCfg.ParentAgent) == "" {
@@ -281,13 +276,10 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 		return err
 	}
 
-	am.mu.RLock()
-	if _, exists := am.agents[a.ID()]; exists {
-		am.mu.RUnlock()
+	if _, exists := am.lifecycle.executionSnapshot(a.ID()); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
-	am.mu.RUnlock()
-	if err := am.lifecycle.register(ctx, rec, persist); err != nil {
+	if err := am.lifecycle.registerExecution(ctx, rec, persist, a); err != nil {
 		return err
 	}
 	if persist && am.lifecycle.store == nil && am.store != nil {
@@ -297,21 +289,14 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 		}
 	}
 
-	am.mu.Lock()
-	am.agents[a.ID()] = a
-	am.agentCfg[a.ID()] = rec.Config
-	startedAt := rec.StartedAt
-	if startedAt.IsZero() {
-		startedAt = time.Now()
-	}
-	am.agentUpAt[a.ID()] = startedAt
-	am.mu.Unlock()
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
 
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
 	if isRunning {
-		am.startAgentLoop(runCtx, a)
+		if _, err := am.replaceExecution(runCtx, a.ID(), "start", "", nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -404,55 +389,16 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	if agentID == "" {
 		return errors.New("agentID is required")
 	}
-	cell, err := am.lifecycle.lockAgentOperation(agentID)
+	result, err := am.replaceExecution(am.runtimeContext(), agentID, "reconfigure", "", &cfg)
 	if err != nil {
 		return err
 	}
-	defer cell.opMu.Unlock()
-
-	am.mu.RLock()
-	current, ok := am.agentCfg[agentID]
-	am.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
-	}
-
-	updated := mergeAgentConfig(current, cfg)
-	if updated.ID == "" {
-		updated.ID = agentID
-	}
-	if updated.ID != agentID {
-		return fmt.Errorf("agent id mismatch: target=%s config.id=%s", agentID, updated.ID)
-	}
-	if err := am.resolveAgentModel(&updated); err != nil {
-		return err
-	}
-	if err := am.validateNativeToolAdmission(am.runtimeContext(), updated); err != nil {
-		return err
-	}
-	if _, err := sessions.ValidateAgentSessionScopeConfig(updated); err != nil {
-		return fmt.Errorf("invalid agent session scope: %w", err)
-	}
-
-	rec := PersistedAgent{Config: updated, Status: "active", HiredBy: "reconfigure"}
-	subordinate := reconfigureSessionMutationPlan(current, updated)
-
-	newAgent, err := am.buildAgent(updated)
-	if err != nil {
-		return err
-	}
-	if err := am.startAgentLoopTransitionLocked(am.runtimeContext(), newAgent, newAgent.Subscriptions(), "reconfigure", "", &rec, subordinate, cell); err != nil {
-		return err
-	}
-	if am.lifecycle.store == nil && am.store != nil {
+	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
+		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
 		if err := am.store.UpsertAgent(am.runtimeContext(), rec); err != nil {
 			return fmt.Errorf("persist reconfigured agent %s: %w", agentID, err)
 		}
 	}
-	am.mu.Lock()
-	am.agents[agentID] = newAgent
-	am.agentCfg[agentID] = updated
-	am.mu.Unlock()
 	return nil
 }
 
@@ -460,9 +406,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	if strings.TrimSpace(agentID) == "" {
 		return errors.New("agentID is required")
 	}
-	am.mu.RLock()
-	_, exists := am.agents[agentID]
-	am.mu.RUnlock()
+	_, exists := am.lifecycle.executionSnapshot(agentID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
@@ -471,15 +415,6 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 	}
 	_ = am.projectLifecycleDiagnostics(context.Background())
 
-	am.mu.Lock()
-	delete(am.agents, agentID)
-	delete(am.agentCfg, agentID)
-	delete(am.agentUpAt, agentID)
-	am.mu.Unlock()
-
-	if am.bus != nil {
-		am.bus.Unsubscribe(agentID)
-	}
 	return nil
 }
 

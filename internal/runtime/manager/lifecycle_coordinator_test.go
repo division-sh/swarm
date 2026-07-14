@@ -288,7 +288,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	rec.LifecycleGeneration = 0
 	rec.LifecyclePhase = AgentLifecycleRegistered
 	rec.LifecycleRunMode = AgentRunModeStopped
-	if err := coordinator.register(context.Background(), rec, false); err != nil {
+	if err := coordinator.registerExecution(context.Background(), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
 		t.Fatalf("register recovered agent: %v", err)
 	}
 	coordinator.beginRun(context.Background(), AgentRunModeStandard)
@@ -310,7 +310,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	coordinator := newAgentLifecycleCoordinator(nil, registry)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, false); err != nil {
+	if err := coordinator.registerExecution(context.Background(), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	coordinator.beginRun(context.Background(), AgentRunModeStandard)
@@ -318,14 +318,15 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	effectCtx, err := coordinator.effectContext(context.Background(), rec.Config.ID)
+	lease, err := coordinator.acquireExecution(context.Background(), rec.Config.ID, "test_effect_context", true)
 	if err != nil {
-		t.Fatalf("effectContext: %v", err)
+		t.Fatalf("acquireExecution: %v", err)
 	}
-	got, ok := runtimeeffects.LifecycleTokenFromContext(effectCtx)
+	got, ok := runtimeeffects.LifecycleTokenFromContext(lease.Context)
 	if !ok || got != token {
 		t.Fatalf("effect token = %+v ok=%v, want %+v", got, ok, token)
 	}
+	lease.Release()
 	coordinator.cancelShutdownWork()
 	<-loopCtx.Done()
 	if err := coordinator.releaseLoop(token, done); err != nil {
@@ -413,7 +414,10 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	var cancel context.CancelFunc
 	var done chan struct{}
 	if cell != nil {
-		phase, cancel, done = cell.phase, cell.cancel, cell.done
+		phase = cell.phase
+		if cell.execution != nil {
+			cancel, done = cell.execution.loopCancel, cell.execution.loopDone
+		}
 	}
 	coordinator.mu.Unlock()
 	if cell == nil || phase != AgentLifecycleTerminated || cancel != nil || done != nil {

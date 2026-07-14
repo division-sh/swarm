@@ -19,7 +19,11 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
-	got := am.agentCfg["agent-1"].LLMBackend
+	cfg, ok := am.GetAgentConfig("agent-1")
+	if !ok {
+		t.Fatal("spawned agent config is absent")
+	}
+	got := cfg.LLMBackend
 	if got != "openai_compatible" {
 		t.Fatalf("llm_backend = %q, want openai_compatible", got)
 	}
