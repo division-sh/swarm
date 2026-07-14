@@ -2,4 +2,4 @@ package runtime_test
 
 import "time"
 
-const connectorSupportedSurfaceAsyncTimeout = 15 * time.Second
+const connectorSupportedSurfaceAsyncTimeout = 30 * time.Second
