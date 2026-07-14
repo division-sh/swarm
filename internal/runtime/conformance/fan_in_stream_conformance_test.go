@@ -71,11 +71,17 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
 	}
+	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(100) {
+		t.Fatalf("last revenue after first = %#v, want 100", got)
+	}
 
 	duplicate := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-b", "operating/a", "report-2", "2026-Q1", 200)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, duplicate, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
+	}
+	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(100) {
+		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
 
 	nextWindow := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-c", "operating/a", "report-3", "2026-Q2", 300)
@@ -85,6 +91,9 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	}
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q2"); got != 1 {
 		t.Fatalf("Q2 accumulator items = %d, want 1", got)
+	}
+	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(300) {
+		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
 }
 
@@ -265,10 +274,22 @@ func fanInStreamPublishAndExecute(
 	if err != nil {
 		t.Fatalf("Execute(%s): %v", evt.ID(), err)
 	}
+	metadata := state.StateCarrier.Metadata
+	if result.StateMutation.StateCarrier.Metadata != nil {
+		metadata = result.StateMutation.StateCarrier.Metadata
+	}
+	gates := state.StateCarrier.Gates
+	if result.StateMutation.StateCarrier.Gates != nil {
+		gates = result.StateMutation.StateCarrier.Gates
+	}
+	buckets := state.StateCarrier.StateBuckets
+	if result.StateMutation.StateCarrier.StateBuckets != nil {
+		buckets = result.StateMutation.StateCarrier.StateBuckets
+	}
 	return runtimeengine.StateSnapshot{
 		EntityID:     runtimeidentity.EntityID(deliveryTarget.EntityID),
 		CurrentState: state.CurrentState,
-		StateCarrier: result.StateMutation.StateCarrier,
+		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
 	}
 }
 
