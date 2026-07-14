@@ -117,13 +117,11 @@ type executionFrame struct {
 type handlerRuleSource string
 
 const (
-	handlerRuleSourceNone                 handlerRuleSource = ""
-	handlerRuleSourceRules                handlerRuleSource = "handler.rules"
-	handlerRuleSourceOnComplete           handlerRuleSource = "handler.on_complete"
-	handlerRuleSourceAccumulateOnComplete handlerRuleSource = "handler.accumulate.on_complete"
-	handlerRuleSourceAccumulateOnTimeout  handlerRuleSource = "handler.accumulate.on_timeout"
-	handlerRuleSourceJoinOnComplete       handlerRuleSource = "handler.join.on_complete"
-	handlerRuleSourceJoinTimeout          handlerRuleSource = "handler.join.timeout"
+	handlerRuleSourceNone           handlerRuleSource = ""
+	handlerRuleSourceRules          handlerRuleSource = "handler.rules"
+	handlerRuleSourceOnComplete     handlerRuleSource = "handler.on_complete"
+	handlerRuleSourceJoinOnComplete handlerRuleSource = "handler.join.on_complete"
+	handlerRuleSourceJoinTimeout    handlerRuleSource = "handler.join.timeout"
 )
 
 type contextTx struct {
@@ -199,6 +197,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := runtimecontracts.ValidateJoinHandlerIsolation(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
+	if err := runtimecontracts.ValidateAccumulateHandlerIsolation(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 	if err := validateHandlerLoopRuntime(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
@@ -230,18 +231,6 @@ func validateUnsupportedRuleActions(handler runtimecontracts.SystemNodeEventHand
 	for idx, rule := range handler.OnComplete {
 		if err := validateRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule); err != nil {
 			return err
-		}
-	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			if err := validateRule(handlerRuleContext("handler.accumulate.on_complete", idx, rule.ID), rule); err != nil {
-				return err
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			if err := validateRule(handlerRuleContext("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), *handler.Accumulate.OnTimeout); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -289,16 +278,6 @@ func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHand
 	for idx, rule := range handler.OnComplete {
 		if !rule.Activity.Empty() {
 			return fmt.Errorf("handler.on_complete[%d].activity is not supported in Stage 1", idx)
-		}
-	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			if !rule.Activity.Empty() {
-				return fmt.Errorf("handler.accumulate.on_complete[%d].activity is not supported in Stage 1", idx)
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && !handler.Accumulate.OnTimeout.Activity.Empty() {
-			return fmt.Errorf("handler.accumulate.on_timeout.activity is not supported in Stage 1")
 		}
 	}
 	return nil
@@ -426,18 +405,6 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 			return err
 		}
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if err := validateRule("handler.accumulate.on_complete", rule); err != nil {
-				return err
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			if err := validateRule("handler.accumulate.on_timeout", *handler.Accumulate.OnTimeout); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -497,18 +464,6 @@ func validateHandlerComputeSpecs(handler runtimecontracts.SystemNodeEventHandler
 	for _, rule := range handler.Rules {
 		if err := validateComputeSpec(rule.Compute); err != nil {
 			return err
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if err := validateComputeSpec(rule.Compute); err != nil {
-				return err
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			if err := validateComputeSpec(handler.Accumulate.OnTimeout.Compute); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -599,9 +554,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		})
 	})
 	if err != nil {
-		if result.AccumulatorCompletionDiagnostics.Relevant {
-			result.AccumulatorCompletionDiagnostics.CommitOutcome = AccumulatorCompletionCommitRolledBack
-		}
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
 			result.Status = OutcomeRejected
 		}
@@ -612,9 +564,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			SetExecutionFailure(&result, err, "runtime.engine", "execute")
 		}
 		return result, err
-	}
-	if result.AccumulatorCompletionDiagnostics.Relevant {
-		result.AccumulatorCompletionDiagnostics.CommitOutcome = AccumulatorCompletionCommitCommitted
 	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
@@ -767,15 +716,15 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 }
 
 func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
-	spec := frame.req.Handler.Join
-	if spec == nil {
+	if frame.req.Handler.Join == nil {
 		return false, nil
 	}
-	resultType, found := e.joinResultType(frame.req)
-	if !found || resultType.Empty() {
-		return false, fmt.Errorf("join %s has no resolved output type in the semantic plan", spec.EffectiveID())
+	plan, found := e.joinPlan(frame.req)
+	if !found || plan.ResultType.Empty() {
+		return false, fmt.Errorf("join %s has no resolved effective semantic plan", frame.req.Handler.Join.EffectiveID())
 	}
-	frame.joinResultType = resultType
+	spec := &plan.Spec
+	frame.joinResultType = plan.ResultType
 	payload := frame.payload
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
 	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.Stage != strings.TrimSpace(spec.Stage) || ref.JoinID != spec.EffectiveID()) {
@@ -1049,10 +998,6 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	frame.result.AccumulatorCompletionDiagnostics.Relevant = true
-	frame.result.AccumulatorCompletionDiagnostics.CompletionMode = spec.Completion.String()
-	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
-	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
 	current := e.currentContext(frame)
 	bucketRef, matched, err := e.resolveAccumulatorBucketRef(frame, spec)
 	if err != nil {
@@ -1065,70 +1010,25 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if !ok {
 		acc = &Accumulator{}
 	}
-	if strings.TrimSpace(acc.StartedAt) == "" {
-		acc.StartedAt = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
-	}
-	expectedIDs, expectedCount := expectedAccumulatorTargets(current, frame.state, spec.ExpectedPath, spec.ExpectedFrom)
-	if len(expectedIDs) > 0 {
-		acc.Expected = append([]string{}, expectedIDs...)
-		acc.ExpectedCount = len(expectedIDs)
-	} else if expectedCount > 0 {
-		acc.ExpectedCount = expectedCount
-	}
 	if acc.Received == nil {
 		acc.Received = map[string]bool{}
 	}
-	if !isAccumulationTimeoutEvent(frame.req.Event.Type()) {
-		arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
-		if arrivalID != "" && !acc.Received[arrivalID] {
-			acc.Received[arrivalID] = true
-			item := cloneStringAnyMap(frame.payload)
-			if item == nil {
-				item = map[string]any{}
-			}
-			item["event_id"] = strings.TrimSpace(frame.req.Event.ID())
-			item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type()))
-			item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent())
-			item["received_at"] = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
-			acc.Items = append(acc.Items, item)
+	arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
+	if arrivalID != "" && !acc.Received[arrivalID] {
+		acc.Received[arrivalID] = true
+		item := cloneStringAnyMap(frame.payload)
+		if item == nil {
+			item = map[string]any{}
 		}
-	}
-	acc.LastEventID = strings.TrimSpace(frame.req.Event.ID())
-	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type()))
-	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent())
-	acc.LastReceivedAt = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
-	frame.result.AccumulatorCompletionDiagnostics.ReceivedCount = len(acc.Received)
-	frame.result.AccumulatorCompletionDiagnostics.ExpectedCount = acc.ExpectedCount
-	if len(acc.Expected) > 0 {
-		frame.result.AccumulatorCompletionDiagnostics.ExpectedCount = len(acc.Expected)
+		item["event_id"] = strings.TrimSpace(frame.req.Event.ID())
+		item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type()))
+		item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent())
+		item["received_at"] = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
+		acc.Items = append(acc.Items, item)
 	}
 	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
-	if isAccumulationTimeoutEvent(frame.req.Event.Type()) && spec.OnTimeout != nil {
-		frame.rule = spec.OnTimeout
-		frame.ruleSource = handlerRuleSourceAccumulateOnTimeout
-		e.applyRule(frame, spec.OnTimeout)
-		return false, nil
-	}
-	complete, err := accumulatorComplete(acc, spec, func(expression string, extraVars map[string]any) (bool, error) {
-		ctx := e.currentContext(frame)
-		if accumulation, ok := extraVars["accumulation"].(map[string]any); ok {
-			ctx = WithAccumulated(ctx, accumulation)
-		}
-		return e.evaluator.EvalBool(expression, ctx)
-	})
-	if err == ErrNotImplemented {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !complete {
-		frame.result.Status = OutcomeWaiting
-		return true, nil
-	}
-	frame.result.AccumulatorCompletionDiagnostics.CompletionReached = true
 	return false, nil
 }
 
@@ -1869,40 +1769,11 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	if frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout {
 		return nil
 	}
-	if isAccumulationTimeoutEvent(frame.req.Event.Type()) &&
-		frame.req.Handler.Accumulate != nil &&
-		frame.req.Handler.Accumulate.OnTimeout != nil &&
-		frame.rule == frame.req.Handler.Accumulate.OnTimeout {
-		return nil
-	}
 	topLevelRules := frame.req.Handler.OnComplete
-	var accumulateRules []runtimecontracts.HandlerRuleEntry
-	if frame.req.Handler.Accumulate != nil {
-		accumulateRules = frame.req.Handler.Accumulate.OnComplete
-	}
-	if frame.result.AccumulatorCompletionDiagnostics.Relevant && (len(topLevelRules) > 0 || len(accumulateRules) > 0) {
-		frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = true
-	}
 	ruleSource := handlerRuleSourceOnComplete
 	rule, err := e.selectRule(frame, topLevelRules)
 	if err != nil {
-		if frame.result.AccumulatorCompletionDiagnostics.Relevant {
-			frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationFailed
-		}
 		return err
-	}
-	if rule == nil && len(accumulateRules) > 0 {
-		ruleSource = handlerRuleSourceAccumulateOnComplete
-		rule, err = e.selectRule(frame, accumulateRules)
-		if err != nil {
-			if frame.result.AccumulatorCompletionDiagnostics.Relevant {
-				frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationFailed
-			}
-			return err
-		}
-	}
-	if frame.result.AccumulatorCompletionDiagnostics.Relevant && (len(topLevelRules) > 0 || len(accumulateRules) > 0) {
-		frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationSucceeded
 	}
 	if rule != nil {
 		frame.rule = rule
@@ -2029,23 +1900,18 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 	return workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
 }
 
-func (e *Executor) joinResultType(req ExecutionRequest) (runtimecontracts.CatalogTypeReference, bool) {
+func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoinPlan, bool) {
 	if e == nil || e.deps.Source == nil {
-		return runtimecontracts.CatalogTypeReference{}, false
+		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	for _, plan := range e.deps.Source.WorkflowJoins() {
-		planFlowID := strings.TrimSpace(plan.FlowID)
-		requestFlowID := strings.TrimSpace(req.FlowID.String())
-		flowMatches := planFlowID == requestFlowID
-		if planFlowID == "" {
-			flowMatches = requestFlowID == "" || requestFlowID == strings.TrimSpace(e.deps.Source.WorkflowName())
-		}
-		if flowMatches && strings.TrimSpace(plan.NodeID) == strings.TrimSpace(req.NodeID.String()) &&
-			strings.TrimSpace(plan.HandlerEvent) == strings.TrimSpace(req.HandlerEventKey) {
-			return plan.ResultType, true
-		}
+	requestFlowID := strings.TrimSpace(req.FlowID.String())
+	if plan, ok := semanticview.WorkflowJoinPlanForHandler(e.deps.Source, requestFlowID, req.NodeID.String(), req.HandlerEventKey); ok {
+		return plan, true
 	}
-	return runtimecontracts.CatalogTypeReference{}, false
+	if requestFlowID == "" {
+		return semanticview.WorkflowJoinPlanForHandler(e.deps.Source, strings.TrimSpace(e.deps.Source.WorkflowName()), req.NodeID.String(), req.HandlerEventKey)
+	}
+	return runtimecontracts.WorkflowJoinPlan{}, false
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {
@@ -2102,22 +1968,7 @@ func activeAccumulatorName(handler runtimecontracts.SystemNodeEventHandler) stri
 }
 
 func accumulatorProjectionEligible(frame *executionFrame) bool {
-	if frame == nil || frame.req.Handler.Accumulate == nil {
-		return false
-	}
-	diagnostics := frame.result.AccumulatorCompletionDiagnostics
-	if !diagnostics.Relevant || !diagnostics.CompletionReached {
-		return false
-	}
-	if isAccumulationTimeoutEvent(frame.req.Event.Type()) || frame.ruleSource == handlerRuleSourceAccumulateOnTimeout {
-		return false
-	}
-	onCompleteDeclared := len(frame.req.Handler.OnComplete) > 0 || len(frame.req.Handler.Accumulate.OnComplete) > 0
-	if !onCompleteDeclared {
-		return true
-	}
-	return frame.rule != nil &&
-		(frame.ruleSource == handlerRuleSourceOnComplete || frame.ruleSource == handlerRuleSourceAccumulateOnComplete)
+	return frame != nil && frame.req.Handler.Accumulate != nil
 }
 
 func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool, error) {
@@ -2126,15 +1977,6 @@ func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runt
 	}
 	if frame.hasAccumulatorBucketRef {
 		return frame.accumulatorBucketRef, true, nil
-	}
-	if isAccumulationTimeoutEvent(frame.req.Event.Type()) {
-		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
-		if !ok || parsed.NodeID != frame.req.NodeID.String() {
-			return timeridentity.AccumulatorBucketRef{}, false, nil
-		}
-		frame.accumulatorBucketRef = parsed
-		frame.hasAccumulatorBucketRef = true
-		return parsed, true, nil
 	}
 	bucketRef, err := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, spec)
 	if err != nil {
@@ -2749,10 +2591,7 @@ func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEve
 	if len(handler.Rules) == 0 {
 		return false
 	}
-	if len(handler.OnComplete) > 0 {
-		return true
-	}
-	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
+	return len(handler.OnComplete) > 0
 }
 
 func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
@@ -3002,9 +2841,6 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	}
 	if id := strings.TrimSpace(rule.ID); id != "" {
 		frame.result.RuleID = id
-		if frame.result.AccumulatorCompletionDiagnostics.Relevant {
-			frame.result.AccumulatorCompletionDiagnostics.SelectedRuleID = id
-		}
 	}
 }
 
@@ -3075,10 +2911,6 @@ func (a activeFanOutSpec) EmitSource() string {
 		return "handler.rules.fan_out.emit"
 	case handlerRuleSourceOnComplete:
 		return "handler.on_complete.fan_out.emit"
-	case handlerRuleSourceAccumulateOnComplete:
-		return "handler.accumulate.on_complete.fan_out.emit"
-	case handlerRuleSourceAccumulateOnTimeout:
-		return "handler.accumulate.on_timeout.fan_out.emit"
 	default:
 		return "handler.fan_out.emit"
 	}

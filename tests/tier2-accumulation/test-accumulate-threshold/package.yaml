@@ -1,5 +1,0 @@
-name: test-accumulate-threshold
-version: 1.0.0
-description: Accumulate with threshold completion fires after 2 of 3 items.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

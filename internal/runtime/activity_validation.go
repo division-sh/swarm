@@ -92,16 +92,6 @@ func rejectUnsupportedNestedActivityContexts(context string, handler runtimecont
 			errs = append(errs, fmt.Errorf("%s.on_complete[%d].activity: durable activity is not supported in on_complete in Stage 1", context, idx))
 		}
 	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			if !rule.Activity.Empty() {
-				errs = append(errs, fmt.Errorf("%s.accumulate.on_complete[%d].activity: durable activity is not supported in accumulator completion in Stage 1", context, idx))
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && !handler.Accumulate.OnTimeout.Activity.Empty() {
-			errs = append(errs, fmt.Errorf("%s.accumulate.on_timeout.activity: durable activity is not supported in accumulator timeout in Stage 1", context))
-		}
-	}
 	return errs
 }
 

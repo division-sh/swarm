@@ -9,21 +9,16 @@ import (
 )
 
 const (
-	checkIDAccumulateAllBoundedEscape        = "accumulate_all_bounded_escape"
-	checkIDAccumulatorTimeoutRequiresTimeout = "accumulator_timeout_requires_timeout_ms"
-	checkIDAccumulatorInputProducer          = "accumulator_input_producer_path"
+	checkIDAccumulatorHandlerIsolation = "accumulator_handler_isolation"
+	checkIDAccumulatorInputProducer    = "accumulator_input_producer_path"
 )
 
-func checkAccumulateAllBoundedEscape(c *checkerContext) []Finding {
-	return c.accumulatorSafetyByCheck(checkIDAccumulateAllBoundedEscape)
+func checkAccumulatorHandlerIsolation(c *checkerContext) []Finding {
+	return c.accumulatorSafetyByCheck(checkIDAccumulatorHandlerIsolation)
 }
 
 func checkAccumulatorInputProducerPath(c *checkerContext) []Finding {
 	return c.accumulatorSafetyByCheck(checkIDAccumulatorInputProducer)
-}
-
-func checkAccumulatorTimeoutRequiresTimeout(c *checkerContext) []Finding {
-	return c.accumulatorSafetyByCheck(checkIDAccumulatorTimeoutRequiresTimeout)
 }
 
 func (c *checkerContext) accumulatorSafetyByCheck(checkID string) []Finding {
@@ -64,27 +59,12 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 			continue
 		}
 		location := accumulatorHandlerLocation(flowID, nodeID, eventType)
-		spec := handler.Accumulate
-		if accumulatorCompletionAllFamily(spec) && !accumulatorHasBoundedEscape(spec) {
+		if err := runtimecontracts.ValidateAccumulateHandlerIsolation(handler); err != nil {
 			c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
-				CheckID:  checkIDAccumulateAllBoundedEscape,
-				Severity: "warning",
-				Location: location,
-				Message: fmt.Sprintf(
-					"flow %s node %s handler %s uses accumulate completion %q without a bounded timeout escape; if an expected arrival never appears this handler can wait indefinitely. Add a schedulable timeout escape such as completion: timeout with timeout_ms, or an on_timeout branch with timeout_ms.",
-					accumulatorFlowLabel(flowID), nodeID, eventType, accumulatorCompletionLabel(spec),
-				),
-			})
-		}
-		if accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec) {
-			c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
-				CheckID:  checkIDAccumulatorTimeoutRequiresTimeout,
+				CheckID:  checkIDAccumulatorHandlerIsolation,
 				Severity: SeverityHardInvalidity,
 				Location: location,
-				Message: fmt.Sprintf(
-					"flow %s node %s handler %s uses accumulate completion %q without positive timeout_ms; runtime cannot schedule the accumulate.timeout event, so the handler can wait indefinitely. Add timeout_ms > 0 or choose a completion mode with a schedulable bounded escape.",
-					accumulatorFlowLabel(flowID), nodeID, eventType, accumulatorCompletionLabel(spec),
-				),
+				Message:  err.Error(),
 			})
 		}
 		producerPaths := c.accumulatorProducerPaths(flowID, eventType)
@@ -96,40 +76,6 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 		}
 	}
 	return c.accumulatorSafetyFindings
-}
-
-func accumulatorCompletionAllFamily(spec *runtimecontracts.AccumulateSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return spec.Completion.Mode == runtimecontracts.AccumulateModeDefault ||
-		spec.Completion.Mode == runtimecontracts.AccumulateModeAll
-}
-
-func accumulatorHasBoundedEscape(spec *runtimecontracts.AccumulateSpec) bool {
-	if spec == nil || spec.TimeoutMS <= 0 {
-		return false
-	}
-	if spec.Completion.Mode == runtimecontracts.AccumulateModeTimeout {
-		return true
-	}
-	return spec.OnTimeout != nil
-}
-
-func accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec *runtimecontracts.AccumulateSpec) bool {
-	return spec != nil &&
-		spec.Completion.Mode == runtimecontracts.AccumulateModeTimeout &&
-		spec.TimeoutMS <= 0
-}
-
-func accumulatorCompletionLabel(spec *runtimecontracts.AccumulateSpec) string {
-	if spec == nil {
-		return ""
-	}
-	if text := strings.TrimSpace(spec.Completion.String()); text != "" {
-		return text
-	}
-	return "default/all"
 }
 
 func accumulatorHandlerLocation(flowID, nodeID, eventType string) string {

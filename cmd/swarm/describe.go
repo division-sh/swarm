@@ -364,6 +364,33 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
 				}
 			}
+			if len(graph.Joins) > 0 {
+				fmt.Fprintln(out, "    joins:")
+				for _, join := range graph.Joins {
+					member := strings.TrimSpace(join.MembersBy)
+					if source := strings.TrimSpace(join.MembersBySource); source != "" {
+						member += " <- " + source
+					}
+					parts := []string{
+						join.ID + " stage " + join.Stage,
+						"members " + join.MembersFrom + " by " + member,
+						"output " + join.Output,
+						"timeout " + join.TimeoutAfter,
+					}
+					if join.WindowFrom != "" {
+						window := join.WindowBy
+						if source := strings.TrimSpace(join.WindowBySource); source != "" {
+							window += " <- " + source
+						}
+						parts = append(parts, "window "+join.WindowFrom+" by "+window)
+					}
+					if join.FanInPin != "" {
+						parts = append(parts, "fan_in_pin "+join.FanInPin)
+					}
+					parts = append(parts, "("+join.NodeID+" on "+join.HandlerEvent+")")
+					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+				}
+			}
 			if len(graph.FanOuts) > 0 {
 				fmt.Fprintln(out, "    fan_out:")
 				for _, fanOut := range graph.FanOuts {

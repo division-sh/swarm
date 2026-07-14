@@ -71,23 +71,6 @@ func CopyPayloadNamedField(t testing.TB) string {
 	return root
 }
 
-func CopyAccumulatorCrossFlow(t testing.TB, withConnect bool) string {
-	t.Helper()
-	root := CopyExample(t, ParentConnect)
-	connect := ""
-	if withConnect {
-		connect = "connect:\n  - from: producer.item.arrived\n    to: consumer.item.arrived\n"
-	}
-	writeClosedVariantFile(t, root, "package.yaml", "name: accumulator-cross-flow\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: producer\n    flow: producer\n    mode: static\n  - id: consumer\n    flow: consumer\n    mode: static\n"+connect)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: accumulator-cross-flow\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "events.yaml", "agents.yaml", "nodes.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
-	writeLegacyInstanceFlow(t, root, "producer", "name: producer\npins:\n  outputs:\n    events: [item.arrived]\n", "item.arrived:\n  expected_count: integer\nproducer.start: {}\n", "{}\n", "producer-node:\n  id: producer-node\n  execution_type: system_node\n  subscribes_to: [producer.start]\n  event_handlers:\n    producer.start:\n      emit:\n        event: item.arrived\n")
-	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\ninitial_state: collecting\nterminal_states: [done]\nstates: [collecting, done]\npins:\n  inputs:\n    events: [item.arrived]\n", "item.arrived:\n  expected_count: integer\n", "{}\n", "consumer-node:\n  id: consumer-node\n  execution_type: system_node\n  subscribes_to: [item.arrived]\n  event_handlers:\n    item.arrived:\n      accumulate:\n        expected_from: entity.expected_count\n        completion: timeout\n        timeout_ms: 5000\n      advances_to: done\n")
-	return root
-}
-
 func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateCreateMintedKey)

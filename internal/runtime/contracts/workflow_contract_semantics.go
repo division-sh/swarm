@@ -182,9 +182,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				semantics.Transitions = append(semantics.Transitions, derivedTransition)
 			}
 			semantics.Transitions = append(semantics.Transitions, deriveRuleTransitions(transition)...)
-			if timeoutTransition, ok := deriveAccumulateTimeoutTransition(transition); ok {
-				semantics.Transitions = append(semantics.Transitions, timeoutTransition)
-			}
 			semantics.Transitions = append(semantics.Transitions, deriveJoinTransitions(transition)...)
 			if semantics.HandlerTransitionIndex[nodeID] == nil {
 				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
@@ -474,22 +471,6 @@ func handlerLevelAdvanceTarget(transition HandlerTransitionSemantic) string {
 	return ""
 }
 
-func deriveAccumulateTimeoutTransition(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
-	for _, carrier := range HandlerTransitionAdvanceCarriers(transition) {
-		if carrier.Kind != HandlerAdvanceCarrierAccumulateOnTimeout {
-			continue
-		}
-		return WorkflowTransitionContract{
-			ID:      strings.TrimSpace(transition.ID) + ":on_timeout",
-			From:    []string{"*"},
-			To:      strings.TrimSpace(carrier.AdvancesTo),
-			Trigger: "accumulate.timeout",
-			Node:    strings.TrimSpace(transition.NodeID),
-		}, true
-	}
-	return WorkflowTransitionContract{}, false
-}
-
 func deriveJoinTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
 	if transition.Join == nil {
 		return nil
@@ -524,7 +505,7 @@ func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTrans
 	defaultIDIndex := 0
 	for _, carrier := range carriers {
 		switch carrier.Kind {
-		case HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierRules, HandlerAdvanceCarrierAccumulateOnComplete:
+		case HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierRules:
 		default:
 			continue
 		}

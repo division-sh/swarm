@@ -39,7 +39,7 @@ func TestEffectiveSpecForHandlerRejectsRedeclarationAndAmbiguity(t *testing.T) {
 	source := accumulatorFanInSource([]runtimecontracts.FlowInputEventPin{{
 		Name:       "work",
 		Event:      "work.requested",
-		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn, Window: "payload.window_id", DedupBy: []string{"payload.work_id"}},
+		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn, Aggregation: "stream", Window: "payload.window_id", DedupBy: []string{"payload.work_id"}},
 	}})
 	if _, err := EffectiveSpecForHandler(source, "worker", "worker-node", "work.requested", &runtimecontracts.AccumulateSpec{Window: "payload.other"}); err == nil || !strings.Contains(err.Error(), "must not redeclare") {
 		t.Fatalf("redeclaration error = %v, want fail-closed", err)

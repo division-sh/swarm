@@ -37,8 +37,8 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	}
 
 	processed := mustHandler(t, bundle, "intake-router", "item.processed")
-	if processed.Accumulate == nil || len(processed.Accumulate.OnComplete) == 0 {
-		t.Fatal("expected accumulate.on_complete on item.processed")
+	if processed.Accumulate == nil || processed.Accumulate.Into != "processed_items" {
+		t.Fatal("expected open stream accumulation on item.processed")
 	}
 	completed := previewHandler(t, bundle, "intake-router", "item.processed", map[string]any{
 		"entity_id":        "item-123",
@@ -54,8 +54,8 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 			"received_count": 1,
 		},
 	}, nil)
-	if completed.Stage != runtimepipeline.NormalizeWorkflowStateID("ready") {
-		t.Fatalf("expected ready state after accumulation completion, got %+v", completed)
+	if completed.Stage != runtimepipeline.NormalizeWorkflowStateID("collecting") {
+		t.Fatalf("stream arrival changed lifecycle state = %+v, want collecting", completed)
 	}
 	if !hasAll(completed.Emits, "intake/item.review_requested") {
 		t.Fatalf("expected intake completion to emit item.review_requested, got %v", completed.Emits)

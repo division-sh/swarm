@@ -16,7 +16,7 @@ const (
 	ReceiverInputPin     = "operating_reported"
 	ReceiverEvent        = "operating.reported"
 	ReceiverNodeID       = "portfolio-collector"
-	ReceiverFlowInstance = "portfolio/default"
+	ReceiverFlowInstance = "portfolio"
 )
 
 type Options struct {
@@ -60,21 +60,34 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func Write(t testing.TB, opts Options) string {
 	t.Helper()
-	return canonicalrouting.CopyTemplateFanIn(t, canonicalrouting.TemplateFanInOptions{
-		MissingDedup:             opts.MissingDedup,
-		DedupTuple:               opts.DedupTuple,
-		MissingWindow:            opts.MissingWindow,
-		BarrierAggregation:       opts.BarrierAggregation,
-		MissingSingleton:         opts.MissingSingleton,
-		WrongSingleton:           opts.WrongSingleton,
-		AccumulateDedupMismatch:  opts.AccumulateDedupMismatch,
-		AccumulateWindowMismatch: opts.AccumulateWindowMismatch,
-		DeliveryMany:             opts.DeliveryMany,
-		LegacyConnectMap:         opts.LegacyConnectMap,
-		EventIDDedup:             opts.EventIDDedup,
-		NonSingletonReceiver:     opts.NonSingletonReceiver,
-		MissingReceiverHandler:   opts.MissingReceiverHandler,
-		MissingAccumulate:        opts.MissingAccumulate,
-		AmbiguousReceiverInput:   opts.AmbiguousReceiverInput,
-	})
+	id := canonicalrouting.FanInStream
+	if opts.BarrierAggregation {
+		id = canonicalrouting.FanInBarrier
+	}
+	root := canonicalrouting.CopyExample(t, id)
+	mutations := []struct {
+		set      bool
+		mutation canonicalrouting.FanInNegativeMutation
+	}{
+		{opts.MissingDedup, canonicalrouting.FanInMissingDedup},
+		{opts.DedupTuple, canonicalrouting.FanInDedupTuple},
+		{opts.MissingWindow, canonicalrouting.FanInMissingWindow},
+		{opts.MissingSingleton, canonicalrouting.FanInMissingSingleton},
+		{opts.WrongSingleton, canonicalrouting.FanInWrongSingleton},
+		{opts.AccumulateDedupMismatch, canonicalrouting.FanInAccumulateDedupRedeclaration},
+		{opts.AccumulateWindowMismatch, canonicalrouting.FanInAccumulateWindowRedeclaration},
+		{opts.DeliveryMany, canonicalrouting.FanInDeliveryMany},
+		{opts.LegacyConnectMap, canonicalrouting.FanInLegacyConnectMap},
+		{opts.EventIDDedup, canonicalrouting.FanInEventIDDedup},
+		{opts.NonSingletonReceiver, canonicalrouting.FanInNonSingletonReceiver},
+		{opts.MissingReceiverHandler, canonicalrouting.FanInMissingReceiverHandler},
+		{opts.MissingAccumulate, canonicalrouting.FanInMissingRuntimeOwner},
+		{opts.AmbiguousReceiverInput, canonicalrouting.FanInAmbiguousReceiverInput},
+	}
+	for _, item := range mutations {
+		if item.set {
+			canonicalrouting.ApplyFanInNegativeMutation(t, root, item.mutation)
+		}
+	}
+	return root
 }

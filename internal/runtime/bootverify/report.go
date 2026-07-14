@@ -42,7 +42,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"agent_prompt_lint_structural":            "Fix the agent prompt lint declaration so it uses supported structural fields, or remove the unsupported prompt lint entry.",
 	"accumulator_entity_projection":           "Fix the accumulator projection so it writes declared entity fields through the supported accumulator projection shape.",
 	"accumulator_input_producer_path":         "Add an accepted producer/source path for the accumulated input event or change the accumulator to consume an event that has one.",
-	"accumulator_timeout_requires_timeout_ms": "Add a positive timeout_ms for timeout completion mode or change the accumulator completion mode.",
+	"accumulator_handler_isolation":           "Remove handler.on_complete or replace accumulate with join when finite completion is intended.",
 	"compute_module_value_rows":               "Fix the compute module value rows so each referenced module and value shape is declared consistently.",
 	"condition_expression_validation":         "Fix the condition expression so it references declared fields and uses supported CEL syntax.",
 	"condition_payload_alignment":             "Fix condition input references so they read declared payload fields for the triggering event.",

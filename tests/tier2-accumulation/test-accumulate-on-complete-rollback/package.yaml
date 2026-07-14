@@ -1,9 +1,0 @@
-name: test-accumulate-on-complete-rollback
-version: 1.0.0
-description: 'Accumulator completion is atomic with on_complete. When the final item
-  completes accumulation, advances_to and emits from on_complete must all commit together.
-  A second handler verifies the state transition persisted.
-
-  '
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -395,28 +396,29 @@ func containsTrimmedString(values []string, want string) bool {
 func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
 	var findings []Finding
 	resolution := pin.Resolution
+	aggregation := strings.ToLower(strings.TrimSpace(resolution.Aggregation))
 	location := flowID
 	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries", location))
 	}
-	if resolution.Aggregation != "stream" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in supports only aggregation: stream in this slice, got %q", resolution.Aggregation), location))
+	if aggregation != "stream" && aggregation != "barrier" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in aggregation must be stream or barrier, got %q", resolution.Aggregation), location))
 	}
 	window := strings.TrimSpace(resolution.Window)
-	if window == "" {
+	if window == "" && aggregation == "stream" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in stream requires window", location))
-	} else if !validTopLevelPayloadPath(window) {
+	} else if window != "" && !validTopLevelPayloadPath(window) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in window %q must be one top-level payload field", window), location))
-	} else if !inputPinPayloadFieldExists(source, flowID, pin, window) {
+	} else if window != "" && !inputPinPayloadFieldExists(source, flowID, pin, window) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in window field %q is not declared on the receiver input event payload", window), location))
 	}
-	_, dedupOK, dedupDetail := validateFanInDedupBy(source, flowID, pin, resolution.DedupBy)
+	_, dedupOK, dedupDetail := validateFanInDedupBy(source, flowID, pin, aggregation, resolution.DedupBy)
 	if !dedupOK {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", dedupDetail, location))
 	}
 	singleton := strings.Trim(strings.TrimSpace(resolution.Singleton), "/")
 	if singleton == "" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in stream requires explicit singleton receiver identity", location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in %s requires explicit singleton receiver identity", aggregation), location))
 	} else {
 		bundle, ok := semanticview.Bundle(source)
 		if !ok || bundle == nil {
@@ -429,31 +431,98 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in singleton %q must be the receiver singleton route or a child of %q", singleton, scopeKey), location))
 		}
 	}
-	if dedupOK && window != "" {
-		findings = append(findings, validateFanInAccumulatorConsistency(source, flowID, pin)...)
+	if dedupOK {
+		switch aggregation {
+		case "stream":
+			if window != "" {
+				findings = append(findings, validateFanInAccumulatorConsistency(source, flowID, pin)...)
+			}
+		case "barrier":
+			findings = append(findings, validateFanInBarrierJoinConsistency(source, flowID, pin)...)
+		}
 	}
 	return findings
 }
 
-func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, dedupBy []string) (string, bool, string) {
+func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, aggregation string, dedupBy []string) (string, bool, string) {
 	dedupBy = normalizedConnectAdapterFields(dedupBy)
 	if len(dedupBy) == 0 {
-		return "", false, "resolution mode fan-in stream requires dedup_by; sender identity is not an implicit default"
+		return "", false, fmt.Sprintf("resolution mode fan-in %s requires dedup_by; sender identity is not an implicit default", aggregation)
 	}
 	if len(dedupBy) != 1 {
-		return "", false, fmt.Sprintf("resolution mode fan-in stream supports exactly one dedup_by field in this slice, got %v", dedupBy)
+		return "", false, fmt.Sprintf("resolution mode fan-in %s supports exactly one dedup_by field, got %v", aggregation, dedupBy)
 	}
 	dedup := strings.TrimSpace(dedupBy[0])
-	if dedup == "event.id" {
+	if dedup == "event.id" && aggregation == "stream" {
 		return dedup, true, ""
 	}
 	if !validTopLevelPayloadPath(dedup) {
-		return "", false, fmt.Sprintf("resolution mode fan-in dedup_by %q must be event.id or one top-level payload field", dedup)
+		if aggregation == "barrier" && dedup == "event.id" {
+			return "", false, "resolution mode fan-in barrier members are matched by a payload identity against the declared member list; event.id cannot appear in expected members"
+		}
+		suffix := ""
+		if aggregation == "stream" {
+			suffix = " or event.id"
+		}
+		return "", false, fmt.Sprintf("resolution mode fan-in %s dedup_by %q must be one top-level payload field%s", aggregation, dedup, suffix)
 	}
 	if !inputPinPayloadFieldExists(source, flowID, pin, dedup) {
 		return "", false, fmt.Sprintf("resolution mode fan-in dedup_by field %q is not declared on the receiver input event payload", dedup)
 	}
 	return dedup, true, ""
+}
+
+func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+	if _, ok := source.FlowScopeByID(flowID); !ok {
+		return []Finding{inputPinResolutionFinding(flowID, pin, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", flowID), flowID)}
+	}
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	candidates := make([]string, 0, 2)
+	findings := make([]Finding, 0)
+	for _, endpoint := range census.MatchingConsumers(flowID, pin.EventType()) {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" {
+			continue
+		}
+		association := census.ResolveFanInInputForHandler(flowID, endpoint.NodeID, endpoint.HandlerEvent)
+		matchedPin, ok := association.Endpoint()
+		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.PinName()) {
+			continue
+		}
+		handler, ok := source.NodeEventHandler(endpoint.NodeID, endpoint.HandlerEvent)
+		if !ok {
+			continue
+		}
+		if handler.Accumulate != nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", endpoint.NodeID, endpoint.HandlerEvent), flowID))
+		}
+		if handler.Join == nil {
+			continue
+		}
+		candidates = append(candidates, endpoint.NodeID+"."+endpoint.HandlerEvent+" join "+handler.Join.EffectiveID())
+		if authored := strings.TrimSpace(handler.Join.Members.By); authored != "" {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", endpoint.NodeID, endpoint.HandlerEvent, strings.Join(pin.Resolution.DedupBy, ", "), authored), flowID))
+		}
+		window := strings.TrimSpace(pin.Resolution.Window)
+		if window == "" && handler.Join.Window != nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window requires resolution.window on the barrier input pin; declare the payload window once on the pin or remove join.window", endpoint.NodeID, endpoint.HandlerEvent), flowID))
+		}
+		if window != "" {
+			if handler.Join.Window == nil || strings.TrimSpace(handler.Join.Window.From) == "" {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s requires join.window.from to snapshot the lifecycle window paired with resolution.window %s", endpoint.NodeID, endpoint.HandlerEvent, window), flowID))
+			} else if authored := strings.TrimSpace(handler.Join.Window.By); authored != "" {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window.by derives from resolution.window (%s); remove authored by: %s", endpoint.NodeID, endpoint.HandlerEvent, window, authored), flowID))
+			}
+		}
+	}
+	sort.Strings(candidates)
+	switch len(candidates) {
+	case 0:
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s requires exactly one handler.join row for event %s; add the join row with members.from, output, on_complete, and timeout", flowID, pin.PinName(), pin.EventType()), flowID))
+	case 1:
+	default:
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s matches multiple join rows %v; use distinct events or distinct stages per join", flowID, pin.PinName(), candidates), flowID))
+	}
+	return findings
 }
 
 func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {

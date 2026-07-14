@@ -1,0 +1,12 @@
+ingress-node:
+  id: ingress-node
+  execution_type: system_node
+  subscribes_to: [operating.report.triggered]
+  produces: [operating.report.requested]
+  event_handlers:
+    operating.report.triggered:
+      emit:
+        event: operating.report.requested
+        fields:
+          period_id: payload.period_id
+          revenue: payload.revenue

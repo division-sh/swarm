@@ -1,6 +1,0 @@
-name: test-accumulate-on-timeout
-version: 1.0.0
-description: Accumulate with on_timeout branch fires when timer expires before all
-  items arrive.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

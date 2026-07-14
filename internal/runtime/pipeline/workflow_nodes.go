@@ -197,9 +197,16 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 		return workflowNodeEventHandlerResolution{}
 	}
 	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
+		handlerEventKey := workflowNodeMatchedHandlerEventKey(source, nodeID, eventType)
+		if bundle, bundleOK := semanticview.Bundle(source); bundleOK {
+			resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
+			if resolved.Matched && strings.TrimSpace(resolved.AuthoredEventType) != "" {
+				handlerEventKey = strings.TrimSpace(resolved.AuthoredEventType)
+			}
+		}
 		return workflowNodeEventHandlerResolution{
 			Handler:         handler,
-			HandlerEventKey: workflowNodeMatchedHandlerEventKey(source, nodeID, eventType),
+			HandlerEventKey: handlerEventKey,
 			Matched:         true,
 		}
 	}
@@ -262,11 +269,6 @@ func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID 
 	if isJoinLifecycleEvent(evt.Type()) {
 		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok && ref.NodeID == strings.TrimSpace(nodeID) {
 			return ref.HandlerEvent
-		}
-	}
-	if isAccumulationTimeoutEvent(evt.Type()) {
-		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); ok && strings.TrimSpace(bucket.NodeID) == strings.TrimSpace(nodeID) {
-			return bucket.EventType
 		}
 	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
@@ -892,13 +894,6 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			ok     bool
 		)
 		policy, ok = workflowNodePolicyForDelivery(source, node, evt)
-		if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
-				if node.Policies != nil {
-					policy, ok = workflowNodePolicyForEventType(node.Policies, bucket.EventType)
-				}
-			}
-		}
 		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 			if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {

@@ -107,9 +107,6 @@ line_item.requested:
     consumer: [worker]
   line_item_id: string
   line_item_index: integer
-accumulate.timeout:
-  swarm:
-    source: platform
 `, `ticket:
   expected_line_item_ids:
     type: "[text]"

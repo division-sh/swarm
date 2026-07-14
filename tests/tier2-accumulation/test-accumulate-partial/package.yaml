@@ -1,5 +1,0 @@
-name: test-accumulate-partial
-version: 1.0.0
-description: Expect 3 items but send only 2. Accumulate stays incomplete.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

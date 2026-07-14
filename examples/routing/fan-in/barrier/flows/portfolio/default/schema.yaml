@@ -1,0 +1,29 @@
+name: portfolio
+mode: singleton
+stages:
+  collecting:
+    initial: true
+  awaiting: {}
+  complete:
+    terminal: true
+  failed:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - name: portfolio_setup
+        event: portfolio.setup
+        source: external
+      - name: operating_reported
+        event: operating.reported
+        resolution:
+          mode: fan-in
+          aggregation: barrier
+          window: payload.period_id
+          dedup_by: payload.operating_id
+          singleton: portfolio
+        carries:
+          operating_id: {from: payload.operating_id, type: text}
+          period_id: {from: payload.period_id, type: text}
+  outputs:
+    events: []

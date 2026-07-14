@@ -28,15 +28,8 @@ var (
 )
 
 type Accumulator struct {
-	Expected       []string         `json:"expected,omitempty"`
-	ExpectedCount  int              `json:"expected_count,omitempty"`
-	Received       map[string]bool  `json:"received,omitempty"`
-	Items          []map[string]any `json:"items,omitempty"`
-	StartedAt      string           `json:"started_at,omitempty"`
-	LastEventID    string           `json:"last_event_id,omitempty"`
-	LastEventType  string           `json:"last_event_type,omitempty"`
-	LastSource     string           `json:"last_source,omitempty"`
-	LastReceivedAt string           `json:"last_received_at,omitempty"`
+	Received map[string]bool  `json:"received,omitempty"`
+	Items    []map[string]any `json:"items,omitempty"`
 }
 
 func arrivalIdentifier(evt events.Event, payload map[string]any) string {
@@ -342,15 +335,8 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 		return nil, false
 	}
 	acc := &Accumulator{
-		Expected:       normalizeStrings(stringSliceFromAny(raw.Raw()["expected"])),
-		ExpectedCount:  raw.Int("expected_count"),
-		Received:       map[string]bool{},
-		Items:          sliceOfMapsFromAny(raw.Raw()["items"]),
-		StartedAt:      raw.String("started_at"),
-		LastEventID:    raw.String("last_event_id"),
-		LastEventType:  raw.String("last_event_type"),
-		LastSource:     raw.String("last_source"),
-		LastReceivedAt: raw.String("last_received_at"),
+		Received: map[string]bool{},
+		Items:    sliceOfMapsFromAny(raw.Raw()["items"]),
 	}
 	if received, ok := raw.Map("received"); ok {
 		for _, key := range received.Keys() {
@@ -385,112 +371,8 @@ func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.Acc
 		items = append(items, cloneStringAnyMap(item))
 	}
 	accumulators.Set(bucketRef.Key(), map[string]any{
-		"expected":         append([]string{}, acc.Expected...),
-		"expected_count":   acc.ExpectedCount,
-		"received":         received,
-		"items":            items,
-		"started_at":       acc.StartedAt,
-		"last_event_id":    acc.LastEventID,
-		"last_event_type":  acc.LastEventType,
-		"last_source":      acc.LastSource,
-		"last_received_at": acc.LastReceivedAt,
-	})
-}
-
-func isAccumulationTimeoutEvent(eventType events.EventType) bool {
-	eventName := strings.TrimSpace(string(eventType))
-	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
-}
-
-func accumulationTimeoutBucketRefFromPayload(payload map[string]any) (timeridentity.AccumulatorBucketRef, bool) {
-	return timeridentity.ParseAccumulatorBucketRef(payload)
-}
-
-func expectedAccumulatorTargets(base BaseContext, state ExecutionState, parsed paths.Path, raw string) ([]string, int) {
-	value, ok := resolveContractPath(base, state, parsed, raw)
-	if !ok {
-		value = nil
-	}
-	switch typed := value.(type) {
-	case []string:
-		return normalizeStrings(typed), len(typed)
-	case []any:
-		targets := stringSliceFromAny(typed)
-		if len(targets) > 0 {
-			return normalizeStrings(targets), len(targets)
-		}
-		return nil, len(typed)
-	case int:
-		return nil, typed
-	case int64:
-		return nil, int(typed)
-	case float64:
-		return nil, int(typed)
-	case string:
-		text := strings.TrimSpace(typed)
-		if text == "" {
-			return nil, 0
-		}
-		if n, err := strconv.Atoi(text); err == nil {
-			return nil, n
-		}
-		return []string{text}, 1
-	default:
-		return nil, asInt(value)
-	}
-}
-
-func accumulatorComplete(
-	acc *Accumulator,
-	spec *runtimecontracts.AccumulateSpec,
-	evalBool func(expression string, extraVars map[string]any) (bool, error),
-) (bool, error) {
-	if acc == nil {
-		return true, nil
-	}
-	completion := ""
-	var completionSpec runtimecontracts.AccumulateCompletion
-	if spec != nil {
-		completionSpec = spec.Completion
-		completion = completionSpec.String()
-	}
-	receivedCount := len(acc.Received)
-	if completionSpec.Mode == runtimecontracts.AccumulateModeDefault ||
-		completionSpec.Mode == runtimecontracts.AccumulateModeAll ||
-		completionSpec.Mode == runtimecontracts.AccumulateModeThreshold {
-		switch {
-		case completionSpec.Mode == runtimecontracts.AccumulateModeThreshold && spec != nil && spec.Threshold > 0:
-			return receivedCount >= spec.Threshold, nil
-		case len(acc.Expected) > 0:
-			for _, expected := range acc.Expected {
-				if !acc.Received[strings.TrimSpace(expected)] {
-					return false, nil
-				}
-			}
-			return true, nil
-		case acc.ExpectedCount > 0:
-			return receivedCount >= acc.ExpectedCount, nil
-		default:
-			return receivedCount > 0, nil
-		}
-	}
-	if completionSpec.Mode == runtimecontracts.AccumulateModeTimeout {
-		if strings.TrimSpace(acc.StartedAt) == "" {
-			return false, nil
-		}
-		if strings.HasSuffix(strings.TrimSpace(acc.LastEventType), ".timeout") || strings.EqualFold(strings.TrimSpace(acc.LastEventType), "accumulate.timeout") {
-			return true, nil
-		}
-		return false, nil
-	}
-	if evalBool == nil {
-		return false, nil
-	}
-	return evalBool(completion, map[string]any{
-		"accumulation": map[string]any{
-			"expected_count": acc.ExpectedCount,
-			"received_count": receivedCount,
-		},
+		"received": received,
+		"items":    items,
 	})
 }
 
@@ -502,16 +384,9 @@ func accumulatorExpressionValue(acc *Accumulator) map[string]any {
 	for _, item := range acc.Items {
 		items = append(items, cloneStringAnyMap(item))
 	}
-	expected := make([]any, 0, len(acc.Expected))
-	for _, item := range acc.Expected {
-		expected = append(expected, item)
-	}
 	return map[string]any{
 		"items":          items,
-		"expected":       expected,
-		"expected_count": acc.ExpectedCount,
 		"received_count": len(acc.Received),
-		"started_at":     acc.StartedAt,
 	}
 }
 

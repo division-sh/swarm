@@ -39,14 +39,6 @@ func HandlerFanOutSites(handler SystemNodeEventHandler) []WorkflowFanOutSite {
 	for idx := range handler.OnComplete {
 		add(indexedFanOutSiteSource("handler.on_complete", idx, handler.OnComplete[idx].ID), handler.OnComplete[idx].FanOut)
 	}
-	if handler.Accumulate != nil {
-		for idx := range handler.Accumulate.OnComplete {
-			add(indexedFanOutSiteSource("handler.accumulate.on_complete", idx, handler.Accumulate.OnComplete[idx].ID), handler.Accumulate.OnComplete[idx].FanOut)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			add(indexedFanOutSiteSource("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), handler.Accumulate.OnTimeout.FanOut)
-		}
-	}
 	return out
 }
 

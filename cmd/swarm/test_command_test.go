@@ -655,15 +655,6 @@ func TestSwarmTestRunsSetupPrestateCatalogCompanions(t *testing.T) {
 		{tier: "tier1-primitives", packageName: "test-payload-transform-multi-source", wantPositiveEvent: true},
 		{tier: "tier10-policy-patterns", packageName: "test-policy-counter-escalate", wantPositiveEvent: true},
 		{tier: "tier10-policy-patterns", packageName: "test-policy-multi-guard-partial"},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-all", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-crash-recovery", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-expected-from-entity", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-from-filter", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-idempotent"},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-on-complete-rollback", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-partial"},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-threshold", wantPositiveEvent: true},
-		{tier: "tier2-accumulation", packageName: "test-accumulate-with-compute", wantPositiveEvent: true},
 		{tier: "tier4-cross-entity", packageName: "test-clear-multiple-targets", wantPositiveEvent: true},
 		{tier: "tier4-cross-entity", packageName: "test-clear-state", wantPositiveEvent: true},
 		{tier: "tier6-event-loop", packageName: "test-atomicity-guard-rollback"},
@@ -770,9 +761,7 @@ func loadCatalogExpectedFieldGateManifestations(t *testing.T, contractsPath stri
 }
 
 func publicScenarioFieldManifestationOverrides() map[string]map[string]any {
-	return map[string]map[string]any{
-		"tier2-accumulation/test-accumulate-with-compute": {"composite": 81},
-	}
+	return map[string]map[string]any{}
 }
 
 func splitCatalogExpectedGateManifestations() map[string]map[string]string {

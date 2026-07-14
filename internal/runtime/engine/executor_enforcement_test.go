@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,28 @@ type terminalGuardRunner struct{}
 
 func (terminalGuardRunner) EvaluateGuard(context.Context, identity.GuardKey, runtimeregistry.GuardInstruction, ExecutionContext) (bool, bool, error) {
 	return false, true, nil
+}
+
+func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: stubSource(), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    eventtest.RootIngress("evt-1", "item.arrived", "", "", json.RawMessage(`{"item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "accumulated.count >= 2", AdvancesTo: "complete"}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "cannot be combined with handler.on_complete") {
+		t.Fatalf("Execute error = %v, want shared accumulator isolation rejection", err)
+	}
 }
 
 func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
@@ -239,145 +262,6 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	}
 }
 
-func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
-	repo := &persistentStateRepo{
-		found: true,
-		snapshot: StateSnapshot{
-			EntityID:     "entity-1",
-			CurrentState: "collecting",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
-		},
-	}
-	acc := &Accumulator{
-		ExpectedCount: 3,
-		Received: map[string]bool{
-			"evt-a": true,
-			"evt-b": true,
-		},
-		Items: []map[string]any{
-			{"event_id": "evt-a"},
-			{"event_id": "evt-b"},
-		},
-		StartedAt: "2026-03-15T00:00:00Z",
-	}
-	storeAccumulator(&repo.snapshot, "node-1", events.EventType("item.arrived"), acc)
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  repo,
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		NodeID:   "node-1",
-		Event: eventtest.RootIngress("timeout-1",
-			events.EventType("accumulate.timeout"), "", "", mustEncodeJSON(t, map[string]any{
-				"timer_handle": map[string]any{
-					"kind": "accumulation_timeout",
-					"bucket": map[string]any{
-						"node_id":    "node-1",
-						"event_type": "item.arrived",
-					},
-				},
-			}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate: &runtimecontracts.AccumulateSpec{
-				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-				OnTimeout: &runtimecontracts.HandlerRuleEntry{
-					AdvancesTo: "partial",
-					Emit:       runtimecontracts.EmitSpec{Event: "collection.partial"},
-				},
-			},
-		},
-		State: repo.snapshot,
-	})
-	if err != nil {
-		t.Fatalf("Execute timeout accumulate: %v", err)
-	}
-	if result.NextState != "partial" {
-		t.Fatalf("NextState = %q", result.NextState)
-	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "collection.partial" {
-		t.Fatalf("EmitIntents = %#v", result.EmitIntents)
-	}
-	if repo.snapshot.CurrentState != "partial" {
-		t.Fatalf("persisted CurrentState = %q", repo.snapshot.CurrentState)
-	}
-}
-
-func TestExecutor_AccumulateOnTimeoutComputeReadsWindowedTimerBucket(t *testing.T) {
-	bucket := timeridentity.NewAccumulatorWindowBucketRef("node-1", "item.arrived", "2026-W10")
-	repo := &persistentStateRepo{
-		found: true,
-		snapshot: StateSnapshot{
-			EntityID:     "entity-1",
-			CurrentState: "collecting",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
-		},
-	}
-	storeAccumulatorForBucket(&repo.snapshot, bucket, &Accumulator{
-		ExpectedCount: 3,
-		Received: map[string]bool{
-			"evt-a": true,
-			"evt-b": true,
-		},
-		Items: []map[string]any{
-			{"event_id": "evt-a"},
-			{"event_id": "evt-b"},
-		},
-		StartedAt: "2026-03-15T00:00:00Z",
-	})
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  repo,
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
-		EntityID:        "entity-1",
-		NodeID:          "node-1",
-		HandlerEventKey: "item.arrived",
-		Event: eventtest.RootIngress("timeout-1",
-			events.EventType("accumulate.timeout"), "", "", mustEncodeJSON(t, map[string]any{
-				"timer_handle": map[string]any{
-					"kind":   string(timeridentity.TimerHandleAccumulationTimeout),
-					"bucket": bucket.PayloadValue(),
-				},
-			}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate: &runtimecontracts.AccumulateSpec{
-				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-				Window:     "payload.window_id",
-				OnTimeout: &runtimecontracts.HandlerRuleEntry{
-					ID: "timeout",
-					Compute: &runtimecontracts.ComputeSpec{
-						Operation: runtimecontracts.ComputeOpCount,
-						StoreAs:   "computed.timed_out_count",
-					},
-				},
-			},
-		},
-		State: repo.snapshot,
-	})
-	if err != nil {
-		t.Fatalf("Execute timeout accumulate: %v", err)
-	}
-	if got := result.Computed["timed_out_count"]; got != 2 {
-		t.Fatalf("timed_out_count = %#v, want 2", got)
-	}
-}
-
 func mustEncodeJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	encoded, err := json.Marshal(value)
@@ -479,9 +363,7 @@ func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate: &runtimecontracts.AccumulateSpec{
-				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-			},
+			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 		},
 	}
 	if _, err := exec.Execute(context.Background(), req); err != nil {
@@ -529,13 +411,11 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	execute := func(eventID, reportID, periodID string) {
+	execute := func(eventID, operatingID, periodID string) {
 		t.Helper()
 		payload, err := json.Marshal(map[string]any{
-			"portfolio_id": templatefanin.ReceiverFlowInstance,
-			"report_id":    reportID,
 			"period_id":    periodID,
-			"operating_id": "opco-a",
+			"operating_id": operatingID,
 			"revenue":      42,
 		})
 		if err != nil {
@@ -561,13 +441,13 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 			),
 		})
 		if err != nil {
-			t.Fatalf("Execute(%s, %s, %s): %v", eventID, reportID, periodID, err)
+			t.Fatalf("Execute(%s, %s, %s): %v", eventID, operatingID, periodID, err)
 		}
 	}
 
-	execute("evt-q1-a", "report-1", "2026-Q1")
-	execute("evt-q1-duplicate", "report-1", "2026-Q1")
-	execute("evt-q2-a", "report-1", "2026-Q2")
+	execute("evt-q1-a", "operating-a", "2026-Q1")
+	execute("evt-q1-duplicate", "operating-a", "2026-Q1")
+	execute("evt-q2-a", "operating-a", "2026-Q2")
 
 	for _, periodID := range []string{"2026-Q1", "2026-Q2"} {
 		bucket := timeridentity.NewAccumulatorWindowBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, periodID)
@@ -576,10 +456,10 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 			t.Fatalf("missing fan-in accumulator window %s in %#v", periodID, repo.snapshot.StateCarrier.StateBuckets)
 		}
 		if got := len(acc.Items); got != 1 {
-			t.Fatalf("window %s item count = %d, want 1 after pin-owned report_id dedup", periodID, got)
+			t.Fatalf("window %s item count = %d, want 1 after pin-owned operating_id dedup", periodID, got)
 		}
-		if !acc.Received["report-1"] {
-			t.Fatalf("window %s received keys = %#v, want report-1", periodID, acc.Received)
+		if !acc.Received["operating-a"] {
+			t.Fatalf("window %s received keys = %#v, want operating-a", periodID, acc.Received)
 		}
 	}
 	if _, ok := loadAccumulatorForBucket(repo.snapshot, timeridentity.NewAccumulatorBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)); ok {

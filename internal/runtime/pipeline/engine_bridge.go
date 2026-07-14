@@ -63,7 +63,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		return contractHandlerExecutionResult{}, nil
 	}
 	owners := source.RuntimeEventOwners(trigger)
-	if len(owners) == 0 && !isAccumulationTimeoutEvent(events.EventType(trigger)) && !isJoinLifecycleEvent(events.EventType(trigger)) {
+	if len(owners) == 0 && !isJoinLifecycleEvent(events.EventType(trigger)) {
 		return contractHandlerExecutionResult{}, nil
 	}
 	var (
@@ -85,17 +85,6 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		handlerEventKey = resolved.HandlerEventKey
 		matched = true
 	}
-	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); ok {
-			timeoutHandler, ok := findAccumulationTimeoutHandlerForBucket(source, bucket)
-			if ok {
-				nodeID = bucket.NodeID
-				handler = timeoutHandler
-				handlerEventKey = bucket.EventType
-				matched = true
-			}
-		}
-	}
 	if !matched && isJoinLifecycleEvent(events.EventType(trigger)) {
 		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok {
 			joinHandler, ok := findJoinHandlerForRef(source, ref)
@@ -116,11 +105,6 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
 }
 
-func isAccumulationTimeoutEvent(eventType events.EventType) bool {
-	eventName := strings.TrimSpace(string(eventType))
-	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
-}
-
 func isJoinLifecycleEvent(eventType events.EventType) bool {
 	eventName := strings.TrimSpace(string(eventType))
 	return eventName == joinTimeoutEvent || eventName == joinCompleteEvent
@@ -139,36 +123,6 @@ func findJoinHandlerForRef(source interface {
 	}
 	handler, ok := source.NodeEventHandlers(ref.NodeID)[ref.HandlerEvent]
 	return handler, ok && handler.Join != nil && handler.Join.EffectiveID() == ref.JoinID && strings.TrimSpace(handler.Join.Stage) == ref.Stage
-}
-
-func findAccumulationTimeoutHandlerForBucket(source interface {
-	NodeEntries() map[string]runtimecontracts.SystemNodeContract
-	NodeRuntimeSubscriptions(nodeID string) []string
-	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
-}, bucket timeridentity.AccumulatorBucketRef) (runtimecontracts.SystemNodeEventHandler, bool) {
-	bucket = bucket.Normalize()
-	if source == nil || !bucket.Valid() {
-		return runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	if _, ok := source.NodeEntries()[bucket.NodeID]; !ok {
-		return runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	for eventType, candidate := range source.NodeEventHandlers(bucket.NodeID) {
-		if strings.TrimSpace(eventType) != bucket.EventType {
-			continue
-		}
-		if accumulationTimeoutHandler(candidate) {
-			return candidate, true
-		}
-	}
-	return runtimecontracts.SystemNodeEventHandler{}, false
-}
-
-func accumulationTimeoutHandler(handler runtimecontracts.SystemNodeEventHandler) bool {
-	if handler.Accumulate == nil {
-		return false
-	}
-	return handler.Accumulate.Completion.Mode == runtimecontracts.AccumulateModeTimeout || handler.Accumulate.OnTimeout != nil
 }
 
 func (pc *PipelineCoordinator) executeNodeContractHandler(
@@ -279,7 +233,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		State:           stateSnapshot,
 	})
 	if !preview {
-		logAccumulatorCompletionOutcome(ctx, pc.bus, nodeID, triggerCtx.Event, result.AccumulatorCompletionDiagnostics, err)
 		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
 		logLoopExecution(ctx, pc.bus, nodeID, triggerCtx.Event, result.LoopTrace)
 	}
@@ -296,9 +249,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
-	}
-	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, handlerEventKey, result.StateMutation.StateCarrier.PersistedStateBuckets(), result.Status == runtimeengine.OutcomeWaiting); err != nil {
-		return contractHandlerExecutionResult{}, err
 	}
 	if collectLocally {
 		flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)

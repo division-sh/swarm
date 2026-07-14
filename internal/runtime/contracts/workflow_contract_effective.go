@@ -257,12 +257,6 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 		appendSubscription(eventType)
 	}
 	for _, handler := range node.EventHandlers {
-		if handlerRequiresAccumulatorTimeoutSubscription(handler) {
-			appendSubscription("accumulate.timeout")
-			break
-		}
-	}
-	for _, handler := range node.EventHandlers {
 		if handler.Join != nil {
 			appendSubscription("platform.join_timeout")
 			appendSubscription("platform.join_complete")
@@ -271,13 +265,6 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func handlerRequiresAccumulatorTimeoutSubscription(handler SystemNodeEventHandler) bool {
-	if handler.Accumulate == nil {
-		return false
-	}
-	return handler.Accumulate.Completion.Mode == AccumulateModeTimeout || handler.Accumulate.OnTimeout != nil
 }
 
 func EffectiveSystemNodeProduces(node SystemNodeContract) []string {
@@ -320,17 +307,6 @@ func DefaultSystemNodeHandlerSourceEvent(handler SystemNodeEventHandler, trigger
 	}
 	if handler.Accumulate != nil {
 		accumulate := *handler.Accumulate
-		if len(accumulate.OnComplete) > 0 {
-			accumulate.OnComplete = append([]HandlerRuleEntry(nil), accumulate.OnComplete...)
-			for i := range accumulate.OnComplete {
-				accumulate.OnComplete[i].DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(accumulate.OnComplete[i].DataAccumulation, triggerEvent)
-			}
-		}
-		if accumulate.OnTimeout != nil {
-			timeout := *accumulate.OnTimeout
-			timeout.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(timeout.DataAccumulation, triggerEvent)
-			accumulate.OnTimeout = &timeout
-		}
 		handler.Accumulate = &accumulate
 	}
 	if handler.Join != nil {

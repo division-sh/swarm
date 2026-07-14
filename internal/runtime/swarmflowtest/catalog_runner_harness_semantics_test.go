@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCatalogRunner_AccumulationRemainsPendingUntilExpectedCount(t *testing.T) {
+func TestCatalogRunner_OpenStreamProcessesEveryAdmittedArrival(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: pending-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -29,8 +29,7 @@ test-node:
   event_handlers:
     item.arrived:
       accumulate:
-        expected_from: entity.expected_count
-        completion: all
+        into: items
       advances_to: complete
       emit: collection.done
 `,
@@ -42,13 +41,10 @@ trigger:
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
-  entity_fields_before:
-    expected_count: 3
-
 expected:
   handler_outcome: success
-  entity_state: collecting
-  emitted_events: []
+  entity_state: complete
+  emitted_events: [collection.done]
 `,
 	)
 
@@ -62,9 +58,12 @@ expected:
 	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
 		t.Fatalf("emitted events mismatch (%s)", diff)
 	}
+	if got := len(catalogAnySlice(result.entityFields["received_items"])); got != 2 {
+		t.Fatalf("received_items = %#v, want two admitted stream arrivals", result.entityFields["received_items"])
+	}
 }
 
-func TestCatalogRunner_AccumulationThresholdCompletesAtThreshold(t *testing.T) {
+func TestCatalogRunner_OpenStreamFiltersByDeclaredSender(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: threshold-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -87,8 +86,8 @@ test-node:
   event_handlers:
     item.arrived:
       accumulate:
-        expected_from: entity.threshold_count
-        completion: threshold
+        into: items
+        from: worker-a
       advances_to: complete
       emit: collection.threshold_met
 `,
@@ -97,13 +96,14 @@ test-node:
 trigger:
   sequence:
     - event: item.arrived
+      sender: worker-a
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
+      sender: worker-b
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
     - event: item.arrived
+      sender: worker-a
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: c}
-  entity_fields_before:
-    threshold_count: 2
 
 expected:
   handler_outcome: success
@@ -122,9 +122,12 @@ expected:
 	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
 		t.Fatalf("emitted events mismatch (%s)", diff)
 	}
+	if got := len(catalogAnySlice(result.entityFields["received_items"])); got != 2 {
+		t.Fatalf("received_items = %#v, want only worker-a arrivals", result.entityFields["received_items"])
+	}
 }
 
-func TestCatalogRunner_AccumulationIgnoresDuplicateItems(t *testing.T) {
+func TestCatalogRunner_OpenStreamDeduplicatesByDeclaredPayloadField(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: idempotent-accumulator\n")
 	writeCatalogCaseFixture(t, dir,
@@ -147,8 +150,8 @@ test-node:
   event_handlers:
     item.arrived:
       accumulate:
-        expected_from: entity.expected_count
-        completion: all
+        into: items
+        dedup_by: payload.item_id
       advances_to: complete
       emit: collection.done
 `,
@@ -162,9 +165,6 @@ trigger:
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
       payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
-  entity_fields_before:
-    expected_count: 2
-
 expected:
   handler_outcome: success
   entity_state: complete
@@ -181,6 +181,9 @@ expected:
 	}
 	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
 		t.Fatalf("emitted events mismatch (%s)", diff)
+	}
+	if got := len(catalogAnySlice(result.entityFields["received_items"])); got != 2 {
+		t.Fatalf("received_items = %#v, want duplicate item_id suppressed", result.entityFields["received_items"])
 	}
 }
 

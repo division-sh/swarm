@@ -151,10 +151,6 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 }
 
 func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
-	accumulate := &runtimecontracts.AccumulateSpec{
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "accumulated"}},
-		OnTimeout:  &runtimecontracts.HandlerRuleEntry{AdvancesTo: "timed-out"},
-	}
 	tests := []struct {
 		name       string
 		handler    runtimecontracts.SystemNodeEventHandler
@@ -166,7 +162,6 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 		{name: "direct", handler: runtimecontracts.SystemNodeEventHandler{AdvancesTo: "direct"}, transition: runtimecontracts.HandlerTransitionSemantic{AdvancesTo: "direct"}, want: []string{"direct"}},
 		{name: "rules", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "ruled"}}}, transition: runtimecontracts.HandlerTransitionSemantic{Rules: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "ruled"}}}, want: []string{"ruled"}},
 		{name: "on complete", handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "completed"}}}, transition: runtimecontracts.HandlerTransitionSemantic{OnComplete: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "completed"}}}, want: []string{"completed"}},
-		{name: "accumulator", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: accumulate}, transition: runtimecontracts.HandlerTransitionSemantic{Accumulate: accumulate}, want: []string{"accumulated", "timed-out"}},
 		{
 			name: "loop target and escape",
 			handler: runtimecontracts.SystemNodeEventHandler{

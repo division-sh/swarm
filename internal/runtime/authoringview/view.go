@@ -98,6 +98,7 @@ type StageGraphView struct {
 	Nodes    []StageGraphNodeView   `json:"nodes"`
 	Edges    []StageGraphEdgeView   `json:"edges"`
 	Timers   []StageGraphTimerView  `json:"timers,omitempty"`
+	Joins    []StageGraphJoinView   `json:"joins,omitempty"`
 	FanOuts  []StageGraphFanOutView `json:"fan_outs,omitempty"`
 	Gates    []StageGraphGateView   `json:"gates,omitempty"`
 }
@@ -150,6 +151,22 @@ type StageGraphTimerView struct {
 	After      string `json:"after"`
 	Emit       string `json:"emit,omitempty"`
 	AdvancesTo string `json:"advances_to,omitempty"`
+}
+
+type StageGraphJoinView struct {
+	ID              string `json:"id"`
+	Stage           string `json:"stage"`
+	NodeID          string `json:"node_id"`
+	HandlerEvent    string `json:"handler_event"`
+	MembersFrom     string `json:"members_from"`
+	MembersBy       string `json:"members_by"`
+	MembersBySource string `json:"members_by_source,omitempty"`
+	WindowFrom      string `json:"window_from,omitempty"`
+	WindowBy        string `json:"window_by,omitempty"`
+	WindowBySource  string `json:"window_by_source,omitempty"`
+	Output          string `json:"output"`
+	TimeoutAfter    string `json:"timeout_after"`
+	FanInPin        string `json:"fan_in_pin,omitempty"`
 }
 
 type StageGraphFanOutView struct {
@@ -474,7 +491,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
+	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
@@ -483,7 +500,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
-		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
+		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 			graphs = append(graphs, graph)
 		}
 	}
@@ -515,9 +532,46 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		Nodes:    nodes,
 		Edges:    buildStageGraphEdgesForFlow(source, flowID),
 		Timers:   buildStageGraphTimersForFlow(source, flowID),
+		Joins:    buildStageGraphJoinsForFlow(source, flowID),
 		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
 		Gates:    buildStageGraphGatesForFlow(source, flowID),
 	}
+}
+
+func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []StageGraphJoinView {
+	if source == nil {
+		return nil
+	}
+	out := make([]StageGraphJoinView, 0)
+	for _, plan := range source.WorkflowJoins() {
+		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		item := StageGraphJoinView{
+			ID:              strings.TrimSpace(plan.Spec.EffectiveID()),
+			Stage:           strings.TrimSpace(plan.Spec.Stage),
+			NodeID:          strings.TrimSpace(plan.NodeID),
+			HandlerEvent:    strings.TrimSpace(plan.HandlerEvent),
+			MembersFrom:     strings.TrimSpace(plan.Spec.Members.From),
+			MembersBy:       strings.TrimSpace(plan.Spec.Members.By),
+			MembersBySource: strings.TrimSpace(plan.Derivation.MembersByFrom),
+			Output:          strings.TrimSpace(plan.Spec.Output),
+			TimeoutAfter:    strings.TrimSpace(plan.Spec.Timeout.After),
+			FanInPin:        strings.TrimSpace(plan.Derivation.FanInPin),
+		}
+		if plan.Spec.Window != nil {
+			item.WindowFrom = strings.TrimSpace(plan.Spec.Window.From)
+			item.WindowBy = strings.TrimSpace(plan.Spec.Window.By)
+			item.WindowBySource = strings.TrimSpace(plan.Derivation.WindowByFrom)
+		}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i].Stage + "\x00" + out[i].ID + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
+		right := out[j].Stage + "\x00" + out[j].ID + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
+		return left < right
+	})
+	return out
 }
 
 func stageDescriptionsForFlow(source semanticview.Source, flowID string) map[string]string {
@@ -756,14 +810,6 @@ func fanOutViewsForHandler(source semanticview.Source, flowID string, from []str
 	}
 	for idx := range handler.OnComplete {
 		add(indexedHandlerGraphSource("handler.on_complete", idx, handler.OnComplete[idx].ID)+".fan_out", handler.OnComplete[idx].FanOut)
-	}
-	if handler.Accumulate != nil {
-		for idx := range handler.Accumulate.OnComplete {
-			add(indexedHandlerGraphSource("handler.accumulate.on_complete", idx, handler.Accumulate.OnComplete[idx].ID)+".fan_out", handler.Accumulate.OnComplete[idx].FanOut)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			add(indexedHandlerGraphSource("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID)+".fan_out", handler.Accumulate.OnTimeout.FanOut)
-		}
 	}
 	return out
 }
@@ -1053,18 +1099,6 @@ func containedOperationRefs(flowID, nodeID string, node runtimecontracts.SystemN
 		}
 		for idx, rule := range handler.OnComplete {
 			out = append(out, writeRefs(flowID, nodeID, eventType, ruleScope("handler.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation.Writes)...)
-		}
-		if handler.Accumulate != nil {
-			for idx, rule := range handler.Accumulate.OnComplete {
-				out = append(out, writeRefs(flowID, nodeID, eventType, ruleScope("handler.accumulate.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation.Writes)...)
-			}
-			if handler.Accumulate.OnTimeout != nil {
-				scope := "handler.accumulate.on_timeout"
-				if id := strings.TrimSpace(handler.Accumulate.OnTimeout.ID); id != "" {
-					scope += "[" + id + "]"
-				}
-				out = append(out, writeRefs(flowID, nodeID, eventType, scope+".data_accumulation", handler.Accumulate.OnTimeout.DataAccumulation.Writes)...)
-			}
 		}
 	}
 	return out

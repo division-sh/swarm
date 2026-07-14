@@ -151,41 +151,23 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		Into         string    `yaml:"into"`
-		ExpectedFrom string    `yaml:"expected_from"`
-		From         string    `yaml:"from"`
-		Description  string    `yaml:"description"`
-		Window       string    `yaml:"window"`
-		DedupBy      string    `yaml:"dedup_by"`
-		Threshold    int       `yaml:"threshold"`
-		TimeoutMS    int       `yaml:"timeout_ms"`
-		Completion   string    `yaml:"completion"`
-		OnComplete   yaml.Node `yaml:"on_complete"`
-		OnTimeout    yaml.Node `yaml:"on_timeout"`
+		Into        string `yaml:"into"`
+		From        string `yaml:"from"`
+		Description string `yaml:"description"`
+		Window      string `yaml:"window"`
+		DedupBy     string `yaml:"dedup_by"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
 	*a = AccumulateSpec{
-		Into:         strings.TrimSpace(aux.Into),
-		ExpectedFrom: strings.TrimSpace(aux.ExpectedFrom),
-		From:         strings.TrimSpace(aux.From),
-		Description:  strings.TrimSpace(aux.Description),
-		Window:       strings.TrimSpace(aux.Window),
-		WindowPath:   paths.Parse(aux.Window),
-		ExpectedPath: paths.Parse(aux.ExpectedFrom),
-		DedupBy:      strings.TrimSpace(aux.DedupBy),
-		DedupPath:    paths.Parse(aux.DedupBy),
-		Threshold:    aux.Threshold,
-		TimeoutMS:    aux.TimeoutMS,
-		Completion:   ParseAccumulateCompletion(aux.Completion),
-	}
-	var err error
-	if a.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete, handlerRuleDecodeContextAccumulateOnComplete); err != nil {
-		return err
-	}
-	if a.OnTimeout, err = decodeHandlerRuleEntryNode(&aux.OnTimeout, handlerRuleDecodeContextAccumulateOnTimeout); err != nil {
-		return err
+		Into:        strings.TrimSpace(aux.Into),
+		From:        strings.TrimSpace(aux.From),
+		Description: strings.TrimSpace(aux.Description),
+		Window:      strings.TrimSpace(aux.Window),
+		WindowPath:  paths.Parse(aux.Window),
+		DedupBy:     strings.TrimSpace(aux.DedupBy),
+		DedupPath:   paths.Parse(aux.DedupBy),
 	}
 	return nil
 }
@@ -207,17 +189,11 @@ func validateAccumulateFieldNodes(node *yaml.Node) error {
 }
 
 var accumulateFieldOptions = map[string]struct{}{
-	"into":          {},
-	"expected_from": {},
-	"from":          {},
-	"description":   {},
-	"window":        {},
-	"dedup_by":      {},
-	"threshold":     {},
-	"timeout_ms":    {},
-	"completion":    {},
-	"on_complete":   {},
-	"on_timeout":    {},
+	"into":        {},
+	"from":        {},
+	"description": {},
+	"window":      {},
+	"dedup_by":    {},
 }
 
 func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {

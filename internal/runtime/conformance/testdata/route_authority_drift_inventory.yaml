@@ -520,9 +520,9 @@ seam_families:
       - internal/runtime/manager/types.go
       - internal/runtime/pipeline/activity_boring_proof_test.go
       - internal/runtime/pipeline/handler_engine_transaction_test.go
+      - internal/runtime/pipeline/fixture_module_test.go
       - internal/runtime/pipeline/internal_subscription_test.go
       - internal/runtime/pipeline/coordinator.go
-      - internal/runtime/pipeline/on_timeout_pipeline_test.go
       - internal/runtime/pipeline/runtime_support.go
       - internal/runtime/pipeline/workflow_conformance_test.go
       - internal/runtime/pipeline/workflow_handler_preview.go

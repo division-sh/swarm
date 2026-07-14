@@ -918,8 +918,11 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 		return payload
 	}
 	delete(decoded, "__schedule_task_id")
-	if handle, ok := timeridentity.ParseTimerHandle(decoded); ok && handle.Kind == timeridentity.TimerHandleWorkflowTimer {
-		delete(decoded, "timer_handle")
+	if _, present := decoded["timer_handle"]; present {
+		handle, ok := timeridentity.ParseTimerHandle(decoded)
+		if !ok || handle.Kind == timeridentity.TimerHandleWorkflowTimer {
+			delete(decoded, "timer_handle")
+		}
 	}
 	entityID := strings.TrimSpace(sc.EffectiveEntityID())
 	if _, ok := decoded["entity_id"]; !ok {

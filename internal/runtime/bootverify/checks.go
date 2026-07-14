@@ -226,8 +226,7 @@ var bootCheckRegistry = []Check{
 	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
 	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
 	{ID: "accumulator_entity_projection", Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
-	{ID: "accumulate_all_bounded_escape", Severity: "warning", Run: checkAccumulateAllBoundedEscape},
-	{ID: "accumulator_timeout_requires_timeout_ms", Severity: SeverityHardInvalidity, Run: checkAccumulatorTimeoutRequiresTimeout},
+	{ID: "accumulator_handler_isolation", Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
 	{ID: "accumulator_input_producer_path", Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
@@ -1957,10 +1956,7 @@ func handlerDeclaresConflictingCreateEntityAccumulation(handler runtimecontracts
 }
 
 func handlerHasOnComplete(handler runtimecontracts.SystemNodeEventHandler) bool {
-	if len(handler.OnComplete) > 0 {
-		return true
-	}
-	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
+	return len(handler.OnComplete) > 0
 }
 
 func workflowFindEventCyclesLocal(graph map[string]map[string]struct{}) [][]string {

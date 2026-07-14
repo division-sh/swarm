@@ -617,22 +617,6 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 		}
 		addRuleTargets(scope, rule)
 	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			scope := fmt.Sprintf("handler.accumulate.on_complete[%d]", idx)
-			if id := strings.TrimSpace(rule.ID); id != "" {
-				scope = "handler.accumulate.on_complete[" + id + "]"
-			}
-			addRuleTargets(scope, rule)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			scope := "handler.accumulate.on_timeout"
-			if id := strings.TrimSpace(handler.Accumulate.OnTimeout.ID); id != "" {
-				scope = "handler.accumulate.on_timeout[" + id + "]"
-			}
-			addRuleTargets(scope, *handler.Accumulate.OnTimeout)
-		}
-	}
 	return out
 }
 

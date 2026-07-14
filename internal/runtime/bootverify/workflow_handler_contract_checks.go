@@ -93,14 +93,6 @@ func rejectUnsupportedRuleActions(nodeID, eventType string, handler runtimecontr
 	for idx, rule := range handler.OnComplete {
 		findings = append(findings, rejectRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule)...)
 	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			findings = append(findings, rejectRule(handlerRuleContext("handler.accumulate.on_complete", idx, rule.ID), rule)...)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			findings = append(findings, rejectRule(handlerRuleContext("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), *handler.Accumulate.OnTimeout)...)
-		}
-	}
 	return findings
 }
 

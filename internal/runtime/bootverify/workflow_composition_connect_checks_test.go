@@ -287,13 +287,12 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, want: "requires dedup_by"},
 		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, want: "supports exactly one dedup_by field"},
 		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, want: "requires window"},
-		{name: "barrier remains unrunnable", opts: templatefanin.Options{BarrierAggregation: true}, want: "supports only aggregation: stream"},
 		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
 		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "is not mode: singleton"},
 		{name: "missing receiver handler", opts: templatefanin.Options{MissingReceiverHandler: true}, want: "has no handler for fan-in input event operating.reported"},
 		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
-		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.operating_id\" must not redeclare fan-in dedup_by"},
+		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.period_id\" must not redeclare fan-in dedup_by"},
 		{name: "accumulator window redeclaration", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window \"payload.operating_id\" must not redeclare fan-in window"},
 		{name: "wrong delivery", opts: templatefanin.Options{DeliveryMany: true}, want: "requires delivery one"},
 		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, want: "connect.map is incompatible with input pin resolution"},
@@ -309,6 +308,173 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFanInBarrierCanonicalBundlePassesStrictVerify(t *testing.T) {
+	bundle := loadFanInBarrierBundle(t)
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("canonical fan-in barrier hard invalidities: %#v", findings)
+	}
+}
+
+func TestFanInBarrierRejectsAuthoredDerivedJoinFields(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mutation canonicalrouting.FanInNegativeMutation
+		want     string
+	}{
+		{name: "members by", mutation: canonicalrouting.FanInAuthoredMembersBy, want: "join.members.by derives from resolution.dedup_by (payload.operating_id); remove authored by"},
+		{name: "window by", mutation: canonicalrouting.FanInAuthoredWindowBy, want: "join.window.by derives from resolution.window (payload.period_id); remove authored by"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := runFanInBarrierMutation(t, tc.mutation)
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected teaching diagnostic %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
+func TestFanInBarrierRequiresExactlyOneJoinRow(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mutation canonicalrouting.FanInNegativeMutation
+		want     []string
+	}{
+		{
+			name:     "zero matches",
+			mutation: canonicalrouting.FanInMissingJoinRow,
+			want:     []string{"requires exactly one handler.join row", "members.from, output, on_complete, and timeout"},
+		},
+		{
+			name:     "multiple matches",
+			mutation: canonicalrouting.FanInMultipleJoinRows,
+			want:     []string{"matches multiple join rows", "portfolio-collector-duplicate.operating.reported", "use distinct events or distinct stages per join"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := runFanInBarrierMutation(t, tc.mutation)
+			for _, want := range tc.want {
+				if !reportContains(report.Errors(), "composition_connect_validation", want) {
+					t.Fatalf("expected exact-association diagnostic %q, got %#v", want, report.Errors())
+				}
+			}
+		})
+	}
+}
+
+func TestFanInBarrierRequiresSinglePayloadMemberIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mutation canonicalrouting.FanInNegativeMutation
+		want     string
+	}{
+		{name: "event identity", mutation: canonicalrouting.FanInEventIDDedup, want: "event.id cannot appear in expected members"},
+		{name: "composite identity", mutation: canonicalrouting.FanInDedupTuple, want: "supports exactly one dedup_by field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := runFanInBarrierMutation(t, tc.mutation)
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected member-identity diagnostic %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
+func TestFanInBarrierWindowRequirementUsesStageReentrancy(t *testing.T) {
+	t.Run("non reentrant stage may omit window", func(t *testing.T) {
+		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierNoWindow)
+		if findings := report.HardInvalidities(); len(findings) != 0 {
+			t.Fatalf("non-reentrant barrier without window hard invalidities: %#v", findings)
+		}
+	})
+	t.Run("reentrant stage requires window", func(t *testing.T) {
+		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierReentrantNoWindow)
+		for _, want := range []string{"add resolution.window", "make the stage provably non-reentrant"} {
+			if !reportContains(report.Errors(), "join_validation", want) {
+				t.Fatalf("expected reentrancy remediation %q, got %#v", want, report.Errors())
+			}
+		}
+	})
+}
+
+func TestFanInAggregationSelectsExactlyOneRuntimeOwner(t *testing.T) {
+	t.Run("stream requires accumulator", func(t *testing.T) {
+		source := templatefanin.LoadSource(t, templatefanin.Options{MissingAccumulate: true})
+		report := Run(context.Background(), source, Options{})
+		if !reportContains(report.Errors(), "composition_connect_validation", "must declare accumulate") {
+			t.Fatalf("stream fan-in accepted without accumulator: %#v", report.Errors())
+		}
+	})
+	t.Run("barrier rejects accumulator", func(t *testing.T) {
+		report := runFanInBarrierMutation(t, canonicalrouting.FanInBarrierWithAccumulate)
+		if !reportContains(report.Errors(), "composition_connect_validation", "use handler.join as the sole finite-barrier owner") {
+			t.Fatalf("barrier fan-in accepted accumulator: %#v", report.Errors())
+		}
+	})
+}
+
+func loadFanInBarrierBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := repoRootForBootverifyTest(t)
+	return loadFixtureBundleAt(t, repoRoot, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+}
+
+func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegativeMutation) Report {
+	t.Helper()
+	repoRoot := repoRootForBootverifyTest(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
+	if mutation == canonicalrouting.FanInMultipleJoinRows {
+		bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+		applyFanInMultipleJoinRows(t, bundle)
+		return Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	}
+	canonicalrouting.ApplyFanInNegativeMutation(t, root, mutation)
+	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	return Run(context.Background(), semanticview.Wrap(bundle), Options{})
+}
+
+func applyFanInMultipleJoinRows(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if bundle == nil {
+		t.Fatal("fan-in semantic mutation requires a bundle")
+	}
+	flow, ok := bundle.FlowViewByID("portfolio")
+	if !ok || flow == nil {
+		t.Fatal("canonical portfolio flow is unavailable")
+	}
+	const sourceNodeID = "portfolio-collector"
+	const duplicateNodeID = "portfolio-collector-duplicate"
+	node, ok := flow.Nodes[sourceNodeID]
+	if !ok {
+		t.Fatal("canonical portfolio collector is unavailable")
+	}
+	node.ID = duplicateNodeID
+	flow.Nodes[duplicateNodeID] = node
+	if bundle.Nodes == nil {
+		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	bundle.Nodes[duplicateNodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[duplicateNodeID] = node.EventHandlers
+	if bundle.Semantics.EffectiveNodes == nil {
+		bundle.Semantics.EffectiveNodes = map[string]runtimecontracts.SystemNodeEffectiveSemantics{}
+	}
+	bundle.Semantics.EffectiveNodes[duplicateNodeID] = runtimecontracts.SystemNodeEffectiveSemantics{
+		ID:                   duplicateNodeID,
+		RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node),
+	}
+	for _, plan := range bundle.Semantics.Joins {
+		if plan.FlowID == "portfolio" && plan.NodeID == sourceNodeID && plan.HandlerEvent == "operating.reported" {
+			plan.NodeID = duplicateNodeID
+			bundle.Semantics.Joins = append(bundle.Semantics.Joins, plan)
+			return
+		}
+	}
+	t.Fatal("canonical portfolio join plan is unavailable")
 }
 
 func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {

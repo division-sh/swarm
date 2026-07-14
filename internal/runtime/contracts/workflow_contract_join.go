@@ -298,3 +298,10 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 	}
 	return fmt.Errorf("handler.join is an outcome-owning finite barrier and cannot be combined with handler fields %s", strings.Join(conflicts, ", "))
 }
+
+func ValidateAccumulateHandlerIsolation(handler SystemNodeEventHandler) error {
+	if handler.Accumulate == nil || len(handler.OnComplete) == 0 {
+		return nil
+	}
+	return fmt.Errorf("handler.accumulate is open stream collection and cannot be combined with handler.on_complete; use same-arrival compute, filter, reduce, count, or rules, or use handler.join for finite completion")
+}

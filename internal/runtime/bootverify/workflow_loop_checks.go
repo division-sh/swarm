@@ -217,12 +217,6 @@ func loopHandlerActions(handler runtimecontracts.SystemNodeEventHandler) []runti
 	}
 	appendRules(handler.Rules)
 	appendRules(handler.OnComplete)
-	if handler.Accumulate != nil {
-		appendRules(handler.Accumulate.OnComplete)
-		if handler.Accumulate.OnTimeout != nil {
-			out = append(out, handler.Accumulate.OnTimeout.Action)
-		}
-	}
 	if handler.Join != nil {
 		out = append(out, handler.Join.OnComplete.Action, handler.Join.Timeout.Outcome.Action)
 	}

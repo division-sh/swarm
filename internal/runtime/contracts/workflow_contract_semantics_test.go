@@ -87,7 +87,7 @@ func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) 
 	}
 }
 
-func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *testing.T) {
+func TestWorkflowSemanticsDerivesTopLevelCompletionTransitions(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{
 			"fan-in-node": {
@@ -98,13 +98,6 @@ func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *t
 							Condition:  "true",
 							AdvancesTo: "top_review",
 						}},
-						Accumulate: &AccumulateSpec{
-							OnComplete: []HandlerRuleEntry{{
-								ID:         "accumulate-complete",
-								Condition:  "accumulated.count >= 3",
-								AdvancesTo: "launch_review",
-							}},
-						},
 					},
 				},
 			},
@@ -120,8 +113,31 @@ func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *t
 	if got := transitions["top-complete"].To; got != "top_review" {
 		t.Fatalf("top-level on_complete transition To = %q, want top_review; transitions=%#v", got, transitions)
 	}
-	if got := transitions["accumulate-complete"].To; got != "launch_review" {
-		t.Fatalf("accumulate.on_complete transition To = %q, want launch_review; transitions=%#v", got, transitions)
+}
+
+func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Nodes: map[string]SystemNodeContract{
+			"collector": {
+				SubscribesTo: []string{"item.arrived"},
+				EventHandlers: map[string]SystemNodeEventHandler{
+					"item.arrived": {
+						Accumulate: &AccumulateSpec{Into: "items", From: "payload"},
+						AdvancesTo: "processed",
+					},
+				},
+			},
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+	if got := bundle.NodeRuntimeSubscriptions("collector"); !reflect.DeepEqual(got, []string{"item.arrived"}) {
+		t.Fatalf("stream accumulator subscriptions = %#v, want only authored arrival", got)
+	}
+	for _, transition := range bundle.WorkflowTransitions() {
+		if transition.Trigger == "accumulate.timeout" || transition.Trigger == "platform.join_timeout" {
+			t.Fatalf("stream accumulator derived finite timeout transition: %#v", transition)
+		}
 	}
 }
 
@@ -284,9 +300,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 						Rules: []HandlerRuleEntry{{Emit: EmitSpec{Event: "task.approved"}}},
 					},
 					"task.timeout": {
-						Accumulate: &AccumulateSpec{
-							OnTimeout: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.expired"}},
-						},
+						Emit: EmitSpec{Event: "task.expired"},
 					},
 					"task.rules": {
 						Rules: []HandlerRuleEntry{
@@ -327,7 +341,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	if got, want := effective.ExecutionType, SystemNodeExecutionType; got != want {
 		t.Fatalf("effective execution type = %q, want %q", got, want)
 	}
-	if got, want := effective.RuntimeSubscriptions, []string{"accumulate.timeout", "task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
+	if got, want := effective.RuntimeSubscriptions, []string{"task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective subscriptions = %#v, want %#v", got, want)
 	}
 	if got, want := effective.Produces, []string{"task.approved", "task.child", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {

@@ -876,8 +876,8 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries"}
 	}
-	if resolution.Aggregation != "stream" {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in supports only aggregation: stream in this slice, got %q", resolution.Aggregation)}
+	if resolution.Aggregation != "stream" && resolution.Aggregation != "barrier" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in aggregation must be stream or barrier, got %q", resolution.Aggregation)}
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -887,7 +887,7 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
 	}
 	window := strings.TrimSpace(resolution.Window)
-	if window == "" {
+	if resolution.Aggregation == "stream" && window == "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in stream requires window"}
 	}
 	dedupBy := normalizedStringList(resolution.DedupBy)
@@ -897,10 +897,10 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 	if len(dedupBy) != 1 {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in stream supports exactly one dedup_by field in this slice, got %v", dedupBy)}
 	}
-	if !connectFanInDedupSupported(dedupBy[0]) {
+	if !connectFanInDedupSupported(dedupBy[0], resolution.Aggregation) {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in dedup_by %q must be event.id or one top-level payload field", dedupBy[0])}
 	}
-	if !connectFanInPayloadFieldSupported(window) {
+	if window != "" && !connectFanInPayloadFieldSupported(window) {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in window %q must be one top-level payload field", window)}
 	}
 	singleton := strings.Trim(strings.TrimSpace(resolution.Singleton), "/")
@@ -919,9 +919,9 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 	}, ConnectRoutePlanIssue{}
 }
 
-func connectFanInDedupSupported(dedup string) bool {
+func connectFanInDedupSupported(dedup, aggregation string) bool {
 	dedup = strings.TrimSpace(dedup)
-	return dedup == "event.id" || connectFanInPayloadFieldSupported(dedup)
+	return (strings.TrimSpace(aggregation) == "stream" && dedup == "event.id") || connectFanInPayloadFieldSupported(dedup)
 }
 
 func connectFanInPayloadFieldSupported(path string) bool {

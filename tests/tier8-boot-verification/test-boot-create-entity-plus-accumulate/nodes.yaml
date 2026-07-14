@@ -7,8 +7,8 @@ test-node:
     task.started:
       create_entity: true
       accumulate:
-        expected_from: entity.expected_count
-        completion: all
+        into: items
+        from: payload
       advances_to: done
       emit:
         event: task.done

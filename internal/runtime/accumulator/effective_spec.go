@@ -20,6 +20,9 @@ func EffectiveSpecForHandler(source semanticview.Source, flowID, nodeID, handler
 	if !ok {
 		return spec, nil
 	}
+	if aggregation := strings.ToLower(strings.TrimSpace(pin.Resolution.Aggregation)); aggregation != "stream" {
+		return nil, fmt.Errorf("receiver handler %s.%s declares accumulate but fan-in input pin %s.%s uses aggregation %q; accumulate accepts only aggregation: stream and finite barriers must use handler.join", strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent), strings.TrimSpace(flowID), pin.PinName(), aggregation)
+	}
 	handlerEvent = strings.TrimSpace(handlerEvent)
 	if handlerEvent == "" {
 		handlerEvent = strings.TrimSpace(pin.EventType())

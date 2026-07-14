@@ -1355,7 +1355,7 @@ contract_formats:
   produces_derivation: >-
     The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
     every supported declarative emit site at boot: handler top-level emit, rule-local emit, rules emit template specialization
-    effective emits, selected on_complete emit, accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority,
+    effective emits, selected on_complete emit, join outcome emit, and fan_out emit. Runtime routing, producer authority,
     and transition checks consume this effective production surface, not raw authored produces. If present, produces is an
     explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
     a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
@@ -1592,9 +1592,9 @@ entity_contracts:
     description: |
       `materialize_from` declares a downstream typed entity-field copy of a
       same-flow node accumulator. The accumulator remains canonical for
-      receipt acceptance, deduplication, completion, and computation. The
+      stream receipt acceptance, deduplication, and computation. The
       entity field is a persisted visibility/audit projection written by the
-      runtime on successful accumulator completion.
+      runtime after each admitted stream arrival.
     source_reference: |
       The value has shape `<node_id>.<accumulator_name>`. The referenced node
       must belong to the same flow as the declaring entity. The referenced
@@ -2264,7 +2264,7 @@ runtime_enforcement:
       surface. Composite whole-value comparison is not part of Wave 1.
     handler_expression_rule: |
       `query_entities(...).count` used inside handler boolean expressions
-      (guards, rules/on_complete conditions, and accumulator completion
+      (guards, rules/on_complete conditions, and join completion
       expressions) resolves through the active handler workflow identity and
       current run context. Missing workflow/run context, unsupported scoped
       operands, or missing scoped operand values fail closed with a diagnostic.
@@ -2349,13 +2349,13 @@ handler_specification:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
     graph: "\nentity acquisition (optional — create_entity materializes the canonical receiving-flow primary entity; select_entity resolves exactly one target-flow-owned existing entity; select_or_create_entity resolves or creates one target-flow-owned entity by declared key)\n  └→ query (optional — pre-fetch cross-entity\
-      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
+      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional open/windowed stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete/timeout emit, or fan_out emit)\n                    \
+      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete emit, or fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
-      \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
+      \                         └→ projection (materialize_from, when declared for an admitted stream arrival)\n                  \
       \                                └→ emit.fields\n                                                       └→ emit.event\n  \
       \                                                          └→ action OR activity intent\n                                            \
       \                     └→ clear (optional — reset accumulator/state buckets)\n    "
@@ -2370,16 +2370,13 @@ handler_specification:
       after this transaction commits).
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
-    on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after accumulation/computation.
-      If handler-level on_complete and accumulate.on_complete are both declared, handler-level on_complete is evaluated first;
-      when no handler-level branch matches, accumulate.on_complete is evaluated as the accumulator-completion branch surface.
+    on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after computation on handlers that do not declare accumulate.
+      `accumulate` and handler-level `on_complete` are mutually incompatible because stream accumulation never owns finite completion.
     rules: Current concrete spelling of the ordered policy-sheet authoring construct for handler-phase selection. Existing
       condition rules and typed selection rows lower to the canonical selected-branch owner. Retired `handler.branch`
       syntax is unsupported and must fail closed instead of being interpreted, lowered, or preserved as compatibility syntax.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
-    accumulate_incomplete: If accumulation is not yet complete, handler stops after recording the arrival. No further steps
-      until completion condition met.
   handler_fields:
     description: Fields within an event_handler declaration. Executed per the dependency graph defined in handler_execution_order.
       All fields are optional — the engine skips absent fields.
@@ -2556,16 +2553,12 @@ handler_specification:
     accumulate:
       field: accumulate
       type: object
-      purpose: Track multiple event arrivals for same entity. Wait until completion.
+      purpose: Admit each event arrival into an open or windowed entity-scoped stream. It never waits for finite membership or closes a barrier.
       sub_fields:
         into: 'string — optional explicit accumulator buffer name. Required when any entity field declares
           materialize_from: <this_node>.<into>. Must resolve to a state_schema field on this node typed as
           list<NamedType> or [NamedType]. Within one node, a given into value may be declared by at most one handler.'
-        expected_from: string — entity field containing expected count or items list
-        completion: all | threshold | timeout
         from: string — optional sender path filter
-        on_complete: handler fields to execute when done
-        on_timeout: handler fields to execute on timeout
         description: string — human-readable note
         window: 'string — optional field path for partitioning one logical accumulator into bounded windows (for
           example payload.period_id). When declared, the runtime resolves the path on each arrival and stores/reads
@@ -2574,18 +2567,19 @@ handler_specification:
         dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
           (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
           with the same dedup key are ignored.'
-      concept: Track multiple events arriving for the same entity. Fire on_complete when completion condition is met. Expected
-        count read from entity state (written by initiating handler).
+      concept: Track accepted stream arrivals for the same entity. Each admitted non-duplicate arrival continues through the remaining handler steps in the same execution.
+      finite_barrier_boundary: >-
+        `expected_from`, `completion`, `threshold`, `timeout_ms`, nested `on_complete`, and nested `on_timeout` are unsupported
+        and fail strict decoding. Finite declared-membership waiting, completion, timeout, persistence, and replay belong only
+        to the effective WorkflowJoinPlan and joinruntime activation. Handler-level `on_complete` is also prohibited on a
+        handler that declares `accumulate`.
       projection_hook: |
-        When a handler accumulator reaches successful completion, any same-flow
+        After each admitted stream arrival, any same-flow
         entity field declaring `materialize_from` for this handler's
         `accumulate.into` buffer is written as a full replacement list after
-        data_accumulation and before emit.fields if either no `on_complete`
-        block is declared or an `on_complete` branch matches successfully.
-        `rules` remain branch-selection/data-write/emit/action semantics and do
-        not guard accumulator projection eligibility. No projection occurs for
-        incomplete accumulation, timeout branches, or declared `on_complete`
-        completion with no matching branch.
+        data_accumulation and before emit.fields. Rules remain ordinary
+        per-arrival branch-selection/data-write/emit/action semantics and do
+        not turn the stream into a finite barrier.
     compute:
       field: compute
       type: object
@@ -2663,7 +2657,7 @@ handler_specification:
     on_complete:
       field: on_complete
       type: list of {condition, advances_to, emit} objects — evaluated top-to-bottom, first match wins
-      purpose: Conditional branching after accumulation or computation.
+      purpose: Conditional branching after computation on handlers without accumulate.
       branch_fields:
         condition: string — expression evaluated against entity state and policy
         advances_to: string — target state
@@ -2707,7 +2701,7 @@ handler_specification:
           meaning: 'CEL expression evaluated against handler context → entity.entity_key.'
           context: 'expression is evaluated against: entity, payload, policy, fan_out. The fan_out
             namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
-            accumulated is NOT available — data_accumulation runs before accumulation completes.'
+            accumulated is available after the current open-stream arrival has been admitted.'
           example: "- target_field: revision_count\n  expression: entity.revision_count + 1"
           note: 'value and expression are mutually exclusive. Use value for constants, expression
             for dynamic computation. Do not use expression for simple constants — use value instead.'
@@ -2791,7 +2785,7 @@ handler_specification:
       field: emit
       type: 'scalar event name OR object: {event, fields, target, broadcast}'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
-        has no nested emit sites. Nested emit sites are selected on_complete emit, rules emit, accumulate.on_timeout emit,
+        has no nested emit sites. Nested emit sites are selected on_complete emit, rules emit, join outcome emit,
         and fan_out emit.
       sub_fields:
         event: string — event to emit
@@ -2847,7 +2841,7 @@ handler_specification:
       single_emit_handler_rule: >-
         A handler top-level emit is valid only when the handler has exactly one possible emit site, except for the explicit
         rules emit template specialization described under `rules.emit_template_specialization`. If the handler also declares
-        ordinary rules emit sites, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity. Payload
+        ordinary rules emit sites, on_complete, join outcome emit, or fan_out emit, boot fails with ambiguity. Payload
         ownership must move to the active emit site. The only approved additive rules success surface is explicit
         on_success.emit, which is not a handler-level emit overload.
       emit_field_lowering:
@@ -2878,7 +2872,7 @@ handler_specification:
         sub_fields:
           emit: emit spec — additive success/audit/lifecycle event emitted after the selected rules emit.
         rules_only: on_success.emit is supported only on handlers with rules in this slice. It is not supported with on_complete,
-          accumulate.on_timeout, handler-level fan_out, rule-level fan_out, handler-level action, or bare handler-level emit.
+          join outcomes, handler-level fan_out, rule-level fan_out, handler-level action, or bare handler-level emit.
         ordering: When a rule matches and has emit, the rule emit is materialized first and on_success.emit second. Both events
           are emitted after rule selection, state/gate/data/projection side effects, and emit.fields evaluation for their own
           active emit site, before the handler transaction commits.
@@ -3018,7 +3012,7 @@ handler_specification:
         unsupported_combinations: Rule-level specialization may not set `emit.event`, `emit.target`, or `emit.broadcast`.
           If both handler template and rule specialization declare `emit.from`, the values must match. Handler-level
           `on_success.emit` remains the separate additive two-event surface and is not part of template specialization.
-          on_complete, accumulate.on_timeout, fan_out, and action-originated emits are out of this specialization slice.
+          on_complete, join outcomes, fan_out, and action-originated emits are out of this specialization slice.
         proof_consumers: Bootverify, semantic view, produces derivation, route authority, runtime execution, and pipeline/outbox
           proof consume the same merged effective emit, not the raw handler template and raw rule specialization as separate
           events.
@@ -3109,10 +3103,13 @@ handler_specification:
         members: >-
           Required `{from: entity.<field>, by: payload.<field>}`. from names a declared ordered list<text> that is
           snapshotted once at stage arm; by names the declared text member identity on each arrival and is the sole
-          membership/dedup key.
+          membership/dedup key. For a join fed by a fan-in barrier pin, author only `from`; `by` is forbidden and derives
+          from that pin's `resolution.dedup_by`. Standalone stage joins retain explicit `from` and `by`.
         window: >-
           Optional `{from: entity.<field>, by: payload.<field>}` text identity. It is required when the static transition
-          graph permits re-entry into the join stage. from is snapshotted at arm and by must match exactly on arrival.
+          graph permits re-entry into the join stage. from is snapshotted at arm and by must match exactly on arrival. For
+          a join fed by a fan-in barrier pin, author only `from`; `by` is forbidden and derives from that pin's
+          `resolution.window`.
         output: Required top-level declared payload field captured with its canonical value/hash per admitted member.
         complete_when: >-
           Optional CEL boolean over join.expected, join.completed, join.missing, join.results, and join.timed_out only.
@@ -3149,10 +3146,15 @@ handler_specification:
       timeout_policy: >-
         Timeout is evaluated once at arm and fire_at is persisted. It is the only missing/dead-contributor escape in this
         slice. join.terminated, join.active, and remaining: terminate are invalid until a real contributor lifecycle owner lands.
-      staged_accumulate_retirement: >-
-        A stages: bundle may not author finite-barrier accumulate fields such as expected_from, threshold/completion,
-        timeout_ms, on_complete, or on_timeout. Non-staged migration remains separately tracked; accumulate continues to
-        own open/windowed streams.
+      fan_in_lowering: >-
+        A receiver `resolution.mode: fan-in` pin with `aggregation: barrier` must associate with exactly one join row by
+        receiver flow, handler event, and join stage. The effective WorkflowJoinPlan carries the expanded member/window
+        identity plus provenance and is the executable owner consumed by verify, describe/graph, Executor, persistence,
+        timeout, restart, and replay. Zero or multiple matches fail closed; no join_id agreement field exists.
+      finite_accumulate_retirement: >-
+        Every bundle, staged or non-staged, rejects finite-barrier accumulate fields such as expected_from,
+        threshold/completion, timeout_ms, nested on_complete, and nested on_timeout. Accumulate owns only open/windowed
+        streams and may not be paired with handler-level on_complete.
       graph_surface: >-
         describe --graph renders stage-scoped join completion and timeout edges. Timeout edges include after and the join ID.
     query:
@@ -3423,7 +3425,7 @@ handler_specification:
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
           is intentionally not defined in this slice.
         with_rules: A top-level handler activity is allowed only when the handler has no rules. In a rules handler, activity
-          must be declared on the selected handler.rules[*] branch. on_complete and accumulator completion/timeout activity
+          must be declared on the selected handler.rules[*] branch. on_complete and join completion/timeout activity
           sites are not supported in Stage 1. Retired `handler.branch` syntax is unsupported for all handler semantics,
           including activity placement.
       execution_position: After emit.event/action selection point and before clear. The intent is persisted inside the handler
@@ -3488,14 +3490,13 @@ handler_specification:
         write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; select_entity/select_or_create_entity keys may not use _entity as a source-authority bypass.
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
-          representing one accumulated event payload. Available only in on_complete conditions and filter
-          expressions — these run after accumulation completes.'
+          representing one admitted event payload in the current open/windowed stream bucket. Available to supported
+          per-arrival filter, reduce, count, compute, and rules processing after stream admission.'
         usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
           accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
           (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
-        not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
-          before accumulation. rules.condition — rules are an alternative to on_complete, not used after
-          accumulation.'
+        not_available_in: 'guard.check — guards run before accumulation. handler-level on_complete is prohibited on
+          accumulate handlers and cannot recreate finite completion.'
         projection_boundary: |
           `materialize_from` consumes accumulated items through the source
           named type's typed view. Runtime accumulator metadata and event
@@ -3507,7 +3508,7 @@ handler_specification:
           scoped to fan_out.emit.fields only.'
         available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
           state. Example: expression: fan_out.count writes the dispatch count to an entity field for
-          downstream accumulation tracking (expected_from: entity.search_expected_count).'
+          downstream open-stream processing.'
         not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
           fields written by data_accumulation instead.'
         usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
@@ -3571,9 +3572,9 @@ handler_specification:
           as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
-          event_handlers keys when omitted. Accumulator timeout delivery is platform-owned; handlers with timeout-mode
-          accumulate or accumulate.on_timeout derive the intrinsic accumulate.timeout runtime subscription. Wildcard/import-boundary
-          escape-hatch subscriptions remain explicit.
+          event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
+          Open/windowed stream accumulation derives no timeout subscription. Wildcard/import-boundary escape-hatch
+          subscriptions remain explicit.
         produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
           from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
           emits.
@@ -3588,7 +3589,7 @@ handler_specification:
         id: YAML map key, with same-value explicit id accepted during migration
         execution_type: system_node
         runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
-          events required by declared handler primitives such as accumulate.timeout
+          events required by declared handler primitives such as platform.join_timeout
         produces: events derived from supported declarative emit sites
     description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
       Every field used in nodes.yaml must be defined here.
@@ -3600,12 +3601,12 @@ handler_specification:
   - 'filter → reduce: pruned items available before aggregation'
   - 'reduce → count: aggregated result available before counting'
   - 'count → compute: all list processing complete before computation'
-  - 'compute → emit-site selection: computed values from compute, lookup, validate, and compute_module value rows are written before rule/on_complete/timeout selection evaluates'
-  - 'emit-site selection → advances_to: the selected rule/on_complete/timeout advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
-  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete/timeout entries do not declare or override sets_gate'
-  - 'emit-site selection → data_accumulation: selected rule/on_complete/timeout data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
+  - 'compute → emit-site selection: computed values from compute, lookup, validate, and compute_module value rows are written before rule/on_complete selection evaluates'
+  - 'emit-site selection → advances_to: the selected rule/on_complete advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
+  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete entries do not declare or override sets_gate'
+  - 'emit-site selection → data_accumulation: selected rule/on_complete data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
-  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected rule/on_complete/timeout writes'
+  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected rule writes on valid stream handlers'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
   - 'emit.event → action: events persisted before platform actions execute'
@@ -3658,8 +3659,8 @@ handler_specification:
       advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
         overrides the handler-level target for that execution only.
       sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
-        and accumulate.on_timeout entries do not declare or override sets_gate.
-      data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/timeout data_accumulation in
+        and join outcome entries do not declare or override sets_gate.
+      data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/join-outcome data_accumulation in
         the same atomic transaction. Selected entry writes run before handler-level writes. This is additive composition,
         not default/override precedence.
       emit_and_action: Bare emit and action never fall through from a handler into a rules-based multi-emit/action handler.
@@ -4305,11 +4306,10 @@ engine:
       storage: Entity table, state column, indexed.
       mutation: Only via advances_to or on_complete branch. Never by agents directly.
     accumulator_state:
-      description: 'Structured data tracking partial progress within a handler''s accumulate pattern. Examples: which scoring
-        dimensions have arrived, which scanner partitions completed, intermediate computed values.'
+      description: 'Structured data for admitted open/windowed stream arrivals within a handler''s accumulate pattern.'
       storage: Per-node state table (from nodes.yaml state_schema). Keyed by entity_id.
       mutation: Written by accumulate tracking (record arrival), data_accumulation (write payload fields), and compute steps
-        (store computed values). Cleared or reset when accumulation completes.
+        (store computed values). It is cleared only by an explicit supported clear operation; stream admission has no completion cleanup.
     gate_state:
       description: Boolean flags on the entity. Used by validation-style flows to track which sub-steps have completed. Guards
         can check gate state as conditions.
@@ -4354,42 +4354,31 @@ engine:
     state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
       state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
-    description: The accumulation engine is the platform subsystem that handles the accumulate primitive. It tracks multiple
-      event arrivals for the same entity and fires on completion.
+    description: The accumulation engine is the platform subsystem for open/windowed stream admission. It tracks accepted
+      event arrivals for the same entity and never owns finite membership, completion, or timeout.
     tracking:
-      setup: 'When an entity first encounters a handler with accumulate.track, the platform creates an accumulator record:
-        expected items list, received items list (empty).'
+      setup: 'When an entity first encounters an accumulate handler, the platform creates a stream bucket with an empty
+        received-key set and item list.'
       bucket_identity: |
         Handler accumulator buckets are keyed by the selected authored handler
         event key after runtime handler resolution/localization, not by the
         concrete event-bus event type that delivered the event. The concrete
         event type remains event provenance and must be retained on accumulated
-        item metadata and diagnostics. Timeout bucket handles, compute reads,
-        and `materialize_from` projection reads must consume the same selected
+        item metadata and diagnostics. Compute reads and `materialize_from`
+        projection reads must consume the same selected
         handler event key. If `accumulate.window` is declared, the window value
         is part of the accumulator bucket identity; unwindowed accumulators keep
         the existing node/event bucket key.
       arrival: 'Each event arrival is identified by its dedup_by key. Default: sender session ID. Can be overridden to a payload
         field (e.g., payload.dimension). If the key was already received, the arrival is ignored (idempotent). If not, it
         is added to the received set and persisted.'
-      completion_check: 'After each arrival, check the completion condition: all (every expected item received), threshold
-        (received count >= N), or timeout (timer fires regardless of count).'
-    completion_modes:
-      all: Proceed when every item in the expected list has been received.
-      threshold: Proceed when received count reaches a configured number.
-      timeout: Proceed when a timer fires, regardless of how many items arrived. Partial results available.
-    on_complete: When completion condition is met, the handler continues to the remaining steps (compute, on_complete branches,
-      advances_to, emit). The accumulated data is available to these steps. Handler-level on_complete branches are evaluated
-      first; if no handler-level branch matches and accumulate.on_complete branches are declared, those accumulator-completion
-      branches are evaluated through the same selected-branch owner.
-    on_timeout: If the handler declares accumulate.on_timeout, the platform executes that branch when the timer fires before
-      completion. Partial accumulated data is available. Typically used to proceed with whatever data arrived. The platform
-      emits and routes accumulate.timeout intrinsically to the owning handler bucket; authors do not declare accumulate.timeout
-      in subscribes_to to make the timeout branch deliverable.
+      continuation: 'Every newly admitted arrival persists the bucket and continues through supported per-arrival handler
+        steps. An exact duplicate updates no item and does not invent a completion signal.'
+    finite_boundary: 'Declared membership snapshots, all/threshold close, finite timeout, one-winner close, and completion
+      outcomes are exclusively owned by the effective WorkflowJoinPlan and joinruntime activation.'
     idempotency: Duplicate arrivals (same item, same entity) are ignored. The received list is a set, not a list. Crash recovery
       replays events through the same tracking — already-received items are skipped, accumulator state is consistent.
-    cleanup: After completion fires and the handler commits, the accumulator record can be archived or deleted. The entity
-      has moved past the accumulation state.
+    cleanup: Stream buckets are not implicitly archived or deleted by arrival processing.
   join_engine:
     description: >-
       The join engine is the canonical durable owner for staged finite-membership barrier activation, arrivals, deterministic
@@ -5985,8 +5974,8 @@ engine:
         For timers started by state:<name> or event:<name>, cancel_on state:<name> must be reachable after every possible
         timer activation context in the authored transition graph. start_on state:<name> uses that state as the activation
         context. start_on event:<name> derives activation states from same-flow handlers for that event: handler-level advances_to,
-        on_complete advances_to, rules advances_to, accumulate.on_complete advances_to, and accumulate.on_timeout advances_to
-        targets are post-handler activation states; a handler with no authored state target uses its authored source states.
+        on_complete advances_to and rules advances_to targets are post-handler activation states; a handler with no authored
+        state target uses its authored source states.
         The timer's own fire event is not valid proof of a pre-fire cancellation path. The activation state itself is not
         sufficient proof unless an authored post-activation transition reaches the
         cancel state from that activation state. Missing activation proof or any derived activation state with no
@@ -6010,7 +5999,7 @@ engine:
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
         are expected, completed, missing, results, and timed_out; join is read-only and never persisted as entity state.
-      accumulated: Available inside on_complete after accumulation (list of received items)
+      accumulated: Available to supported per-arrival filter/reduce/count/compute/rules processing after stream admission
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or
       `timestamp()`. Time-driven behavior is authored with stage timers so fire_at is evaluated once and persisted.
@@ -6551,7 +6540,7 @@ engine:
       scope: per-node
       trigger: >-
         A node's explicit produces list does not match the set of events derived from its supported declarative emit
-        sites: handler top-level emit, rules emit, on_complete emit, accumulate.on_timeout emit, and fan_out emit.
+        sites: handler top-level emit, rules emit, on_complete emit, and fan_out emit.
       when: boot-only
     - id: invalid_field_detection
       severity: error
@@ -6577,8 +6566,9 @@ engine:
       severity: error
       scope: per-node
       trigger: A handler uses on_complete as a map (dict) instead of a list (ordered). Or uses both on_complete and rules
-        on the same handler. Or uses both create_entity and accumulate on the same handler. Or combines more than one entity
-        acquisition mode on the same handler (create_entity, select_entity, select_or_create_entity).
+        on the same handler. Or uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate
+        on the same handler. Or combines more than one entity acquisition mode on the same handler (create_entity,
+        select_entity, select_or_create_entity).
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -6716,18 +6706,6 @@ engine:
         evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, explicit harness injection,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
         producer-pattern authority, events.yaml swarm.source:external as input-pin proof, produces, or swarm.status: planned.'
-      when: boot-only
-    - id: accumulate_all_bounded_escape
-      severity: warning
-      scope: per-handler
-      trigger: A handler declares an accumulator in completion all/default mode without a schedulable bounded timeout escape.
-        This is a static safety-net lint only; it does not prove the accumulator will stall.
-      when: boot-only
-    - id: accumulator_timeout_requires_timeout_ms
-      severity: hard_invalidity
-      scope: per-handler
-      trigger: A handler declares accumulator completion timeout without positive timeout_ms, so runtime cannot schedule the
-        accumulate.timeout event required to complete that mode.
       when: boot-only
     - id: accumulator_input_producer_path
       severity: hard_invalidity
@@ -6899,7 +6877,7 @@ compliance:
     rules:
     - Match inbound event to handler in owning node
     - 'If handler has guard: evaluate condition. If false, reject or kill.'
-    - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
+    - 'If handler has accumulate: admit the open/windowed stream arrival, persist a new non-duplicate item, and continue per arrival.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
     - 'If handler has rules: match payload field, select the matching rule-local emit and action if present.'
     - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, sets_gate is handler-level only, and data_accumulation composes selected-entry writes before handler-level writes.'
@@ -9065,7 +9043,7 @@ flow_model:
         graph_rule: >
           `swarm describe --graph` renders the per-flow lifecycle stage graph
           from the canonical lowered lifecycle owner and the existing transition
-          carriers, including accumulator completion and timeout `advances_to`
+          carriers, including join completion and timeout `advances_to`
           carriers. It must show flow namespace, nodes, initial/terminal markers,
           edges, and edge source. It is projection-only and MUST NOT introduce a
           second transition-authoring owner.
@@ -9693,9 +9671,9 @@ flow_model:
             broadcast:true, receiver select_entity/select_or_create_entity, and
             explicit create_flow_instance are not lifecycle authority.
         implementation_slice_1835:
-          status: create_select_select_or_create_fan_in_stream_and_reply_modes_runnable_fan_out_and_fan_in_barrier_fail_closed
+          status: create_select_select_or_create_fan_in_stream_barrier_and_reply_modes_runnable_fan_out_fail_closed
           canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
-          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
+          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution/WorkflowJoinPlan + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec/joinruntime.Activation + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
           rule: |
             Receiver input pins may declare an explicit instance-resolution
             contract under `resolution:{mode,...}`. This receiver-side contract
@@ -9713,13 +9691,14 @@ flow_model:
             the same single declared carried-key boundary, with lifecycle/store
             convergence on exactly one receiver instance for concurrent same-key
             missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
-            only for `aggregation: stream` / bounded windowed delivery into an
-            explicit singleton/coordinator receiver. Reply resolution is also
+            for `aggregation: stream` / bounded windowed delivery into an
+            explicit singleton/coordinator receiver. The finite barrier slice
+            makes `aggregation: barrier` runnable by lowering pin identity into
+            one effective WorkflowJoinPlan and executing through joinruntime,
+            never through accumulate. Reply resolution is also
             runnable through the route-scoped reply-context contract under
-            `engine.cross_flow_routing.reply_resolution`. Fan-out and fan-in
-            barrier semantics are recognized by contracts and verifier and fail
-            closed as design-locked/not-runnable until their implementation
-            slices land.
+            `engine.cross_flow_routing.reply_resolution`. Fan-out remains
+            design-locked and fail-closed until its implementation slice lands.
             Static root ingress, parent-connect static delivery, and
             harness-injected inputs remain existing #1807 input-source /
             connect behavior; they are not instance-resolution runtime modes.
@@ -9841,48 +9820,51 @@ flow_model:
               - unavailable template lifecycle activator
               - activation/create race that cannot reload exactly one matching instance
             fan-in:
-              status: stream_windowed_runnable_in_1835_pr4_barrier_fail_closed
+              status: stream_windowed_and_finite_barrier_runnable
               contract: >
                 Fan-in routes many source deliveries into one receiver instance
                 or aggregation context. `aggregation: stream|barrier` is the
                 locked sub-semantics selector. Stream delivers each accepted
-                event into the receiver context; barrier waits for the declared
-                close condition/window before releasing an aggregate result.
-                In the PR4 runnable subset, only `aggregation: stream` is
-                executable. The receiver input pin MUST declare `window`,
-                `dedup_by`, and `singleton`. `singleton` is the explicit
+                event into an open/windowed accumulator context; barrier admits
+                arrivals into a declared-membership join activation and closes
+                through joinruntime. The receiver input pin MUST declare
+                `dedup_by` and `singleton`; stream MUST declare `window`, while
+                barrier may omit window only when stage topology proves the join
+                stage non-reentrant. `singleton` is the explicit
                 receiver route path for the singleton/coordinator instance and
                 MUST be the receiver route or a child of the receiver route; it
                 is never inferred from the sender/source instance. `dedup_by`
-                is required and may be only `event.id` or one top-level
-                `payload.<field>` in this slice; tuple/composite dedup remains
-                fail-closed until evidence requires it. `window` is required and
-                must be one top-level payload field. The route plan reuses
+                is required and is exactly one top-level `payload.<field>` for
+                barrier; stream also permits `event.id`. Tuple/composite dedup
+                remains fail-closed. Any window must be one top-level payload
+                field. The route plan reuses
                 singular target delivery and carries fan-in metadata for proof;
                 it MUST NOT introduce a new fan-in target kind. The receiver
                 input pin is the only authoring owner for fan-in `dedup_by` and
-                `window` semantics. The receiving handler accumulator declares
-                only the accumulator target/source; handler redeclaration of
-                `accumulate.dedup_by` or `accumulate.window` for a fan-in input
-                is invalid. Runtime derives the effective accumulator
-                dedup/window from the matched receiver input pin, and the
-                accumulate kernel enforces idempotency and window partitioning
-                from those derived values. EventBus/delivery MUST NOT add an
-                independent fan-in dedup/window owner.
+                `window` semantics. A stream receiver declares only the
+                accumulator target/source and consumes an effective stream spec.
+                A barrier receiver declares one join row; members.by and
+                window.by are forbidden there and derive into the effective
+                WorkflowJoinPlan from the pin. EventBus/delivery owns only
+                singular route delivery and MUST NOT add aggregation,
+                dedup/window, membership, completion, or timeout authority.
               fail_closed:
-              - aggregation other than stream, including barrier
+              - aggregation other than stream or barrier
               - missing or empty singleton
               - singleton outside the receiver route path
-              - missing or empty window
+              - missing or empty stream window
+              - missing barrier window when the join stage is re-entrant
               - window not naming one top-level payload field
               - missing or empty dedup_by
               - dedup_by list/tuple/composite beyond one field
-              - dedup_by other than event.id or one top-level payload field
+              - barrier dedup_by event.id or any non-payload identity
               - receiver not mode: singleton/coordinator
               - missing receiver handler for the input event
-              - receiver handler missing accumulate
+              - stream receiver missing accumulate or declaring join
+              - barrier receiver missing exactly one matching join or declaring accumulate
               - receiver handler redeclares accumulate.dedup_by for fan-in
               - receiver handler redeclares accumulate.window for fan-in
+              - barrier join authors members.by or window.by instead of consuming derived pin identity
               - combined legacy input address
               - combined connect.using.instance or connect.map
               - delivery topology other than one
@@ -9924,7 +9906,7 @@ flow_model:
               `resolution:{mode,...}` semantics.
           proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
-          - bootverify accepts valid create/select/select-or-create/fan-in stream resolution and rejects other non-runnable modes as not runnable in this slice
+          - bootverify accepts valid create/select/select-or-create/fan-in stream/barrier resolution and rejects other non-runnable modes as not runnable in this slice
           - route-plan lowering records create mode, mint kind, carried `as` field, create/reuse lifecycle policy, and does not require producer output key/carries
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
           - downstream receiver routes can render the carried minted instance key from activation variables
@@ -9948,6 +9930,9 @@ flow_model:
           - receiver accumulator kernel enforces pin-declared dedup_by idempotency and partitions arrivals by pin-declared window
           - same committed fan-in stream event replay reuses persisted delivery route/scope and does not re-infer receiver identity from sender/source state
           - standalone #1828 `template-fan-in` conformance fixture verifies and materializes through the canonical fan-in stream route plan
+          - canonical fan-in barrier lowers pin-owned member/window identity into exactly one effective WorkflowJoinPlan with provenance
+          - EventBus/Pipeline execution proves partial arrival, exact duplicate, conflicting duplicate, completion, timeout, restart, and committed replay without an accumulator
+          - canonical fan-in barrier execution has SQLite/PostgreSQL parity and membership-ordered results independent of arrival order
         implementation_slice_1546:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver
@@ -12424,9 +12409,9 @@ run_model:
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes its source-at-T flow_instance/entity_type
         metadata or produces a named fail-closed blocker.'
       2_detect_pending: 'Identify events that were pending at timestamp T — events with created_at <= T whose
-        delivery chain was incomplete. This includes: deliveries with status pending or in_progress at T,
-        accumulations that had not reached completion at T, entities in non-terminal states expecting further
-        events. These are the events the system will re-deliver.'
+        delivery chain was incomplete. This includes deliveries with status pending or in_progress at T and
+        entities in non-terminal states expecting further events. Open-stream accumulator buckets are persisted
+        entity state, not pending finite-completion work. These are the events the system will re-deliver.'
       3_create_run: 'Insert new run row with forked_from_run_id = source run, forked_from_event_id = target event
         (if event ID was provided). Copy reconstructed entity states into the fork context.'
       3a_materialize_only_run: 'For a materialize-only fork, insert the fork run row with status=paused,
@@ -14149,7 +14134,7 @@ observation_model:
     - Events from handler rules emit
     - Events from handler on_success.emit
     - Events from handler on_complete emit
-    - Events from handler accumulate.on_timeout emit
+    - Events from handler join completion/timeout outcomes
     - Events from handler fan_out emit
     - Events from action-originated emits produced by runtime action instructions
     - Events from handler action side effects (e.g., auto_emit_on_create)
@@ -14244,10 +14229,10 @@ observation_model:
         carrier, envelope-owned fields cannot be authored into business payload, and fail-closed contract validation applies.'
       dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
-      waiting: Accumulation incomplete. Handler recorded the arrival but completion condition not yet met. No further steps
-        executed. Entity unchanged except for accumulator tracking update.
-      fanned_out: Fan-out dispatched. Handler emitted per-item events and is waiting for accumulation of results. Intermediate
-        state — final outcome determined when accumulation completes.
+      waiting: A finite join admitted an arrival but its declared membership completion condition is not yet met. The durable
+        join activation records the admitted arrival; later handler steps do not execute until the join selects an outcome.
+      fanned_out: Fan-out dispatched. Handler emitted the declared per-item events. Downstream result coordination, when needed,
+        is authored independently through fan-in stream or finite join semantics rather than implied by fan-out.
   agent_vs_node_observability: System node handler emissions are recorded in the entity emission chain and appear in emitted_events.
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
@@ -15662,7 +15647,7 @@ static_analyzer:
       - handler top-level single-emit
       - rules entries
       - on_complete branches
-      - accumulate.on_timeout
+      - join outcome branches
       - fan_out per-item emit
       - guard on_fail: escalate
       excludes:
@@ -15759,7 +15744,7 @@ static_analyzer:
       - handler top-level single-emit
       - rules entries
       - on_complete branches
-      - accumulate.on_timeout
+      - join outcome branches
       - fan_out per-item emit
       - agent emit_events declarations
       excludes:
@@ -15884,7 +15869,7 @@ static_analyzer:
       - handler top-level single-emit
       - rules entries
       - on_complete branches
-      - accumulate.on_timeout and accumulate.on_complete branches
+      - join completion and timeout outcome branches
       - fan_out per-item emit
       - guard on_fail: escalate
       - agent emit_events declarations
@@ -16021,10 +16006,10 @@ static_analyzer:
         rule: on_complete branches with advances_to contribute possible edges.
       rules_branches:
         rule: rules branches with advances_to contribute possible edges.
-      accumulate_on_complete_branches:
-        rule: accumulate.on_complete branches with advances_to contribute possible edges.
-      accumulate_on_timeout_branch:
-        rule: accumulate.on_timeout with advances_to contributes a possible edge.
+      join_on_complete_branches:
+        rule: Effective WorkflowJoinPlan completion outcomes with advances_to contribute possible edges.
+      join_timeout_branch:
+        rule: Effective WorkflowJoinPlan timeout outcomes with advances_to contribute possible edges.
     source_state_derivation:
       create_entity_handlers:
         rule: create_entity handlers source from initial_state only.
@@ -16149,21 +16134,17 @@ static_analyzer:
       also declares `_unused_reason`, or any other authored writer targets the
       same field.
     runtime_rule: |
-      On successful accumulator completion, runtime writes the projection as a
-      full replacement before emit.fields when no `on_complete` block is
-      declared or when a declared `on_complete` branch matches successfully.
-      Handler `rules` do not guard projection eligibility. The projected result
-      is validated through entity named-type normalization. Failure rolls back
-      the whole handler transaction. If a verify-clean declaration exists for
-      the active handler accumulator but runtime resolves zero projection
-      bindings, execution fails closed as a runtime invariant violation rather
-      than silently skipping the projection. Projection does not run for
-      timeout, incomplete accumulation, or declared `on_complete` no-match
-      completion.
+      After each open-stream accumulator arrival is admitted, runtime writes the
+      current projection as a full replacement before emit.fields. Handler
+      `rules` do not guard projection eligibility. The projected result is
+      validated through entity named-type normalization. Failure rolls back the
+      whole handler transaction. If a verify-clean declaration exists for the
+      active stream accumulator but runtime resolves zero projection bindings,
+      execution fails closed as a runtime invariant violation rather than
+      silently skipping the projection. Projection is per admitted arrival and
+      is never gated by finite completion, timeout, or handler `on_complete`.
   slice_6c_accumulator_static_safety:
     ids:
-    - accumulate_all_bounded_escape
-    - accumulator_timeout_requires_timeout_ms
     - accumulator_input_producer_path
     domain: semantic_validity
     authority: mixed_warning_and_hard_invalidity
@@ -16183,21 +16164,8 @@ static_analyzer:
       - runtime progress detection
       - watchdog stalled-entity signaling
       - implicit timeout insertion
-      - changing accumulator completion semantics
       - treating produces declarations as producer proof
       - treating swarm.status planned as producer proof
-    bounded_escape_warning:
-      id: accumulate_all_bounded_escape
-      severity: warning
-      rule: Emit a warning when an accumulator uses completion all/default and has no schedulable bounded timeout escape.
-        A schedulable timeout escape requires positive timeout_ms plus either completion timeout or an on_timeout branch.
-        A bare on_timeout without positive timeout_ms remains unbounded. This warning is not proof that runtime execution
-        will stall; it says the authored handler has no static escape if an expected arrival never appears.
-    timeout_completion_requires_timeout:
-      id: accumulator_timeout_requires_timeout_ms
-      severity: hard_invalidity
-      rule: Emit hard invalidity when an accumulator uses completion timeout without positive timeout_ms. Runtime schedules
-        accumulate.timeout only from a positive timeout_ms, and timeout completion depends on that event.
     input_producer_dead_end:
       id: accumulator_input_producer_path
       severity: hard_invalidity

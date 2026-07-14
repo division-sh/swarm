@@ -15,7 +15,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -745,63 +744,6 @@ fanout-node:
 			},
 		},
 		{
-			name:   "accumulate on_complete emit",
-			target: "support/ticket.ready",
-			opts: deadEventSchemaFixtureOptions{
-				name: "dead-event-schema-accumulate-on-complete-emit",
-				flows: map[string]deadEventSchemaFlowFiles{
-					"support": {
-						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
-						nodes: `
-accumulate-node:
-  id: accumulate-node
-  execution_type: system_node
-  subscribes_to:
-    - start
-  event_handlers:
-    start:
-      accumulate:
-        expected_from: payload.items
-        threshold: 1
-        on_complete:
-          - emit: ticket.ready
-`,
-					},
-				},
-			},
-		},
-		{
-			name:   "accumulate on_timeout fan-out",
-			target: "support/ticket.ready",
-			opts: deadEventSchemaFixtureOptions{
-				name: "dead-event-schema-accumulate-on-timeout-fanout",
-				flows: map[string]deadEventSchemaFlowFiles{
-					"support": {
-						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
-						nodes: `
-accumulate-timeout-node:
-  id: accumulate-timeout-node
-  execution_type: system_node
-  subscribes_to:
-    - start
-  event_handlers:
-    start:
-      accumulate:
-        expected_from: payload.items
-        threshold: 2
-        timeout_ms: 1000
-        on_timeout:
-          fan_out:
-            items_from: payload.items
-            as: ticket
-            identity: ticket.id
-            emit: ticket.ready
-`,
-					},
-				},
-			},
-		},
-		{
 			name:   "auto emit on create",
 			target: "support/ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
@@ -1355,30 +1297,6 @@ func TestRun_ReportsUnsupportedRuleActionContexts(t *testing.T) {
 				}},
 			},
 			want: "handler.on_complete[complete] action is unsupported",
-		},
-		{
-			name: "accumulate on_complete",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					OnComplete: []runtimecontracts.HandlerRuleEntry{{
-						ID:     "complete",
-						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-					}},
-				},
-			},
-			want: "handler.accumulate.on_complete[complete] action is unsupported",
-		},
-		{
-			name: "accumulate on_timeout",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					OnTimeout: &runtimecontracts.HandlerRuleEntry{
-						ID:     "timeout",
-						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-					},
-				},
-			},
-			want: "handler.accumulate.on_timeout[timeout] action is unsupported",
 		},
 	}
 	for _, tc := range cases {
@@ -2179,16 +2097,6 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 			},
 		},
 		{
-			name: "accumulate on complete",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					OnComplete: []runtimecontracts.HandlerRuleEntry{{
-						Condition: `payload.missing == "x"`,
-					}},
-				},
-			},
-		},
-		{
 			name: "filter",
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Filter: &runtimecontracts.FilterSpec{Condition: `payload.missing == "x"`},
@@ -2668,64 +2576,6 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 
 	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
 		t.Fatalf("unexpected semantic_drift_unreachable_state warning when rules reach review, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnWhenAccumulateOnCompleteBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
-      accumulate:
-        expected_from: payload.entity_id
-        threshold: 1
-        on_complete:
-          - condition: "true"
-            advances_to: review`)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
-		t.Fatalf("unexpected semantic_drift_unreachable_state warning when accumulate.on_complete reaches review, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnWhenAccumulateOnTimeoutBranchReachesDeclaredState(t *testing.T) {
-	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
-      accumulate:
-        expected_from: payload.entity_id
-        completion: timeout
-        timeout_ms: 1000
-        on_timeout:
-          condition: "true"
-          advances_to: review`)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
-		t.Fatalf("unexpected semantic_drift_unreachable_state warning when accumulate.on_timeout reaches review, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidAccumulateTimeoutTargetExists(t *testing.T) {
-	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	node := bundle.Nodes["support-node"]
-	handler := node.EventHandlers["ticket.closed"]
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{
-		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
-		TimeoutMS:  1000,
-		OnTimeout: &runtimecontracts.HandlerRuleEntry{
-			Condition:  "true",
-			AdvancesTo: "bogus_state",
-		},
-	}
-	node.EventHandlers["ticket.closed"] = handler
-	bundle.Nodes["support-node"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "state_machine_coherence", "bogus_state") {
-		t.Fatalf("expected state_machine_coherence error for invalid accumulate.on_timeout target, got %#v", report.Errors())
 	}
 }
 
@@ -4103,36 +3953,6 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 	}
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[complete].emit") {
 		t.Fatalf("unexpected payload completeness error for fully specified on_complete branch, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ErrorsForAccumulateOnTimeoutEmitSitePayloadDrift(t *testing.T) {
-	bundle := bootverifyPayloadCompletenessBundle()
-	node := bundle.Nodes["dispatcher"]
-	handler := node.EventHandlers["scan.corpus_dispatch"]
-	handler.Emit = runtimecontracts.EmitSpec{}
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{
-		OnTimeout: &runtimecontracts.HandlerRuleEntry{
-			ID: "timeout",
-			Emit: runtimecontracts.EmitSpec{
-				Event: "market_research.scan_assigned",
-				Fields: map[string]runtimecontracts.ExpressionValue{
-					"geography": runtimecontracts.RefExpression("payload.geography"),
-				},
-			},
-		},
-	}
-	node.EventHandlers["scan.corpus_dispatch"] = handler
-	bundle.Nodes["dispatcher"] = node
-	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "accumulate.on_timeout[timeout].emit") {
-		t.Fatalf("expected accumulate.on_timeout payload completeness error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-		t.Fatalf("expected missing scan_id error for accumulate.on_timeout emit, got %#v", report.Errors())
 	}
 }
 
@@ -5643,14 +5463,11 @@ func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseW
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected_count"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "entity.composite_score",
 	}
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.composite_score >= 0",
-	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -5660,18 +5477,15 @@ func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseW
 	}
 }
 
-func TestRun_RejectsCreateEntityAccumulateWhenExpectedFromIsNotDynamicEntityField(t *testing.T) {
+func TestRun_RejectsCreateEntityAccumulateWithoutFiniteCompletionSemantics(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Threshold: 1}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "entity.composite_score",
 	}
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.composite_score >= 0",
-	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -6337,8 +6151,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 79 {
-		t.Fatalf("bootCheckRegistry count = %d, want 79", got)
+	if got := len(bootCheckRegistry); got != 78 {
+		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6740,42 +6554,6 @@ func TestRun_AllowsTimerCancelStateReachableFromEventStartContext(t *testing.T) 
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable") {
 		t.Fatalf("unexpected timer_validation event-start cancel-state reachability error, got %#v", report.Errors())
-	}
-}
-
-func TestTimerReachabilityConsumesAccumulatorTransitionCarriers(t *testing.T) {
-	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
-      accumulate:
-        expected_from: payload.entity_id
-        completion: timeout
-        timeout_ms: 1000
-        on_complete:
-          - condition: "true"
-            advances_to: review
-        on_timeout:
-          condition: "true"
-          advances_to: active`)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	source := semanticview.Wrap(bundle)
-	declaredStates := map[string]struct{}{"waiting": {}, "active": {}, "review": {}, "done": {}}
-	trigger, err := timeridentity.ParseStartTrigger("event:ticket.closed")
-	if err != nil {
-		t.Fatalf("ParseStartTrigger: %v", err)
-	}
-	activationStates := timerActivationStates(source, runtimecontracts.WorkflowTimerContract{FlowID: "support"}, trigger, declaredStates)
-	for _, want := range []string{"active", "review"} {
-		if _, ok := activationStates[want]; !ok {
-			t.Fatalf("timer activation states = %#v, want accumulator carrier target %s", activationStates, want)
-		}
-	}
-
-	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{FlowID: "support", Event: "timer.reminder"})
-	if _, ok := edges["waiting"]["review"]; !ok {
-		t.Fatalf("timer cancel graph edges = %#v, want accumulator on_complete edge to review", edges)
-	}
-	if _, ok := edges["waiting"]["active"]; !ok {
-		t.Fatalf("timer cancel graph edges = %#v, want accumulator on_timeout edge to active", edges)
 	}
 }
 

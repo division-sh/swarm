@@ -1,6 +1,0 @@
-score.received:
-  swarm:
-    source: external
-  score: integer
-batch.scored:
-scores.verified:

@@ -26,14 +26,10 @@ intake-router:
             item_id: intake_item.id
     item.processed:
       accumulate:
-        expected_from: payload.expected_workers
-        completion: all
-        on_complete:
-          id: ready_for_review
-          condition: else
-          advances_to: ready
-          emit:
-            event: item.review_requested
+        into: processed_items
+        from: payload
+      emit:
+        event: item.review_requested
       sets_gate: intake_ready
       clear_gates:
         - needs_revision

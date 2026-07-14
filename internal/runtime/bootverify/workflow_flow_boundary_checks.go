@@ -779,16 +779,6 @@ func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID stri
 			return true
 		}
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if bootverifyRuleWritesEntityFields(rule, allowedFields) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && bootverifyRuleWritesEntityFields(*handler.Accumulate.OnTimeout, allowedFields) {
-			return true
-		}
-	}
 	return false
 }
 
@@ -803,16 +793,6 @@ func bootverifyHandlerActionMaterializesEntity(handler runtimecontracts.SystemNo
 	}
 	for _, rule := range handler.OnComplete {
 		if bootverifyActionMaterializesEntity(rule.Action) {
-			return true
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if bootverifyActionMaterializesEntity(rule.Action) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && bootverifyActionMaterializesEntity(handler.Accumulate.OnTimeout.Action) {
 			return true
 		}
 	}
@@ -841,16 +821,6 @@ func bootverifyHandlerMutatesEntityLifecycle(handler runtimecontracts.SystemNode
 	}
 	for _, rule := range handler.OnComplete {
 		if strings.TrimSpace(rule.AdvancesTo) != "" {
-			return true
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if strings.TrimSpace(rule.AdvancesTo) != "" {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && strings.TrimSpace(handler.Accumulate.OnTimeout.AdvancesTo) != "" {
 			return true
 		}
 	}
@@ -922,25 +892,6 @@ func bootverifyEmitSitesReferenceEntity(handler runtimecontracts.SystemNodeEvent
 			return true
 		}
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if bootverifyEmitReferencesEntity(rule.Emit) {
-				return true
-			}
-			if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			rule := handler.Accumulate.OnTimeout
-			if bootverifyEmitReferencesEntity(rule.Emit) {
-				return true
-			}
-			if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
-				return true
-			}
-		}
-	}
 	return false
 }
 
@@ -963,7 +914,9 @@ func bootverifyAccumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec)
 	if spec == nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(spec.ExpectedFrom), "entity.")
+	return strings.HasPrefix(strings.TrimSpace(spec.From), "entity.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.Window), "entity.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.DedupBy), "entity.")
 }
 
 func bootverifyNormalizeEntityWriteTarget(target string) string {
