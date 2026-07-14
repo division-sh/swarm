@@ -18,27 +18,32 @@ escalation_paths:
   - ^cmd/swarm-test-timing/
 special_packages:
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
+  - github.com/division-sh/swarm/internal/runtime
 profiles:
   pr-common:
     count_mode: cache-default
     environment_id: ci-postgres-gateway-empty-v1
     units:
       - catalog-required-smoke
+      - runtime-full
   pr-escalated:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
       - catalog-full
+      - runtime-full
   full:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
       - catalog-full
+      - runtime-full
   nightly:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
       - catalog-full
+      - runtime-full
 units:
   catalog-required-smoke:
     packages:
@@ -50,6 +55,12 @@ units:
   catalog-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  runtime-full:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
