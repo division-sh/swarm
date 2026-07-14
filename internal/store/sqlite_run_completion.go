@@ -52,6 +52,13 @@ func (s *SQLiteRuntimeStore) MarkRunTerminal(ctx context.Context, runID, status 
 	if !caps.Events.RunTerminalFields {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence requires canonical runs.failure and ended_at")
 	}
+	status, err = canonicalRunTerminalStatus(status)
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
+	}
+	if status == "completed" {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("completed run terminalization is owned by normal run completion convergence")
+	}
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "sqlite mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
 		var err error

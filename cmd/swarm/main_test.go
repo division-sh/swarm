@@ -314,10 +314,11 @@ func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, sessi
 	}, nil
 }
 
-func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
+func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
 	t.Helper()
+	eventID := uuid.NewString()
 	if err := bus.Publish(context.Background(), eventtest.RootIngress(
-		uuid.NewString(),
+		eventID,
 		events.EventType("scan.requested"),
 		"api.v1",
 		"",
@@ -330,6 +331,7 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 	)); err != nil {
 		t.Fatalf("publish root event: %v", err)
 	}
+	return eventID
 }
 
 func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) {
@@ -351,10 +353,10 @@ func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) 
 	}
 }
 
-func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, runID string) {
+func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
 	t.Helper()
-	if _, err := pg.MarkRunTerminal(context.Background(), runID, "completed", nil, time.Now().UTC()); err != nil {
-		t.Fatalf("mark run completed: %v", err)
+	if err := pg.ConvergeNormalRunCompletion(context.Background(), eventID, []string{"ready"}, map[string][]string{"run-status-test": {"ready"}}); err != nil {
+		t.Fatalf("converge normal run completion: %v", err)
 	}
 }
 
@@ -12466,9 +12468,9 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	}
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	publishRunStatusRootEvent(t, eb, runID, entityID)
+	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, db, runID, entityID)
-	markRunStatusCompleted(t, pg, runID)
+	markRunStatusCompleted(t, pg, eventID)
 
 	ctx := context.Background()
 	deadline := time.Now().Add(2 * time.Second)
@@ -12523,7 +12525,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	publishRunStatusRootEvent(t, eb, runID, entityID)
+	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, db, runID, entityID)
 
 	select {
@@ -12569,7 +12571,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)
-	markRunStatusCompleted(t, pg, runID)
+	markRunStatusCompleted(t, pg, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -12636,7 +12638,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	publishRunStatusRootEvent(t, eb, runID, entityID)
+	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, db, runID, entityID)
 
 	select {
@@ -12682,7 +12684,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	}
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)
-	markRunStatusCompleted(t, pg, runID)
+	markRunStatusCompleted(t, pg, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {

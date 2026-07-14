@@ -45,7 +45,8 @@ type EventBus struct {
 	subscriptions               map[string][]events.EventType
 	subscriptionKinds           map[string]inMemorySubscriberKind
 	pendingInternalByID         map[string][]events.DeliveryRoute
-	pendingOutboxByID           map[string]pendingOutboxOperation
+	pendingOutboxByID           map[string][]pendingOutboxOperation
+	pendingOutboxSequence       uint64
 	routeTable                  *RouteTable
 	runtimeAgentDescriptors     map[string]ActiveAgentDescriptor
 	connectRoutePlanner         connectRoutePlanResolver
@@ -197,7 +198,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
 		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
 		pendingInternalByID:         make(map[string][]events.DeliveryRoute),
-		pendingOutboxByID:           make(map[string]pendingOutboxOperation),
+		pendingOutboxByID:           make(map[string][]pendingOutboxOperation),
 		routeTable:                  routeTable,
 		store:                       store,
 		logger:                      opts.Logger,
@@ -466,7 +467,7 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
-	eb.pendingOutboxByID = make(map[string]pendingOutboxOperation)
+	eb.pendingOutboxByID = make(map[string][]pendingOutboxOperation)
 	eb.inFlightEventIDs = make(map[string]int)
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {

@@ -69,13 +69,23 @@ func (s *directRecipientTransactionalStore) AppendEvent(context.Context, events.
 	return nil
 }
 
-func (s *directRecipientTransactionalStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {
+func (s *directRecipientTransactionalStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}
 	}
+	previous, existed := s.deliveries[eventID]
 	s.deliveries[eventID] = append([]string(nil), agentIDs...)
+	s.mu.Unlock()
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if existed {
+			s.deliveries[eventID] = append([]string(nil), previous...)
+		} else {
+			delete(s.deliveries, eventID)
+		}
+	})
 	return nil
 }
 
@@ -116,13 +126,27 @@ func (m *directRecipientEventMutation) AppendEvent(ctx context.Context, evt even
 
 func (m *directRecipientEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
 	m.store.mu.Lock()
-	defer m.store.mu.Unlock()
 	for _, existing := range m.store.events {
 		if existing.ID() == evt.ID() {
+			m.store.mu.Unlock()
+			if existing.Type() != evt.Type() {
+				return runtimebus.EventAppendOutcomeUnknown, errors.New("conflicting event identity")
+			}
 			return runtimebus.EventAppendExactDuplicate, nil
 		}
 	}
 	m.store.events = append(m.store.events, evt)
+	m.store.mu.Unlock()
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+		m.store.mu.Lock()
+		defer m.store.mu.Unlock()
+		for i := range m.store.events {
+			if m.store.events[i].ID() == evt.ID() {
+				m.store.events = append(m.store.events[:i], m.store.events[i+1:]...)
+				return
+			}
+		}
+	})
 	return runtimebus.EventAppendInserted, nil
 }
 
@@ -164,22 +188,39 @@ func (s *directRecipientTransactionalStore) InsertEventDeliveriesTx(ctx context.
 	return s.InsertEventDeliveries(ctx, eventID, agentIDs)
 }
 
-func (s *directRecipientTransactionalStore) InsertEventDeliveryRoutesTx(_ context.Context, _ *sql.Tx, eventID string, routes []events.DeliveryRoute) error {
+func (s *directRecipientTransactionalStore) InsertEventDeliveryRoutesTx(ctx context.Context, _ *sql.Tx, eventID string, routes []events.DeliveryRoute) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.routes == nil {
 		s.routes = map[string][]events.DeliveryRoute{}
 	}
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}
 	}
+	previousRoutes, routesExisted := s.routes[eventID]
+	previousDeliveries, deliveriesExisted := s.deliveries[eventID]
 	s.routes[eventID] = events.NormalizeDeliveryRoutes(routes)
+	s.deliveries[eventID] = nil
 	for _, route := range s.routes[eventID] {
 		if route.SubscriberType != "agent" {
 			continue
 		}
 		s.deliveries[eventID] = append(s.deliveries[eventID], route.SubscriberID)
 	}
+	s.mu.Unlock()
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if routesExisted {
+			s.routes[eventID] = append([]events.DeliveryRoute(nil), previousRoutes...)
+		} else {
+			delete(s.routes, eventID)
+		}
+		if deliveriesExisted {
+			s.deliveries[eventID] = append([]string(nil), previousDeliveries...)
+		} else {
+			delete(s.deliveries, eventID)
+		}
+	})
 	return nil
 }
 
@@ -616,6 +657,212 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 	if strings.Join(got, ",") != "reviewer" {
 		t.Fatalf("persisted recipients after exact duplicate = %v, want [reviewer]", got)
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: "ent-1"}}}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	reviewer := eb.Subscribe("reviewer")
+	intent := runtimeengine.EmitIntent{
+		Event:      eventtest.RootIngress("evt-same-batch", events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()),
+		Recipients: []string{"reviewer"},
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, intent}); err != nil {
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent, intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	if evt := requireBusEvent(t, reviewer, "inserted same-batch intent"); evt.ID() != intent.Event.ID() {
+		t.Fatalf("dispatched event = %q, want %q", evt.ID(), intent.Event.ID())
+	}
+	requireNoBusEvent(t, reviewer, "same-batch exact duplicate")
+	if got := len(store.events); got != 1 {
+		t.Fatalf("persisted events = %d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: "ent-1"}}}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	reviewer := eb.Subscribe("reviewer")
+	intent := runtimeengine.EmitIntent{
+		Event:      eventtest.RootIngress("evt-preexisting-batch", events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()),
+		Recipients: []string{"reviewer"},
+	}
+	writeAndDispatch := func(intents []runtimeengine.EmitIntent) {
+		t.Helper()
+		mock.ExpectBegin()
+		mock.ExpectCommit()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+			t.Fatalf("WriteOutbox: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), intents); err != nil {
+			t.Fatalf("DispatchPostCommit: %v", err)
+		}
+	}
+
+	writeAndDispatch([]runtimeengine.EmitIntent{intent})
+	_ = requireBusEvent(t, reviewer, "initial inserted intent")
+	writeAndDispatch([]runtimeengine.EmitIntent{intent, intent, intent})
+	requireNoBusEvent(t, reviewer, "preexisting exact duplicate batch")
+	if got := len(store.events); got != 1 {
+		t.Fatalf("persisted events = %d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: "ent-1"}}}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	reviewer := eb.Subscribe("reviewer")
+	intent := runtimeengine.EmitIntent{
+		Event:      eventtest.RootIngress("evt-conflicting-batch", events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()),
+		Recipients: []string{"reviewer"},
+	}
+	conflict := intent
+	conflict.Event = eventtest.RootIngress(intent.Event.ID(), events.EventType("custom.conflicting"), "", "", []byte(`{"entity_id":"ent-1","value":"conflict"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), intent.Event.CreatedAt())
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollbackActions := []func(){}
+	ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
+		t.Fatalf("WriteOutbox conflict error = %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+	if got := len(store.events); got != 0 {
+		t.Fatalf("events after rollback = %d, want 0", got)
+	}
+	if got, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID()); err != nil || len(got) != 0 {
+		t.Fatalf("deliveries after rollback = %v, %v", got, err)
+	}
+
+	writeAndDispatch := func() {
+		t.Helper()
+		mock.ExpectBegin()
+		mock.ExpectCommit()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAndDispatch()
+	_ = requireBusEvent(t, reviewer, "insert after rolled-back conflict")
+	writeAndDispatch()
+	requireNoBusEvent(t, reviewer, "exact duplicate after rolled-back conflict")
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: "ent-1"}}}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	reviewer := eb.Subscribe("reviewer")
+	intents := []runtimeengine.EmitIntent{
+		{Event: eventtest.RootIngress("evt-distinct-1", events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), Recipients: []string{"reviewer"}},
+		{Event: eventtest.RootIngress("evt-distinct-2", events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), Recipients: []string{"reviewer"}},
+	}
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), intents); err != nil {
+		t.Fatal(err)
+	}
+	if evt := requireBusEvent(t, reviewer, "first distinct intent"); evt.ID() != intents[0].Event.ID() {
+		t.Fatalf("first event = %q, want %q", evt.ID(), intents[0].Event.ID())
+	}
+	if evt := requireBusEvent(t, reviewer, "second distinct intent"); evt.ID() != intents[1].Event.ID() {
+		t.Fatalf("second event = %q, want %q", evt.ID(), intents[1].Event.ID())
+	}
+	requireNoBusEvent(t, reviewer, "distinct intent over-dispatch")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}

@@ -19,11 +19,12 @@ import (
 
 type snapshotRunStore struct {
 	runtimebus.InMemoryEventStore
-	snapshot    runtimebus.RunLifecycleSnapshot
-	events      []store.OperatorEventFull
-	runtimeLogs []store.OperatorRuntimeLogEntry
-	appendErr   error
-	terminalErr error
+	snapshot      runtimebus.RunLifecycleSnapshot
+	events        []store.OperatorEventFull
+	runtimeLogs   []store.OperatorRuntimeLogEntry
+	appendErr     error
+	terminalErr   error
+	terminalCalls int
 }
 
 func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt events.Event) error {
@@ -34,6 +35,7 @@ func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt events.Event) er
 }
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
+	s.terminalCalls++
 	if s.terminalErr != nil {
 		return runtimebus.RunLifecycleSnapshot{}, s.terminalErr
 	}
@@ -150,7 +152,7 @@ func TestRunHubStartRunPublishFailureUsesCanonicalEnvelopeOnly(t *testing.T) {
 	}
 }
 
-func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFails(t *testing.T) {
+func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCanonicalObservationIsUnavailable(t *testing.T) {
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -170,7 +172,7 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFail
 	hub.awaitCompletion("run-123")
 
 	if !hub.isTerminal("run-123") {
-		t.Fatal("expected run session to be marked terminal when completion persistence fails")
+		t.Fatal("expected run session to be marked terminal when canonical completion observation is unavailable")
 	}
 	session := hub.session("run-123")
 	if session == nil {
@@ -226,12 +228,15 @@ func TestRunHubAwaitCompletionFailedTerminalPersistenceOmitsOriginalFailure(t *t
 }
 
 func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
+	endedAt := time.Now().UTC()
 	store := &snapshotRunStore{
 		snapshot: runtimebus.RunLifecycleSnapshot{
 			RunID:       "run-123",
+			Status:      "completed",
 			EventCount:  3,
 			EntityCount: 2,
 			StartedAt:   time.Now().UTC().Add(-2 * time.Second),
+			EndedAt:     &endedAt,
 		},
 	}
 	eb, err := runtimebus.NewEventBus(store)
@@ -279,6 +284,47 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 	}
 	if got, ok := summary["duration_ms"].(int64); !ok || got <= 0 {
 		t.Fatalf("summary.duration_ms = %#v, want positive int64", summary["duration_ms"])
+	}
+}
+
+func TestRunHubAwaitCompletion_WaitingCanonicalRunDoesNotWriteCompleted(t *testing.T) {
+	store := &snapshotRunStore{snapshot: runtimebus.RunLifecycleSnapshot{RunID: "run-123", Status: "running", StartedAt: time.Now().UTC()}}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eb}
+	hub := &runHub{sessions: map[string]*runSession{"run-123": {
+		runID:             "run-123",
+		runtime:           rt,
+		waitForQuiescence: func(context.Context) error { return nil },
+		subs:              map[string]func(RunEventEnvelope){},
+	}}}
+	previousInterval := runCompletionObservationInterval
+	runCompletionObservationInterval = 5 * time.Millisecond
+	t.Cleanup(func() { runCompletionObservationInterval = previousInterval })
+
+	done := make(chan struct{})
+	go func() {
+		hub.awaitCompletion("run-123")
+		close(done)
+	}()
+	time.Sleep(25 * time.Millisecond)
+	wasTerminal := hub.isTerminal("run-123")
+	hub.markTerminal("run-123")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion observer did not stop after session terminalization")
+	}
+	if wasTerminal {
+		t.Fatal("waiting canonical run was marked locally terminal")
+	}
+	if store.terminalCalls != 0 {
+		t.Fatalf("MarkRunTerminal calls = %d, want zero", store.terminalCalls)
+	}
+	if events := hub.session("run-123").controlEvents; len(events) != 0 {
+		t.Fatalf("waiting canonical run emitted synthetic control events: %#v", events)
 	}
 }
 

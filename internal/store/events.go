@@ -1786,17 +1786,20 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
+	if status == "completed" {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("completed run terminalization is owned by normal run completion convergence")
+	}
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
-		if err != nil {
+		if err := supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true); err != nil {
 			return err
 		}
-		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true)
+		var err error
+		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
+		return err
 	})
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err

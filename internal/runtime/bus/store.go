@@ -175,8 +175,8 @@ type ProcessedPipelineReceiptReader interface {
 	HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error)
 }
 
-// RunLifecyclePersistence is an optional capability for persisting canonical
-// terminal run lifecycle state once execution proves the run is done.
+// RunLifecyclePersistence owns explicit failed, cancelled, and forked
+// terminalization. Successful completion is owned by normal-run convergence.
 type RunLifecyclePersistence interface {
 	MarkRunTerminal(ctx context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (RunLifecycleSnapshot, error)
 }

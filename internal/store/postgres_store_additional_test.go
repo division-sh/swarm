@@ -125,7 +125,85 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 	return result
 }
 
-func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeliveries(t *testing.T) {
+func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop agent_turns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_sessions (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'entity',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'session',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			lease_holder TEXT,
+			lease_expires_at TIMESTAMPTZ,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (agent_id, scope_key)
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_sessions: %v", err)
+	}
+	sessionID := uuid.NewString()
+	createdAt := time.Now().UTC().Add(-2 * time.Hour).Round(time.Second)
+	updatedAt := createdAt.Add(30 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES ($1::uuid, 'a1', 'global', 'global', 'session', 'terminated', $2, $3)
+	`, sessionID, createdAt, updatedAt); err != nil {
+		t.Fatalf("insert legacy terminated session: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_sessions): %v", err)
+	}
+
+	var reason string
+	var terminatedAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(termination_reason, ''), terminated_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&reason, &terminatedAt); err != nil {
+		t.Fatalf("load migrated terminated row: %v", err)
+	}
+	if reason != "legacy" {
+		t.Fatalf("termination_reason = %q, want legacy", reason)
+	}
+	if !terminatedAt.Equal(updatedAt) {
+		t.Fatalf("terminated_at = %s, want %s", terminatedAt, updatedAt)
+	}
+}
+
+func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeliveries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -158,17 +236,23 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 	`, runID, eventID); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
+		t.Fatalf("seed pipeline receipt: %v", err)
+	}
 
-	for _, status := range []string{"completed", "failed"} {
-		var failure *runtimefailures.Envelope
-		if status == "failed" {
-			value := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
-			failure = &value
-		}
-		_, err := pg.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
-		if err == nil || !strings.Contains(err.Error(), "active deliveries") {
-			t.Fatalf("MarkRunTerminal(%s active delivery) error = %v, want active delivery rejection", status, err)
-		}
+	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "normal run completion convergence") {
+		t.Fatalf("MarkRunTerminal(completed) error = %v, want canonical convergence refusal", err)
+	}
+	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
+	if _, err := pg.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "active deliveries") {
+		t.Fatalf("MarkRunTerminal(failed active delivery) error = %v, want active delivery rejection", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion(active delivery): %v", err)
+	}
+	var activeStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&activeStatus); err != nil || activeStatus != "running" {
+		t.Fatalf("active-delivery run status = %q, %v, want running", activeStatus, err)
 	}
 
 	if _, err := db.ExecContext(ctx, `
@@ -179,8 +263,8 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("deliver completion: %v", err)
 	}
 
-	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
-		t.Fatalf("MarkRunTerminal(completed): %v", err)
+	if err := pg.ConvergeNormalRunCompletion(ctx, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 
 	var (
@@ -300,7 +384,8 @@ func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t 
 		t.Fatalf("LoadRunLifecycleSnapshot = (%+v, %v), want canonical entity_state failure", snap, err)
 	}
 
-	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
+	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
+	if _, err := pg.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
 		t.Fatalf("MarkRunTerminal error = %v, want canonical entity_state failure", err)
 	}
 
@@ -2026,18 +2111,18 @@ func eventReceiptsTypedIdentityPlans(t *testing.T) []SchemaTableDDL {
 	return plans
 }
 
-func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) {
+func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	completedRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, completedRunID); err != nil {
-		t.Fatalf("seed completed run: %v", err)
+	completedFixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
+	completedRunID := completedFixture.RunID
+	if err := pg.UpsertPipelineReceipt(ctx, completedFixture.EventID, "processed", nil); err != nil {
+		t.Fatalf("seed completed run receipt: %v", err)
 	}
-	completedAt := time.Now().UTC().Round(time.Second)
-	if _, err := pg.MarkRunTerminal(ctx, completedRunID, "completed", nil, completedAt); err != nil {
-		t.Fatalf("MarkRunTerminal(completed): %v", err)
+	if err := pg.ConvergeNormalRunCompletion(ctx, completedFixture.EventID, []string{"done"}, map[string][]string{"review": {"done"}}); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 
 	var (
