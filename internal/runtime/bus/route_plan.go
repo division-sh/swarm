@@ -166,6 +166,22 @@ type RoutePlanLiveRecipient struct {
 	SubscriberType    string
 	PersistAsDelivery bool
 	Producer          routeIntentProducer
+	liveAuthority     liveRecipientAuthority
+	agentRoute        *agentRouteHandle
+}
+
+type liveRecipientAuthority uint8
+
+const (
+	liveRecipientAuthorityIdentity liveRecipientAuthority = iota
+	liveRecipientAuthorityAgentRoute
+)
+
+func (a liveRecipientAuthority) Normalized() liveRecipientAuthority {
+	if a == liveRecipientAuthorityAgentRoute {
+		return a
+	}
+	return liveRecipientAuthorityIdentity
 }
 
 type RoutePlanDeliveryIntent struct {
@@ -389,9 +405,21 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, pro
 	for _, recipient := range uniqueStrings(manifest.PersistedRecipients) {
 		persisted[recipient] = struct{}{}
 	}
-	recipientIDs := uniqueStrings(append(append([]string(nil), manifest.Recipients...), manifest.PersistedRecipients...))
+	candidates := normalizeDeliveryRecipientCandidates(manifest.LiveRecipients)
+	if len(candidates) == 0 {
+		for _, recipient := range uniqueStrings(append(append([]string(nil), manifest.Recipients...), manifest.PersistedRecipients...)) {
+			_, persist := persisted[recipient]
+			candidates = append(candidates, deliveryRecipientCandidate{
+				ID:                recipient,
+				PersistAsDelivery: persist,
+				LiveAuthority:     liveRecipientAuthorityIdentity,
+			})
+		}
+	}
+	recipientIDs := deliveryRecipientIDs(candidates)
 	out := make([]RoutePlanLiveRecipient, 0, len(recipientIDs))
-	for _, recipient := range recipientIDs {
+	for _, candidate := range candidates {
+		recipient := candidate.ID
 		subscriberType := routePlanSubscriberInternal
 		persist := false
 		if _, ok := persisted[recipient]; ok {
@@ -403,6 +431,8 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, pro
 			SubscriberType:    subscriberType,
 			PersistAsDelivery: persist,
 			Producer:          producer,
+			liveAuthority:     candidate.LiveAuthority.Normalized(),
+			agentRoute:        candidate.AgentRoute,
 		})
 	}
 	return normalizeRoutePlanLiveRecipients(out)
@@ -465,6 +495,10 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 		recipient.RecipientID = strings.TrimSpace(recipient.RecipientID)
 		recipient.SubscriberType = strings.TrimSpace(recipient.SubscriberType)
 		recipient.Producer = recipient.Producer.Normalized()
+		recipient.liveAuthority = recipient.liveAuthority.Normalized()
+		if recipient.liveAuthority == liveRecipientAuthorityIdentity {
+			recipient.agentRoute = nil
+		}
 		if recipient.RecipientID == "" {
 			continue
 		}
@@ -478,6 +512,7 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 		key := strings.Join([]string{recipient.SubscriberType, recipient.RecipientID}, "\x00")
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || recipient.PersistAsDelivery
+			out[idx] = mergeRoutePlanLiveRecipientAuthority(out[idx], recipient)
 			if out[idx].Producer.Empty() {
 				out[idx].Producer = recipient.Producer
 			}
@@ -487,6 +522,19 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 		out = append(out, recipient)
 	}
 	return out
+}
+
+func mergeRoutePlanLiveRecipientAuthority(current, candidate RoutePlanLiveRecipient) RoutePlanLiveRecipient {
+	if current.liveAuthority.Normalized() == liveRecipientAuthorityIdentity || candidate.liveAuthority.Normalized() == liveRecipientAuthorityIdentity {
+		current.liveAuthority = liveRecipientAuthorityIdentity
+		current.agentRoute = nil
+		return current
+	}
+	current.liveAuthority = liveRecipientAuthorityAgentRoute
+	if current.agentRoute == nil {
+		current.agentRoute = candidate.agentRoute
+	}
+	return current
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {

@@ -4620,12 +4620,12 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 		t.Fatal("timed out waiting for served runtime context manager")
 	}
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "thing.created", "bundle_hash": bundleHash,
-		"payload": map[string]any{"amount": 7, "who": "operator"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString(),
+		"event_name": "item.received", "bundle_hash": bundleHash,
+		"payload": map[string]any{"item_id": "cleanup"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString(),
 	})
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, "postgres", initial.RunID, initial.EventID, probe)
 	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "thing.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
+		"event_name": "item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
 		"payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString(),
 	})
 	var sessionID string
@@ -7574,21 +7574,7 @@ func writeServedEventPublishActiveLoadFixture(t *testing.T) string {
 
 func writeServedSessionCleanupFixture(t *testing.T) string {
 	t.Helper()
-	root := writeServedEventPublishFollowUpFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-load-agent:
-  id: load-agent
-  role: load_agent
-  prompt_ref: load-agent
-  model: regular
-  mode: task
-  subscriptions:
-    - thing.agent_hold
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
-Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.
-	`)
-	return root
+	return canonicalrouting.CopyRootIngressServedSessionCleanup(t)
 }
 
 func writeServedLiveAgentFixture(t *testing.T) string {
@@ -7801,6 +7787,11 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
 		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
+}
+
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
+	t.Helper()
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, "item-handler", probe)
 }
 
 const (

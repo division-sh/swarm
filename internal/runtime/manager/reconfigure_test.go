@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,19 +26,44 @@ func (reconfigureTestAgent) OnEvent(context.Context, events.Event) ([]events.Eve
 
 func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
 	builds := 0
-	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+	registry := sessions.NewInMemoryRegistry(0)
+	bus := newProjectionTestBus()
+	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
 		builds++
 		return &reconfigureTestAgent{id: cfg.ID}, nil
-	})
-	cfg := models.AgentConfig{ID: "same-current-agent", Tools: []string{"tool-a"}}
+	}, AgentManagerOptions{Sessions: registry})
+	cfg := models.AgentConfig{
+		ID:               "same-current-agent",
+		Tools:            []string{"tool-a"},
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "same-current/instance",
+	}
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(runCtx)
+	seedCtx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
+	if _, err := registry.Acquire(seedCtx, cfg.ID, sessions.RuntimeModeSession, sessions.SessionScopeFlow, "same-current", cfg.CanonicalFlowPath()); err != nil {
+		t.Fatalf("Acquire session: %v", err)
 	}
 	beforeExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
 	if !ok {
 		t.Fatal("spawned execution is absent")
 	}
-	before := beforeExecution.Agent
+	beforeSession, ok := registry.Snapshot(cfg.ID)
+	if !ok {
+		t.Fatal("same-current session is absent before reconfigure")
+	}
+	am.lifecycle.mu.Lock()
+	beforeProjection := am.lifecycle.cells[cfg.ID].execution
+	beforeLoopDone := beforeProjection.loopDone
+	beforeRoute := beforeProjection.route
+	beforeRouteToken := beforeProjection.routeToken
+	beforeGenerationContext := beforeProjection.generationCtx
+	am.lifecycle.mu.Unlock()
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 
 	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{Tools: []string{"tool-a"}}); err != nil {
@@ -51,11 +77,27 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	if !ok {
 		t.Fatal("same-current execution is absent")
 	}
-	if got := afterExecution.Agent; got != before {
-		t.Fatalf("execution agent changed on same-current reconfigure: before=%p after=%p", before, got)
+	if got := afterExecution.Agent; got != beforeExecution.Agent {
+		t.Fatalf("execution agent changed on same-current reconfigure: before=%p after=%p", beforeExecution.Agent, got)
 	}
 	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
 		t.Fatalf("generation = %d, want unchanged %d", got, beforeGeneration)
+	}
+	if !reflect.DeepEqual(afterExecution.Config, beforeExecution.Config) {
+		t.Fatalf("config changed on same-current reconfigure: before=%#v after=%#v", beforeExecution.Config, afterExecution.Config)
+	}
+	if !reflect.DeepEqual(afterExecution.Subscriptions, beforeExecution.Subscriptions) || afterExecution.StartedAt != beforeExecution.StartedAt || afterExecution.Token != beforeExecution.Token {
+		t.Fatalf("execution snapshot changed on same-current reconfigure: before=%#v after=%#v", beforeExecution, afterExecution)
+	}
+	am.lifecycle.mu.Lock()
+	afterProjection := am.lifecycle.cells[cfg.ID].execution
+	am.lifecycle.mu.Unlock()
+	if afterProjection != beforeProjection || afterProjection.loopDone != beforeLoopDone || afterProjection.route != beforeRoute || afterProjection.routeToken != beforeRouteToken || afterProjection.generationCtx != beforeGenerationContext {
+		t.Fatal("same-current reconfigure replaced the projection, loop, route, token, or generation context")
+	}
+	afterSession, ok := registry.Snapshot(cfg.ID)
+	if !ok || !reflect.DeepEqual(afterSession, beforeSession) {
+		t.Fatalf("session changed on same-current reconfigure: before=%#v after=%#v ok=%v", beforeSession, afterSession, ok)
 	}
 }
 

@@ -84,6 +84,41 @@ func CopyRootIngressServedActiveLoad(t testing.TB) string {
 	return root
 }
 
+// CopyRootIngressServedSessionCleanup derives the destructive-cleanup proof
+// with a separately addressable live-agent event from the canonical route.
+func CopyRootIngressServedSessionCleanup(t testing.TB) string {
+	t.Helper()
+	root := CopyRootIngressServedFollowUp(t)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
+  item_id: text
+`, `item.processed:
+  item_id: text
+item.agent_hold:
+  note: text
+`)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `      - name: item_received
+        event: item.received
+        source: external
+`, `      - name: item_received
+        event: item.received
+        source: external
+      - name: item_agent_hold
+        event: item.agent_hold
+        source: external
+`)
+	writeClosedVariantFile(t, root, "agents.yaml", `load-agent:
+  id: load-agent
+  role: load_agent
+  prompt_ref: load-agent
+  model: regular
+  mode: task
+  subscriptions:
+    - item.agent_hold
+`)
+	writeClosedVariantFile(t, root, "prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
+	return root
+}
+
 // CopyRootIngressServedLiveAgent derives the fixed live-agent parity proof
 // from the canonical root-ingress route.
 func CopyRootIngressServedLiveAgent(t testing.TB) string {
