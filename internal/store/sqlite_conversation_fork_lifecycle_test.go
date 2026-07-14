@@ -16,6 +16,9 @@ import (
 func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	ctx := context.Background()
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	if _, err := s.DB.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
+		t.Fatalf("enable production SQLite journal mode: %v", err)
+	}
 	now := activeConversationForkTestClock()
 	source := seedSQLiteConversationForkSource(t, s, now)
 
