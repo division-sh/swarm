@@ -611,14 +611,6 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 	return out
 }
 
-func (eb *EventBus) deliverByType(evt events.Event) {
-	recipients := uniqueStrings(append(
-		eb.resolveRoutedRecipientsForEvent(evt),
-		eb.resolveSubscribedRecipients(string(evt.Type()))...,
-	))
-	_ = eb.deliverToAgents(context.Background(), evt, recipients)
-}
-
 func (eb *EventBus) resolveSubscribedRecipients(eventType string) []string {
 	return deliveryRecipientIDs(eb.resolveSubscribedRecipientsForPlanning(eventType))
 }
