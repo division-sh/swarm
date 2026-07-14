@@ -984,6 +984,44 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
 }
 
+func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *testing.T) {
+	store := newRouteSetEventStore()
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "agent-a"})
+	ch := eb.Subscribe("agent-a", events.EventType("custom.direct"))
+	eventID := uuid.NewString()
+	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:direct-context"}}
+	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
+
+	if err := eb.PublishDirect(ctx, eventtest.RootIngress(
+		eventID,
+		events.EventType("custom.direct"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	), []string{"agent-a"}); err != nil {
+		t.Fatalf("PublishDirect: %v", err)
+	}
+	got := requireBusEvent(t, ch, "context-carrying direct delivery")
+	if got.DeliveryContext().ReplyContextID() != deliveryContext.ReplyContextID() {
+		t.Fatalf("live direct context = %#v, want %#v", got.DeliveryContext(), deliveryContext)
+	}
+	store.mu.Lock()
+	routes := append([]events.DeliveryRoute(nil), store.routes[eventID]...)
+	store.mu.Unlock()
+	if len(routes) != 1 || routes[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
+		t.Fatalf("persisted direct routes = %#v, want one context-carrying route", routes)
+	}
+}
+
 func TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
@@ -1744,9 +1782,15 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		if err != nil {
 			t.Fatal(err)
 		}
+		anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+			FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
+			Stage: "awaiting_review", StageActivationID: uuid.NewString(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		card, err := decisioncard.New(decisioncard.Card{
-			CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
-			Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+			CardID: uuid.NewString(), RunID: runID, Anchor: anchor,
 			Snapshot:         snapshot,
 			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: time.Now().UTC(),

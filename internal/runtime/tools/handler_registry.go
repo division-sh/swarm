@@ -46,7 +46,6 @@ func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
 
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
 	handlers["human_task_request"] = e.execHumanTaskRequest
-	handlers["human_task_decide"] = e.execHumanTaskDecide
 }
 
 func (e *Executor) registerFlowDataHandlers(handlers map[string]ToolHandler) {

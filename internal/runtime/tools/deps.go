@@ -56,7 +56,7 @@ type ExecutorOptions struct {
 	ManagedCredentials runtimemanagedcredentials.Store
 	MailboxStore       MailboxPersistence
 	EntityStore        EntityPersistence
-	HumanTaskStore     HumanTaskPersistence
+	HumanTaskStore     HumanTaskCardStore
 	WorkflowInstances  WorkflowInstanceLoader
 	MCPClient          *runtimemcp.Client
 	WorkflowSource     semanticview.Source

@@ -12,6 +12,10 @@ import (
 )
 
 func insertDecisionCardLifecycleOutbox(ctx context.Context, tx *sql.Tx, card decisioncard.Card, evt events.Event, postgres bool) error {
+	scope, err := card.Anchor.Scope()
+	if err != nil {
+		return err
+	}
 	query := `INSERT INTO decision_card_lifecycle_outbox (
 		event_id, card_id, run_id, bundle_hash, event_name, payload, entity_id, flow_instance, status, created_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
@@ -19,7 +23,7 @@ func insertDecisionCardLifecycleOutbox(ctx context.Context, tx *sql.Tx, card dec
 	if postgres {
 		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d"))
 	}
-	_, err := tx.ExecContext(ctx, query, evt.ID(), card.CardID, card.RunID, card.BundleHash, string(evt.Type()), string(evt.Payload()), card.EntityID, card.FlowInstance, evt.CreatedAt().UTC())
+	_, err = tx.ExecContext(ctx, query, evt.ID(), card.CardID, card.RunID, card.BundleHash, string(evt.Type()), string(evt.Payload()), nullString(scope.EntityID), nullString(scope.FlowInstance), evt.CreatedAt().UTC())
 	return err
 }
 
@@ -28,7 +32,7 @@ func (s *PostgresStore) ListPendingDecisionCardLifecycleEvents(ctx context.Conte
 		limit = 200
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT event_id::text, run_id::text, event_name, payload, entity_id::text, flow_instance, created_at
+		SELECT event_id::text, run_id::text, event_name, payload, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), created_at
 		FROM decision_card_lifecycle_outbox
 		WHERE bundle_hash = $1 AND status = 'pending'
 		ORDER BY created_at ASC, event_id ASC
@@ -45,7 +49,7 @@ func (s *SQLiteRuntimeStore) ListPendingDecisionCardLifecycleEvents(ctx context.
 		limit = 200
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT event_id, run_id, event_name, payload, entity_id, flow_instance, created_at
+		SELECT event_id, run_id, event_name, payload, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), created_at
 		FROM decision_card_lifecycle_outbox
 		WHERE bundle_hash = ? AND status = 'pending'
 		ORDER BY created_at ASC, event_id ASC

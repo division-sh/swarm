@@ -380,6 +380,32 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 // carries the mutation; backend SQL transaction details stay below the store
 // boundary.
 func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) error {
+	return eb.publishInMutation(ctx, evt, runtimereplayclaim.CommittedReplayScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		return eb.planSubscribedRoutePlan(ctx, evt, true)
+	})
+}
+
+// PublishDirectInMutation is the transactional counterpart of PublishDirect.
+// It persists the exact direct-recipient manifest in the caller's active typed
+// mutation so payload fields can never become delivery authority.
+func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
+	requested := uniqueStrings(recipients)
+	if len(requested) == 0 {
+		return errors.New("direct event publication requires at least one recipient")
+	}
+	return eb.publishInMutation(ctx, evt, runtimereplayclaim.CommittedReplayScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		plan, err := eb.planDirectRoutePlan(ctx, evt, requested)
+		if err != nil {
+			return RoutePlan{}, err
+		}
+		if filtered := filteredRecipients(requested, plan.RecipientIDs()); len(filtered) > 0 {
+			return RoutePlan{}, fmt.Errorf("transactional direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
+		}
+		return plan, nil
+	})
+}
+
+func (eb *EventBus) publishInMutation(ctx context.Context, evt events.Event, replayScope runtimereplayclaim.CommittedReplayScope, planRoutes func(context.Context, events.Event) (RoutePlan, error)) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
@@ -419,7 +445,7 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 	if err := mutation.AppendEvent(txctx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
+	inboundPlan, err := planRoutes(txctx, evt)
 	if err != nil {
 		return err
 	}
@@ -433,7 +459,7 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 			eb.notifyTestPublishPersisted(context.WithoutCancel(txctx), evt, inboundPlan)
 		})
 	}
-	if err := eb.upsertCommittedReplayScopeMutation(txctx, mutation, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := eb.upsertCommittedReplayScopeMutation(txctx, mutation, evt.ID(), replayScope); err != nil {
 		return err
 	}
 	if inboundPlan.TargetFailure != "" {
@@ -1527,7 +1553,7 @@ func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, r
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return plan.Normalized(), nil
+	return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
 }
 
 // PublishDirect persists an event and delivers it to an explicit caller-supplied

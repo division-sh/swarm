@@ -116,13 +116,6 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 				"deadline_at": "2026-01-02T03:04:05Z",
 			},
 		},
-		{
-			name: "human_task_decide_alias",
-			tool: "human_task_decide",
-			input: map[string]any{
-				"decision": "approve",
-			},
-		},
 	}
 
 	for _, tt := range tests {

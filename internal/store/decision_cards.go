@@ -48,6 +48,8 @@ func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisi
 }
 
 func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
+	card.CreatedAt = decisioncard.CanonicalTimestamp(card.CreatedAt)
+	card.UpdatedAt = decisioncard.CanonicalTimestamp(card.UpdatedAt)
 	if err := card.Validate(); err != nil {
 		return err
 	}
@@ -63,21 +65,23 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	if err != nil {
 		return err
 	}
+	anchor, err := canonicaljson.Encode(card.Anchor.SemanticValue())
+	if err != nil {
+		return err
+	}
 	query := `
-		INSERT INTO decision_cards (
-			card_id, run_id, flow_instance, flow_id, entity_id, stage,
-			stage_activation_id, decision_id, status, snapshot,
-			card_content_hash, decision_schema_hash, bundle_hash, workflow_version,
-			effective_cadence, provenance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (card_id) DO NOTHING`
+			INSERT INTO decision_cards (
+				card_id, run_id, anchor_kind, anchor, status, snapshot,
+				card_content_hash, decision_schema_hash, bundle_hash, workflow_version,
+				effective_cadence, provenance, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (card_id) DO NOTHING`
 	if postgres {
 		query = strings.ReplaceAll(query, "?", "$%d")
 		query = numberPostgresPlaceholders(query)
 	}
 	res, err := db.ExecContext(ctx, query,
-		card.CardID, card.RunID, card.FlowInstance, nullString(card.FlowID), card.EntityID, card.Stage,
-		card.StageActivationID, card.DecisionID, card.Status, string(snapshot),
+		card.CardID, card.RunID, card.Anchor.Kind(), string(anchor), card.Status, string(snapshot),
 		card.CardContentHash, card.DecisionSchemaHash, card.BundleHash, nullString(card.WorkflowVersion),
 		string(cadence), string(provenance), card.CreatedAt.UTC(), card.UpdatedAt.UTC(),
 	)
@@ -90,7 +94,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	}
 	if rows == 0 {
 		existing, loadErr := loadDecisionCard(ctx, db, card.CardID, postgres, false)
-		if loadErr == nil && existing.CardContentHash == card.CardContentHash && existing.StageActivationID == card.StageActivationID {
+		if loadErr == nil && existing.CardContentHash == card.CardContentHash && existing.Anchor.Kind() == card.Anchor.Kind() && existing.Anchor.SemanticValue().Equal(card.Anchor.SemanticValue()) {
 			return nil
 		}
 		if loadErr != nil {
@@ -99,7 +103,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 		return fmt.Errorf("decision card identity collision: %s", card.CardID)
 	}
 	_, err = appendDecisionCardChangeDTO(ctx, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
-		"status": card.Status, "stage_activation_id": card.StageActivationID,
+		"status": card.Status, "anchor_kind": card.Anchor.Kind(),
 	}, card.CreatedAt, postgres)
 	return err
 }
@@ -121,8 +125,7 @@ func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (de
 }
 
 const decisionCardSelect = `SELECT
-	card_id, run_id, flow_instance, COALESCE(flow_id, ''), entity_id, stage,
-	stage_activation_id, decision_id, status, snapshot, card_content_hash,
+	card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
 	decision_schema_hash, bundle_hash, COALESCE(workflow_version, ''),
 	effective_cadence, provenance, COALESCE(verdict, ''), COALESCE(fields, '{}'),
 	COALESCE(decided_by, ''), decided_at, deferred_until,
@@ -147,11 +150,11 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 
 func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	var card decisioncard.Card
-	var snapshot, cadence, provenance, fields []byte
+	var anchorKind string
+	var anchor, snapshot, cadence, provenance, fields []byte
 	var decidedAt, deferredUntil, createdAt, updatedAt any
 	err := row.Scan(
-		&card.CardID, &card.RunID, &card.FlowInstance, &card.FlowID, &card.EntityID, &card.Stage,
-		&card.StageActivationID, &card.DecisionID, &card.Status, &snapshot, &card.CardContentHash,
+		&card.CardID, &card.RunID, &anchorKind, &anchor, &card.Status, &snapshot, &card.CardContentHash,
 		&card.DecisionSchemaHash, &card.BundleHash, &card.WorkflowVersion,
 		&cadence, &provenance, &card.Verdict, &fields, &card.DecidedBy, &decidedAt, &deferredUntil,
 		&card.DecisionEventID, &card.DeliveryReceiptID, &card.DeliveryRenderHash, &card.SupersededReason,
@@ -160,6 +163,10 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return decisioncard.Card{}, decisioncard.ErrNotFound
 	}
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	card.Anchor, err = decisioncard.DecodeAnchor(anchorKind, anchor)
 	if err != nil {
 		return decisioncard.Card{}, err
 	}
@@ -246,7 +253,17 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 		add("run_id", value)
 	}
 	if value := strings.TrimSpace(opts.EntityID); value != "" {
-		add("entity_id", value)
+		args = append(args, value)
+		placeholder := "?"
+		if postgres {
+			placeholder = "$" + strconv.Itoa(len(args))
+			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND anchor->>'entity_id' = "+placeholder+") OR (anchor_kind = 'human_task' AND anchor->'scope'->>'entity_id' = "+placeholder+"))")
+		} else {
+			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = "+placeholder+") OR (anchor_kind = 'human_task' AND json_extract(anchor, '$.scope.entity_id') = "+placeholder+"))")
+		}
+	}
+	if value := strings.TrimSpace(opts.AnchorKind); value != "" {
+		add("anchor_kind", value)
 	}
 	if !cursor.CreatedAt.IsZero() {
 		if postgres {
@@ -264,11 +281,12 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	if postgres {
 		limit = "$" + strconv.Itoa(len(args))
 	}
-	query := `SELECT card_id, run_id, flow_instance, entity_id, stage, decision_id,
-		COALESCE(snapshot->>'title', ''), status, deferred_until, created_at, updated_at
+	query := `SELECT card_id, run_id, anchor_kind, anchor,
+			COALESCE(snapshot->>'title', ''), COALESCE(snapshot->>'decision', ''), status, deferred_until, created_at, updated_at
 		FROM decision_cards WHERE ` + strings.Join(clauses, " AND ") + ` ORDER BY created_at, card_id LIMIT ` + limit
 	if !postgres {
 		query = strings.Replace(query, "snapshot->>'title'", "json_extract(snapshot, '$.title')", 1)
+		query = strings.Replace(query, "snapshot->>'decision'", "json_extract(snapshot, '$.decision')", 1)
 	}
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -278,12 +296,30 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	results := []decisioncard.ListItem{}
 	for rows.Next() {
 		var row decisioncard.ListItem
+		var anchorKind string
+		var anchor []byte
 		var deferred, created, updated any
-		if err := rows.Scan(&row.CardID, &row.RunID, &row.FlowInstance, &row.EntityID, &row.Stage,
-			&row.DecisionID, &row.Title, &row.Status, &deferred, &created, &updated); err != nil {
+		if err := rows.Scan(&row.CardID, &row.RunID, &anchorKind, &anchor,
+			&row.Title, &row.Decision, &row.Status, &deferred, &created, &updated); err != nil {
+			return nil, "", err
+		}
+		row.Anchor, err = decisioncard.DecodeAnchor(anchorKind, anchor)
+		if err != nil {
+			return nil, "", err
+		}
+		row.Scope, err = row.Anchor.Scope()
+		if err != nil {
 			return nil, "", err
 		}
 		row.Kind = decisioncard.KindDecisionCard
+		if row.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
+			human, err := row.Anchor.HumanTask()
+			if err != nil {
+				return nil, "", err
+			}
+			row.Category = human.Category
+			row.Decision = ""
+		}
 		if at, ok, err := sqliteTimeValue(deferred); err != nil {
 			return nil, "", err
 		} else if ok {
@@ -313,6 +349,9 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 }
 
 func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return decideDecisionCard(ctx, tx, req, true)
+	}
 	var out decisioncard.DecisionOutcome
 	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -323,6 +362,9 @@ func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard
 }
 
 func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return decideDecisionCard(ctx, tx, req, false)
+	}
 	var out decisioncard.DecisionOutcome
 	err := s.runDecisionCardMutation(ctx, "sqlite decide decision card", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -333,9 +375,9 @@ func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisio
 }
 
 func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	now := req.Now.UTC()
+	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
 	if err != nil {
@@ -355,6 +397,29 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	}
 	if strings.TrimSpace(req.DecisionEventID) == "" {
 		return decisioncard.DecisionOutcome{}, fmt.Errorf("decision event id is required")
+	}
+	if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
+		proposed := card
+		proposed.Verdict = strings.TrimSpace(req.Verdict)
+		forced, err := commitHumanTaskContinuation(ctx, tx, proposed, req.DecisionEventID, now, postgres)
+		if err != nil {
+			return decisioncard.DecisionOutcome{}, err
+		}
+		if forced {
+			continuation, err := loadHumanTaskContinuation(ctx, tx, card.CardID, postgres, false)
+			if err != nil {
+				return decisioncard.DecisionOutcome{}, err
+			}
+			card.DeferredUntil = continuation.DeferredUntil
+			card.UpdatedAt = now
+			changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{
+				"until": continuation.DeferredUntil.UTC().Format(time.RFC3339Nano), "cause": "weekly_budget_exhausted",
+			}, now, postgres)
+			if err != nil {
+				return decisioncard.DecisionOutcome{}, err
+			}
+			return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID, ForcedDeferred: true}, nil
+		}
 	}
 	if strings.TrimSpace(req.InputDraftID) != "" {
 		draft, err := loadDecisionCardDraft(ctx, tx, req.InputDraftID, postgres)
@@ -416,6 +481,9 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 }
 
 func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return deferDecisionCard(ctx, tx, req, true)
+	}
 	var out decisioncard.DecisionOutcome
 	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -426,6 +494,9 @@ func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.
 }
 
 func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return deferDecisionCard(ctx, tx, req, false)
+	}
 	var out decisioncard.DecisionOutcome
 	err := s.runDecisionCardMutation(ctx, "sqlite defer decision card", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -436,11 +507,12 @@ func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decision
 }
 
 func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	now := req.Now.UTC()
+	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if !req.Until.After(now) {
+	until := decisioncard.CanonicalTimestamp(req.Until)
+	if !until.After(now) {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrInvalidDeferUntil
 	}
 	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
@@ -450,20 +522,28 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 	if card.Status != decisioncard.StatusPending {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrAlreadyTerminal
 	}
+	if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
+		if err := deferHumanTaskContinuation(ctx, tx, card.CardID, until, now, postgres); err != nil {
+			return decisioncard.DecisionOutcome{}, err
+		}
+	}
 	query := `UPDATE decision_cards SET deferred_until = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
 	if postgres {
 		query = `UPDATE decision_cards SET deferred_until = $1, updated_at = $2 WHERE card_id = $3 AND status = 'pending'`
 	}
-	if _, err := tx.ExecContext(ctx, query, req.Until.UTC(), now, card.CardID); err != nil {
+	if _, err := tx.ExecContext(ctx, query, until, now, card.CardID); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	card.DeferredUntil = req.Until.UTC()
+	card.DeferredUntil = until
 	card.UpdatedAt = now
 	changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{"until": card.DeferredUntil}, now, postgres)
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, err
 }
 
 func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return beginDecisionCardInput(ctx, tx, req, true)
+	}
 	var draft decisioncard.InputDraft
 	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -474,6 +554,9 @@ func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decision
 }
 
 func (s *SQLiteRuntimeStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return beginDecisionCardInput(ctx, tx, req, false)
+	}
 	var draft decisioncard.InputDraft
 	err := s.runDecisionCardMutation(ctx, "sqlite begin decision card input", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -484,9 +567,9 @@ func (s *SQLiteRuntimeStore) BeginDecisionCardInput(ctx context.Context, req dec
 }
 
 func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.BeginInputRequest, postgres bool) (decisioncard.InputDraft, error) {
-	now := req.Now.UTC()
+	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	if req.TTL <= 0 {
 		req.TTL = 15 * time.Minute
@@ -519,7 +602,7 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	draft := decisioncard.InputDraft{
 		InputDraftID: uuid.NewString(), RunID: card.RunID, CardID: card.CardID, ActorTokenID: actor,
 		Verdict: strings.TrimSpace(req.Verdict), DeliveryReceiptID: strings.TrimSpace(req.DeliveryReceiptID), Status: decisioncard.DraftStatusActive,
-		ExpiresAt: now.Add(req.TTL), CreatedAt: now, UpdatedAt: now,
+		ExpiresAt: decisioncard.CanonicalTimestamp(now.Add(req.TTL)), CreatedAt: now, UpdatedAt: now,
 	}
 	query := `INSERT INTO decision_card_input_drafts (input_draft_id, run_id, card_id, actor_token_id, verdict, delivery_receipt_id, status, expires_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -536,6 +619,9 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 }
 
 func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return cancelDecisionCardInput(ctx, tx, req, true)
+	}
 	var draft decisioncard.InputDraft
 	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -546,6 +632,9 @@ func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisio
 }
 
 func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return cancelDecisionCardInput(ctx, tx, req, false)
+	}
 	var draft decisioncard.InputDraft
 	err := s.runDecisionCardMutation(ctx, "sqlite cancel decision card input", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -556,9 +645,9 @@ func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req de
 }
 
 func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.CancelInputRequest, postgres bool) (decisioncard.InputDraft, error) {
-	now := req.Now.UTC()
+	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	draft, err := loadDecisionCardDraft(ctx, tx, req.InputDraftID, postgres)
 	if err != nil {
@@ -604,6 +693,10 @@ func loadDecisionCardDraft(ctx context.Context, db decisionCardSQL, id string, p
 }
 
 func updateDecisionCardDraftStatus(ctx context.Context, db decisionCardSQL, id, status string, now time.Time, postgres bool) error {
+	now = decisioncard.CanonicalTimestamp(now)
+	if now.IsZero() {
+		return fmt.Errorf("decision card draft transition requires an authoritative timestamp")
+	}
 	query := `UPDATE decision_card_input_drafts SET status = ?, updated_at = ? WHERE input_draft_id = ? AND status = 'active'`
 	if postgres {
 		query = `UPDATE decision_card_input_drafts SET status = $1, updated_at = $2 WHERE input_draft_id = $3 AND status = 'active'`
@@ -627,6 +720,10 @@ type draftTransitionFilter struct {
 }
 
 func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftTransitionFilter, now time.Time, onlyExpired, postgres bool) (int, error) {
+	now = decisioncard.CanonicalTimestamp(now)
+	if now.IsZero() {
+		return 0, fmt.Errorf("decision card draft transition requires an authoritative timestamp")
+	}
 	filter.onlyExpired = onlyExpired
 	clauses := []string{"status = 'active'"}
 	args := []any{}
@@ -726,9 +823,9 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context,
 }
 
 func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) error {
-	now = now.UTC()
+	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	card, err := loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, postgres)
 	if errors.Is(err, decisioncard.ErrNotFound) {
@@ -769,7 +866,7 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForRun(ctx context.Context, r
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
-	now = now.UTC()
+	now = decisioncard.CanonicalTimestamp(now)
 	if runID == "" {
 		return fmt.Errorf("run id is required to supersede decision cards")
 	}
@@ -777,7 +874,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		return fmt.Errorf("supersession reason is required")
 	}
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	if err := supersedeRunGateActivations(ctx, tx, runID, reason, now, postgres); err != nil {
 		return err
@@ -810,6 +907,11 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		if err != nil {
 			return err
 		}
+		if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
+			if err := supersedeHumanTaskContinuation(ctx, tx, card.CardID, now, postgres); err != nil {
+				return err
+			}
+		}
 		update := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
 		if postgres {
 			update = `UPDATE decision_cards SET status = $1, superseded_reason = $2, updated_at = $3 WHERE card_id = $4 AND status = 'pending'`
@@ -820,14 +922,26 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
 		}
-		payload, err := canonicaljson.Bytes(map[string]any{
-			"card_id": card.CardID, "stage_activation_id": card.StageActivationID, "reason": reason,
-		})
+		payload := []byte(nil)
+		stage, stageErr := card.Anchor.StageGate()
+		if stageErr == nil {
+			payload, err = canonicaljson.Bytes(map[string]any{
+				"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "stage_activation_id": stage.StageActivationID, "reason": reason,
+			})
+		} else {
+			payload, err = canonicaljson.Bytes(map[string]any{
+				"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "reason": reason,
+			})
+		}
+		if err != nil {
+			return err
+		}
+		scope, err := card.Anchor.Scope()
 		if err != nil {
 			return err
 		}
 		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now)
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now)
 		if err := insertDecisionCardLifecycleOutbox(ctx, tx, card, evt, postgres); err != nil {
 			return fmt.Errorf("queue run decision card supersession event: %w", err)
 		}
@@ -938,13 +1052,15 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 }
 
 func loadDecisionCardByActivation(ctx context.Context, db decisionCardSQL, runID, entityID, activationID string, postgres bool) (decisioncard.Card, error) {
-	query := decisionCardSelect + ` WHERE entity_id = ? AND stage_activation_id = ?`
+	query := decisionCardSelect + ` WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND json_extract(anchor, '$.stage_activation_id') = ?`
 	args := []any{entityID, activationID}
 	if strings.TrimSpace(runID) != "" {
 		query += ` AND run_id = ?`
 		args = append(args, runID)
 	}
 	if postgres {
+		query = strings.ReplaceAll(query, "json_extract(anchor, '$.entity_id')", "anchor->>'entity_id'")
+		query = strings.ReplaceAll(query, "json_extract(anchor, '$.stage_activation_id')", "anchor->>'stage_activation_id'")
 		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d")) + ` FOR UPDATE`
 	}
 	return scanDecisionCard(db.QueryRowContext(ctx, query, args...))
@@ -1005,6 +1121,10 @@ func appendDecisionCardChangeDTO(ctx context.Context, db decisionCardSQL, runID,
 }
 
 func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
+	now = decisioncard.CanonicalTimestamp(now)
+	if now.IsZero() {
+		return 0, fmt.Errorf("decision card change requires an authoritative timestamp")
+	}
 	if payload.Kind() != semanticvalue.KindObject {
 		return 0, fmt.Errorf("decision card change payload must be an object")
 	}
@@ -1017,7 +1137,7 @@ func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, ca
 		query = `INSERT INTO decision_card_changes (run_id, card_id, change_type, payload, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING change_id`
 	}
 	var id int64
-	if err := db.QueryRowContext(ctx, query, runID, cardID, changeType, string(raw), now.UTC()).Scan(&id); err != nil {
+	if err := db.QueryRowContext(ctx, query, runID, cardID, changeType, string(raw), now).Scan(&id); err != nil {
 		return 0, fmt.Errorf("append decision card change: %w", err)
 	}
 	return id, nil

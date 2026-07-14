@@ -201,26 +201,6 @@ func canonicalRuntimeToolInput(name string, input any) any {
 		if payload["context"] == nil && payload["payload"] != nil {
 			payload["context"] = payload["payload"]
 		}
-	case "human_task_request":
-		if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
-			payload["entity_id"] = entityID
-		}
-		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
-			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
-			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {
-			if hours := asInt(payload["deadline_hours"]); hours > 0 {
-				payload["deadline_at"] = time.Now().Add(time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
-			}
-		}
-	case "human_task_decide":
-		switch strings.ToLower(strings.TrimSpace(asString(payload["decision"]))) {
-		case "approve":
-			payload["decision"] = "approved"
-		case "reject":
-			payload["decision"] = "rejected"
-		case "defer":
-			payload["decision"] = "deferred"
-		}
 	}
 	return payload
 }

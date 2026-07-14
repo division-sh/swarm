@@ -27,8 +27,18 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		forkCard := sourceCard
 		forkCard.CardID = binding.Fork.CardID
 		forkCard.RunID = strings.TrimSpace(forkRunID)
-		forkCard.EntityID = strings.TrimSpace(entityID)
-		forkCard.StageActivationID = binding.Fork.ActivationID
+		sourceAnchor, err := sourceCard.Anchor.StageGate()
+		if err != nil {
+			return fmt.Errorf("source decision card %s anchor: %w", sourceCard.CardID, err)
+		}
+		forkCard.Anchor, err = decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+			FlowInstance: sourceAnchor.FlowInstance, FlowID: sourceAnchor.FlowID,
+			EntityID: strings.TrimSpace(entityID), Stage: sourceAnchor.Stage,
+			StageActivationID: binding.Fork.ActivationID,
+		})
+		if err != nil {
+			return fmt.Errorf("construct fork stage_gate anchor: %w", err)
+		}
 		forkCard.Status = decisioncard.StatusPending
 		forkCard.Verdict = ""
 		forkCard.Fields = semanticvalue.EmptyObject()

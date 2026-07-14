@@ -39,7 +39,7 @@ type selectedConcreteRuntimeStore interface {
 	runtimepipeline.MailboxWriteMaterializationStore
 	runtimetools.MailboxPersistence
 	runtimetools.EntityPersistence
-	runtimetools.HumanTaskPersistence
+	runtimetools.HumanTaskCardStore
 	budgetspend.Store
 	runtime.InboundPersistence
 	runtimeingress.Store

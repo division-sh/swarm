@@ -38,7 +38,7 @@ const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
 type SelectedContractAgentRuntimeOptions struct {
 	Config              *config.Config
 	EntityStore         runtimetools.EntityPersistence
-	HumanTaskStore      runtimetools.HumanTaskPersistence
+	HumanTaskStore      runtimetools.HumanTaskCardStore
 	SessionRegistry     runtimesessions.Registry
 	ConversationStore   runtimellm.ConversationPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence

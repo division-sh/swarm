@@ -64,7 +64,7 @@ type Stores struct {
 	StartupOwnership    runtimestartupownership.Store
 	MailboxStore        runtimetools.MailboxPersistence
 	ToolEntityStore     runtimetools.EntityPersistence
-	HumanTaskStore      runtimetools.HumanTaskPersistence
+	HumanTaskStore      runtimetools.HumanTaskCardStore
 	BudgetSpendStore    budgetspend.Store
 	InboundStore        InboundPersistence
 	RuntimeIngressStore runtimeingress.Store

@@ -13,23 +13,38 @@ import (
 )
 
 type GateDecisionFence interface {
-	CommitGateDecision(context.Context, decisioncard.Card, string, time.Time) error
+	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
 }
 
-func (s *WorkflowInstanceStore) CommitGateDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
+func (s *WorkflowInstanceStore) CommitDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
+	switch card.Anchor.Kind() {
+	case decisioncard.AnchorKindStageGate:
+		return s.commitGateDecision(ctx, card, eventID, now)
+	case decisioncard.AnchorKindHumanTask:
+		return nil
+	default:
+		return fmt.Errorf("decision-card anchor kind %q is not registered", card.Anchor.Kind())
+	}
+}
+
+func (s *WorkflowInstanceStore) commitGateDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
 	if s == nil || !s.Enabled() {
 		return fmt.Errorf("workflow instance store is required for gate decision")
 	}
-	return s.MutateE(ctx, card.EntityID, func(instance *WorkflowInstance) error {
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return err
+	}
+	return s.MutateE(ctx, anchor.EntityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err
 		}
-		activation, found, err := gateruntime.Load(carrier.StateBuckets, card.FlowID, card.DecisionID)
+		activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
 		if err != nil {
 			return err
 		}
-		if !found || activation.ActivationID != card.StageActivationID || activation.CardID != card.CardID || activation.Stage != card.Stage || instance.CurrentState != card.Stage {
+		if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
 			return fmt.Errorf("decision card is superseded by the current stage activation")
 		}
 		if err := activation.CommitDecision(eventID, now); err != nil {

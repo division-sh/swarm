@@ -73,9 +73,9 @@ type TestSetupStore interface {
 	SetupScenarioEntities(context.Context, store.ScenarioSetupRequest) (store.ScenarioSetupResult, error)
 }
 
-type DecisionCardWorkflowStore interface {
+type DecisionCardAuthority interface {
 	RunPipelineMutation(context.Context, func(context.Context) error) error
-	CommitGateDecision(context.Context, decisioncard.Card, string, time.Time) error
+	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
 }
 
 type OperatorReadOptions struct {
@@ -101,7 +101,7 @@ type OperatorReadOptions struct {
 	AgentControl              AgentControlController
 	Mailbox                   MailboxAPIStore
 	DecisionCards             decisioncard.Store
-	WorkflowStore             DecisionCardWorkflowStore
+	DecisionAuthority         DecisionCardAuthority
 	TestSetup                 TestSetupStore
 	Idempotency               APIIdempotencyStore
 	Events                    EventPublisher

@@ -4040,7 +4040,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
-	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, _ := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
 		"bundle_hash":     bundleHash,
@@ -4100,7 +4100,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
-	endpoint, db, bundleHash := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, rt := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
@@ -4119,7 +4119,13 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), servedProofPollDeadline)
+	defer cancelWait()
+	if err := rt.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("wait for join source quiescence before fork frontier: %v", err)
+	}
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
 
 	var fork apiv1.RunForkExecutionResult
@@ -6186,9 +6192,15 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		StageActivationID: activation.ActivationID,
+	})
+	if err != nil {
+		t.Fatalf("new decision card anchor: %v", err)
+	}
 	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, FlowInstance: "root", EntityID: entityID,
-		Stage: activation.Stage, StageActivationID: activation.ActivationID, DecisionID: activation.DecisionID,
+		CardID: activation.CardID, RunID: runID, Anchor: anchor,
 		Snapshot:   snapshot,
 		BundleHash: bundleHash, WorkflowVersion: "1.0.0",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
@@ -7509,14 +7521,14 @@ func writeServedTestSetupFixture(t *testing.T) string {
 	return canonicalrouting.CopyServedTestSetup(t)
 }
 
-func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
+func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime) {
 	t.Helper()
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	root := writeServedJoinProofFixture(t)
 	bundleHash := seedServeRuntimeBundleCatalogRoot(t, context.Background(), pg, root)
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+	endpoint, rt := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		BundleHash:              bundleHash,
 		PlatformSpecPath:        defaultPlatformSpecPath,
@@ -7529,7 +7541,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string) {
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
-	return endpoint, db, bundleHash
+	return endpoint, db, bundleHash, rt
 }
 
 func writeServedJoinProofFixture(t *testing.T) string {
@@ -7595,9 +7607,15 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'fork-probe', 'pending', 'join_fork_replay_proof', $4)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'frontier-agent', 'pending', 'join_fork_replay_proof', $4)
 	`, deliveryID, runID, eventID, createdAt); err != nil {
 		t.Fatalf("seed served join fork delivery: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects)
+		VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}'::jsonb)
+	`, eventID); err != nil {
+		t.Fatalf("seed served join fork pipeline receipt: %v", err)
 	}
 	return eventID
 }

@@ -35,6 +35,10 @@ type recordingPipelineBus struct {
 	outboxIntents         []runtimeengine.EmitIntent
 	publishErr            error
 	publishInMutationHook func(context.Context, events.Event) error
+	directPublishes       []events.Event
+	directRecipients      [][]string
+	directContexts        []events.DeliveryContext
+	directInMutation      []bool
 	outboxErr             error
 	runtimeLogErr         error
 }
@@ -80,7 +84,23 @@ func (*recordingPipelineBus) Subscribe(string, ...events.EventType) <-chan event
 }
 
 func (*recordingPipelineBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
-func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string                 { return nil }
+func (b *recordingPipelineBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
+	_, inMutation := PipelineSQLTxFromContext(ctx)
+	if !inMutation {
+		return errors.New("pipeline transaction is required")
+	}
+	if b.publishErr != nil {
+		return b.publishErr
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.directPublishes = append(b.directPublishes, evt)
+	b.directRecipients = append(b.directRecipients, append([]string(nil), recipients...))
+	b.directContexts = append(b.directContexts, events.DeliveryContextFromContext(ctx))
+	b.directInMutation = append(b.directInMutation, inMutation)
+	return nil
+}
+func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string { return nil }
 func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEntry) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

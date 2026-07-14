@@ -133,6 +133,129 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	}
 }
 
+func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testing.T) {
+	current := canonicalSchemaBootstrapTestRequest(t)
+	legacy := stageOnlyDecisionCardSchemaRequest(t)
+	legacy.Origin.CreatedAt = legacy.Origin.CreatedAt.Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+
+	t.Run("sqlite", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "stage-only.db")
+		store, err := NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		if err := store.BootstrapSchema(context.Background(), legacy); err != nil {
+			t.Fatalf("bootstrap stage-only fixture: %v", err)
+		}
+
+		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectSQLite, path, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations")
+		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
+		var continuations int
+		if err := store.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='human_task_continuations'`).Scan(&continuations); err != nil {
+			t.Fatal(err)
+		}
+		if continuations != 0 {
+			t.Fatal("incompatible bootstrap created human_task_continuations")
+		}
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		_, db, cleanup := testutil.StartEmptyPostgres(t)
+		t.Cleanup(cleanup)
+		store := &PostgresStore{DB: db}
+		if err := store.BootstrapSchema(context.Background(), legacy); err != nil {
+			t.Fatalf("bootstrap stage-only fixture: %v", err)
+		}
+		var target string
+		if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
+			t.Fatal(err)
+		}
+		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
+			t.Fatal("stage-only PostgreSQL fixture has unexpected decision-card columns")
+		}
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectPostgres, target, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations")
+		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
+			t.Fatal("incompatible bootstrap mutated stage-only decision-card columns")
+		}
+		var continuations bool
+		if err := db.QueryRow(`SELECT to_regclass('public.human_task_continuations') IS NOT NULL`).Scan(&continuations); err != nil {
+			t.Fatal(err)
+		}
+		if continuations {
+			t.Fatal("incompatible bootstrap created human_task_continuations")
+		}
+	})
+}
+
+func assertStageOnlyDecisionCardColumns(t testing.TB, columns map[string]bool) {
+	t.Helper()
+	if !columns["flow_instance"] || !columns["stage_activation_id"] || columns["anchor_kind"] || columns["anchor"] {
+		t.Fatalf("decision-card columns are not the stage-only fixture: %#v", columns)
+	}
+}
+
+func stageOnlyDecisionCardSchemaRequest(t testing.TB) SchemaBootstrapRequest {
+	t.Helper()
+	request := canonicalSchemaBootstrapTestRequest(t)
+	request.Origin.SwarmVersion = "stage-only-card-schema"
+	plans := make([]SchemaTableDDL, 0, len(request.PlatformPlans)-1)
+	for _, plan := range request.PlatformPlans {
+		switch plan.TableName {
+		case "human_task_continuations":
+			continue
+		case "decision_cards":
+			plan = stageOnlyDecisionCardTablePlan()
+		}
+		plans = append(plans, plan)
+	}
+	request.PlatformPlans = plans
+	return request
+}
+
+func stageOnlyDecisionCardTablePlan() SchemaTableDDL {
+	return SchemaTableDDL{
+		TableName: "decision_cards", SchemaKind: "platform_spec", ColumnCount: 27,
+		Statements: []string{
+			`CREATE TABLE IF NOT EXISTS decision_cards (
+    card_id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    flow_instance TEXT NOT NULL,
+    flow_id TEXT,
+    entity_id UUID NOT NULL,
+    stage TEXT NOT NULL,
+    stage_activation_id UUID NOT NULL,
+    decision_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'superseded')),
+    snapshot JSONB NOT NULL,
+    card_content_hash TEXT NOT NULL,
+    decision_schema_hash TEXT NOT NULL,
+    bundle_hash TEXT NOT NULL,
+    workflow_version TEXT,
+    effective_cadence JSONB NOT NULL DEFAULT '{}',
+    provenance JSONB NOT NULL DEFAULT '{}',
+    verdict TEXT,
+    fields JSONB NOT NULL DEFAULT '{}',
+    decided_by TEXT,
+    decided_at TIMESTAMPTZ,
+    deferred_until TIMESTAMPTZ,
+    decision_event_id UUID,
+    delivery_receipt_id TEXT,
+    delivery_render_hash TEXT,
+    superseded_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (run_id, flow_instance, entity_id, stage_activation_id, decision_id),
+    CHECK ((status = 'pending' AND verdict IS NULL AND superseded_reason IS NULL) OR (status = 'decided' AND verdict IS NOT NULL AND decided_at IS NOT NULL AND decision_event_id IS NOT NULL) OR (status = 'superseded' AND superseded_reason IS NOT NULL))
+)`,
+			`CREATE INDEX IF NOT EXISTS idx_decision_cards_mailbox ON decision_cards (status, deferred_until, created_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_decision_cards_run ON decision_cards (run_id, created_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_decision_cards_entity ON decision_cards (run_id, entity_id, stage_activation_id)`,
+		},
+	}
+}
+
 func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	const createUnexpectedIndex = `CREATE UNIQUE INDEX drift_probe_idx ON timers(status) WHERE status = 'pending'`
@@ -404,6 +527,11 @@ func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T)
 
 func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend SchemaDialect, target string, current RuntimeStoreOrigin, wantOrigin *RuntimeStoreOrigin, wantDrift ...string) {
 	t.Helper()
+	current = current.canonical()
+	if wantOrigin != nil {
+		canonical := wantOrigin.canonical()
+		wantOrigin = &canonical
+	}
 	var incompatible *SchemaCompatibilityError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("bootstrap error = %v (%T), want SchemaCompatibilityError", err, err)

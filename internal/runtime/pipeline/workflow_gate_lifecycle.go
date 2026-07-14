@@ -22,6 +22,10 @@ type workflowGateMutationPublisher interface {
 	PublishInMutation(context.Context, events.Event) error
 }
 
+type decisionCardDirectMutationPublisher interface {
+	PublishDirectInMutation(context.Context, events.Event, []string) error
+}
+
 type workflowGateIntent struct {
 	activation gateruntime.Activation
 	card       decisioncard.Card
@@ -148,13 +152,17 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{
-		"card_id": activation.CardID, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
+		"card_id": activation.CardID, "anchor_kind": decisioncard.AnchorKindStageGate, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
 	})
 	if err != nil {
 		return err
 	}
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return err
+	}
 	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now.UTC())
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance), now.UTC())
 	if err := publisher.PublishInMutation(ctx, evt); err != nil {
 		return fmt.Errorf("publish decision card superseded event: %w", err)
 	}
@@ -229,10 +237,16 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"),
+		FlowID:       plan.FlowID, EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
+		StageActivationID: activation.ActivationID,
+	})
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
 	card := decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"), FlowID: plan.FlowID,
-		EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
-		StageActivationID: activation.ActivationID, DecisionID: plan.Decision,
+		CardID: activation.CardID, RunID: runID, Anchor: anchor,
 		Snapshot:   snapshot,
 		BundleHash: activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
 		EffectiveCadence: pc.decisionCardCadence.Stamp(activation.OpenedAt),

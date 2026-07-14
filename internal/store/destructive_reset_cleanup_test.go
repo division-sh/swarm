@@ -56,6 +56,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "dead_letters", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
+	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
+	assertCleanupTableResult(t, result, "decision_cards", 1, 1)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
 	assertCleanupTableResult(t, result, "generated_entity_tables", 0, 0)
 
@@ -70,6 +72,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"agent_turns",
 		"agent_conversation_audits",
 		"agent_sessions",
+		"human_task_continuations",
+		"decision_cards",
 		"entity_mutations",
 		"entity_state",
 		"run_control_state",
@@ -135,6 +139,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	assertCleanupTableResult(t, result, "runs", 2, 0)
 	assertCleanupTableResult(t, result, "events", 4, 0)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 0)
+	assertCleanupTableResult(t, result, "human_task_continuations", 1, 0)
+	assertCleanupTableResult(t, result, "decision_cards", 1, 0)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
 	if got := countRows(t, ctx, pg, "runs"); got != 2 {
 		t.Fatalf("runs after dry-run = %d, want 2", got)
@@ -144,6 +150,12 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "mailbox"); got != 1 {
 		t.Fatalf("mailbox after dry-run = %d, want preserved", got)
+	}
+	if got := countRows(t, ctx, pg, "human_task_continuations"); got != 1 {
+		t.Fatalf("human_task_continuations after dry-run = %d, want 1", got)
+	}
+	if got := countRows(t, ctx, pg, "decision_cards"); got != 1 {
+		t.Fatalf("decision_cards after dry-run = %d, want 1", got)
 	}
 }
 
@@ -623,7 +635,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO mailbox (item_id, item_type, source_event_id, from_agent, summary, reply_context_id)
-		VALUES ($1::uuid, 'human_task', $2::uuid, 'agent-a', 'preserved reply mailbox', $3)
+		VALUES ($1::uuid, 'review_notice', $2::uuid, 'agent-a', 'preserved reply mailbox', $3)
 	`, mailboxID, eventID, replyContextID); err != nil {
 		t.Fatalf("seed preserved reply mailbox: %v", err)
 	}
@@ -1110,6 +1122,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	timerRun := uuid.NewString()
 	timerForkRun := uuid.NewString()
 	timerForkEvent := uuid.NewString()
+	humanTaskCardID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_entity_fixture (entity_id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
 		t.Fatalf("create generated entity fixture: %v", err)
 	}
@@ -1122,6 +1135,29 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 			($2::uuid, 'completed', $4::uuid, 'fork.event')
 	`, runA, runB, sourceEvent, forkEvent); err != nil {
 		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO decision_cards (
+			card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
+			decision_schema_hash, bundle_hash, effective_cadence, provenance, fields,
+			created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'human_task', '{}'::jsonb, 'pending', '{}'::jsonb, 'content-hash',
+			'schema-hash', 'bundle-hash', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, now(), now()
+		)
+	`, humanTaskCardID, runA); err != nil {
+		t.Fatalf("seed human-task decision card: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO human_task_continuations (
+			card_id, run_id, deadline_at, budget_bundle_hash, budget_limit,
+			budget_window_start, budget_window_end, state, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, now() + interval '1 hour', 'bundle-hash', 5,
+			now(), now() + interval '7 days', 'pending', now(), now()
+		)
+	`, humanTaskCardID, runA); err != nil {
+		t.Fatalf("seed human-task continuation: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
@@ -1271,7 +1307,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO mailbox (entity_id, flow_instance, item_type, source_event_id, from_agent, summary)
-		VALUES ($1::uuid, 'flow/a', 'human_task', $2::uuid, 'agent-a', 'preserve mailbox')
+		VALUES ($1::uuid, 'flow/a', 'review_notice', $2::uuid, 'agent-a', 'preserve mailbox')
 	`, entityID, sourceEvent); err != nil {
 		t.Fatalf("seed mailbox: %v", err)
 	}

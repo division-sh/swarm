@@ -12,6 +12,7 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite store is required for schema bootstrap")
 	}
+	request = request.canonical()
 	if err := request.validate(); err != nil {
 		return err
 	}

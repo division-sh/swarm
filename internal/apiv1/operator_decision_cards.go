@@ -106,10 +106,10 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				}
 				txctx = correlation.WithRunID(txctx, card.RunID)
 				eventID := uuid.NewString()
-				if opts.WorkflowStore == nil {
-					return nil, fmt.Errorf("workflow gate decision fence is required")
+				if opts.DecisionAuthority == nil {
+					return nil, fmt.Errorf("decision-card anchor authority is required")
 				}
-				if err := opts.WorkflowStore.CommitGateDecision(txctx, card, eventID, now().UTC()); err != nil {
+				if err := opts.DecisionAuthority.CommitDecision(txctx, card, eventID, now().UTC()); err != nil {
 					return nil, err
 				}
 				outcome, err := opts.DecisionCards.DecideDecisionCard(txctx, decisioncard.DecideRequest{
@@ -125,9 +125,29 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if !ok || publisher == nil {
 					return nil, fmt.Errorf("event mutation publisher is required for mailbox.decide")
 				}
-				payloadFields := map[string]semanticvalue.Value{"fields": fields}
+				if outcome.ForcedDeferred {
+					payload, err := canonicaljson.Bytes(map[string]any{
+						"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(),
+						"until": outcome.Card.DeferredUntil.UTC().Format(time.RFC3339Nano),
+						"cause": "weekly_budget_exhausted",
+					})
+					if err != nil {
+						return nil, err
+					}
+					scope, err := card.Anchor.Scope()
+					if err != nil {
+						return nil, err
+					}
+					evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), "platform", "", payload, 0, card.RunID, "",
+						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
+					if err := publisher.PublishInMutation(txctx, evt); err != nil {
+						return nil, fmt.Errorf("publish budget-deferred decision card event: %w", err)
+					}
+					return decisionCardMutationResult{OK: true, CardID: card.CardID, Status: outcome.Card.Status, ChangeID: outcome.ChangeID}, nil
+				}
+				payloadFields := map[string]semanticvalue.Value{"fields": fields, "anchor": card.Anchor.SemanticValue()}
 				for name, text := range map[string]string{
-					"card_id": card.CardID, "stage_activation_id": card.StageActivationID, "decision_id": card.DecisionID,
+					"card_id": card.CardID, "anchor_kind": string(card.Anchor.Kind()), "decision_id": card.Snapshot.Decision,
 					"verdict": verdict, "card_content_hash": card.CardContentHash,
 					"decision_schema_hash": card.DecisionSchemaHash, "bundle_hash": card.BundleHash,
 				} {
@@ -144,8 +164,12 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
+				scope, err := card.Anchor.Scope()
+				if err != nil {
+					return nil, err
+				}
 				evt := events.NewRuntimeControlEvent(eventID, events.EventType(decisionCardEventName), "platform", "", payload, 0, card.RunID, "",
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), now().UTC())
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card event: %w", err)
 				}
@@ -171,8 +195,12 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
+				scope, err := outcome.Card.Anchor.Scope()
+				if err != nil {
+					return nil, err
+				}
 				evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), "platform", "", payload, 0,
-					outcome.Card.RunID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, outcome.Card.EntityID), outcome.Card.FlowInstance), now().UTC())
+					outcome.Card.RunID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card deferred event: %w", err)
 				}
@@ -256,15 +284,19 @@ func listMailboxProjection(ctx context.Context, req Request, opts OperatorReadOp
 	noticeOpts := listOpts
 	noticeOpts.Cursor = cursor.Notice
 	noticeOpts.Limit = limit
-	notices, noticeNext, err := opts.Mailbox.ListV1MailboxItems(ctx, noticeOpts)
-	if err != nil {
-		if errors.Is(err, store.ErrMailboxV1InvalidCursor) {
-			return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid notice cursor"})
+	var notices []store.MailboxV1Item
+	var noticeNext string
+	if listOpts.AnchorKind == "" {
+		notices, noticeNext, err = opts.Mailbox.ListV1MailboxItems(ctx, noticeOpts)
+		if err != nil {
+			if errors.Is(err, store.ErrMailboxV1InvalidCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid notice cursor"})
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	cards, cardNext, err := opts.DecisionCards.ListDecisionCards(ctx, decisioncard.ListOptions{
-		Status: listOpts.Status, RunID: listOpts.RunID, EntityID: listOpts.EntityID, Limit: limit, Cursor: cursor.Card,
+		Status: listOpts.Status, RunID: listOpts.RunID, EntityID: listOpts.EntityID, AnchorKind: listOpts.AnchorKind, Limit: limit, Cursor: cursor.Card,
 	})
 	if errors.Is(err, decisioncard.ErrInvalidCursor) {
 		return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid decision-card cursor"})
@@ -339,7 +371,7 @@ func encodeMailboxProjectionCursor(cursor mailboxProjectionCursor) string {
 }
 
 func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opts OperatorReadOptions, cardID string, execute func(context.Context) (any, error)) (any, error) {
-	if opts.WorkflowStore == nil || opts.Idempotency == nil {
+	if opts.DecisionAuthority == nil || opts.Idempotency == nil {
 		return nil, fmt.Errorf("decision card workflow mutation and idempotency owners are required")
 	}
 	idempotencyKey := strings.TrimSpace(stringParam(req.Params, "idempotency_key"))
@@ -349,7 +381,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	err := opts.WorkflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err := opts.DecisionAuthority.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		completion, wasReplay, err := opts.Idempotency.WithAPIIdempotency(txctx, store.APIIdempotencyRequest{
 			Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
 			RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,

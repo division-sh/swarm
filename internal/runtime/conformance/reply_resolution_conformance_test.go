@@ -15,15 +15,17 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -316,6 +318,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 			if contexts[requests[0].name].ReplyContextID() == contexts[requests[1].name].ReplyContextID() {
 				t.Fatalf("overlapping same-origin requests share reply context: %#v", contexts)
 			}
+			waitReplyConformanceBus(t, requestBus)
 
 			// Reconstructing the bus forces reply routing to consume persisted route
 			// context and durable reply state rather than process-local request state.
@@ -449,7 +452,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 	}
 }
 
-func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalReply(t *testing.T) {
+func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossRestart(t *testing.T) {
 	for _, backendCase := range []struct {
 		name  string
 		setup func(*testing.T) durableReplyConformanceStore
@@ -469,190 +472,170 @@ func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalRe
 			},
 		},
 	} {
-		for _, continuationKind := range []string{templatereply.ContinuationHuman} {
-			t.Run(backendCase.name+"/"+continuationKind, func(t *testing.T) {
-				ctx := context.Background()
-				requestKey := continuationKind + "-request"
-				source := templatereply.LoadSource(t, templatereply.Options{
-					ProviderContinuation:   continuationKind,
-					ContinuationRequestKey: requestKey,
-					ContinuationAccountID:  "account-a",
-				})
-				if findings := runtimebootverify.Run(ctx, source, runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
-					t.Fatalf("continuation fixture hard invalidities = %#v", findings)
-				}
-				backend := backendCase.setup(t)
-				continuations, ok := backend.(replyContinuationConformanceStore)
-				if !ok {
-					t.Fatalf("%T lacks reply continuation conformance surface", backend)
-				}
-				runID := uuid.NewString()
-				seedDurableReplyConformanceRun(t, ctx, backend, runID)
-				requestBus := newDurableReplyContinuationRuntime(t, ctx, backend, source)
-				requestID := uuid.NewString()
-				request := replyConformanceEventForRun(
-					source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent),
-					requestID,
-					runID,
-					templatereply.RequesterFlowID,
-					templatereply.RequesterFlowID+"/account-a",
-					map[string]any{"provider_request_id": requestKey, "account_id": "account-a"},
-				)
-				if err := requestBus.Publish(ctx, request); err != nil {
-					t.Fatalf("publish continuation request: %v", err)
-				}
-				requestRoutes, err := backend.ListEventDeliveryRoutes(ctx, requestID)
-				if err != nil || len(requestRoutes) != 1 || requestRoutes[0].Context.Empty() {
-					t.Fatalf("continuation request routes = %#v err=%v", requestRoutes, err)
-				}
-				deliveryContext := requestRoutes[0].Context
-
-				rowID := ""
-				switch continuationKind {
-				case templatereply.ContinuationHuman:
-					rowID, err = continuations.CreateHumanTask(events.WithDeliveryContext(ctx, deliveryContext), runtimetools.HumanTaskCreateRecord{
-						ActorID:       "provider-agent",
-						FlowInstance:  templatereply.ProviderFlowID,
-						Category:      "approval",
-						Description:   "Approve provider reply",
-						ExpectedValue: "approved",
-						Priority:      "normal",
-						Deadline:      time.Now().UTC().Add(time.Hour),
-						SourceEventID: requestID,
-						Context:       deliveryContext,
-					})
-					if err != nil {
-						t.Fatalf("CreateHumanTask: %v", err)
-					}
-				}
-				item, err := continuations.GetMailboxItem(ctx, rowID)
-				if err != nil || item.ReplyContextID != deliveryContext.ReplyContextID() {
-					t.Fatalf("continuation row = %#v err=%v", item, err)
-				}
-
-				// Rebuild both EventBus and Pipeline before the row outcome. The
-				// outcome must restore authority from the row, not process memory.
-				resumedBus := newDurableReplyContinuationRuntime(t, ctx, backend, source)
-				if continuationKind == templatereply.ContinuationHuman {
-					for _, eventType := range []string{"human_task.deferred", "human_task.approved"} {
-						if routes := resumedBus.RouteTable().Resolve(eventType); len(routes) == 0 {
-							t.Fatalf("human-task outcome route %s is missing", eventType)
-						}
-					}
-				}
-				deferAt := time.Now().UTC()
-				switch continuationKind {
-				case templatereply.ContinuationHuman:
-					if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
-						TaskID:               rowID,
-						Status:               "deferred",
-						ActorID:              "operator",
-						Reason:               "review later",
-						RequeueDate:          deferAt.Add(10 * time.Minute).Format(time.RFC3339),
-						DecidedAt:            deferAt,
-						DecisionEventPublish: resumedBus.PublishInMutation,
-					}); err != nil {
-						t.Fatalf("defer human continuation: %v", err)
-					}
-				}
-				waitReplyConformanceBus(t, resumedBus)
-				assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
-				if got := countReplyConformanceEvents(t, ctx, backend, source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent)); got != 0 {
-					t.Fatalf("terminal replies after defer = %d, want 0", got)
-				}
-
-				finalAt := deferAt.Add(time.Second)
-				switch continuationKind {
-				case templatereply.ContinuationHuman:
-					if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
-						TaskID:               rowID,
-						Status:               "approved",
-						ActorID:              "operator",
-						Reason:               "approved",
-						DecidedAt:            finalAt,
-						DecisionEventPublish: resumedBus.PublishInMutation,
-					}); err != nil {
-						t.Fatalf("approve human continuation: %v", err)
-					}
-				}
-				waitReplyConformanceBus(t, resumedBus)
-				replyType := source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent)
-				replyID := loadLatestReplyConformanceEventID(t, ctx, backend, replyType)
-				routes, err := backend.ListEventDeliveryRoutes(ctx, replyID)
-				if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != templatereply.RequesterFlowID+"/account-a" {
-					t.Fatalf("terminal continuation reply routes = %#v err=%v", routes, err)
-				}
-				assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateTerminal, replyID)
-				proveReplyContinuationStaleOrigin(t, ctx, backend, source, continuationKind, requestKey)
+		t.Run(backendCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			requestKey := "human-task-request"
+			source := templatereply.LoadSource(t, templatereply.Options{
+				ProviderContinuation: templatereply.ContinuationHuman,
 			})
-		}
+			if findings := runtimebootverify.Run(ctx, source, runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+				t.Fatalf("human-task continuation fixture hard invalidities = %#v", findings)
+			}
+			backend := backendCase.setup(t)
+			cards, ok := backend.(replyHumanTaskConformanceStore)
+			if !ok {
+				t.Fatalf("%T lacks typed human-task conformance surface", backend)
+			}
+			runID := uuid.NewString()
+			seedDurableReplyConformanceRun(t, ctx, backend, runID)
+
+			requestBus := newDurableReplyConformanceBus(t, ctx, backend, source)
+			requestID := uuid.NewString()
+			request := replyConformanceEventForRun(
+				source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent),
+				requestID,
+				runID,
+				templatereply.RequesterFlowID,
+				templatereply.RequesterFlowID+"/account-a",
+				map[string]any{"provider_request_id": requestKey, "account_id": "account-a"},
+			)
+			if err := requestBus.Publish(ctx, request); err != nil {
+				t.Fatalf("publish human-task request: %v", err)
+			}
+			requestRoutes, err := backend.ListEventDeliveryRoutes(ctx, requestID)
+			if err != nil || len(requestRoutes) != 1 || requestRoutes[0].Context.Empty() {
+				t.Fatalf("human-task request routes = %#v err=%v", requestRoutes, err)
+			}
+			deliveryContext := requestRoutes[0].Context
+			card := createReplyConformanceHumanTask(t, ctx, cards, runID, requestID, deliveryContext, "main")
+			waitReplyConformanceBus(t, requestBus)
+
+			// Rebuild the bus and coordinator before any operator outcome. No
+			// process-local request state may be needed to resume the requester.
+			resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+			deferredAt := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+			deferred, err := cards.DeferDecisionCard(ctx, decisioncard.DeferRequest{
+				CardID: card.CardID, ActorTokenID: "operator", Until: deferredAt.Add(10 * time.Minute), Now: deferredAt,
+			})
+			if err != nil {
+				t.Fatalf("defer typed human-task card: %v", err)
+			}
+			deferEvent := replyConformanceCardLifecycleEvent(t, deferred.Card, uuid.NewString(), "mailbox.card_deferred", deferredAt)
+			if err := resumedBus.Publish(ctx, deferEvent); err != nil {
+				t.Fatalf("publish typed human-task defer: %v", err)
+			}
+			deferredOutcome := receiveReplyConformanceHumanTaskOutcome(t, outcomes, "human_task.deferred")
+			if got := deferredOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
+				t.Fatalf("deferred human-task reply context = %q, want %q", got, deliveryContext.ReplyContextID())
+			}
+			assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
+
+			decisionAt := deferredAt.Add(time.Second)
+			decisionEventID := uuid.NewString()
+			decided, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decisionAt,
+			})
+			if err != nil {
+				t.Fatalf("decide typed human-task card: %v", err)
+			}
+			decisionEvent := replyConformanceCardLifecycleEvent(t, decided.Card, decisionEventID, "mailbox.card_decided", decisionAt)
+			if err := resumedBus.Publish(ctx, decisionEvent); err != nil {
+				t.Fatalf("publish typed human-task decision: %v", err)
+			}
+			approvedOutcome := receiveReplyConformanceHumanTaskOutcome(t, outcomes, "human_task.approved")
+			if got := approvedOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
+				t.Fatalf("approved human-task reply context = %q, want %q", got, deliveryContext.ReplyContextID())
+			}
+			continuation, err := cards.LoadHumanTaskContinuation(ctx, card.CardID)
+			if err != nil || continuation.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
+				t.Fatalf("dispatched human-task continuation = %#v err=%v", continuation, err)
+			}
+
+			replyID := uuid.NewString()
+			reply := replyConformanceEventForRun(
+				source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent),
+				replyID,
+				runID,
+				templatereply.ProviderFlowID,
+				templatereply.ProviderFlowID,
+				map[string]any{"provider_request_id": requestKey, "account_id": "account-a", "result": "approved"},
+			)
+			if err := resumedBus.Publish(events.WithDeliveryContext(ctx, approvedOutcome.DeliveryContext()), reply); err != nil {
+				t.Fatalf("publish terminal reply after typed human task: %v", err)
+			}
+			routes, err := backend.ListEventDeliveryRoutes(ctx, replyID)
+			if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != templatereply.RequesterFlowID+"/account-a" {
+				t.Fatalf("terminal typed-human-task reply routes = %#v err=%v", routes, err)
+			}
+			assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateTerminal, replyID)
+
+			proveTypedHumanTaskStaleOrigin(t, ctx, backend, cards, source, runID)
+		})
 	}
 }
 
-func proveReplyContinuationStaleOrigin(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source, continuationKind, requestKey string) {
+func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, cards replyHumanTaskConformanceStore, source semanticview.Source, runID string) {
 	t.Helper()
-	requestBus := newDurableReplyContinuationRuntime(t, ctx, backend, source)
+	requestKey := "human-task-stale-origin"
+	requestBus := newDurableReplyConformanceBus(t, ctx, backend, source)
 	requestID := uuid.NewString()
 	request := replyConformanceEventForRun(
 		source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent),
 		requestID,
-		loadReplyConformanceRunID(t, ctx, backend),
+		runID,
 		templatereply.RequesterFlowID,
 		templatereply.RequesterFlowID+"/account-a",
-		map[string]any{"provider_request_id": requestKey + "-stale", "account_id": "account-a"},
+		map[string]any{"provider_request_id": requestKey, "account_id": "account-a"},
 	)
 	if err := requestBus.Publish(ctx, request); err != nil {
-		t.Fatalf("publish stale-origin continuation request: %v", err)
+		t.Fatalf("publish stale-origin human-task request: %v", err)
 	}
 	routes, err := backend.ListEventDeliveryRoutes(ctx, requestID)
 	if err != nil || len(routes) != 1 || routes[0].Context.Empty() {
-		t.Fatalf("stale-origin request routes = %#v err=%v", routes, err)
+		t.Fatalf("stale-origin human-task request routes = %#v err=%v", routes, err)
 	}
 	deliveryContext := routes[0].Context
-	continuations := backend.(replyContinuationConformanceStore)
-	rowID := ""
-	switch continuationKind {
-	case templatereply.ContinuationHuman:
-		rowID, err = continuations.CreateHumanTask(events.WithDeliveryContext(ctx, deliveryContext), runtimetools.HumanTaskCreateRecord{
-			ActorID:       "provider-agent",
-			FlowInstance:  templatereply.ProviderFlowID,
-			Category:      "approval",
-			Description:   "Approve stale-origin provider reply",
-			ExpectedValue: "approved",
-			Priority:      "normal",
-			Deadline:      time.Now().UTC().Add(time.Hour),
-			SourceEventID: requestID,
-			Context:       deliveryContext,
-		})
-		if err != nil {
-			t.Fatalf("CreateHumanTask for stale origin: %v", err)
-		}
+	card := createReplyConformanceHumanTask(t, ctx, cards, runID, requestID, deliveryContext, "stale")
+	waitReplyConformanceBus(t, requestBus)
+
+	resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+	decisionAt := time.Now().UTC()
+	decisionEventID := uuid.NewString()
+	decided, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+		ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decisionAt,
+	})
+	if err != nil {
+		t.Fatalf("decide stale-origin human-task card: %v", err)
+	}
+	if err := resumedBus.Publish(ctx, replyConformanceCardLifecycleEvent(t, decided.Card, decisionEventID, "mailbox.card_decided", decisionAt)); err != nil {
+		t.Fatalf("publish stale-origin human-task decision: %v", err)
+	}
+	approvedOutcome := receiveReplyConformanceHumanTaskOutcome(t, outcomes, "human_task.approved")
+	if got := approvedOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
+		t.Fatalf("stale-origin approved reply context = %q, want %q", got, deliveryContext.ReplyContextID())
+	}
+	if err := resumedBus.RouteTable().RemoveFlowInstanceRoute(runtimeflowidentity.StoredRoute(
+		templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a",
+	)); err != nil {
+		t.Fatalf("remove stale requester route: %v", err)
 	}
 
-	staleBus := newDurableReplyContinuationRuntimeWithRequesterRoutes(t, ctx, backend, source, false)
-	replyType := source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent)
-	repliesBefore := countReplyConformanceEvents(t, ctx, backend, replyType)
-	now := time.Now().UTC()
-	switch continuationKind {
-	case templatereply.ContinuationHuman:
-		if err := continuations.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
-			TaskID:               rowID,
-			Status:               "approved",
-			ActorID:              "operator",
-			Reason:               "approved",
-			DecidedAt:            now,
-			DecisionEventPublish: staleBus.PublishInMutation,
-		}); err != nil {
-			t.Fatalf("approve stale-origin human continuation: %v", err)
-		}
+	replyID := uuid.NewString()
+	reply := replyConformanceEventForRun(
+		source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent),
+		replyID,
+		runID,
+		templatereply.ProviderFlowID,
+		templatereply.ProviderFlowID,
+		map[string]any{"provider_request_id": requestKey, "account_id": "account-a", "result": "approved"},
+	)
+	if err := resumedBus.Publish(events.WithDeliveryContext(ctx, approvedOutcome.DeliveryContext()), reply); err != nil {
+		t.Fatalf("publish stale-origin terminal reply: %v", err)
 	}
-	waitReplyConformanceBus(t, staleBus)
-	if got := countReplyConformanceEvents(t, ctx, backend, replyType); got != repliesBefore+1 {
-		t.Fatalf("stale-origin terminal reply events = %d, want %d", got, repliesBefore+1)
-	}
-	replyID := loadLatestReplyConformanceEventID(t, ctx, backend, replyType)
 	if routes, err := backend.ListEventDeliveryRoutes(ctx, replyID); err != nil || len(routes) != 0 {
-		t.Fatalf("stale-origin reply routes = %#v err=%v, want none", routes, err)
+		t.Fatalf("stale-origin terminal reply routes = %#v err=%v, want none", routes, err)
 	}
 	if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != string(runtimepinrouting.FailureStaleArrival) {
 		t.Fatalf("stale-origin target failure = %q, want %q", got, runtimepinrouting.FailureStaleArrival)
@@ -660,17 +643,124 @@ func proveReplyContinuationStaleOrigin(t *testing.T, ctx context.Context, backen
 	assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
 }
 
+type replyHumanTaskConformanceStore interface {
+	durableReplyConformanceStore
+	decisioncard.Store
+	decisioncard.HumanTaskStore
+}
+
+func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards replyHumanTaskConformanceStore, runID, sourceEventID string, deliveryContext events.DeliveryContext, suffix string) decisioncard.Card {
+	t.Helper()
+	now := time.Now().UTC()
+	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+		RequesterAgentID: "provider-agent",
+		OperationID:      "provider-turn/" + suffix,
+		Category:         "approval",
+		Scope:            decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: templatereply.ProviderFlowID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := decisioncard.FreezeSnapshot("human_task", "Approve provider reply", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", Label: "Approve"},
+		"reject":  {Verdict: "reject", Label: "Reject"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation := decisioncard.HumanTaskContinuation{
+		CardID: card.CardID, RunID: runID, ReplyContextID: deliveryContext.ReplyContextID(), SourceEventID: sourceEventID,
+		DeadlineAt: now.Add(time.Hour), BudgetBundleHash: card.BundleHash,
+		BudgetWindowStart: now.Truncate(7 * 24 * time.Hour), BudgetWindowEnd: now.Truncate(7 * 24 * time.Hour).Add(7 * 24 * time.Hour),
+		State: decisioncard.HumanTaskContinuationPending, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := cards.CreateHumanTaskCard(ctx, card, continuation); err != nil {
+		t.Fatalf("create typed human-task card: %v", err)
+	}
+	return card
+}
+
+func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan events.Event) {
+	t.Helper()
+	cards, ok := backend.(replyHumanTaskConformanceStore)
+	if !ok {
+		t.Fatalf("%T lacks typed human-task runtime surface", backend)
+	}
+	eb := newDurableReplyConformanceBus(t, ctx, backend, source)
+	db := replyConformanceDB(t, backend)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+	}
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowDefinition: %v", err)
+	}
+	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	module := conformanceLoadedWorkflowModule{
+		source: source, workflow: workflow, nodes: nodes,
+		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
+	}
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module, WorkflowStore: workflowStore, DecisionCards: cards,
+		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+	})
+	eb.SetInterceptors(coordinator)
+	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{AgentID: "provider-agent"})
+	outcomes := eb.Subscribe("provider-agent", events.EventType("human_task.deferred"), events.EventType("human_task.approved"))
+	return eb, outcomes
+}
+
+func replyConformanceCardLifecycleEvent(t *testing.T, card decisioncard.Card, eventID, eventType string, at time.Time) events.Event {
+	t.Helper()
+	payload, err := canonicaljson.Bytes(map[string]any{
+		"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "anchor": card.Anchor.SemanticValue().Interface(),
+		"decision_id": card.Snapshot.Decision, "verdict": card.Verdict, "card_content_hash": card.CardContentHash,
+		"decision_schema_hash": card.DecisionSchemaHash, "bundle_hash": card.BundleHash, "fields": card.Fields.Interface(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := card.Anchor.Scope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return eventtest.RuntimeControl(
+		eventID, events.EventType(eventType), "platform", "", payload, 0, card.RunID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), at.UTC(),
+	)
+}
+
+func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan events.Event, eventType string) events.Event {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case evt := <-outcomes:
+			if string(evt.Type()) == eventType {
+				return evt
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %s", eventType)
+		}
+	}
+}
+
 type durableReplyConformanceStore interface {
 	bus.EventStore
 	runtimereplycontext.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-}
-
-type replyContinuationConformanceStore interface {
-	durableReplyConformanceStore
-	runtimepipeline.MailboxWriteMaterializationStore
-	runtimetools.HumanTaskPersistence
-	GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error)
 }
 
 func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) *bus.EventBus {
@@ -693,68 +783,6 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	return eb
 }
 
-func newDurableReplyContinuationRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) *bus.EventBus {
-	return newDurableReplyContinuationRuntimeWithRequesterRoutes(t, ctx, backend, source, true)
-}
-
-func newDurableReplyContinuationRuntimeWithRequesterRoutes(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source, addRequesterRoutes bool) *bus.EventBus {
-	t.Helper()
-	continuations, ok := backend.(replyContinuationConformanceStore)
-	if !ok {
-		t.Fatalf("%T lacks reply continuation runtime surface", backend)
-	}
-	var coordinator *runtimepipeline.PipelineCoordinator
-	eb, err := bus.NewEventBusWithOptions(backend, bus.EventBusOptions{
-		ContractBundle: source,
-		InterceptorProvider: func() []bus.EventInterceptor {
-			if coordinator == nil {
-				return nil
-			}
-			return []bus.EventInterceptor{coordinator}
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	db := replyConformanceDB(t, backend)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
-	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
-	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowNodes: %v", err)
-	}
-	module := conformanceLoadedWorkflowModule{
-		source:   source,
-		workflow: workflow,
-		nodes:    nodes,
-		guards:   runtimepipeline.NewContractGuardRegistry(source),
-		actions:  runtimepipeline.NewContractActionRegistry(source),
-	}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		WorkflowStore:           workflowStore,
-		MailboxMaterializer:     continuations,
-		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
-	})
-	if addRequesterRoutes {
-		for _, accountID := range []string{"account-a", "account-b"} {
-			if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
-				Identity:            runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
-				ActivationVariables: map[string]string{"account_id": accountID},
-			}); err != nil {
-				t.Fatalf("materialize requester route %s: %v", accountID, err)
-			}
-		}
-	}
-	return eb
-}
-
 func replyConformanceDB(t *testing.T, backend durableReplyConformanceStore) *sql.DB {
 	t.Helper()
 	switch typed := backend.(type) {
@@ -766,34 +794,6 @@ func replyConformanceDB(t *testing.T, backend durableReplyConformanceStore) *sql
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 		return nil
 	}
-}
-
-func loadReplyContinuationRowID(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, sourceEventID, itemType string) string {
-	t.Helper()
-	db := replyConformanceDB(t, backend)
-	query := `SELECT item_id::text FROM mailbox WHERE source_event_id = $1::uuid AND item_type = $2`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT item_id FROM mailbox WHERE source_event_id = ? AND item_type = ?`
-	}
-	var id string
-	if err := db.QueryRowContext(ctx, query, sourceEventID, itemType).Scan(&id); err != nil {
-		t.Fatalf("load reply continuation row: %v", err)
-	}
-	return id
-}
-
-func loadReplyConformanceRunID(t *testing.T, ctx context.Context, backend durableReplyConformanceStore) string {
-	t.Helper()
-	db := replyConformanceDB(t, backend)
-	query := `SELECT run_id::text FROM runs ORDER BY started_at DESC, run_id DESC LIMIT 1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT run_id FROM runs ORDER BY started_at DESC, run_id DESC LIMIT 1`
-	}
-	var runID string
-	if err := db.QueryRowContext(ctx, query).Scan(&runID); err != nil {
-		t.Fatalf("load reply conformance run: %v", err)
-	}
-	return runID
 }
 
 func loadReplyConformanceTargetFailure(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, eventID string) string {

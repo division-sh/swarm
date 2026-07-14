@@ -219,7 +219,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE entity_id = ? AND status = 'pending' AND decision_id = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
@@ -408,7 +408,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE entity_id = $1::uuid AND status = 'pending' AND decision_id = 'standing_review'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'standing_review'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int

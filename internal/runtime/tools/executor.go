@@ -36,7 +36,7 @@ type Executor struct {
 	scheduleStore                  SchedulePersistence
 	mailboxStore                   MailboxPersistence
 	entityStore                    EntityPersistence
-	humanTaskStore                 HumanTaskPersistence
+	humanTaskStore                 HumanTaskCardStore
 	workflowInstances              WorkflowInstanceLoader
 	cfg                            *config.Config
 	credentials                    runtimecredentials.Store
@@ -469,9 +469,7 @@ func toolAllowsLegacySubsetFallback(name string) bool {
 	switch strings.TrimSpace(name) {
 	case "agent_message",
 		"agent_fire",
-		"mailbox_send",
-		"human_task_request",
-		"human_task_decide":
+		"mailbox_send":
 		return true
 	default:
 		return false
@@ -712,12 +710,12 @@ func (e *Executor) entityStoreDependency() (EntityPersistence, error) {
 	return store, nil
 }
 
-func (e *Executor) humanTaskStoreDependency() (HumanTaskPersistence, error) {
+func (e *Executor) humanTaskStoreDependency() (HumanTaskCardStore, error) {
 	e.mu.RLock()
 	store := e.humanTaskStore
 	e.mu.RUnlock()
 	if store == nil {
-		return nil, errors.New("human task persistence store is not configured")
+		return nil, errors.New("human-task card store is not configured")
 	}
 	return store, nil
 }
@@ -760,10 +758,6 @@ func (e *Executor) ExecMailboxSendDirectContext(ctx context.Context, actor model
 
 func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execHumanTaskRequest(ctx, actor, input)
-}
-
-func (e *Executor) ExecHumanTaskDecideDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execHumanTaskDecide(ctx, actor, input)
 }
 
 func authorizeRouting(provider runtimeauthority.Provider, actor, target models.AgentConfig, status string) error {

@@ -23,6 +23,7 @@ const (
 	StatusPending    = "pending"
 	StatusDecided    = "decided"
 	StatusSuperseded = "superseded"
+	StatusExpired    = "expired"
 
 	DraftStatusActive    = "active"
 	DraftStatusCancelled = "cancelled"
@@ -32,6 +33,7 @@ const (
 	ChangeCreated        = "created"
 	ChangeDecided        = "decided"
 	ChangeDeferred       = "deferred"
+	ChangeExpired        = "expired"
 	ChangeSuperseded     = "superseded"
 	ChangeDraftStarted   = "input_draft_started"
 	ChangeDraftCancelled = "input_draft_cancelled"
@@ -56,6 +58,14 @@ var (
 	ErrDraftNotAuthority = errors.New("decision card input draft is not authoritative")
 )
 
+// CanonicalTimestamp matches the exact precision shared by the selected stores.
+func CanonicalTimestamp(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Round(time.Microsecond)
+}
+
 var reservedNoticeFields = map[string]struct{}{
 	"card_id": {}, "decision_id": {}, "stage_activation_id": {}, "card_content_hash": {},
 	"decision_schema_hash": {}, "decision_event_id": {}, "verdict": {}, "outcomes": {},
@@ -64,8 +74,8 @@ var reservedNoticeFields = map[string]struct{}{
 func ValidateNoticeShape(itemType string, payload map[string]any) error {
 	itemType = strings.ToLower(strings.TrimSpace(itemType))
 	itemType = strings.NewReplacer("-", "_", ".", "_").Replace(itemType)
-	if itemType == KindDecisionCard {
-		return fmt.Errorf("mailbox item_type %s is reserved for the typed decision-card owner", KindDecisionCard)
+	if itemType == KindDecisionCard || itemType == string(AnchorKindHumanTask) {
+		return fmt.Errorf("mailbox item_type %s is reserved for the typed decision-card owner", itemType)
 	}
 	return validateNoticePayloadFields(payload, "")
 }
@@ -183,12 +193,7 @@ type decisionEmitSchemaProjection struct {
 type Card struct {
 	CardID             string              `json:"card_id"`
 	RunID              string              `json:"run_id"`
-	FlowInstance       string              `json:"flow_instance"`
-	FlowID             string              `json:"flow_id,omitempty"`
-	EntityID           string              `json:"entity_id"`
-	Stage              string              `json:"stage"`
-	StageActivationID  string              `json:"stage_activation_id"`
-	DecisionID         string              `json:"decision_id"`
+	Anchor             Anchor              `json:"-"`
 	Status             string              `json:"status"`
 	Snapshot           Snapshot            `json:"snapshot"`
 	CardContentHash    string              `json:"card_content_hash"`
@@ -215,17 +220,26 @@ func (c Card) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	scope, err := c.Anchor.Scope()
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]any{
-		"card_id": c.CardID, "run_id": c.RunID, "flow_instance": c.FlowInstance,
-		"entity_id": c.EntityID, "stage": c.Stage, "stage_activation_id": c.StageActivationID,
-		"decision_id": c.DecisionID, "status": c.Status, "snapshot": json.RawMessage(snapshot),
+		"card_id": c.CardID, "run_id": c.RunID, "anchor_kind": c.Anchor.Kind(),
+		"anchor": c.Anchor.SemanticValue().Interface(), "scope": scope,
+		"status": c.Status, "snapshot": json.RawMessage(snapshot),
 		"card_content_hash": c.CardContentHash, "decision_schema_hash": c.DecisionSchemaHash,
 		"bundle_hash": c.BundleHash, "workflow_version": c.WorkflowVersion,
 		"effective_cadence": c.EffectiveCadence, "provenance": c.Provenance.Interface(),
 		"created_at": c.CreatedAt.UTC(), "updated_at": c.UpdatedAt.UTC(),
 	}
-	if c.FlowID != "" {
-		out["flow_id"] = c.FlowID
+	switch c.Anchor.Kind() {
+	case AnchorKindStageGate:
+		out["decision"] = c.Snapshot.Decision
+	case AnchorKindHumanTask:
+		if anchor, anchorErr := c.Anchor.HumanTask(); anchorErr == nil {
+			out["category"] = anchor.Category
+		}
 	}
 	for name, value := range map[string]string{
 		"verdict": c.Verdict, "decided_by": c.DecidedBy, "decision_event_id": c.DecisionEventID,
@@ -266,23 +280,24 @@ type CreateRequest struct {
 }
 
 type ListOptions struct {
-	Status   string
-	RunID    string
-	EntityID string
-	Kind     string
-	Limit    int
-	Cursor   string
+	Status     string
+	RunID      string
+	EntityID   string
+	AnchorKind string
+	Kind       string
+	Limit      int
+	Cursor     string
 }
 
 type ListItem struct {
 	Kind          string    `json:"kind"`
 	CardID        string    `json:"card_id"`
 	RunID         string    `json:"run_id"`
-	FlowInstance  string    `json:"flow_instance"`
-	EntityID      string    `json:"entity_id"`
-	Stage         string    `json:"stage"`
-	DecisionID    string    `json:"decision_id"`
+	Anchor        Anchor    `json:"-"`
+	Scope         Scope     `json:"scope"`
 	Title         string    `json:"title"`
+	Decision      string    `json:"decision,omitempty"`
+	Category      string    `json:"category,omitempty"`
 	Status        string    `json:"status"`
 	DeferredUntil time.Time `json:"deferred_until,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -296,10 +311,22 @@ func (i ListItem) MarshalJSON() ([]byte, error) {
 		value := i.DeferredUntil.UTC()
 		deferredUntil = &value
 	}
-	return json.Marshal(struct {
-		listItemAlias
-		DeferredUntil *time.Time `json:"deferred_until,omitempty"`
-	}{listItemAlias: listItemAlias(i), DeferredUntil: deferredUntil})
+	base := map[string]any{
+		"kind": i.Kind, "card_id": i.CardID, "run_id": i.RunID,
+		"anchor_kind": i.Anchor.Kind(), "anchor": i.Anchor.SemanticValue().Interface(),
+		"scope": i.Scope, "title": i.Title, "status": i.Status,
+		"created_at": i.CreatedAt, "updated_at": i.UpdatedAt,
+	}
+	if deferredUntil != nil {
+		base["deferred_until"] = deferredUntil
+	}
+	if i.Decision != "" {
+		base["decision"] = i.Decision
+	}
+	if i.Category != "" {
+		base["category"] = i.Category
+	}
+	return canonicaljson.Bytes(base)
 }
 
 type DecideRequest struct {
@@ -339,9 +366,10 @@ type CancelInputRequest struct {
 }
 
 type DecisionOutcome struct {
-	Card     Card  `json:"card"`
-	ChangeID int64 `json:"change_id"`
-	Replayed bool  `json:"idempotency_replayed"`
+	Card           Card  `json:"card"`
+	ChangeID       int64 `json:"change_id"`
+	Replayed       bool  `json:"idempotency_replayed"`
+	ForcedDeferred bool  `json:"forced_deferred,omitempty"`
 }
 
 type SubscriptionOptions struct {
@@ -367,8 +395,7 @@ func (c Change) MarshalJSON() ([]byte, error) {
 
 func (c Card) Validate() error {
 	for field, value := range map[string]string{
-		"card_id": c.CardID, "run_id": c.RunID, "entity_id": c.EntityID, "stage": c.Stage,
-		"stage_activation_id": c.StageActivationID, "decision_id": c.DecisionID,
+		"card_id": c.CardID, "run_id": c.RunID,
 		"card_content_hash": c.CardContentHash, "decision_schema_hash": c.DecisionSchemaHash, "bundle_hash": c.BundleHash,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -379,7 +406,7 @@ func (c Card) Validate() error {
 		return fmt.Errorf("decision card id is invalid: %w", err)
 	}
 	switch c.Status {
-	case StatusPending, StatusDecided, StatusSuperseded:
+	case StatusPending, StatusDecided, StatusSuperseded, StatusExpired:
 	default:
 		return fmt.Errorf("decision card status %q is invalid", c.Status)
 	}
@@ -389,17 +416,17 @@ func (c Card) Validate() error {
 	if c.Status == StatusSuperseded && strings.TrimSpace(c.SupersededReason) == "" {
 		return fmt.Errorf("superseded card is missing reason")
 	}
+	if c.Status == StatusExpired && (strings.TrimSpace(c.Verdict) != "" || c.DecidedAt.IsZero()) {
+		return fmt.Errorf("expired card is missing terminal evidence")
+	}
+	if err := c.Anchor.Validate(); err != nil {
+		return err
+	}
 	if c.Provenance.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("decision card provenance must be an object")
 	}
 	if c.Fields.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("decision card fields must be an object")
-	}
-	if c.DecisionID != strings.TrimSpace(c.DecisionID) {
-		return fmt.Errorf("decision card decision_id %q is not canonical", c.DecisionID)
-	}
-	if c.Snapshot.Decision != c.DecisionID {
-		return fmt.Errorf("decision card snapshot identity does not match decision_id")
 	}
 	if len(c.Snapshot.Outcomes) == 0 {
 		return fmt.Errorf("decision card has no authored outcomes")
@@ -451,7 +478,7 @@ func validateSnapshotContract(snapshot Snapshot) error {
 		return err
 	}
 	if snapshot.Decision == "" || snapshot.Decision != strings.TrimSpace(snapshot.Decision) {
-		return fmt.Errorf("stage gate decision id %q is not canonical", snapshot.Decision)
+		return fmt.Errorf("decision card decision identity %q is not canonical", snapshot.Decision)
 	}
 	if err := validateCanonicalDecisionMapIdentity("verdict", snapshot.Outcomes); err != nil {
 		return err
@@ -483,14 +510,14 @@ func validateCanonicalDecisionMapIdentity[T any](label string, values map[string
 	for raw := range values {
 		canonical := strings.TrimSpace(raw)
 		if canonical == "" {
-			return fmt.Errorf("stage gate %s is empty", label)
+			return fmt.Errorf("decision card %s is empty", label)
 		}
 		if previous, exists := seen[canonical]; exists {
-			return fmt.Errorf("stage gate %s contains duplicate normalized key %q (from %q and %q)", label, canonical, previous, raw)
+			return fmt.Errorf("decision card %s contains duplicate normalized key %q (from %q and %q)", label, canonical, previous, raw)
 		}
 		seen[canonical] = raw
 		if raw != canonical {
-			return fmt.Errorf("stage gate %s key %q is not canonical; use %q", label, raw, canonical)
+			return fmt.Errorf("decision card %s key %q is not canonical; use %q", label, raw, canonical)
 		}
 	}
 	return nil
@@ -570,20 +597,20 @@ func outcomeDecisionField(expression FrozenExpression) (string, error) {
 }
 
 func New(card Card) (Card, error) {
-	decisionID := strings.TrimSpace(card.DecisionID)
-	if card.DecisionID != decisionID {
-		return Card{}, fmt.Errorf("decision card decision_id %q is not canonical; use %q", card.DecisionID, decisionID)
+	decisionID := strings.TrimSpace(card.Snapshot.Decision)
+	if card.Snapshot.Decision != decisionID {
+		return Card{}, fmt.Errorf("decision card decision identity %q is not canonical; use %q", card.Snapshot.Decision, decisionID)
 	}
-	now := card.CreatedAt.UTC()
+	now := CanonicalTimestamp(card.CreatedAt)
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = CanonicalTimestamp(time.Now())
 	}
 	card.CreatedAt = now
 	card.UpdatedAt = now
 	card.Status = StatusPending
 	card.Snapshot.Decision = decisionID
 	if strings.TrimSpace(card.Snapshot.Title) == "" {
-		card.Snapshot.Title = humanize(card.DecisionID)
+		card.Snapshot.Title = humanize(decisionID)
 	}
 	if card.Snapshot.Context.Kind() == semanticvalue.KindNull {
 		card.Snapshot.Context = semanticvalue.EmptyObject()

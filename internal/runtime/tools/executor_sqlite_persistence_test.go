@@ -15,6 +15,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -26,10 +28,9 @@ import (
 )
 
 type humanTaskToolStore interface {
-	runtimetools.HumanTaskPersistence
-	runtimetools.MailboxPersistence
+	decisioncard.Store
+	decisioncard.HumanTaskStore
 	runtimereplycontext.Store
-	GetV1MailboxItem(ctx context.Context, id string) (store.MailboxV1ItemDetail, error)
 }
 
 type allowHumanTaskAuthority struct{}
@@ -51,7 +52,6 @@ func (allowHumanTaskAuthority) AuthorizeManagement(actor, target models.AgentCon
 func (allowHumanTaskAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	return nil
 }
-func (allowHumanTaskAuthority) CanDecideHumanTasks(role string) bool { return true }
 
 func TestEntityTools_SQLiteBackendNeutralEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{
@@ -238,7 +238,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}
 }
 
-func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
+func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		store humanTaskToolStore
@@ -248,126 +248,82 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.Config{Extensions: map[string]any{
-				"budget": map[string]any{
-					"human_tasks": map[string]any{
-						"max_tasks_per_week": 1,
-						"budget_reset":       "monday",
-					},
-				},
+				"budget": map[string]any{"human_tasks": map[string]any{
+					"max_tasks_per_week": 3, "budget_reset": "monday", "auto_expire_hours": 48,
+				}},
 			}}
 			exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-				Config:            cfg,
-				MailboxStore:      tc.store,
-				HumanTaskStore:    tc.store,
-				AuthorityProvider: allowHumanTaskAuthority{},
+				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{},
 			})
 			requester := models.AgentConfig{
-				ID:          "requester",
-				Role:        "worker",
-				FlowPath:    "provider",
-				EntityID:    uuid.NewString(),
-				Tools:       []string{"human_task_request", "mailbox_send"},
-				Permissions: []string{"human_task_request"},
+				ID: "requester", Role: "worker", FlowPath: "provider", EntityID: uuid.NewString(),
+				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
-			decider := models.AgentConfig{ID: "decider", Role: "operator"}
-
-			replyCtx, replyContextID, requestEventID := seedReplyToolContext(t, tc.store)
-			replyTaskOut, err := exec.ExecHumanTaskRequestDirect(replyCtx, requester, map[string]any{
-				"category":       "review",
-				"description":    "Needs reply-scoped human review",
-				"expected_value": "approval",
-				"priority":       "high",
+			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
+			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
+			ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
+				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			})
+			ctx = runtimetools.WithActor(ctx, requester)
+			input := map[string]any{
+				"scope": "flow", "category": "review", "description": "Review provider response",
+				"talking_points": []string{"Check source evidence"}, "expected_value": "approval", "priority": "high",
+			}
+			created, err := exec.Execute(ctx, "human_task_request", input)
 			if err != nil {
-				t.Fatalf("reply-scoped human_task_request: %v", err)
+				t.Fatalf("human_task_request: %v", err)
 			}
-			replyTaskID := strings.TrimSpace(asString(replyTaskOut.(map[string]any)["task_id"]))
-			replyTask, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), replyTaskID)
-			if err != nil || replyTask.ReplyContextID != replyContextID || replyTask.FlowInstance != "provider" {
-				t.Fatalf("reply-scoped human task = %#v err=%v", replyTask, err)
-			}
-			mailboxOut, err := exec.ExecMailboxSendDirectContext(replyCtx, requester, map[string]any{
-				"event_id": requestEventID,
-				"type":     "approval",
-				"priority": "normal",
-				"summary":  "Needs reply-scoped mailbox review",
-				"context":  map[string]any{"kind": "reply"},
-			})
+			cardID := strings.TrimSpace(asString(created.(map[string]any)["card_id"]))
+			card, err := tc.store.GetDecisionCard(context.Background(), cardID)
 			if err != nil {
-				t.Fatalf("reply-scoped mailbox_send: %v", err)
+				t.Fatalf("GetDecisionCard: %v", err)
 			}
-			mailboxID := strings.TrimSpace(asString(mailboxOut.(map[string]any)["mailbox_id"]))
-			mailboxItem, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), mailboxID)
-			if err != nil || mailboxItem.ReplyContextID != replyContextID {
-				t.Fatalf("reply-scoped mailbox item = %#v err=%v", mailboxItem, err)
-			}
-
-			firstID := createHumanTaskWithExecutor(t, exec, requester)
-			firstItem, err := tc.store.GetMailboxItem(unmanagedToolTestContext(), firstID)
+			anchor, err := card.Anchor.HumanTask()
 			if err != nil {
-				t.Fatalf("get first human task: %v", err)
+				t.Fatal(err)
 			}
-			if firstItem.Type != "human_task" || firstItem.EntityID != requester.EntityID {
-				t.Fatalf("first human task item = %#v", firstItem)
+			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != "provider-turn/tool-call-1" || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
+				t.Fatalf("human-task anchor = %#v", anchor)
 			}
-			if _, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
-				"task_id":  firstID,
-				"decision": "approve",
-				"reason":   "ok",
-			}); err != nil {
-				t.Fatalf("approve first human task: %v", err)
+			continuation, err := tc.store.LoadHumanTaskContinuation(context.Background(), cardID)
+			if err != nil {
+				t.Fatalf("LoadHumanTaskContinuation: %v", err)
+			}
+			if continuation.ReplyContextID != replyContextID || continuation.SourceEventID != sourceEventID || continuation.State != decisioncard.HumanTaskContinuationPending {
+				t.Fatalf("human-task continuation = %#v", continuation)
+			}
+			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowInstance: "provider", EntityID: requester.EntityID}) {
+				t.Fatalf("human-task requester route = %#v", got)
+			}
+			if got := continuation.DeadlineAt.Sub(card.CreatedAt); got != 48*time.Hour {
+				t.Fatalf("default expiry = %s, want 48h", got)
 			}
 
-			secondID := createHumanTaskWithExecutor(t, exec, requester)
-			out, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
-				"task_id":  secondID,
-				"decision": "approve",
+			replayed, err := exec.Execute(ctx, "human_task_request", input)
+			if err != nil || strings.TrimSpace(asString(replayed.(map[string]any)["card_id"])) != cardID {
+				t.Fatalf("idempotent replay = %#v, %v", replayed, err)
+			}
+			changed := map[string]any{}
+			for key, value := range input {
+				changed[key] = value
+			}
+			changed["description"] = "Changed request under the same operation"
+			if _, err := exec.Execute(ctx, "human_task_request", changed); err == nil {
+				t.Fatal("changed content under the same operation identity was accepted")
+			}
+
+			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
+			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, "provider-turn/tool-call-1")
+			forkCtx = runtimecorrelation.WithBundleSourceFact(forkCtx, runtimecorrelation.BundleSourceFact{
+				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			})
+			forkCtx = runtimetools.WithActor(forkCtx, requester)
+			forked, err := exec.Execute(forkCtx, "human_task_request", input)
 			if err != nil {
-				t.Fatalf("budget-gated approve second human task: %v", err)
+				t.Fatalf("fork-local human_task_request: %v", err)
 			}
-			if got := strings.TrimSpace(asString(out.(map[string]any)["status"])); got != "deferred" {
-				t.Fatalf("second human task status = %q, want deferred", got)
-			}
-			assertHumanTaskDeferredProjection(t, tc.store, secondID)
-			requeueCount, err := tc.store.HumanTaskRequeueCount(unmanagedToolTestContext(), secondID)
-			if err != nil {
-				t.Fatalf("load second human task requeue count: %v", err)
-			}
-			if requeueCount != 1 {
-				t.Fatalf("second human task requeue count = %d, want 1", requeueCount)
-			}
-			explicitID := createHumanTaskWithExecutor(t, exec, requester)
-			explicitUntil := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
-			out, err = exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
-				"task_id":      explicitID,
-				"decision":     "defer",
-				"reason":       "wait for operator context",
-				"requeue_date": explicitUntil.Format(time.RFC3339),
-			})
-			if err != nil {
-				t.Fatalf("explicit defer human task: %v", err)
-			}
-			if got := strings.TrimSpace(asString(out.(map[string]any)["status"])); got != "deferred" {
-				t.Fatalf("explicit human task status = %q, want deferred", got)
-			}
-			assertHumanTaskDeferredProjection(t, tc.store, explicitID)
-			missingDateID := createHumanTaskWithExecutor(t, exec, requester)
-			if _, err := exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
-				"task_id":  missingDateID,
-				"decision": "defer",
-			}); err == nil {
-				t.Fatal("defer human task without requeue_date error = nil")
-			}
-			out, err = exec.ExecHumanTaskDecideDirect(unmanagedToolTestContext(), decider, map[string]any{
-				"task_id":  secondID,
-				"decision": "approve",
-			})
-			if err != nil {
-				t.Fatalf("approve requeued human task: %v", err)
-			}
-			if got := strings.TrimSpace(asString(out.(map[string]any)["status"])); got != "approved" {
-				t.Fatalf("requeued human task status = %q, want approved", got)
+			if forkedCardID := strings.TrimSpace(asString(forked.(map[string]any)["card_id"])); forkedCardID == "" || forkedCardID == cardID {
+				t.Fatalf("fork-local card id = %q, source card id = %q", forkedCardID, cardID)
 			}
 		})
 	}
@@ -377,7 +333,9 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	t.Helper()
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
-	now := time.Now().UTC()
+	// Force precision that Postgres cannot retain so idempotent replay proves
+	// admission canonicalizes before snapshot and selected-store persistence.
+	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
@@ -436,46 +394,6 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
 	return ctx, record.ID, requestEventID
-}
-
-func assertHumanTaskDeferredProjection(t *testing.T, store humanTaskToolStore, taskID string) {
-	t.Helper()
-	detail, err := store.GetV1MailboxItem(unmanagedToolTestContext(), taskID)
-	if err != nil {
-		t.Fatalf("get v1 deferred human task: %v", err)
-	}
-	if detail.Item.Status != "deferred" || detail.Item.Decision != "" || detail.Item.DeferredUntil == "" {
-		t.Fatalf("deferred human task projection = %#v, want status deferred, no terminal decision, deferred_until set", detail.Item)
-	}
-	if _, err := time.Parse(time.RFC3339Nano, detail.Item.DeferredUntil); err != nil {
-		t.Fatalf("deferred_until %q is not RFC3339Nano: %v", detail.Item.DeferredUntil, err)
-	}
-	if len(detail.History) < 2 || detail.History[len(detail.History)-1].Action != "deferred" {
-		t.Fatalf("deferred human task history = %#v", detail.History)
-	}
-}
-
-func createHumanTaskWithExecutor(t *testing.T, exec *runtimetools.Executor, actor models.AgentConfig) string {
-	t.Helper()
-	out, err := exec.ExecHumanTaskRequestDirect(unmanagedToolTestContext(), actor, map[string]any{
-		"category":       "review",
-		"description":    "Needs human review",
-		"expected_value": "approval",
-		"priority":       "high",
-		"talking_points": []string{"one", "two"},
-	})
-	if err != nil {
-		t.Fatalf("human_task_request: %v", err)
-	}
-	result, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("human_task_request output = %#v", out)
-	}
-	taskID := strings.TrimSpace(asString(result["task_id"]))
-	if taskID == "" {
-		t.Fatalf("human_task_request task_id missing in %#v", out)
-	}
-	return taskID
 }
 
 func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {

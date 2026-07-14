@@ -1066,3 +1066,53 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
+
+func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{{
+			AgentID: "requester-agent", EntityID: "requester-entity", FlowInstance: "provider/instance-a",
+		}},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	evt := eventtest.RootIngress(
+		"evt-filtered-direct-mutation", events.EventType("human_task.approved"), "runtime", "", []byte(`{}`), 0, "", "",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "wrong-entity", FlowInstance: "wrong-flow"}),
+		time.Now().UTC(),
+	)
+	postCommit := make([]func(), 0, 1)
+	rollback := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
+	err = eb.PublishDirectInMutation(ctx, evt, []string{"requester-agent"})
+	if err == nil || !strings.Contains(err.Error(), "transactional direct delivery rejected recipients: requester-agent") {
+		_ = tx.Rollback()
+		t.Fatalf("PublishDirectInMutation error = %v", err)
+	}
+	if len(postCommit) != 0 {
+		_ = tx.Rollback()
+		t.Fatalf("post-commit actions = %d, want none", len(postCommit))
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	runtimepipeline.FlushPipelineRollbackActions(rollback)
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
