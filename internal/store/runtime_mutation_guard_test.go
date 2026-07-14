@@ -809,7 +809,7 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 	switch site.Function {
 	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
-	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation", "CompleteDecisionCardLifecycleEvent":
+	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation":
 		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true
 	case "BeginEventTx":
 		if site.Kind == primitiveBegin {
@@ -894,15 +894,15 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "decision card obligation transactional helpers",
-			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
-			function:       rx(`^(insertDecisionRouteObligation|deferDecisionRouteObligation|insertDecisionCardLifecycleOutbox)$`),
+			path:           rx(`^internal/store/decision_card_route_obligations\.go$`),
+			function:       rx(`^(insertDecisionRouteObligation|deferDecisionRouteObligation)$`),
 			kinds:          kinds(primitiveWrite),
 			classification: classActiveTxHelper,
-			reason:         "decision-card route and lifecycle obligations write only inside their selected-store mutation owners",
+			reason:         "decision-card route obligations write only inside their selected-store mutation owner",
 		},
 		{
 			name:           "decision card obligation selected-store owners",
-			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
+			path:           rx(`^internal/store/decision_card_route_obligations\.go$`),
 			receiver:       rx(`^SQLiteRuntimeStore$`),
 			kinds:          kinds(primitiveWrite),
 			classification: classConsumesCanonical,
@@ -910,7 +910,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "decision card obligation readers",
-			path:           rx(`^internal/store/decision_card_(route_obligations|lifecycle_outbox)\.go$`),
+			path:           rx(`^internal/store/decision_card_route_obligations\.go$`),
 			kinds:          kinds(primitiveRead),
 			classification: classDifferentConcept,
 			reason:         "decision-card obligation due/pending scans are read-only recovery surfaces",
@@ -933,7 +933,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "sqlite schema bootstrap",
-			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|agent_lifecycle_schema|completion_schema_migration|platformschema/platformschema)\.go$`),
+			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|obsolete_schema_cutoff|agent_lifecycle_schema|completion_schema_migration|platformschema/platformschema)\.go$`),
 			kinds:          allPrimitiveKinds(),
 			classification: classDifferentConcept,
 			reason:         "schema/bootstrap owns dialect DDL and PRAGMA behavior, split from selected runtime mutation writers",

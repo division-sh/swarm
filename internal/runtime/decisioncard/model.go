@@ -111,7 +111,6 @@ type Store interface {
 	CancelDecisionCardInput(context.Context, CancelInputRequest) (InputDraft, error)
 	ListDecisionCardChanges(context.Context, SubscriptionOptions) ([]Change, error)
 	SupersedeDecisionCardsForStage(context.Context, string, string, string, string, time.Time) error
-	SupersedeDecisionCardsForRun(context.Context, string, string, time.Time) error
 }
 
 type Cadence struct {

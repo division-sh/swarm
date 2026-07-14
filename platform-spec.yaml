@@ -373,13 +373,14 @@ contract_formats:
           a verdict is decision_committed it fences ordinary, timer, terminal,
           and quiescence exits until that frozen route succeeds; only an open
           activation may be superseded.
-          Every supersession lifecycle fact carries the card's full run,
-          entity, and flow-instance identity. Ordinary and flow exits publish
-          through EventBus inside their selected-store mutation. Run terminal
-          and pre-runtime quiescence mutations persist a lifecycle outbox
-          intent atomically; the matching bundle EventBus later creates route
-          authority, delivery manifests, committed replay scope, dispatch, and
-          the terminal pipeline receipt. Raw events-row append is forbidden.
+          Every active competing-exit supersession lifecycle event carries the
+          card's full run, entity, and flow-instance identity and publishes
+          through EventBus inside its selected-store mutation. Run-terminal and
+          pre-runtime quiescence mutations instead persist only superseded
+          gate/card/draft state plus one append-only superseded
+          decision_card_changes row in the terminal transaction. They create no
+          event, receipt, outbox, route, delivery, replay scope, or EventBus
+          work; mailbox.subscribe and mailbox.list expose that terminal change.
         snapshot: >
           Card creation evaluates context once and freezes the structured
           presentation snapshot, authored verdict/input schema, effective cadence,
@@ -775,6 +776,12 @@ contract_formats:
           duplicate is idempotent even after the run becomes terminal and creates no rows or lifecycle transition. A
           duplicate event_id with different persisted event facts fails closed. Only a genuinely new event proceeds to
           the locked running-or-paused check.
+        duplicate_operation_boundary: >
+          The selected-store append owner returns an explicit inserted or exact-duplicate outcome. When event append is
+          part of an event-plus-side-effects operation, exact duplicate terminates that whole operation before route
+          planning or any delivery, route, replay-scope, receipt, outbox, state, counter, convergence, log, or
+          process-local dispatch mutation. This rule applies while the run is active and after it is terminal: retry may
+          neither create a missing side-effect set nor expand the side-effect set already associated with the event.
         terminal_evidence: >
           Executable terminal outcome events persist before the terminal transition in the same owner transaction.
           There is no generic post-terminal event bypass. Only typed platform.runtime_log evidence may persist after
@@ -10700,7 +10707,6 @@ platform_tables:
         - run_fork_revision_heads
         - inbound_publications
         - activity_attempts
-        - decision_card_lifecycle_outbox
         - decision_card_route_obligations
         - decision_card_changes
         - decision_card_input_drafts
@@ -11641,6 +11647,11 @@ platform_tables:
         consume that same admitted representation. The requester route is stamped independently from the card business scope,
         so entity-bound requesters receive flow- and global-scoped task outcomes. Transactional direct publication rolls back
         when its explicit requester is rejected by route policy; outcome delivery state never commits against an empty plan.
+        Automatic expiry executes inside one selected-store RunPipelineMutation: the transaction-local store operation
+        updates the card, continuation, and decision-card change rows and returns the deterministic mailbox.card_expired
+        event, then PipelineCoordinator publishes that event with EventBus.PublishInMutation before the same transaction
+        commits. Generic EventBus dispatch and recovery own post-commit convergence; no lifecycle-specific outbox,
+        releaser, compatibility reader, or recovery path exists.
         PostgreSQL approval admission serializes the stamped (budget_bundle_hash, budget_window_start) scope inside the
         decision transaction before counting committed approvals, so concurrent cards cannot exceed the weekly limit;
         SQLite provides the same atomicity through its selected-store write serialization.'
@@ -11690,7 +11701,9 @@ platform_tables:
         );
     decision_card_changes:
       description: 'Append-only transactional cursor owner for resumable at-least-once decision-card subscription. Consumers
-        reconnect from change_id and must reconcile through mailbox.list; timestamps are evidence and never ordering authority.'
+        reconnect from change_id and must reconcile through mailbox.list; timestamps are evidence and never ordering authority.
+        Run-terminal and pre-runtime quiescence supersession commits exactly one superseded change per transitioned card in
+        the selected-store terminal transaction and creates no executable event or delivery work.'
       ddl: |
         CREATE TABLE decision_card_changes (
             change_id  BIGSERIAL PRIMARY KEY,
@@ -11725,27 +11738,6 @@ platform_tables:
             updated_at     TIMESTAMPTZ NOT NULL,
             CHECK ((status = 'pending' AND completed_at IS NULL AND quarantined_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL AND quarantined_at IS NULL) OR (status = 'quarantined' AND completed_at IS NULL AND quarantined_at IS NOT NULL)),
             INDEX idx_decision_route_due (status, attempt_count, next_attempt_at, created_at)
-        );
-    decision_card_lifecycle_outbox:
-      description: 'Transactional publication-intent owner for decision-card lifecycle events created by run terminalization
-        and startup quiescence. The run mutation stores full run/entity/flow identity and payload here instead of raw-appending
-        an unroutable events row. The bundle EventBus publishes each deterministic event through normal route planning,
-        delivery-manifest, replay-scope, dispatch, and receipt ownership before completing the intent.'
-      ddl: |
-        CREATE TABLE decision_card_lifecycle_outbox (
-            event_id       UUID PRIMARY KEY,
-            card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-            bundle_hash    TEXT NOT NULL,
-            event_name     TEXT NOT NULL,
-            payload        JSONB NOT NULL,
-            entity_id      UUID,
-            flow_instance  TEXT,
-            status         TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
-            created_at     TIMESTAMPTZ NOT NULL,
-            completed_at   TIMESTAMPTZ,
-            CHECK ((status = 'pending' AND completed_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL)),
-            INDEX idx_decision_lifecycle_outbox_pending (bundle_hash, status, created_at, event_id)
         );
     api_idempotency:
       description: 'Reusable v1 API idempotency replay store. One row per (method, actor token id, idempotency key). Stores
@@ -12208,8 +12200,18 @@ platform_tables:
       inspected before any persistent schema or data mutation. A non-empty un-stamped store is not adopted. A stamped store
       is accepted only when every required table, column type, nullability, default, key, reference, check, and index derived
       from the current platform plans is compatible. Existing compatible platform schema is not rerun through CREATE, ALTER,
-      UPDATE, DROP, backfill, rebuild, or repair paths. Incompatible stores fail closed; pre-1.0 continuity and managed
+      UPDATE, DROP, backfill, rebuild, or repair paths except for the explicit obsolete
+      decision_card_lifecycle_outbox cutoff below. Incompatible stores fail closed; pre-1.0 continuity and managed
       migrations remain deferred under issue #995.
+    obsolete_decision_card_lifecycle_outbox_cutoff: >
+      Inside each backend's serialized schema-bootstrap transaction, immediately after the PostgreSQL advisory lock or
+      SQLite BEGIN IMMEDIATE and before any other bootstrap mutation, inspect only whether
+      decision_card_lifecycle_outbox exists and whether it is empty. Fresh databases omit the table. An existing empty
+      table is dropped transactionally. Any populated table is an unsupported pre-1.0 database and refuses startup before
+      runtime initialization: SQLite instructs the operator to recreate the configured database file or select a fresh
+      empty database; PostgreSQL instructs the operator to provision or select a fresh empty database. Both diagnostics
+      name the obsolete table and state that existing database state is not migrated. Row payload/status and related
+      event, delivery, receipt, route, or replay history are never inspected, preserved, converted, settled, or dispatched.
     fresh_bootstrap: >
       Fresh platform creation is backend-serialized and atomically commits the complete platform schema plus exactly one
       immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
@@ -14469,13 +14471,15 @@ platform_events:
       - until
       produced_by_type: platform
     mailbox.card_superseded:
-      description: Platform evidence event emitted when an anchor-owned lifecycle boundary supersedes a pending typed decision card.
+      description: >-
+        Platform evidence event emitted when an active anchor-owned lifecycle boundary supersedes a pending typed decision
+        card. Run-level terminal supersession commits only decision-card domain state and the append-only decision_card_changes
+        row; it creates no mailbox.card_superseded event, route, delivery, replay scope, receipt, or dispatch work.
       schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform
         locations:
         - internal/runtime/pipeline/workflow_gate_lifecycle.go
-        - internal/store/decision_cards.go#supersedeDecisionCardsForRun
       routing_class: event_loop_routable
       scope: entity, flow, or global
       payload:
@@ -14489,12 +14493,16 @@ platform_events:
       - reason
       produced_by_type: platform
     mailbox.card_expired:
-      description: Platform evidence event emitted when a human-task decision card reaches its stamped deadline without a verdict.
+      description: >-
+        Platform evidence event emitted when a human-task decision card reaches its stamped deadline without a verdict.
+        Its card, continuation, change row, event, routes, deliveries, replay scope, and receipt authority are one
+        selected-store transaction; generic EventBus convergence delivers the committed event afterward.
       schema_authority: platform-spec.yaml#platform_tables.tables.human_task_continuations
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/human_task_cards.go#expireHumanTaskCards
+        - internal/store/human_task_cards.go#ExpireHumanTaskCardsInMutation
+        - internal/runtime/pipeline/coordinator.go#PipelineCoordinator.expireHumanTaskCards
       routing_class: event_loop_routable
       scope: entity, flow, or global
       payload:

@@ -35,8 +35,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 61 {
-		t.Fatalf("method count = %d, want 61", len(openRPCNames))
+	if len(openRPCNames) != 64 {
+		t.Fatalf("method count = %d, want 64", len(openRPCNames))
 	}
 	if _, ok := registry.Method("test.setup_entities"); !ok {
 		t.Fatal("test.setup_entities missing from generated registry")

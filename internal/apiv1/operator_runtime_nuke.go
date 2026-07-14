@@ -138,15 +138,6 @@ func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 		if err != nil {
 			return err
 		}
-		if !dryRun {
-			if releaser, ok := opts.Events.(interface {
-				ReleaseDecisionCardLifecycleEvents(context.Context, int) (int, error)
-			}); ok && releaser != nil {
-				if _, err := releaser.ReleaseDecisionCardLifecycleEvents(ctx, 200); err != nil {
-					return err
-				}
-			}
-		}
 		cleanup, err = opts.ResetCleaner.Apply(ctx, destructivereset.CleanupRequest{
 			Result:       planResult,
 			Quiescence:   quiescence,

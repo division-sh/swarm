@@ -159,30 +159,26 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	return current, nil
 }
 
-func (s *PostgresStore) ExpireHumanTaskCards(ctx context.Context, now time.Time, limit int) (int, error) {
-	count := 0
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = expireHumanTaskCards(txctx, tx, now, limit, true)
-		return err
-	})
-	return count, err
+func (s *PostgresStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
+	}
+	return expireHumanTaskCards(ctx, tx, now, limit, true)
 }
 
-func (s *SQLiteRuntimeStore) ExpireHumanTaskCards(ctx context.Context, now time.Time, limit int) (int, error) {
-	count := 0
-	err := s.runDecisionCardMutation(ctx, "sqlite expire human-task cards", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = expireHumanTaskCards(txctx, tx, now, limit, false)
-		return err
-	})
-	return count, err
+func (s *SQLiteRuntimeStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
+	}
+	return expireHumanTaskCards(ctx, tx, now, limit, false)
 }
 
-func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit int, postgres bool) (int, error) {
+func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
-		return 0, fmt.Errorf("human-task expiry requires an authoritative timestamp")
+		return nil, fmt.Errorf("human-task expiry requires an authoritative timestamp")
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 200
@@ -195,39 +191,39 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 	}
 	rows, err := tx.QueryContext(ctx, query, now, limit)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var cardIDs []string
 	for rows.Next() {
 		var cardID string
 		if err := rows.Scan(&cardID); err != nil {
 			rows.Close()
-			return 0, err
+			return nil, err
 		}
 		cardIDs = append(cardIDs, strings.TrimSpace(cardID))
 	}
 	if err := rows.Close(); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
-		return 0, err
+		return nil, err
 	}
-	expired := 0
+	expiredEvents := make([]events.Event, 0, len(cardIDs))
 	for _, cardID := range cardIDs {
 		card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		continuation, err := loadHumanTaskContinuation(ctx, tx, cardID, postgres, true)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if card.Status != decisioncard.StatusPending || continuation.State != decisioncard.HumanTaskContinuationPending || continuation.DeadlineAt.After(now) {
 			continue
 		}
 		eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expired.v1\x00"+card.CardID+"\x00"+continuation.DeadlineAt.UTC().Format(time.RFC3339Nano))).String()
 		if _, err := transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{cardID: card.CardID}, now, false, postgres); err != nil {
-			return 0, err
+			return nil, err
 		}
 		cardUpdate := `UPDATE decision_cards SET status = 'expired', decided_at = ?, deferred_until = NULL, updated_at = ? WHERE card_id = ? AND status = 'pending'`
 		continuationUpdate := `UPDATE human_task_continuations SET state = 'expired', outcome_event_id = ?, deferred_until = NULL, defer_cause = 'deadline_elapsed', updated_at = ? WHERE card_id = ? AND state = 'pending'`
@@ -236,39 +232,36 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 			continuationUpdate = `UPDATE human_task_continuations SET state = 'expired', outcome_event_id = $1, deferred_until = NULL, defer_cause = 'deadline_elapsed', updated_at = $2 WHERE card_id = $3 AND state = 'pending'`
 		}
 		if result, err := tx.ExecContext(ctx, cardUpdate, now, now, card.CardID); err != nil {
-			return 0, err
+			return nil, err
 		} else if affected, _ := result.RowsAffected(); affected != 1 {
-			return 0, fmt.Errorf("human-task card expiry lost card authority")
+			return nil, fmt.Errorf("human-task card expiry lost card authority")
 		}
 		if result, err := tx.ExecContext(ctx, continuationUpdate, eventID, now, card.CardID); err != nil {
-			return 0, err
+			return nil, err
 		} else if affected, _ := result.RowsAffected(); affected != 1 {
-			return 0, fmt.Errorf("human-task card expiry lost continuation authority")
+			return nil, fmt.Errorf("human-task card expiry lost continuation authority")
 		}
 		if _, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeExpired, map[string]any{
 			"cause": "deadline_elapsed", "deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
 		}, now, postgres); err != nil {
-			return 0, err
+			return nil, err
 		}
 		payload, err := canonicaljson.Bytes(map[string]any{
 			"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "cause": "deadline_elapsed",
 			"deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		scope, err := card.Anchor.Scope()
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		evt := events.NewRuntimeControlEvent(eventID, events.EventType("mailbox.card_expired"), "platform", "", payload, 0, card.RunID, "",
 			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now)
-		if err := insertDecisionCardLifecycleOutbox(ctx, tx, card, evt, postgres); err != nil {
-			return 0, err
-		}
-		expired++
+		expiredEvents = append(expiredEvents, evt)
 	}
-	return expired, nil
+	return expiredEvents, nil
 }
 
 func loadHumanTaskContinuation(ctx context.Context, db decisionCardSQL, cardID string, postgres, forUpdate bool) (decisioncard.HumanTaskContinuation, error) {

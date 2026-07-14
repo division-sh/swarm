@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -881,18 +880,6 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	return err
 }
 
-func (s *PostgresStore) SupersedeDecisionCardsForRun(ctx context.Context, runID, reason string, now time.Time) error {
-	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, true)
-	})
-}
-
-func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForRun(ctx context.Context, runID, reason string, now time.Time) error {
-	return s.runDecisionCardMutation(ctx, "sqlite supersede run decision cards", func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, tx, runID, reason, now, false)
-	})
-}
-
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
@@ -959,29 +946,6 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		}
 		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
-		}
-		payload := []byte(nil)
-		stage, stageErr := card.Anchor.StageGate()
-		if stageErr == nil {
-			payload, err = canonicaljson.Bytes(map[string]any{
-				"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "stage_activation_id": stage.StageActivationID, "reason": reason,
-			})
-		} else {
-			payload, err = canonicaljson.Bytes(map[string]any{
-				"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "reason": reason,
-			})
-		}
-		if err != nil {
-			return err
-		}
-		scope, err := card.Anchor.Scope()
-		if err != nil {
-			return err
-		}
-		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now)
-		if err := insertDecisionCardLifecycleOutbox(ctx, tx, card, evt, postgres); err != nil {
-			return fmt.Errorf("queue run decision card supersession event: %w", err)
 		}
 	}
 	_, err = transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{runID: runID}, now, false, postgres)

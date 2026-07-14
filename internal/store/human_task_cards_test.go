@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -206,11 +208,15 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 			expiryAt := now.Add(2 * time.Hour).Add(789 * time.Nanosecond)
 			wantExpiryAt := decisioncard.CanonicalTimestamp(expiryAt)
-			if count, err := expiryStore.ExpireHumanTaskCards(ctx, expiryAt, 10); err != nil || count != 1 {
-				t.Fatalf("ExpireHumanTaskCards = %d, %v", count, err)
+			if _, err := expiryStore.ExpireHumanTaskCardsInMutation(ctx, expiryAt, 10); err == nil {
+				t.Fatal("ExpireHumanTaskCardsInMutation without a pipeline transaction succeeded")
 			}
-			if count, err := expiryStore.ExpireHumanTaskCards(ctx, expiryAt, 10); err != nil || count != 0 {
-				t.Fatalf("replayed ExpireHumanTaskCards = %d, %v", count, err)
+			expiredEvents := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryStore, expiryAt, 10)
+			if len(expiredEvents) != 1 || expiredEvents[0].ID() == "" || expiredEvents[0].Type() != events.EventType("mailbox.card_expired") {
+				t.Fatalf("ExpireHumanTaskCardsInMutation events = %#v", expiredEvents)
+			}
+			if replayed := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryStore, expiryAt, 10); len(replayed) != 0 {
+				t.Fatalf("replayed ExpireHumanTaskCardsInMutation events = %#v", replayed)
 			}
 			expiredCard, err := cardStore.GetDecisionCard(ctx, due.CardID)
 			if err != nil || expiredCard.Status != decisioncard.StatusExpired || !expiredCard.DecidedAt.Equal(wantExpiryAt) || !expiredCard.UpdatedAt.Equal(wantExpiryAt) {
@@ -223,11 +229,11 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 			supersededAt := now.Add(3 * time.Hour).Add(789 * time.Nanosecond)
 			wantSupersededAt := decisioncard.CanonicalTimestamp(supersededAt)
-			if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "completed", supersededAt); err != nil {
-				t.Fatalf("MarkRunTerminal completed: %v", err)
+			if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "cancelled", supersededAt); err != nil {
+				t.Fatalf("MarkRunTerminal cancelled: %v", err)
 			}
 			supersededCard, err := cardStore.GetDecisionCard(ctx, pending.CardID)
-			if err != nil || supersededCard.Status != decisioncard.StatusSuperseded || supersededCard.SupersededReason != "run_completed" || !supersededCard.UpdatedAt.Equal(wantSupersededAt) {
+			if err != nil || supersededCard.Status != decisioncard.StatusSuperseded || supersededCard.SupersededReason != "run_cancelled" || !supersededCard.UpdatedAt.Equal(wantSupersededAt) {
 				t.Fatalf("run-superseded card = %#v, %v", supersededCard, err)
 			}
 			supersededContinuation, err := humanStore.LoadHumanTaskContinuation(ctx, pending.CardID)
@@ -239,6 +245,30 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, expiryStore decisioncard.HumanTaskExpiryStore, at time.Time, limit int) []events.Event {
+	t.Helper()
+	db, _ := decisionCardStoreDB(t, cardStore)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin human-task expiry transaction: %v", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	eventsOut, err := expiryStore.ExpireHumanTaskCardsInMutation(runtimepipeline.WithPipelineSQLTxContext(ctx, tx), at, limit)
+	if err != nil {
+		t.Fatalf("ExpireHumanTaskCardsInMutation: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit human-task expiry transaction: %v", err)
+	}
+	committed = true
+	return eventsOut
 }
 
 func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string, createdAt time.Time, budgetLimit int, deadline time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {

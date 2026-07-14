@@ -18,10 +18,3 @@ type DecisionRouteObligationStore interface {
 	QuarantineDecisionRouteObligation(context.Context, string, time.Time, *runtimefailures.Envelope) error
 	CompleteDecisionRouteObligation(context.Context, string, time.Time) error
 }
-
-// DecisionCardLifecycleOutboxStore owns lifecycle events created by run-level
-// mutations that may execute before the bundle EventBus exists.
-type DecisionCardLifecycleOutboxStore interface {
-	ListPendingDecisionCardLifecycleEvents(context.Context, string, int) ([]events.Event, error)
-	CompleteDecisionCardLifecycleEvent(context.Context, string, time.Time) error
-}

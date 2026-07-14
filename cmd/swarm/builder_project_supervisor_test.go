@@ -1024,6 +1024,15 @@ func (m *processIngressMutation) Context() context.Context { return m.ctx }
 func (m *processIngressMutation) AppendEvent(ctx context.Context, evt events.Event) error {
 	return m.store.AppendEvent(ctx, evt)
 }
+func (m *processIngressMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	if owner, ok := m.store.(runtimebus.EventAppendOutcomePersistence); ok {
+		return owner.AppendEventOutcome(ctx, evt)
+	}
+	if err := m.store.AppendEvent(ctx, evt); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	return runtimebus.EventAppendInserted, nil
+}
 func (m *processIngressMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
 	return m.store.InsertEventDeliveries(ctx, eventID, agentIDs)
 }

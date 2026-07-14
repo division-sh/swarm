@@ -60,7 +60,7 @@ type terminalEventAdmissionHarness struct {
 	appendTx        func(context.Context, events.Event) error
 	markTerminal    func(context.Context, string, string) error
 	loadState       func(context.Context, string, string) (terminalEventAdmissionState, error)
-	persistVariants map[string]func(context.Context, events.Event) error
+	persistVariants map[string]func(context.Context, events.Event, string) error
 }
 
 type runtimeLogStatusState struct {
@@ -400,19 +400,19 @@ func terminalEventAdmissionPersistVariants(
 	withScope func(context.Context, events.Event, []string, runtimereplayclaim.CommittedReplayScope) error,
 	withRoutes func(context.Context, events.Event, []string, map[string]events.RouteIdentity, runtimereplayclaim.CommittedReplayScope) error,
 	withRouteSet func(context.Context, events.Event, []events.DeliveryRoute, runtimereplayclaim.CommittedReplayScope) error,
-) map[string]func(context.Context, events.Event) error {
-	return map[string]func(context.Context, events.Event) error{
-		"deliveries": func(ctx context.Context, evt events.Event) error {
-			return withDeliveries(ctx, evt, []string{"agent-1"})
+) map[string]func(context.Context, events.Event, string) error {
+	return map[string]func(context.Context, events.Event, string) error{
+		"deliveries": func(ctx context.Context, evt events.Event, recipient string) error {
+			return withDeliveries(ctx, evt, []string{recipient})
 		},
-		"deliveries_and_scope": func(ctx context.Context, evt events.Event) error {
-			return withScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		"deliveries_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
+			return withScope(ctx, evt, []string{recipient}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 		},
-		"delivery_routes_and_scope": func(ctx context.Context, evt events.Event) error {
-			return withRoutes(ctx, evt, []string{"agent-1"}, map[string]events.RouteIdentity{"agent-1": {}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		"delivery_routes_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
+			return withRoutes(ctx, evt, []string{recipient}, map[string]events.RouteIdentity{recipient: {}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 		},
-		"delivery_route_set_and_scope": func(ctx context.Context, evt events.Event) error {
-			return withRouteSet(ctx, evt, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		"delivery_route_set_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
+			return withRouteSet(ctx, evt, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: recipient}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 		},
 	}
 }
@@ -483,28 +483,68 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 		})
 	}
 
+	for _, status := range []string{"completed", "cancelled", "failed", "forked"} {
+		status := status
+		for name, persist := range harness.persistVariants {
+			name, persist := name, persist
+			t.Run("atomic_"+name+"_"+status, func(t *testing.T) {
+				runID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				seed := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"seed"}`, createdAt)
+				if err := harness.append(ctx, seed); err != nil {
+					t.Fatalf("seed event: %v", err)
+				}
+				if err := harness.markTerminal(ctx, runID, status); err != nil {
+					t.Fatalf("mark %s: %v", status, err)
+				}
+				if err := persist(ctx, seed, "agent-terminal-duplicate"); err != nil {
+					t.Fatalf("exact duplicate atomic persistence: %v", err)
+				}
+				seedState, err := harness.loadState(ctx, runID, seed.ID())
+				if err != nil {
+					t.Fatalf("load exact duplicate state: %v", err)
+				}
+				if seedState.Status != status || seedState.RunEventCount != 1 || seedState.EventExists != 1 || seedState.DeliveryCount != 0 {
+					t.Fatalf("state after exact duplicate atomic no-op = %+v", seedState)
+				}
+
+				candidate := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"atomic"}`, createdAt.Add(time.Second))
+				if err := persist(ctx, candidate, "agent-terminal-new"); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+					t.Fatalf("atomic persistence error = %v, want inactive-run rejection", err)
+				}
+				state, err := harness.loadState(ctx, runID, candidate.ID())
+				if err != nil {
+					t.Fatalf("load state: %v", err)
+				}
+				if state.Status != status || state.RunEventCount != 1 || state.EventExists != 0 || state.DeliveryCount != 0 {
+					t.Fatalf("state after atomic refusal = %+v", state)
+				}
+			})
+		}
+	}
+
 	for name, persist := range harness.persistVariants {
 		name, persist := name, persist
-		t.Run("atomic_"+name, func(t *testing.T) {
+		t.Run("atomic_"+name+"_active_duplicate_does_not_expand", func(t *testing.T) {
 			runID := uuid.NewString()
 			createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			seed := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"seed"}`, createdAt)
-			if err := harness.append(ctx, seed); err != nil {
-				t.Fatalf("seed event: %v", err)
+			evt := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"active"}`, createdAt)
+			if err := persist(ctx, evt, "agent-original"); err != nil {
+				t.Fatalf("persist original atomic event: %v", err)
 			}
-			if err := harness.markTerminal(ctx, runID, "completed"); err != nil {
-				t.Fatalf("mark completed: %v", err)
-			}
-			candidate := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"atomic"}`, createdAt.Add(time.Second))
-			if err := persist(ctx, candidate); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
-				t.Fatalf("atomic persistence error = %v, want inactive-run rejection", err)
-			}
-			state, err := harness.loadState(ctx, runID, candidate.ID())
+			before, err := harness.loadState(ctx, runID, evt.ID())
 			if err != nil {
-				t.Fatalf("load state: %v", err)
+				t.Fatalf("load original side effects: %v", err)
 			}
-			if state.Status != "completed" || state.RunEventCount != 1 || state.EventExists != 0 || state.DeliveryCount != 0 {
-				t.Fatalf("state after atomic refusal = %+v", state)
+			if err := persist(ctx, evt, "agent-expansion"); err != nil {
+				t.Fatalf("persist exact active duplicate: %v", err)
+			}
+			after, err := harness.loadState(ctx, runID, evt.ID())
+			if err != nil {
+				t.Fatalf("load duplicate side effects: %v", err)
+			}
+			if after != before {
+				t.Fatalf("exact active duplicate expanded atomic side effects: before=%+v after=%+v", before, after)
 			}
 		})
 	}
@@ -540,7 +580,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 					uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"must remain non-routed"}`),
 					0, runID, "", events.EventEnvelope{}, createdAt.Add(2*time.Second),
 				)
-				err := persist(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), candidate)
+				err := persist(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), candidate, "agent-diagnostic")
 				if err == nil || !strings.Contains(err.Error(), "cannot use generic event delivery persistence") {
 					t.Fatalf("diagnostic atomic persistence error = %v, want non-routed refusal", err)
 				}

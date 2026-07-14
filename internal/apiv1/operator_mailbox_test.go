@@ -11,7 +11,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
