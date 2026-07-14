@@ -170,23 +170,5 @@ func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 			return true
 		}
 	}
-	if plan.Accumulate != nil {
-		for _, rule := range plan.Accumulate.OnComplete {
-			if rule.Emit.HasFields() {
-				return true
-			}
-			if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
-				return true
-			}
-		}
-		if plan.Accumulate.OnTimeout != nil {
-			if plan.Accumulate.OnTimeout.Emit.HasFields() {
-				return true
-			}
-			if plan.Accumulate.OnTimeout.FanOut != nil && plan.Accumulate.OnTimeout.FanOut.Emit.HasFields() {
-				return true
-			}
-		}
-	}
 	return false
 }

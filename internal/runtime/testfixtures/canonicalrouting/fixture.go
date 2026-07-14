@@ -21,6 +21,8 @@ const (
 	TemplateSelectOrCreate  ArtifactID = "template-select-or-create"
 	TemplateReply           ArtifactID = "template-reply"
 	TemplateCreateMintedKey ArtifactID = "template-create-minted-key"
+	FanInStream             ArtifactID = "fan-in/stream"
+	FanInBarrier            ArtifactID = "fan-in/barrier"
 )
 
 // ArtifactID is a checked-in routing artifact identity. The ownership guard
@@ -85,7 +87,7 @@ func ExampleRoot(t testing.TB, id ArtifactID) string {
 	t.Helper()
 	root, ok := canonicalExamplePath(id)
 	if !ok {
-		t.Fatalf("routing artifact %q is not one of the six canonical positive fixture owners", id)
+		t.Fatalf("routing artifact %q is not a canonical positive fixture owner", id)
 	}
 	return filepath.Join(RepoRoot(t), filepath.FromSlash(root))
 }
@@ -145,6 +147,9 @@ func ProveSource(t testing.TB, tokens ...SourceToken) {
 
 func checkedArtifactRoot(t testing.TB, id ArtifactID) string {
 	t.Helper()
+	if canonical, ok := canonicalExamplePath(id); ok {
+		return filepath.Join(RepoRoot(t), filepath.FromSlash(canonical))
+	}
 	root := filepath.ToSlash(filepath.Clean(strings.TrimSpace(string(id))))
 	if root == "." || filepath.IsAbs(root) || strings.HasPrefix(root, "../") {
 		t.Fatalf("invalid routing artifact ID %q", id)
@@ -164,6 +169,8 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		TemplateSelectOrCreate,
 		TemplateReply,
 		TemplateCreateMintedKey,
+		FanInStream,
+		FanInBarrier,
 	} {
 		root := filepath.ToSlash(filepath.Join("examples", "routing", string(canonical)))
 		if requested == string(canonical) || requested == root {

@@ -87,14 +87,11 @@ func TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget(t *testi
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one fan-in route plan", plans)
-	}
-	plan := plans[0]
+	plan := requireFanInRoutePlan(t, plans)
 	if plan.FanIn == nil {
 		t.Fatalf("fan-in metadata = nil in %#v", plan)
 	}
-	if plan.FanIn.Aggregation != "stream" || plan.FanIn.Window != "payload.period_id" || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "payload.report_id" {
+	if plan.FanIn.Aggregation != "stream" || plan.FanIn.Window != "payload.period_id" || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "payload.operating_id" {
 		t.Fatalf("fan-in metadata = %#v, want stream/window/dedup", plan.FanIn)
 	}
 	if plan.TargetKind != ConnectTargetKindTarget || plan.ResolutionKind != ConnectResolutionStatic || plan.Delivery != ConnectDeliveryOne {
@@ -113,10 +110,7 @@ func TestLowerCompositionConnectRoutePlansAllowsFanInStreamEventIDDedup(t *testi
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one fan-in route plan", plans)
-	}
-	plan := plans[0]
+	plan := requireFanInRoutePlan(t, plans)
 	if plan.FanIn == nil || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "event.id" {
 		t.Fatalf("fan-in metadata = %#v, want event.id dedup", plan.FanIn)
 	}
@@ -132,7 +126,6 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires dedup_by"},
 		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "exactly one dedup_by"},
 		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires window"},
-		{name: "barrier", opts: templatefanin.Options{BarrierAggregation: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "aggregation: stream"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "must be the receiver singleton route or a child"},
 		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "is not mode: singleton"},
 		{name: "delivery many", opts: templatefanin.Options{DeliveryMany: true}, failure: ConnectFailureDeliveryTopologyInvalid, detail: "requires delivery one"},
@@ -155,6 +148,40 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 			}
 		})
 	}
+}
+
+func TestLowerCompositionConnectRoutePlansUsesFanInBarrierSingularTarget(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load canonical barrier: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
+	}
+	plan := requireFanInRoutePlan(t, plans)
+	if plan.FanIn.Aggregation != "barrier" || plan.FanIn.Window != "payload.period_id" || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "payload.operating_id" {
+		t.Fatalf("fan-in metadata = %#v, want barrier/window/member identity", plan.FanIn)
+	}
+	if plan.Delivery != ConnectDeliveryOne || plan.TargetKind != ConnectTargetKindTarget || plan.ResolutionKind != ConnectResolutionStatic {
+		t.Fatalf("barrier routing shape = %#v, want singular static target", plan)
+	}
+}
+
+func requireFanInRoutePlan(t *testing.T, plans []ConnectRoutePlan) ConnectRoutePlan {
+	t.Helper()
+	var matches []ConnectRoutePlan
+	for _, plan := range plans {
+		if plan.FanIn != nil {
+			matches = append(matches, plan)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("fan-in route plans = %#v in all plans %#v, want exactly one", matches, plans)
+	}
+	return matches[0]
 }
 
 func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) {

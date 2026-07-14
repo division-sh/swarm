@@ -1256,12 +1256,10 @@ func decodeClearGatesNode(node *yaml.Node) ([]string, error) {
 type handlerRuleDecodeContext string
 
 const (
-	handlerRuleDecodeContextRules                handlerRuleDecodeContext = "rules"
-	handlerRuleDecodeContextOnComplete           handlerRuleDecodeContext = "on_complete"
-	handlerRuleDecodeContextAccumulateOnComplete handlerRuleDecodeContext = "accumulate.on_complete"
-	handlerRuleDecodeContextAccumulateOnTimeout  handlerRuleDecodeContext = "accumulate.on_timeout"
-	handlerRuleDecodeContextJoinOnComplete       handlerRuleDecodeContext = "join.on_complete"
-	handlerRuleDecodeContextJoinTimeout          handlerRuleDecodeContext = "join.timeout"
+	handlerRuleDecodeContextRules          handlerRuleDecodeContext = "rules"
+	handlerRuleDecodeContextOnComplete     handlerRuleDecodeContext = "on_complete"
+	handlerRuleDecodeContextJoinOnComplete handlerRuleDecodeContext = "join.on_complete"
+	handlerRuleDecodeContextJoinTimeout    handlerRuleDecodeContext = "join.timeout"
 )
 
 func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContext) (*HandlerRuleEntry, error) {

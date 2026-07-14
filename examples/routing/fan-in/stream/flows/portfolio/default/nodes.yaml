@@ -1,0 +1,9 @@
+portfolio-collector:
+  id: portfolio-collector
+  execution_type: system_node
+  subscribes_to: [operating.reported]
+  event_handlers:
+    operating.reported:
+      accumulate:
+        into: operating_reports
+        from: payload

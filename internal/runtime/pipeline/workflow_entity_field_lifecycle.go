@@ -196,14 +196,6 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 		for _, rule := range handler.OnComplete {
 			addRuleWriters(rule)
 		}
-		if handler.Accumulate != nil {
-			for _, rule := range handler.Accumulate.OnComplete {
-				addRuleWriters(rule)
-			}
-			if handler.Accumulate.OnTimeout != nil {
-				addRuleWriters(*handler.Accumulate.OnTimeout)
-			}
-		}
 	}
 	if handler.CreateEntity && phaseAfter(phase, WorkflowEntityFieldLifecycleDataAccumulation) {
 		for _, write := range handler.DataAccumulation.Writes {

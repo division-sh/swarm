@@ -2995,7 +2995,7 @@ source: payload.items
 	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
 	}
-	want := []string{"completion", "dedup_by", "description", "expected_from", "from", "into", "on_complete", "on_timeout", "threshold", "timeout_ms", "window"}
+	want := []string{"dedup_by", "description", "from", "into", "window"}
 	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
 		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}
@@ -3423,31 +3423,6 @@ on_complete:
       id: mailbox_write
 `,
 		},
-		{
-			name: "accumulate_on_complete",
-			raw: `
-accumulate:
-  into: approvals
-  expected_from: entity.expected_approvals
-  on_complete:
-    - id: done
-      condition: "else"
-      action:
-        id: mailbox_write
-`,
-		},
-		{
-			name: "accumulate_on_timeout",
-			raw: `
-accumulate:
-  into: approvals
-  expected_from: entity.expected_approvals
-  on_timeout:
-    advances_to: timed_out
-    action:
-      id: mailbox_write
-`,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3818,8 +3793,20 @@ legacy_buffer: dimensions_received
 	if !ok {
 		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
 	}
-	if !containsString(diagnostic.ValidOptions, "into") || !containsString(diagnostic.ValidOptions, "on_complete") {
+	if !containsString(diagnostic.ValidOptions, "into") || containsString(diagnostic.ValidOptions, "on_complete") {
 		t.Fatalf("diagnostic valid options = %#v, want accumulate options", diagnostic.ValidOptions)
+	}
+}
+
+func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
+	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout"} {
+		t.Run(field, func(t *testing.T) {
+			var spec AccumulateSpec
+			err := yaml.Unmarshal([]byte("into: items\n"+field+": retired\n"), &spec)
+			if err == nil || !strings.Contains(err.Error(), `accumulate field "`+field+`" is not supported`) {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired field rejection", err)
+			}
+		})
 	}
 }
 

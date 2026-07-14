@@ -410,34 +410,6 @@ func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
 	m.StateCarrier.StateBuckets = cloneStateBucketSet(raw)
 }
 
-type AccumulatorCompletionEvaluationOutcome string
-
-const (
-	AccumulatorCompletionEvaluationNotAttempted AccumulatorCompletionEvaluationOutcome = "not_attempted"
-	AccumulatorCompletionEvaluationSucceeded    AccumulatorCompletionEvaluationOutcome = "succeeded"
-	AccumulatorCompletionEvaluationFailed       AccumulatorCompletionEvaluationOutcome = "failed"
-)
-
-type AccumulatorCompletionCommitOutcome string
-
-const (
-	AccumulatorCompletionCommitUnknown    AccumulatorCompletionCommitOutcome = "unknown"
-	AccumulatorCompletionCommitCommitted  AccumulatorCompletionCommitOutcome = "committed"
-	AccumulatorCompletionCommitRolledBack AccumulatorCompletionCommitOutcome = "rolled_back"
-)
-
-type AccumulatorCompletionDiagnostics struct {
-	Relevant           bool
-	CompletionReached  bool
-	ReceivedCount      int
-	ExpectedCount      int
-	CompletionMode     string
-	OnCompleteDeclared bool
-	EvaluationOutcome  AccumulatorCompletionEvaluationOutcome
-	SelectedRuleID     string
-	CommitOutcome      AccumulatorCompletionCommitOutcome
-}
-
 type RuleMatch struct {
 	ID         string
 	AdvancesTo string
@@ -446,28 +418,27 @@ type RuleMatch struct {
 }
 
 type ExecutionResult struct {
-	Status                           OutcomeStatus
-	Failure                          *failures.Envelope
-	FailureDisposition               FailureDisposition
-	ExecutedSteps                    []Step
-	CurrentState                     string
-	NextState                        string
-	GuardsEvaluated                  []string
-	ActionsExecuted                  []string
-	ClearGates                       []string
-	SetsGate                         string
-	RuleID                           string
-	FanOutCount                      int
-	Computed                         map[string]any
-	StateMutation                    StateMutation
-	TimerIntents                     []TimerIntent
-	EmitIntents                      []EmitIntent
-	ActivityIntents                  []ActivityIntent
-	ComputeModuleTraces              []ComputeModuleTrace
-	DeadLetterIntents                []EmitIntent
-	ChainDepth                       int
-	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
-	LoopTrace                        *LoopExecutionTrace
+	Status              OutcomeStatus
+	Failure             *failures.Envelope
+	FailureDisposition  FailureDisposition
+	ExecutedSteps       []Step
+	CurrentState        string
+	NextState           string
+	GuardsEvaluated     []string
+	ActionsExecuted     []string
+	ClearGates          []string
+	SetsGate            string
+	RuleID              string
+	FanOutCount         int
+	Computed            map[string]any
+	StateMutation       StateMutation
+	TimerIntents        []TimerIntent
+	EmitIntents         []EmitIntent
+	ActivityIntents     []ActivityIntent
+	ComputeModuleTraces []ComputeModuleTrace
+	DeadLetterIntents   []EmitIntent
+	ChainDepth          int
+	LoopTrace           *LoopExecutionTrace
 }
 
 type LoopExecutionTrace struct {

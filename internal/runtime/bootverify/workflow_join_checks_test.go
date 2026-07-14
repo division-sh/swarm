@@ -135,18 +135,6 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsStagedBarrierAccumulate(t *testing.T) {
-	bundle := joinValidationBundle()
-	h := bundle.Nodes["join-node"].EventHandlers["item.completed"]
-	h.Join = nil
-	h.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected", Completion: runtimecontracts.ParseAccumulateCompletion("all")}
-	bundle.Nodes["join-node"].EventHandlers["item.completed"] = h
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.HardInvalidities(), joinValidationCheckID, "must use handler.join") {
-		t.Fatalf("expected staged accumulate retirement, got %#v", report.HardInvalidities())
-	}
-}
-
 func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	bundle := joinValidationBundle()
 	source := semanticview.Wrap(bundle)
@@ -204,6 +192,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 
 func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
 	transitions := []runtimecontracts.HandlerTransitionSemantic{}
+	joins := []runtimecontracts.WorkflowJoinPlan{}
 	for nodeID, node := range bundle.Nodes {
 		for eventType, handler := range node.EventHandlers {
 			transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
@@ -217,9 +206,14 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 				Join:         handler.Join,
 				Loop:         handler.Loop,
 			})
+			if handler.Join != nil {
+				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, "", eventType, "result")
+				joins = append(joins, runtimecontracts.WorkflowJoinPlan{NodeID: nodeID, HandlerEvent: eventType, Spec: *handler.Join, ResultType: resultType})
+			}
 		}
 	}
 	bundle.Semantics.HandlerTransitions = transitions
+	bundle.Semantics.Joins = joins
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
 		"": runtimecontracts.BuildWorkflowStageTopology(
 			"",

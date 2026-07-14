@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -219,14 +218,6 @@ func createEntityFieldInitializationFinding(flowID, nodeID, eventType string, ha
 		return nil
 	}
 	if createEntityComputeStoresField(handler, field) && createEntityComputeMakesFieldAvailable(expr.Phase) {
-		if createEntityDynamicExpectedFrom(handler.Accumulate) {
-			return &Finding{
-				CheckID:  "expression_field_reference_validation",
-				Severity: "warning",
-				Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s through same-handler compute.store_as, but accumulate.expected_from %q is dynamic so initialization proof degrades on the create_entity slice", flowID, nodeID, eventType, field, expr.Kind, strings.TrimSpace(handler.Accumulate.ExpectedFrom)),
-				Location: nodeID,
-			}
-		}
 		return nil
 	}
 	return &Finding{
@@ -269,17 +260,6 @@ func createEntityComputeMakesFieldAvailable(phase runtimepipeline.WorkflowEntity
 	default:
 		return false
 	}
-}
-
-func createEntityDynamicExpectedFrom(spec *runtimecontracts.AccumulateSpec) bool {
-	if spec == nil {
-		return false
-	}
-	path := spec.ExpectedPath
-	if path.IsZero() {
-		path = runtimepaths.Parse(spec.ExpectedFrom)
-	}
-	return path.Root == runtimepaths.RootEntity
 }
 
 type expressionReference struct {
@@ -329,16 +309,6 @@ func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []handle
 				Expression: condition,
 				Context:    runtimepipeline.WorkflowConditionContextOnComplete,
 			})
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-				out = append(out, handlerCondition{
-					Expression: condition,
-					Context:    runtimepipeline.WorkflowConditionContextOnComplete,
-				})
-			}
 		}
 	}
 	if handler.Filter != nil {
@@ -424,14 +394,6 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 	}
 	for _, rule := range handler.OnComplete {
 		appendRuleExpressions("on_complete", rule)
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			appendRuleExpressions("accumulate.on_complete", rule)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			appendRuleExpressions("accumulate.on_timeout", *handler.Accumulate.OnTimeout)
-		}
 	}
 	if handler.Join != nil {
 		if from := strings.TrimSpace(handler.Join.Members.From); from != "" {
@@ -632,14 +594,6 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 	}
 	for _, rule := range handler.OnComplete {
 		addRuleWriters(rule)
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			addRuleWriters(rule)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			addRuleWriters(*handler.Accumulate.OnTimeout)
-		}
 	}
 	return out
 }

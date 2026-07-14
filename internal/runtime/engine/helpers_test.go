@@ -260,11 +260,8 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T) {
 	state := &StateSnapshot{}
 	acc := &Accumulator{
-		Expected:      []string{"a", "b"},
-		ExpectedCount: 2,
-		Received:      map[string]bool{"a": true},
-		Items:         []map[string]any{{"payload": map[string]any{"score": 8}}},
-		LastEventID:   "evt-1",
+		Received: map[string]bool{"a": true},
+		Items:    []map[string]any{{"payload": map[string]any{"score": 8}}},
 	}
 
 	storeAccumulator(state, "node-1", events.EventType("task.completed"), acc)
@@ -285,7 +282,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	if !ok {
 		t.Fatal("expected accumulator to load")
 	}
-	if loaded.ExpectedCount != 2 || len(loaded.Items) != 1 || !loaded.Received["a"] {
+	if len(loaded.Items) != 1 || !loaded.Received["a"] {
 		t.Fatalf("loaded accumulator mismatch: %#v", loaded)
 	}
 }
@@ -465,57 +462,6 @@ func TestNextChainDepth_EnforcesLimit(t *testing.T) {
 	}
 	if next, err := nextChainDepth(3, 3); err != ErrChainDepthExceeded || next != 4 {
 		t.Fatalf("nextChainDepth overflow = %d, %v", next, err)
-	}
-}
-
-func TestExpectedAccumulatorTargets(t *testing.T) {
-	base := BaseContext{Payload: values.Wrap(map[string]any{
-		"sources": []any{"b", "a", "a"},
-		"count":   "3",
-	})}
-	if ids, count := expectedAccumulatorTargets(base, ExecutionState{}, paths.Parse("payload.sources"), "payload.sources"); len(ids) != 2 || count != 3 {
-		t.Fatalf("expectedAccumulatorTargets sources = %v, %d", ids, count)
-	}
-	if ids, count := expectedAccumulatorTargets(base, ExecutionState{}, paths.Parse("payload.count"), "payload.count"); ids != nil || count != 3 {
-		t.Fatalf("expectedAccumulatorTargets count = %v, %d", ids, count)
-	}
-}
-
-func TestAccumulatorComplete(t *testing.T) {
-	acc := &Accumulator{
-		Expected:      []string{"a", "b"},
-		ExpectedCount: 2,
-		Received:      map[string]bool{"a": true},
-	}
-	complete, err := accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("all")}, nil)
-	if err != nil || complete {
-		t.Fatalf("accumulatorComplete all = %v, %v", complete, err)
-	}
-	acc.Received["b"] = true
-	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{
-		Completion: runtimecontracts.ParseAccumulateCompletion("threshold"),
-		Threshold:  2,
-	}, nil)
-	if err != nil || !complete {
-		t.Fatalf("accumulatorComplete threshold = %v, %v", complete, err)
-	}
-	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("received_count >= 2")}, func(expression string, extra map[string]any) (bool, error) {
-		if expression != "received_count >= 2" {
-			t.Fatalf("unexpected expression: %q", expression)
-		}
-		accumulation, _ := extra["accumulation"].(map[string]any)
-		return accumulation["received_count"] == 2, nil
-	})
-	if err != nil || !complete {
-		t.Fatalf("accumulatorComplete expression = %v, %v", complete, err)
-	}
-	acc = &Accumulator{
-		StartedAt:     "2026-03-14T00:00:00Z",
-		LastEventType: "accumulate.timeout",
-	}
-	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("timeout")}, nil)
-	if err != nil || !complete {
-		t.Fatalf("accumulatorComplete timeout = %v, %v", complete, err)
 	}
 }
 

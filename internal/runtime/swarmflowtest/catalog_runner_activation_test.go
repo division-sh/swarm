@@ -33,9 +33,6 @@ func TestCatalogRunner_ExecutesCurrentlySupportedCatalogCases(t *testing.T) {
 	if perTier["tier1-primitives"] == 0 {
 		t.Fatal("no tier1 primitive cases executed")
 	}
-	if perTier["tier2-accumulation"] == 0 {
-		t.Fatal("no tier2 accumulation cases executed")
-	}
 	if perTier["tier3-list-processing"] == 0 {
 		t.Fatal("no tier3 list-processing cases executed")
 	}

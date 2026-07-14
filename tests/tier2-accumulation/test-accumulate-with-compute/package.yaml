@@ -1,5 +1,0 @@
-name: test-accumulate-with-compute
-version: 1.0.0
-description: Accumulate all items then compute weighted_average via on_complete.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

@@ -1,0 +1,31 @@
+portfolio-collector:
+  id: portfolio-collector
+  execution_type: system_node
+  subscribes_to: [portfolio.setup, operating.reported]
+  event_handlers:
+    portfolio.setup:
+      select_entity:
+        by:
+          portfolio_id: payload.portfolio_id
+      data_accumulation:
+        writes:
+          - source_field: portfolio_id
+            target_field: portfolio_id
+          - source_field: expected_operating_ids
+            target_field: expected_operating_ids
+          - source_field: period_id
+            target_field: period_id
+      advances_to: awaiting
+    operating.reported:
+      join:
+        stage: awaiting
+        members:
+          from: entity.expected_operating_ids
+        window:
+          from: entity.period_id
+        output: payload.revenue
+        on_complete:
+          advances_to: complete
+        timeout:
+          after: 5m
+          advances_to: failed

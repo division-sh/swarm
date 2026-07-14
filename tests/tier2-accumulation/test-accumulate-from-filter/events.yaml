@@ -1,5 +1,0 @@
-score.received:
-  swarm:
-    source: external
-  score: float
-scores.collected:

@@ -1,8 +1,0 @@
-core:
-  expected_count:
-    type: integer
-    _unused_reason: preseeded accumulation threshold field
-  composite: numeric(5,2)
-  received_items:
-    type: "[text]"
-    _unused_reason: platform-managed accumulation bucket

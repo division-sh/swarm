@@ -1,6 +1,0 @@
-item.arrived:
-  swarm:
-    source: external
-  item_id: string
-accumulate.timeout:
-collection.done:

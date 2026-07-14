@@ -525,6 +525,58 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	}
 }
 
+func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
+	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier)
+
+	t.Run("json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+			"describe", "--contracts", contractsRoot, "--graph", "--json",
+		}, &stdout, &stderr, defaultRootCommandOptions())
+		if code != 0 {
+			t.Fatalf("describe barrier json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+		var output describeCommandOutput
+		if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+			t.Fatalf("decode describe barrier json: %v\n%s", err, stdout.String())
+		}
+		var joins []authoringview.StageGraphJoinView
+		for _, graph := range output.StageGraphs {
+			if graph.FlowID == "portfolio" {
+				joins = graph.Joins
+				break
+			}
+		}
+		if len(joins) != 1 {
+			t.Fatalf("portfolio joins = %#v, want one", joins)
+		}
+		join := joins[0]
+		if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
+			join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" {
+			t.Fatalf("barrier json provenance = %#v", join)
+		}
+	})
+
+	t.Run("human", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+			"describe", "--contracts", contractsRoot, "--graph",
+		}, &stdout, &stderr, defaultRootCommandOptions())
+		if code != 0 {
+			t.Fatalf("describe barrier code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+		for _, want := range []string{
+			"members entity.expected_operating_ids by payload.operating_id <- resolution.dedup_by",
+			"window entity.period_id by payload.period_id <- resolution.window",
+			"fan_in_pin operating_reported",
+		} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("describe barrier output missing %q:\n%s", want, stdout.String())
+			}
+		}
+	})
+}
+
 func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 	contractsRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer

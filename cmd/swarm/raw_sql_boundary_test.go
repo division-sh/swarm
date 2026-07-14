@@ -162,11 +162,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#tool_model.provider_trigger_adapters.pack_manifest_engine.provider_delivery_transaction",
 			Reason:         "flow activation observes the ambient selected-store transaction only to persist route authority in-unit and defer agent process startup until commit",
 		},
-		"internal/runtime/pipeline/accumulator_completion_diagnostics.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "pipeline diagnostic path observes active pipeline transaction context as an explicit unit-of-work boundary",
-		},
 		"internal/runtime/pipeline/activity_engine.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

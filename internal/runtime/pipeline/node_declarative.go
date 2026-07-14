@@ -95,11 +95,6 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 		eventType = strings.TrimSpace(string(evt.Type()))
 	}
 	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), eventType)
-	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
-			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), bucket.EventType)
-		}
-	}
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
 			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), ref.HandlerEvent)
@@ -156,11 +151,6 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 		eventType = strings.TrimSpace(string(evt.Type()))
 	}
 	policy, ok := n.policies[eventType]
-	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
-			policy, ok = n.policies[bucket.EventType]
-		}
-	}
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
 			policy, ok = n.policies[ref.HandlerEvent]
@@ -204,22 +194,6 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
 				handler = candidate
 				handlerEventKey = strings.TrimSpace(pattern)
-				ok = true
-				break
-			}
-		}
-	}
-	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
-			for candidateEventType, candidate := range n.contract.EventHandlers {
-				if strings.TrimSpace(candidateEventType) != bucket.EventType {
-					continue
-				}
-				if !accumulationTimeoutHandler(candidate) {
-					continue
-				}
-				handler = candidate
-				handlerEventKey = bucket.EventType
 				ok = true
 				break
 			}
@@ -527,16 +501,6 @@ func handlerMaterializesEntity(source semanticview.Source, flowID string, handle
 			return true
 		}
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if ruleWritesEntityFields(rule, allowedFields) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && ruleWritesEntityFields(*handler.Accumulate.OnTimeout, allowedFields) {
-			return true
-		}
-	}
 	return false
 }
 
@@ -551,16 +515,6 @@ func handlerActionMaterializesEntity(handler SystemNodeEventHandler) bool {
 	}
 	for _, rule := range handler.OnComplete {
 		if actionMaterializesEntity(rule.Action) {
-			return true
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if actionMaterializesEntity(rule.Action) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && actionMaterializesEntity(handler.Accumulate.OnTimeout.Action) {
 			return true
 		}
 	}
@@ -589,16 +543,6 @@ func handlerMutatesEntityLifecycle(handler SystemNodeEventHandler) bool {
 	}
 	for _, rule := range handler.OnComplete {
 		if strings.TrimSpace(rule.AdvancesTo) != "" {
-			return true
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if strings.TrimSpace(rule.AdvancesTo) != "" {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && strings.TrimSpace(handler.Accumulate.OnTimeout.AdvancesTo) != "" {
 			return true
 		}
 	}
@@ -697,25 +641,6 @@ func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
 			return true
 		}
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if emitReferencesEntity(rule.Emit) {
-				return true
-			}
-			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			rule := handler.Accumulate.OnTimeout
-			if emitReferencesEntity(rule.Emit) {
-				return true
-			}
-			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
-				return true
-			}
-		}
-	}
 	return false
 }
 
@@ -738,7 +663,9 @@ func accumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec) bool {
 	if spec == nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(spec.ExpectedFrom), "entity.")
+	return strings.HasPrefix(strings.TrimSpace(spec.From), "entity.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.Window), "entity.") ||
+		strings.HasPrefix(strings.TrimSpace(spec.DedupBy), "entity.")
 }
 
 func normalizeEntityWriteTarget(target string) string {

@@ -17,6 +17,18 @@ func TestTimerHandleRoundTripPreservesLoopGeneration(t *testing.T) {
 	}
 }
 
+func TestTimerHandleParserRejectsRetiredAccumulationTimeoutKind(t *testing.T) {
+	payload := map[string]any{
+		"timer_handle": map[string]any{
+			"kind":   "accumulation_timeout",
+			"bucket": map[string]any{"node_id": "collector", "event_type": "item.arrived"},
+		},
+	}
+	if handle, ok := ParseTimerHandle(payload); ok {
+		t.Fatalf("retired accumulation timeout parsed as %#v", handle)
+	}
+}
+
 func TestParseStartTrigger(t *testing.T) {
 	trigger, err := ParseStartTrigger("state:active")
 	if err != nil {
@@ -88,43 +100,14 @@ func TestTimerHandlePayloadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAccumulationTimeoutHandleRoundTrip(t *testing.T) {
-	bucket := NewAccumulatorBucketRef("collector", "item.arrived")
-	handle := AccumulationTimeoutHandle(bucket)
-	parsedHandle, ok := ParseTimerHandle(handle.PayloadMetadata())
-	if !ok {
-		t.Fatal("expected accumulation timeout handle payload to round trip")
-	}
-	if parsedHandle.Kind != TimerHandleAccumulationTimeout {
-		t.Fatalf("parsedHandle = %#v", parsedHandle)
-	}
-	if parsedHandle.Bucket != bucket {
-		t.Fatalf("parsed bucket = %#v, want %#v", parsedHandle.Bucket, bucket)
-	}
-	if got := parsedHandle.TaskID(); got != "accumulate_timeout:collector:item.arrived" {
-		t.Fatalf("TaskID() = %q", got)
-	}
-}
-
-func TestAccumulationTimeoutHandleRoundTripWithWindow(t *testing.T) {
+func TestAccumulatorBucketRefRetainsStreamWindowAndGenerationIdentity(t *testing.T) {
 	bucket := NewAccumulatorWindowBucketRef("collector", "item.arrived", "2026-Q1:closed")
-	handle := AccumulationTimeoutHandle(bucket)
-	parsedHandle, ok := ParseTimerHandle(handle.PayloadMetadata())
-	if !ok {
-		t.Fatal("expected windowed accumulation timeout handle payload to round trip")
-	}
-	if parsedHandle.Bucket != bucket {
-		t.Fatalf("parsed bucket = %#v, want %#v", parsedHandle.Bucket, bucket)
-	}
 	parsedBucket, ok := ParseAccumulatorBucketKey(bucket.Key())
 	if !ok {
 		t.Fatalf("ParseAccumulatorBucketKey(%q) failed", bucket.Key())
 	}
 	if parsedBucket != bucket {
 		t.Fatalf("parsed bucket key = %#v, want %#v", parsedBucket, bucket)
-	}
-	if got := handle.TaskID(); got == "accumulate_timeout:collector:item.arrived" {
-		t.Fatalf("windowed TaskID() = %q, want distinct from unwindowed bucket", got)
 	}
 }
 

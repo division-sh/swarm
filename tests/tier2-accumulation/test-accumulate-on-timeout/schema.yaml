@@ -1,8 +1,0 @@
-initial_state: collecting
-terminal_states: [complete, partial]
-states: [collecting, complete, partial]
-pins:
-  inputs:
-    events: [item.arrived, accumulate.timeout]
-  outputs:
-    events: [collection.done, collection.partial]

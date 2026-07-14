@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -53,7 +54,7 @@ func TestScheduleEventPayloadPreservesExistingEntityID(t *testing.T) {
 	}
 }
 
-func TestScheduleEventPayloadPreservesAccumulationTimeoutHandle(t *testing.T) {
+func TestScheduleEventPayloadRejectsRetiredAccumulationTimeoutHandle(t *testing.T) {
 	payload := scheduleEventPayload(runtimepipeline.Schedule{
 		EntityID: "ent-001",
 		Payload:  []byte(`{"timer_handle":{"kind":"accumulation_timeout","bucket":{"node_id":"collector","event_type":"item.arrived"}}}`),
@@ -62,11 +63,28 @@ func TestScheduleEventPayloadPreservesAccumulationTimeoutHandle(t *testing.T) {
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("Unmarshal(payload): %v", err)
 	}
-	if _, ok := decoded["timer_handle"]; !ok {
-		t.Fatalf("expected accumulation timeout handle to remain in published payload, got %#v", decoded)
+	if _, ok := decoded["timer_handle"]; ok {
+		t.Fatalf("retired accumulation timeout handle survived schedule publication: %#v", decoded)
 	}
 	if got := decoded["entity_id"]; got != "ent-001" {
 		t.Fatalf("entity_id = %#v, want %q", got, "ent-001")
+	}
+}
+
+func TestScheduleEventPayloadPreservesJoinTimeoutHandle(t *testing.T) {
+	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef("collector", "item.arrived", "awaiting", "items", "window-1"))
+	raw, err := json.Marshal(handle.PayloadMetadata())
+	if err != nil {
+		t.Fatalf("Marshal(join handle): %v", err)
+	}
+	payload := scheduleEventPayload(runtimepipeline.Schedule{EntityID: "ent-001", Payload: raw})
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("Unmarshal(payload): %v", err)
+	}
+	parsed, ok := timeridentity.ParseTimerHandle(decoded)
+	if !ok || parsed.Kind != timeridentity.TimerHandleJoinTimeout {
+		t.Fatalf("join timeout handle = %#v, %v", parsed, ok)
 	}
 }
 

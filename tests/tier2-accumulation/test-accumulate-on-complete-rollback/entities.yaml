@@ -1,4 +1,0 @@
-core:
-  expected_count:
-    type: integer
-    _unused_reason: preseeded accumulation threshold field

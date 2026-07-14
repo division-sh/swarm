@@ -48,14 +48,6 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 	for _, rule := range handler.OnComplete {
 		out = append(out, ruleEmitEvents(rule)...)
 	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			out = append(out, ruleEmitEvents(rule)...)
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			out = append(out, ruleEmitEvents(*handler.Accumulate.OnTimeout)...)
-		}
-	}
 	if handler.Join != nil {
 		out = append(out, ruleEmitEvents(handler.Join.OnComplete)...)
 		out = append(out, ruleEmitEvents(handler.Join.Timeout.Outcome)...)
@@ -117,22 +109,6 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 		addAction("handler.on_complete.action", indexedHandlerEmitSiteKey("handler.on_complete", idx, "action"), rule.ID, idx, rule.Action)
 		if rule.FanOut != nil {
 			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
-		}
-	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			add("handler.accumulate.on_complete.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
-			addAction("handler.accumulate.on_complete.action", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "action"), rule.ID, idx, rule.Action)
-			if rule.FanOut != nil {
-				add("handler.accumulate.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Emit)
-			addAction("handler.accumulate.on_timeout.action", "handler.accumulate.on_timeout.action", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Action)
-			if handler.Accumulate.OnTimeout.FanOut != nil {
-				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit, handler.Accumulate.OnTimeout.FanOut.As)
-			}
 		}
 	}
 	if handler.Join != nil {
@@ -243,11 +219,6 @@ func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
 	if len(handler.OnComplete) > 0 {
 		return true
 	}
-	if handler.Accumulate != nil {
-		if len(handler.Accumulate.OnComplete) > 0 || handler.Accumulate.OnTimeout != nil {
-			return true
-		}
-	}
 	if handler.Join != nil {
 		return true
 	}
@@ -294,14 +265,6 @@ func HandlerEmitSiteOwnershipError(handler SystemNodeEventHandler) error {
 			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with rules[%d].fan_out", idx)
 		}
 	}
-	if handler.Accumulate != nil {
-		if len(handler.Accumulate.OnComplete) > 0 {
-			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with accumulate.on_complete")
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with accumulate.on_timeout")
-		}
-	}
 	return nil
 }
 
@@ -329,14 +292,6 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 	}
 	if handler.FanOut != nil {
 		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not fan_out")
-	}
-	if handler.Accumulate != nil {
-		if len(handler.Accumulate.OnComplete) > 0 {
-			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with accumulate.on_complete")
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with accumulate.on_timeout")
-		}
 	}
 	if err := validateEmitTemplateCELFields("handler.emit.fields", handler.Emit.Fields); err != nil {
 		return err
@@ -425,18 +380,6 @@ func rejectEventlessEmitSpecs(handler SystemNodeEventHandler) error {
 	for idx, rule := range handler.OnComplete {
 		if err := requireRuleEmitEvents("on_complete", idx, rule); err != nil {
 			return err
-		}
-	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			if err := requireRuleEmitEvents("accumulate.on_complete", idx, rule); err != nil {
-				return err
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			if err := requireRuleEmitEvents("accumulate.on_timeout", 0, *handler.Accumulate.OnTimeout); err != nil {
-				return err
-			}
 		}
 	}
 	if handler.Join != nil {

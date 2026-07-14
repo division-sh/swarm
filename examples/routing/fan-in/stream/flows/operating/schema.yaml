@@ -1,0 +1,22 @@
+name: operating
+mode: template
+instance:
+  by: operating_id
+pins:
+  inputs:
+    events:
+      - name: operating_report_requested
+        event: operating.report.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: event_id
+            as: operating_id
+        carries:
+          operating_id:
+            from: instance.key.operating_id
+            type: text
+  outputs:
+    events:
+      - name: operating_reported
+        event: operating.reported

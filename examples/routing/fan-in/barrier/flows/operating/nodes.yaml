@@ -1,0 +1,13 @@
+operating-node:
+  id: operating-node
+  execution_type: system_node
+  subscribes_to: [operating.report.requested]
+  produces: [operating.reported]
+  event_handlers:
+    operating.report.requested:
+      emit:
+        event: operating.reported
+        fields:
+          operating_id: payload.operating_id
+          period_id: payload.period_id
+          revenue: payload.revenue

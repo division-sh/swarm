@@ -7,57 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type AccumulateMode uint8
-
-const (
-	AccumulateModeDefault AccumulateMode = iota
-	AccumulateModeAll
-	AccumulateModeThreshold
-	AccumulateModeTimeout
-	AccumulateModeExpression
-)
-
-func (m AccumulateMode) String() string {
-	switch m {
-	case AccumulateModeAll:
-		return "all"
-	case AccumulateModeThreshold:
-		return "threshold"
-	case AccumulateModeTimeout:
-		return "timeout"
-	default:
-		return ""
-	}
-}
-
-type AccumulateCompletion struct {
-	Mode       AccumulateMode
-	Expression string
-}
-
-func ParseAccumulateCompletion(text string) AccumulateCompletion {
-	trimmed := strings.TrimSpace(text)
-	switch strings.ToLower(trimmed) {
-	case "":
-		return AccumulateCompletion{Mode: AccumulateModeDefault}
-	case "all":
-		return AccumulateCompletion{Mode: AccumulateModeAll}
-	case "threshold":
-		return AccumulateCompletion{Mode: AccumulateModeThreshold}
-	case "timeout":
-		return AccumulateCompletion{Mode: AccumulateModeTimeout}
-	default:
-		return AccumulateCompletion{Mode: AccumulateModeExpression, Expression: trimmed}
-	}
-}
-
-func (c AccumulateCompletion) String() string {
-	if c.Mode == AccumulateModeExpression {
-		return c.Expression
-	}
-	return c.Mode.String()
-}
-
 type ComputeOperation uint8
 
 const (

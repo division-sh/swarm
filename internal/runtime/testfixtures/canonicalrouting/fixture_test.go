@@ -21,6 +21,8 @@ func canonicalExampleNames() []ArtifactID {
 		TemplateSelectOrCreate,
 		TemplateReply,
 		TemplateCreateMintedKey,
+		FanInStream,
+		FanInBarrier,
 	}
 }
 
@@ -42,7 +44,7 @@ func TestCanonicalPositiveFixtureOwnerSetIsClosed(t *testing.T) {
 }
 
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
-	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey)
+	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier)
 	for _, name := range canonicalExampleNames() {
 		t.Run(string(name), func(t *testing.T) {
 			root := ExampleRoot(t, name)
@@ -71,9 +73,13 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 	return ExecuteSource(t,
 		SourceID("internal/runtime/testfixtures/canonicalrouting/fixture_test.go:canonicalRoutingTeachingContractSource"), func() {
 			artifactIDs := canonicalExampleNames()
-			want := make([]string, 0, len(artifactIDs))
+			wantSet := map[string]struct{}{}
 			for _, id := range artifactIDs {
-				want = append(want, filepath.Base(string(id)))
+				wantSet[strings.Split(string(id), "/")[0]] = struct{}{}
+			}
+			want := make([]string, 0, len(wantSet))
+			for name := range wantSet {
+				want = append(want, name)
 			}
 			sort.Strings(want)
 			entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))
@@ -92,17 +98,17 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				t.Fatalf("canonical routing inventory = %v, want %v", got, want)
 			}
 
-			for _, name := range want {
-				t.Run(name, func(t *testing.T) {
-					root := ExampleRoot(t, ArtifactID("examples/routing/"+name))
+			for _, id := range artifactIDs {
+				t.Run(string(id), func(t *testing.T) {
+					root := ExampleRoot(t, id)
 					readme, err := os.ReadFile(filepath.Join(root, "README.md"))
 					if err != nil {
 						t.Fatal(err)
 					}
 					text := string(readme)
 					for _, required := range []string{
-						"swarm verify --contracts examples/routing/" + name,
-						"swarm serve --contracts examples/routing/" + name,
+						"swarm verify --contracts examples/routing/" + string(id),
+						"swarm serve --contracts examples/routing/" + string(id),
 						"swarm event publish",
 						"Expected:",
 					} {

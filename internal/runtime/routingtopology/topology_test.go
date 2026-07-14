@@ -42,7 +42,7 @@ func TestBuildProjectsFanInConnectWithCompleteResolution(t *testing.T) {
 	if edge.Resolution == nil || edge.Resolution.Mode != "fan-in" || edge.Resolution.FanIn == nil {
 		t.Fatalf("resolution = %#v, want fan-in", edge.Resolution)
 	}
-	if edge.Resolution.FanIn.Window != "payload.period_id" || !reflect.DeepEqual(edge.Resolution.FanIn.DedupBy, []string{"payload.report_id"}) {
+	if edge.Resolution.FanIn.Window != "payload.period_id" || !reflect.DeepEqual(edge.Resolution.FanIn.DedupBy, []string{"payload.operating_id"}) || edge.Resolution.FanIn.Singleton != "portfolio" {
 		t.Fatalf("fan-in = %#v, want window/dedup", edge.Resolution.FanIn)
 	}
 	if edge.RequiresRuntimeResolution {
@@ -196,7 +196,7 @@ func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
 		t.Fatalf("issue source = %q, want exact package.yaml:line", topology.Issues[0].AuthoredLocation)
 	}
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect {
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating_reported" {
 			t.Fatalf("invalid connect survived as executable edge: %#v", edge)
 		}
 	}
@@ -205,18 +205,28 @@ func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
 func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T) {
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || len(bundle.Semantics.CompositionConnects) != 1 {
+	if !ok || len(bundle.Semantics.CompositionConnects) == 0 {
 		t.Fatalf("source bundle/connects unavailable")
 	}
-	bundle.Semantics.CompositionConnects[0].SourceFile = ""
-	bundle.Semantics.CompositionConnects[0].SourceLine = 0
+	found := false
+	for idx := range bundle.Semantics.CompositionConnects {
+		if bundle.Semantics.CompositionConnects[idx].From != "operating.operating_reported" {
+			continue
+		}
+		bundle.Semantics.CompositionConnects[idx].SourceFile = ""
+		bundle.Semantics.CompositionConnects[idx].SourceLine = 0
+		found = true
+	}
+	if !found {
+		t.Fatal("canonical fan-in connect unavailable")
+	}
 
 	topology := Build(source)
 	if len(topology.Issues) != 1 || topology.Issues[0].Failure != string(pinrouting.ConnectFailureSourceLocationMissing) || topology.Issues[0].AuthoredLocation != "" {
 		t.Fatalf("issues = %#v, want source-location issue without renderer fallback", topology.Issues)
 	}
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect {
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating_reported" {
 			t.Fatalf("connect without source proof survived as edge: %#v", edge)
 		}
 	}

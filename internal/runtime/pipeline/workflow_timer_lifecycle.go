@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -408,67 +407,6 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 	}
 }
 
-func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
-	ctx context.Context,
-	entityID, nodeID string,
-	handler runtimecontracts.SystemNodeEventHandler,
-	evt Event,
-	handlerEventKey string,
-	stateBuckets map[string]any,
-	waiting bool,
-) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	spec := handler.Accumulate
-	if spec == nil || spec.TimeoutMS <= 0 {
-		return nil
-	}
-	effectiveSpec, err := pc.effectiveAccumulationTimeoutSpec(ctx, nodeID, handlerEventKey, spec)
-	if err != nil {
-		return err
-	}
-	spec = effectiveSpec
-	entityID = strings.TrimSpace(entityID)
-	nodeID = strings.TrimSpace(nodeID)
-	if entityID == "" || nodeID == "" {
-		return nil
-	}
-	generation := attemptgeneration.Generation{}
-	if resolved, found, resolveErr := workflowLoopGenerationFromBuckets(pc.SemanticSource(), stateBuckets); resolveErr != nil {
-		return resolveErr
-	} else if found {
-		generation = resolved
-	}
-	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID, handlerEventKey, spec, generation)
-	if !ok {
-		return nil
-	}
-	sc := accumulationTimeoutSchedule(entityID, evt.FlowInstance(), bucketRef, time.Time{}, spec.TimeoutMS)
-	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
-		sc.RunID = runID
-	}
-	if isAccumulationTimeoutEvent(evt.Type()) || !waiting {
-		return pc.persistWorkflowTimerCancellation(ctx, sc)
-	}
-	startedAt, ok := accumulationTimeoutStartedAt(stateBuckets, bucketRef)
-	if !ok {
-		return nil
-	}
-	sc.At = startedAt.Add(time.Duration(spec.TimeoutMS) * time.Millisecond)
-	return pc.persistWorkflowTimerSchedule(ctx, sc)
-}
-
-func (pc *PipelineCoordinator) effectiveAccumulationTimeoutSpec(ctx context.Context, nodeID, handlerEventKey string, spec *runtimecontracts.AccumulateSpec) (*runtimecontracts.AccumulateSpec, error) {
-	if spec == nil {
-		return nil, nil
-	}
-	if pc == nil || pc.SemanticSource() == nil || pipelineFlowScope(ctx) == "" {
-		return spec, nil
-	}
-	return runtimeaccumulator.EffectiveSpecForHandler(pc.SemanticSource(), pipelineFlowScope(ctx), nodeID, handlerEventKey, spec)
-}
-
 func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceEvent string) bool {
 	return trigger.MatchesStage(stage) || trigger.MatchesEvent(sourceEvent)
 }
@@ -488,97 +426,6 @@ func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerCo
 	}
 	startTrigger, ok := workflowTimerStartTrigger(timer)
 	return ok && workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent)
-}
-
-func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string, spec *runtimecontracts.AccumulateSpec, generations ...attemptgeneration.Generation) (timeridentity.AccumulatorBucketRef, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		return timeridentity.AccumulatorBucketRef{}, false
-	}
-	if !isAccumulationTimeoutEvent(evt.Type()) {
-		eventType := strings.TrimSpace(handlerEventKey)
-		if eventType == "" {
-			eventType = strings.TrimSpace(string(evt.Type()))
-		}
-		generation := attemptgeneration.Generation{}
-		if len(generations) > 0 {
-			generation = generations[0]
-		}
-		bucket := timeridentity.NewAccumulatorBucketRefForGeneration(nodeID, eventType, "", generation)
-		if spec != nil && strings.TrimSpace(spec.Window) != "" {
-			window, ok := accumulationTimeoutWindowValue(parsePayloadMap(evt.Payload()), spec.Window)
-			if !ok {
-				return timeridentity.AccumulatorBucketRef{}, false
-			}
-			bucket = timeridentity.NewAccumulatorBucketRefForGeneration(nodeID, eventType, window, generation)
-		}
-		return bucket, bucket.Valid()
-	}
-	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload()))
-	if !ok || strings.TrimSpace(bucket.NodeID) != nodeID {
-		return timeridentity.AccumulatorBucketRef{}, false
-	}
-	return bucket, true
-}
-
-func accumulationTimeoutWindowValue(payload map[string]any, window string) (string, bool) {
-	window = strings.TrimSpace(window)
-	if window == "" {
-		return "", false
-	}
-	if strings.HasPrefix(window, "payload.") {
-		window = strings.TrimPrefix(window, "payload.")
-	}
-	if strings.Contains(window, ".") || window == "" {
-		return "", false
-	}
-	value := strings.TrimSpace(asString(payload[window]))
-	return value, value != ""
-}
-
-func accumulationTimeoutStartedAt(stateBuckets map[string]any, bucketRef timeridentity.AccumulatorBucketRef) (time.Time, bool) {
-	bucketRef = bucketRef.Normalize()
-	nodeBucket, _ := stateBuckets[bucketRef.NodeID].(map[string]any)
-	accumulators, _ := nodeBucket["handler_accumulators"].(map[string]any)
-	raw, ok := accumulators[bucketRef.Key()].(map[string]any)
-	if !ok {
-		return time.Time{}, false
-	}
-	startedAt := strings.TrimSpace(asString(raw["started_at"]))
-	if startedAt == "" {
-		return time.Time{}, false
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, startedAt)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return parsed.UTC(), true
-}
-
-func accumulationTimeoutSchedule(entityID, flowInstance string, bucketRef timeridentity.AccumulatorBucketRef, fireAt time.Time, timeoutMS int) Schedule {
-	handle := timeridentity.AccumulationTimeoutHandle(bucketRef)
-	return Schedule{
-		AgentID:      runtimeWorkflowID,
-		EventType:    "accumulate.timeout",
-		Mode:         "once",
-		At:           fireAt,
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
-		TaskID:       handle.TaskID(),
-		Payload:      mustJSON(accumulationTimeoutPayload(handle, timeoutMS)),
-	}
-}
-
-func accumulationTimeoutPayload(handle timeridentity.TimerHandle, timeoutMS int) map[string]any {
-	payload := handle.PayloadMetadata()
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payload["timeout_ms"] = timeoutMS
-	if generation := handle.Generation.Normalize(); generation.Valid() {
-		payload[generation.RevisionField] = generation.RevisionID
-	}
-	return payload
 }
 
 func scheduleWithRunIDFromContext(ctx context.Context, sc Schedule) Schedule {

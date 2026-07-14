@@ -1,5 +1,0 @@
-name: test-accumulate-expected-from-entity
-version: 1.0.0
-description: Expected count read from entity field item_count. Send 2 items to complete.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

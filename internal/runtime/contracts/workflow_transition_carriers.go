@@ -5,13 +5,11 @@ import "strings"
 type HandlerAdvanceCarrierKind string
 
 const (
-	HandlerAdvanceCarrierHandler              HandlerAdvanceCarrierKind = "handler.advances_to"
-	HandlerAdvanceCarrierOnComplete           HandlerAdvanceCarrierKind = "handler.on_complete"
-	HandlerAdvanceCarrierRules                HandlerAdvanceCarrierKind = "handler.rules"
-	HandlerAdvanceCarrierAccumulateOnComplete HandlerAdvanceCarrierKind = "handler.accumulate.on_complete"
-	HandlerAdvanceCarrierAccumulateOnTimeout  HandlerAdvanceCarrierKind = "handler.accumulate.on_timeout"
-	HandlerAdvanceCarrierJoinOnComplete       HandlerAdvanceCarrierKind = "handler.join.on_complete"
-	HandlerAdvanceCarrierJoinTimeout          HandlerAdvanceCarrierKind = "handler.join.timeout"
+	HandlerAdvanceCarrierHandler        HandlerAdvanceCarrierKind = "handler.advances_to"
+	HandlerAdvanceCarrierOnComplete     HandlerAdvanceCarrierKind = "handler.on_complete"
+	HandlerAdvanceCarrierRules          HandlerAdvanceCarrierKind = "handler.rules"
+	HandlerAdvanceCarrierJoinOnComplete HandlerAdvanceCarrierKind = "handler.join.on_complete"
+	HandlerAdvanceCarrierJoinTimeout    HandlerAdvanceCarrierKind = "handler.join.timeout"
 )
 
 // HandlerAdvanceCarrier describes one authored handler site that can carry an advances_to target.
@@ -82,21 +80,7 @@ func handlerAdvanceCarriers(
 	}
 	appendRuleCarriers(HandlerAdvanceCarrierOnComplete, onComplete)
 	appendRuleCarriers(HandlerAdvanceCarrierRules, rules)
-	if accumulate != nil {
-		appendRuleCarriers(HandlerAdvanceCarrierAccumulateOnComplete, accumulate.OnComplete)
-		if accumulate.OnTimeout != nil {
-			rule := *accumulate.OnTimeout
-			if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-				out = append(out, HandlerAdvanceCarrier{
-					Kind:       HandlerAdvanceCarrierAccumulateOnTimeout,
-					AdvancesTo: target,
-					Rule:       rule,
-					RuleIndex:  0,
-					RuleID:     strings.TrimSpace(rule.ID),
-				})
-			}
-		}
-	}
+	_ = accumulate
 	if join != nil {
 		appendRuleCarriers(HandlerAdvanceCarrierJoinOnComplete, []HandlerRuleEntry{join.OnComplete})
 		appendRuleCarriers(HandlerAdvanceCarrierJoinTimeout, []HandlerRuleEntry{join.Timeout.Outcome})

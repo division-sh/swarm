@@ -1,6 +1,0 @@
-name: test-accumulate-crash-recovery
-version: 1.0.0
-description: Accumulate persists state across sequential item arrivals, proving crash
-  recovery.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

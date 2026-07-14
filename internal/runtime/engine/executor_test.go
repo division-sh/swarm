@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1067,21 +1068,11 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 			}, nil, map[string]map[string]any{}),
 		},
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Compute: &runtimecontracts.ComputeSpec{
-				Operation: runtimecontracts.ComputeOpWeightedAverage,
-				StoreAs:   "entity.composite_score",
-				Tiers: []runtimecontracts.ComputeTier{
-					{Dimensions: []string{"build_complexity"}, Weight: 1},
-				},
-				Keys: runtimecontracts.ComputeKeyConfig{
-					DimensionKey: "dimension",
-					ScoreKeys:    []string{"score"},
-				},
-			},
-			Accumulate: &runtimecontracts.AccumulateSpec{
-				ExpectedFrom: "entity.dimensions_requested",
-				Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
-				DedupBy:      "payload.dimension",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					SourceField: "score",
+					TargetField: "composite_score",
+				}},
 			},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{
 				{Condition: "else", Emit: runtimecontracts.EmitSpec{Event: "vertical.rejected"}},
@@ -1207,15 +1198,12 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 			Into:      "dimensions_received",
 			DedupBy:   "payload.dimension",
 			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-			OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				ID: "complete",
-				Emit: runtimecontracts.EmitSpec{
-					Event: "vertical.scored",
-					Fields: map[string]runtimecontracts.ExpressionValue{
-						"scores": runtimecontracts.RefExpression("entity.scores"),
-					},
-				},
-			}},
+		},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "vertical.scored",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"scores": runtimecontracts.RefExpression("entity.scores"),
+			},
 		},
 	}
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
@@ -1398,136 +1386,6 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	if _, ok := result.StateMutation.Metadata["rule_marker"]; ok {
 		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Metadata)
 	}
-}
-
-func TestExecutor_AccumulatorProjectionSkipsDeclaredOnCompleteNoMatch(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
-		"payload.score > 100": false,
-	}})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:      "dimensions_received",
-			DedupBy:   "payload.dimension",
-			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
-			OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "too-high",
-				Condition: "payload.score > 100",
-				Emit:      runtimecontracts.EmitSpec{Event: "vertical.scored"},
-			}},
-		},
-	}
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
-	requireNoProjectedScores(t, result)
-	if got := strings.TrimSpace(result.RuleID); got != "" {
-		t.Fatalf("RuleID = %q, want empty when on_complete does not match", got)
-	}
-	if len(result.EmitIntents) != 0 {
-		t.Fatalf("EmitIntents count = %d, want 0", len(result.EmitIntents))
-	}
-}
-
-func TestExecutor_AccumulatorOnCompleteMatchesWhenTopLevelOnCompleteDoesNot(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
-		"payload.score > 100": false,
-	}})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{
-			ID:         "top-level",
-			Condition:  "payload.score > 100",
-			AdvancesTo: "top_review",
-		}},
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			ExpectedFrom: "entity.expected_dimensions",
-			ExpectedPath: runtimecontracts.RefExpression("entity.expected_dimensions").RefPath,
-			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
-			DedupBy:      "payload.dimension",
-			DedupPath:    runtimecontracts.RefExpression("payload.dimension").RefPath,
-			OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				ID:         "accumulate-complete",
-				Condition:  "else",
-				AdvancesTo: "launch_review",
-			}},
-		},
-	}
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot(
-		"pending",
-		map[string]any{"expected_dimensions": []any{"market"}},
-		nil,
-		map[string]map[string]any{},
-	))
-	if got, want := result.RuleID, "accumulate-complete"; got != want {
-		t.Fatalf("RuleID = %q, want %q", got, want)
-	}
-	if got, want := result.NextState, "launch_review"; got != want {
-		t.Fatalf("NextState = %q, want %q", got, want)
-	}
-}
-
-func TestExecutor_AccumulatorProjectionSkipsIncompleteAccumulation(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:         "dimensions_received",
-			ExpectedFrom: "entity.expected_dimensions",
-			ExpectedPath: runtimecontracts.RefExpression("entity.expected_dimensions").RefPath,
-			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
-			DedupBy:      "payload.dimension",
-			DedupPath:    runtimecontracts.RefExpression("payload.dimension").RefPath,
-		},
-	}
-	state := testStateSnapshot("pending", map[string]any{"expected_dimensions": []any{"market", "risk"}}, nil, map[string]map[string]any{})
-	result := executeAccumulatorProjectionTestEvent(t, exec, handler, state)
-	if result.Status != OutcomeWaiting {
-		t.Fatalf("Status = %q, want %q", result.Status, OutcomeWaiting)
-	}
-	requireNoProjectedScores(t, result)
-}
-
-func TestExecutor_AccumulatorProjectionSkipsTimeoutBranch(t *testing.T) {
-	exec := newAccumulatorProjectionTestExecutor(t, nil)
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into:       "dimensions_received",
-			Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-			OnTimeout: &runtimecontracts.HandlerRuleEntry{
-				ID: "timeout",
-				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-					Writes: []runtimecontracts.WorkflowDataWrite{{
-						TargetField: "metadata.timeout_seen",
-						Value:       runtimecontracts.LiteralExpression(true),
-					}},
-				},
-			},
-		},
-	}
-	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
-	storeAccumulatorForBucket(&state, accumulatorBucketRef("scoring-node", "score.dimension_complete"), &Accumulator{
-		ExpectedCount: 2,
-		Received:      map[string]bool{"market": true},
-		Items: []map[string]any{{
-			"dimension":  "market",
-			"tier":       2,
-			"score":      87,
-			"evidence":   "strong",
-			"confidence": "high",
-		}},
-	})
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		NodeID:   "scoring-node",
-		Event: eventtest.RootIngress("timeout-1",
-			"accumulate.timeout", "", "", json.RawMessage(`{"timer_handle":{"kind":"accumulation_timeout","bucket":{"node_id":"scoring-node","event_type":"score.dimension_complete"}}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		HandlerEventKey: "score.dimension_complete",
-		Handler:         handler,
-		State:           state,
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.StateMutation.Metadata["timeout_seen"]; got != true {
-		t.Fatalf("timeout_seen = %#v, want true", got)
-	}
-	requireNoProjectedScores(t, result)
 }
 
 func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitFields(t *testing.T) {
@@ -1720,13 +1578,11 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			ExpectedFrom: "entity.expected_count",
-			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
-			DedupBy:      "payload.component_id",
-			DedupPath:    runtimecontracts.RefExpression("payload.component_id").RefPath,
+			DedupBy:   "payload.component_id",
+			DedupPath: runtimecontracts.RefExpression("payload.component_id").RefPath,
 		},
 	}
-	firstState := testStateSnapshot("pending", map[string]any{"expected_count": 2}, nil, map[string]map[string]any{})
+	firstState := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
 	first, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
@@ -1751,10 +1607,11 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	if err != nil {
 		t.Fatalf("first Execute error: %v", err)
 	}
-	if !first.AccumulatorCompletionDiagnostics.Relevant || first.AccumulatorCompletionDiagnostics.CompletionReached {
-		t.Fatalf("first diagnostics = %#v, want relevant waiting accumulator", first.AccumulatorCompletionDiagnostics)
+	firstAccumulator, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: first.StateMutation.StateCarrier}, accumulatorBucketRef("lifecycle-orchestrator", "component.scaffolded"))
+	if !ok || len(firstAccumulator.Items) != 1 {
+		t.Fatalf("first stream accumulator = %#v, want one item", firstAccumulator)
 	}
-	secondState := testStateSnapshot("pending", map[string]any{"expected_count": 2}, nil, first.StateMutation.StateCarrier.StateBuckets)
+	secondState := testStateSnapshot("pending", map[string]any{}, nil, first.StateMutation.StateCarrier.StateBuckets)
 	second, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
@@ -1778,9 +1635,6 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	})
 	if err != nil {
 		t.Fatalf("second Execute error: %v", err)
-	}
-	if !second.AccumulatorCompletionDiagnostics.CompletionReached {
-		t.Fatalf("second diagnostics = %#v, want completion reached", second.AccumulatorCompletionDiagnostics)
 	}
 	state := StateSnapshot{StateCarrier: second.StateMutation.StateCarrier}
 	acc, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component.scaffolded"))
@@ -1806,19 +1660,19 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 
 func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", ResultType: resultType}},
-		}}), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	spec := runtimecontracts.JoinSpec{
 		ID: "line_items", Stage: "awaiting", Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
 		Members:    runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
 		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+		}}), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	activation, err := joinruntime.NewActivation(spec.ID, spec.Stage, "join-node", "item.completed", "", []string{"a", "b"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout")
@@ -1862,6 +1716,57 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	results := closed.Results()
 	if len(results) != 2 || results[0].(map[string]any)["score"] != float64(1) || results[1].(map[string]any)["score"] != float64(2) {
 		t.Fatalf("results = %#v, want membership order a,b", results)
+	}
+}
+
+func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load canonical fan-in barrier: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, "portfolio", "portfolio-collector", "operating.reported")
+	if !ok || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Window == nil || plan.Spec.Window.By != "payload.period_id" {
+		t.Fatalf("effective barrier plan = %#v", plan)
+	}
+	rawHandler, ok := bundle.NodeEventHandler("portfolio-collector", "operating.reported")
+	if !ok || rawHandler.Join == nil {
+		t.Fatal("authored barrier handler is unavailable")
+	}
+	if rawHandler.Join.Members.By != "" || rawHandler.Join.Window == nil || rawHandler.Join.Window.By != "" {
+		t.Fatalf("authored handler contains derived identity: %#v", rawHandler.Join)
+	}
+
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	activation, err := joinruntime.NewActivation(plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute), "join-timeout", "platform.join_timeout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := joinruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "portfolio/portfolio", NodeID: "portfolio-collector", FlowID: "portfolio", HandlerEventKey: "operating.reported", Handler: rawHandler,
+		Event: eventtest.RootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
+		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
+	})
+	if err != nil {
+		t.Fatalf("execute barrier arrival: %v", err)
+	}
+	if result.StateMutation.NextState != "complete" {
+		t.Fatalf("barrier next state = %q, want complete", result.StateMutation.NextState)
 	}
 }
 
@@ -2988,8 +2893,8 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		}, nil, map[string]map[string]any{}),
 	}
 	storeAccumulator(&initial, "node-1", "items.submitted", &Accumulator{
-		StartedAt:     "2026-03-14T00:00:00Z",
-		LastEventType: "items.submitted",
+		Received: map[string]bool{"seed": true},
+		Items:    []map[string]any{{"seed": true}},
 	})
 
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
@@ -4298,37 +4203,6 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				}}}
 			},
 		},
-		{
-			name:      "accumulate_on_complete",
-			eventType: "batch.ready",
-			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
-				return runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnComplete: []runtimecontracts.HandlerRuleEntry{{
-						ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
-					}},
-				}}
-			},
-		},
-		{
-			name:            "accumulate_on_timeout",
-			eventType:       "accumulate.timeout",
-			handlerEventKey: "batch.ready",
-			payload: json.RawMessage(`{
-				"timer_handle": {
-					"kind": "accumulation_timeout",
-					"bucket": {"node_id": "node-1", "event_type": "batch.ready"}
-				}
-			}`),
-			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
-				return runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnTimeout: &runtimecontracts.HandlerRuleEntry{
-						ID: "dispatch", FanOut: spec, AdvancesTo: "dispatched",
-					},
-				}}
-			},
-		},
 	}
 
 	newSpec := func(maxItems int) *runtimecontracts.FanOutSpec {
@@ -4491,8 +4365,6 @@ func TestActiveFanOutSpecEmitSourceNamesOwningSite(t *testing.T) {
 		{name: "handler", want: "handler.fan_out.emit"},
 		{name: "rules", source: handlerRuleSourceRules, want: "handler.rules.fan_out.emit"},
 		{name: "on_complete", source: handlerRuleSourceOnComplete, want: "handler.on_complete.fan_out.emit"},
-		{name: "accumulate_on_complete", source: handlerRuleSourceAccumulateOnComplete, want: "handler.accumulate.on_complete.fan_out.emit"},
-		{name: "accumulate_on_timeout", source: handlerRuleSourceAccumulateOnTimeout, want: "handler.accumulate.on_timeout.fan_out.emit"},
 	}
 
 	for _, tc := range tests {
@@ -4751,38 +4623,6 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 				OnComplete: []runtimecontracts.HandlerRuleEntry{{
 					Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
 				}},
-			},
-		},
-		{
-			name: "accumulate on-complete emit",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnComplete: []runtimecontracts.HandlerRuleEntry{{
-						Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
-					}},
-				},
-			},
-		},
-		{
-			name:      "accumulate on-timeout emit",
-			eventType: "accumulate.timeout",
-			payload: json.RawMessage(`{
-				"timer_handle": {
-					"kind": "accumulation_timeout",
-					"bucket": {
-						"node_id": "component-node",
-						"event_type": "repo-scaffold/repo_scaffold.repo_scaffolded"
-					}
-				}
-			}`),
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnTimeout: &runtimecontracts.HandlerRuleEntry{
-						Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
-					},
-				},
 			},
 		},
 	}
@@ -6027,33 +5867,6 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 			},
 			want: "handler.on_complete[complete] action is unsupported",
 		},
-		{
-			name: "accumulate on_complete",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnComplete: []runtimecontracts.HandlerRuleEntry{{
-						ID:        "complete",
-						Condition: "else",
-						Action:    runtimecontracts.ActionSpec{ID: "notify"},
-					}},
-				},
-			},
-			want: "handler.accumulate.on_complete[complete] action is unsupported",
-		},
-		{
-			name: "accumulate on_timeout",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				Accumulate: &runtimecontracts.AccumulateSpec{
-					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
-					OnTimeout: &runtimecontracts.HandlerRuleEntry{
-						ID:     "timeout",
-						Action: runtimecontracts.ActionSpec{ID: "notify"},
-					},
-				},
-			},
-			want: "handler.accumulate.on_timeout[timeout] action is unsupported",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -6109,8 +5922,6 @@ func TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules(t *testing.T) 
 	}{
 		{name: "handler rules", source: handlerRuleSourceRules, want: "rule_action"},
 		{name: "on complete", source: handlerRuleSourceOnComplete, want: "handler_action"},
-		{name: "accumulate on complete", source: handlerRuleSourceAccumulateOnComplete, want: "handler_action"},
-		{name: "accumulate on timeout", source: handlerRuleSourceAccumulateOnTimeout, want: "handler_action"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -6386,15 +6197,12 @@ scoring-node:
     score.dimension_complete:
       accumulate:
         into: dimensions_received
-        completion: all
         dedup_by: payload.dimension
-        on_complete:
-          - id: complete
-            emit:
-              event: vertical.scored
-              broadcast: true
-              fields:
-                scores: entity.scores
+      emit:
+        event: vertical.scored
+        broadcast: true
+        fields:
+          scores: entity.scores
   state_schema:
     fields:
       dimensions_received: "[DimensionScore]"

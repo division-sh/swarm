@@ -1,0 +1,20 @@
+name: portfolio
+mode: singleton
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: operating_reported
+        event: operating.reported
+        resolution:
+          mode: fan-in
+          aggregation: stream
+          window: payload.period_id
+          dedup_by: payload.operating_id
+          singleton: portfolio
+        carries:
+          operating_id: {from: payload.operating_id, type: text}
+          period_id: {from: payload.period_id, type: text}
+  outputs:
+    events: []

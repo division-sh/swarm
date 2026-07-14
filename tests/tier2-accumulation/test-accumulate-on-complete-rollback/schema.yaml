@@ -1,8 +1,0 @@
-initial_state: collecting
-terminal_states: [verified]
-states: [collecting, scored, verified]
-pins:
-  inputs:
-    events: [score.received]
-  outputs:
-    events: [scores.verified]

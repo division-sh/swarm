@@ -230,13 +230,8 @@ type catalogRule struct {
 type catalogRuleList []catalogRule
 
 type catalogAccumulateSpec struct {
-	ExpectedFrom string          `yaml:"expected_from"`
-	DedupBy      string          `yaml:"dedup_by"`
-	Completion   string          `yaml:"completion"`
-	From         string          `yaml:"from"`
-	Threshold    int             `yaml:"threshold"`
-	OnComplete   catalogRuleList `yaml:"on_complete"`
-	OnTimeout    *catalogRule    `yaml:"on_timeout"`
+	DedupBy string `yaml:"dedup_by"`
+	From    string `yaml:"from"`
 }
 
 type catalogComputeSpec struct {
@@ -611,45 +606,11 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 		return result, expected
 	}
 
-	expectedCount := 0
-	if ref := strings.TrimSpace(accumulate.ExpectedFrom); ref != "" {
-		expectedCount = asIntForCatalog(resolveCatalogRef(ref, entity, map[string]any{"payload": expected.Trigger.Payload, "entity": entity}))
-	}
-	received := 0
 	seen := map[string]struct{}{}
-	completion := strings.ToLower(strings.TrimSpace(accumulate.Completion))
 	for _, step := range steps {
 		if strings.EqualFold(strings.TrimSpace(accumulate.From), step.Sender) || strings.TrimSpace(accumulate.From) == "" {
 			// keep step
 		} else {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(step.Event), "accumulate.timeout") {
-			if strings.EqualFold(strings.TrimSpace(accumulate.Completion), "timeout") {
-				result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
-				break
-			}
-			if accumulate.OnTimeout != nil {
-				result.handlerOutcome = "success"
-				if next := strings.TrimSpace(accumulate.OnTimeout.AdvancesTo); next != "" {
-					result.entityState = next
-				}
-				if emit := strings.TrimSpace(accumulate.OnTimeout.Emit.EventType()); emit != "" {
-					result.emittedEvents = append(result.emittedEvents, emit)
-				}
-				if accumulate.OnTimeout.DataAccumulation.HasWrites() {
-					applyCatalogDataAccumulation(accumulate.OnTimeout.DataAccumulation, step.Payload, entity)
-					result.entityFields = cloneStringAnyMapCatalog(entity)
-				}
-				applyCatalogCompute(accumulate.OnTimeout.Compute, entity)
-				applyCatalogDataAccumulation(handler.DataAccumulation, step.Payload, entity)
-				applyCatalogCompute(handler.Compute, entity)
-				result.entityFields = cloneStringAnyMapCatalog(entity)
-				if emit := strings.TrimSpace(handler.Emit.EventType()); emit != "" {
-					result.emittedEvents = append(result.emittedEvents, emit)
-				}
-				break
-			}
 			continue
 		}
 		key := catalogAccumulationKey(step.Payload, accumulate.DedupBy, entity, policy)
@@ -657,12 +618,8 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 			continue
 		}
 		seen[key] = struct{}{}
-		received++
 		entity["received_items"] = appendCatalogItem(entity["received_items"], step.Payload)
-		if catalogAccumulationComplete(completion, received, expectedCount, accumulate.Threshold) {
-			result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
-			break
-		}
+		result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
 	}
 	if result.handlerOutcome == "" {
 		result.handlerOutcome = "success"
@@ -2049,7 +2006,6 @@ func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument
 	case "tier5-flow-lifecycle/test-timer-cancel",
 		"tier5-flow-lifecycle/test-timer-fire",
 		"tier5-flow-lifecycle/test-timer-recurring",
-		"tier2-accumulation/test-accumulate-on-complete-rollback",
 		"tier6-event-loop/test-dead-letter",
 		"tier6-event-loop/test-entity-serialization",
 		"tier6-event-loop/test-on-complete-atomicity-chain",
@@ -2077,8 +2033,6 @@ func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument
 	}
 	switch {
 	case strings.HasPrefix(dir, "tier1-primitives/"):
-		return true
-	case strings.HasPrefix(dir, "tier2-accumulation/"):
 		return true
 	case strings.HasPrefix(dir, "tier3-list-processing/"):
 		return true
@@ -2192,20 +2146,6 @@ func applyCatalogRule(rule catalogRule, payload, entity map[string]any, result c
 	applyCatalogCompute(rule.Compute, entity)
 	result.entityFields = cloneStringAnyMapCatalog(entity)
 	return result
-}
-
-func catalogAccumulationComplete(mode string, received, expected, threshold int) bool {
-	switch mode {
-	case "threshold":
-		if threshold > 0 {
-			return received >= threshold
-		}
-		return expected > 0 && received >= expected
-	case "all", "":
-		return expected > 0 && received >= expected
-	default:
-		return false
-	}
 }
 
 func catalogGuardPasses(spec any, payload, entity, policy map[string]any, state string) bool {

@@ -1,8 +1,0 @@
-initial_state: collecting
-terminal_states: [complete]
-states: [collecting, complete]
-pins:
-  inputs:
-    events: [score.received]
-  outputs:
-    events: [scores.aggregated]

@@ -162,6 +162,21 @@ func (t WorkflowStageTopology) StronglyConnectedComponent(stage string) []string
 	return component
 }
 
+// StageCanReenter reports whether a stage can return to itself through the
+// canonical lifecycle graph, including a direct self-loop.
+func (t WorkflowStageTopology) StageCanReenter(stage string) bool {
+	stage = strings.TrimSpace(stage)
+	if stage == "" {
+		return false
+	}
+	for _, edge := range t.Edges {
+		if strings.TrimSpace(edge.From) == stage && strings.TrimSpace(edge.To) == stage {
+			return true
+		}
+	}
+	return len(t.StronglyConnectedComponent(stage)) > 1
+}
+
 func (t WorkflowStageTopology) HandlerStages(nodeID, eventType string) []string {
 	nodeID, eventType = strings.TrimSpace(nodeID), strings.TrimSpace(eventType)
 	for _, handler := range t.Handlers {

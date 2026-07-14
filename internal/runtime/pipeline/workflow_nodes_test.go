@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
@@ -344,6 +345,33 @@ func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTarget
 	}
 	if got := resolved.HandlerEventKey; got != "account.ready" {
 		t.Fatalf("handler event key = %q, want account.ready", got)
+	}
+}
+
+func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlowEvent(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	evt := eventtest.RootIngress("", "operating/operating.reported", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
+		FlowID:       "portfolio",
+		FlowInstance: "portfolio",
+		EntityID:     FlowInstanceEntityID("portfolio"),
+	})
+
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "portfolio-collector", evt)
+	if !resolved.Matched {
+		t.Fatal("expected portfolio handler to resolve through the canonical cross-flow event")
+	}
+	if got := resolved.HandlerEventKey; got != "operating.reported" {
+		t.Fatalf("handler event key = %q, want authored operating.reported", got)
 	}
 }
 

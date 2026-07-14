@@ -13175,12 +13175,11 @@ func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T) {
+func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithExternalSource(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
 	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
 		eventSource: "external (verify accumulator safety proof)",
-		completion:  "all",
 	})
 
 	var stdout, stderr bytes.Buffer
@@ -13192,50 +13191,13 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 		t.Fatalf("verify stdout missing success marker:\n%s", out)
 	}
 	errText := stderr.String()
-	if !strings.Contains(errText, "[WARN] accumulate_all_bounded_escape @") ||
-		!strings.Contains(errText, "without a bounded timeout escape") {
-		t.Fatalf("verify stderr missing accumulator bounded-escape warning:\n%s", errText)
-	}
-	if strings.Contains(errText, "accumulator_input_producer_path") {
-		t.Fatalf("verify stderr reported no-producer error despite external source:\n%s", errText)
-	}
-}
-
-func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T) {
-	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
-		eventSource: "external (verify accumulator safety proof)",
-		completion:  "timeout",
-	})
-
-	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
-	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
-	}
-	errText := stderr.String()
-	for _, want := range []string{
-		"verify failed: boot verification failed:",
-		"[BLOCKER] accumulator_timeout_requires_timeout_ms @",
-		"without positive timeout_ms",
-		"remediation:",
-	} {
-		if !strings.Contains(errText, want) {
-			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
-		}
-	}
 	if strings.Contains(errText, "accumulator_input_producer_path") {
 		t.Fatalf("verify stderr reported no-producer error despite external source:\n%s", errText)
 	}
 }
 
 func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing.T) {
-	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
-		completion: "timeout",
-		timeoutMS:  5000,
-	})
+	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{})
 
 	var stdout, stderr bytes.Buffer
 	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), repoRoot(), root, &stdout, &stderr)
@@ -13260,17 +13222,11 @@ func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing
 
 type verifyAccumulatorSafetyCommandFixtureOptions struct {
 	eventSource string
-	completion  string
-	timeoutMS   int
 }
 
 func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumulatorSafetyCommandFixtureOptions) string {
 	t.Helper()
 	root := t.TempDir()
-	completion := strings.TrimSpace(opts.completion)
-	if completion == "" {
-		completion = "all"
-	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-accumulator-safety
 version: "1.0.0"
@@ -13297,10 +13253,6 @@ pins:
 item.arrived:`+sourceBlock+`
   expected_count: integer
 `)
-	timeoutLine := ""
-	if opts.timeoutMS > 0 {
-		timeoutLine = fmt.Sprintf("        timeout_ms: %d\n", opts.timeoutMS)
-	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   id: accumulator
@@ -13309,12 +13261,9 @@ accumulator:
   event_handlers:
     item.arrived:
       accumulate:
-        expected_from: entity.expected_count
-        completion: `+completion+`
-`+timeoutLine+`      advances_to: done
-  state_schema:
-    fields:
-      expected_count: integer
+        into: items
+        from: payload
+      advances_to: done
 `)
 	return root
 }
@@ -15213,14 +15162,11 @@ func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface
 	}
 	handler := node.EventHandlers[eventType]
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected_count"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "entity.composite_score",
 	}
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.composite_score >= 0",
-	}}
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node
 	if bundle.Semantics.NodeHandlers == nil {

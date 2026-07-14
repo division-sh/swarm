@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
@@ -38,6 +39,38 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 		if reply == nil || reply.RequestOutputPin != templatereply.RequesterRequestPin || reply.ReplyInputPin != templatereply.RequesterReplyPin || reply.ProviderInputPin != templatereply.ProviderRequestPin || reply.ProviderOutputPin != templatereply.ProviderReplyPin {
 			t.Fatalf("reply role %s = %#v", role, reply)
 		}
+	}
+}
+
+func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load canonical fan-in barrier: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	view, err := Build(context.Background(), source, BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var joins []StageGraphJoinView
+	for _, graph := range view.StageGraphs {
+		if graph.FlowID == "portfolio" {
+			joins = graph.Joins
+			break
+		}
+	}
+	if len(joins) != 1 {
+		t.Fatalf("portfolio joins = %#v, want one", joins)
+	}
+	join := joins[0]
+	if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
+		join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" || join.FanInPin != "operating_reported" {
+		t.Fatalf("effective join readback = %#v", join)
 	}
 }
 

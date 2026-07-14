@@ -1,0 +1,4 @@
+portfolio_state:
+  reports:
+    type: map[text]json
+    _unused_reason: open per-window report collection

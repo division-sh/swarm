@@ -1,0 +1,6 @@
+operating.report.triggered:
+  period_id: text
+  revenue: integer
+operating.report.requested:
+  period_id: text
+  revenue: integer

@@ -78,22 +78,6 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 				}
 				out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, scope, rule.DataAccumulation.Writes)...)
 			}
-			if handler.Accumulate != nil {
-				for idx, rule := range handler.Accumulate.OnComplete {
-					scope := fmt.Sprintf("handler.accumulate.on_complete[%d]", idx)
-					if id := strings.TrimSpace(rule.ID); id != "" {
-						scope = "handler.accumulate.on_complete[" + id + "]"
-					}
-					out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, scope, rule.DataAccumulation.Writes)...)
-				}
-				if handler.Accumulate.OnTimeout != nil {
-					scope := "handler.accumulate.on_timeout"
-					if id := strings.TrimSpace(handler.Accumulate.OnTimeout.ID); id != "" {
-						scope = "handler.accumulate.on_timeout[" + id + "]"
-					}
-					out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, scope, handler.Accumulate.OnTimeout.DataAccumulation.Writes)...)
-				}
-			}
 		}
 	}
 	return out

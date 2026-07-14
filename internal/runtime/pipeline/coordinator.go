@@ -351,13 +351,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	handler := resolved.Handler
 	handlerEventKey := resolved.HandlerEventKey
 	ok := resolved.Matched
-	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload()))
-		if bucketOK && strings.TrimSpace(bucket.NodeID) == nodeID {
-			handler, ok = findAccumulationTimeoutHandlerForBucket(source, bucket)
-			handlerEventKey = bucket.EventType
-		}
-	}
 	if !ok && isJoinLifecycleEvent(events.EventType(trigger)) {
 		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == nodeID {
 			handler, ok = findJoinHandlerForRef(source, ref)

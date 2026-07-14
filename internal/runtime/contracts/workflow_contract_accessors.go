@@ -1238,29 +1238,6 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 	}
 	if handler.Accumulate != nil {
 		clone := *handler.Accumulate
-		if len(clone.OnComplete) > 0 {
-			rules := make([]HandlerRuleEntry, 0, len(clone.OnComplete))
-			for _, rule := range clone.OnComplete {
-				rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
-				if rule.FanOut != nil {
-					fanOut := *rule.FanOut
-					fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
-					rule.FanOut = &fanOut
-				}
-				rules = append(rules, rule)
-			}
-			clone.OnComplete = rules
-		}
-		if clone.OnTimeout != nil {
-			onTimeout := *clone.OnTimeout
-			onTimeout.Emit = b.externalizeEmitSpec(nodeID, onTimeout.Emit)
-			if onTimeout.FanOut != nil {
-				fanOut := *onTimeout.FanOut
-				fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
-				onTimeout.FanOut = &fanOut
-			}
-			clone.OnTimeout = &onTimeout
-		}
 		handler.Accumulate = &clone
 	}
 	return handler

@@ -26,17 +26,19 @@ func checkJoinValidation(c *checkerContext) []Finding {
 		flowID := nodeFlowID(c.source, nodeID)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			if flowUsesAuthoredStages(c.source, flowID) && stagedBarrierAccumulator(handler.Accumulate) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, "staged finite barriers must use handler.join; barrier-shaped accumulate fields are retired for stages: bundles"))
-			}
 			if handler.Join == nil {
 				continue
 			}
 			if err := runtimecontracts.ValidateJoinHandlerIsolation(handler); err != nil {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
 			}
-			spec := *handler.Join
-			resultType := c.joinOutputType(flowID, nodeID, eventType, spec)
+			plan, ok := semanticview.WorkflowJoinPlanForHandler(c.source, flowID, nodeID, eventType)
+			if !ok {
+				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has no effective WorkflowJoinPlan; reload the workflow contract and declare exactly one canonical join row"))
+				continue
+			}
+			spec := plan.Spec
+			resultType := plan.ResultType
 			prefix := fmt.Sprintf("join %s", spec.EffectiveID())
 			if !flowUsesAuthoredStages(c.source, flowID) {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
@@ -53,7 +55,11 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			}
 			findings = append(findings, c.validateJoinPaths(flowID, nodeID, eventType, spec)...)
 			if spec.Window == nil && joinStageCanReenter(c.source, flowID, spec.Stage) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" stage is re-entrant; window.from and window.by are required"))
+				detail := prefix + " stage is re-entrant; add window.from and window.by, or make the stage provably non-reentrant"
+				if strings.TrimSpace(plan.Derivation.FanInPin) != "" {
+					detail = prefix + " stage is re-entrant; add resolution.window on input pin " + plan.Derivation.FanInPin + " plus join.window.from, or make the stage provably non-reentrant"
+				}
+				findings = append(findings, joinFinding(flowID, nodeID, eventType, detail))
 			}
 			if spec.HasCustomCompletion() {
 				if spec.Remaining != runtimecontracts.JoinRemainingIgnore {
@@ -76,25 +82,6 @@ func checkJoinValidation(c *checkerContext) []Finding {
 		}
 	}
 	return findings
-}
-
-func (c *checkerContext) joinOutputType(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) runtimecontracts.CatalogTypeReference {
-	if c == nil || c.source == nil {
-		return runtimecontracts.CatalogTypeReference{}
-	}
-	for _, plan := range c.source.WorkflowJoins() {
-		if strings.TrimSpace(plan.FlowID) == strings.TrimSpace(flowID) &&
-			strings.TrimSpace(plan.NodeID) == strings.TrimSpace(nodeID) &&
-			strings.TrimSpace(plan.HandlerEvent) == strings.TrimSpace(eventType) {
-			return plan.ResultType
-		}
-	}
-	if bundle, ok := semanticview.Bundle(c.source); ok {
-		if resultType, found := runtimecontracts.ResolveEventFieldType(bundle, flowID, eventType, joinPathField(spec.Output, "payload")); found {
-			return resultType
-		}
-	}
-	return runtimecontracts.CatalogTypeReference{}
 }
 
 func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) []Finding {
@@ -177,13 +164,6 @@ func joinRuleEmpty(rule runtimecontracts.HandlerRuleEntry) bool {
 	return strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && !rule.DataAccumulation.HasWrites()
 }
 
-func stagedBarrierAccumulator(spec *runtimecontracts.AccumulateSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return strings.TrimSpace(spec.ExpectedFrom) != "" || spec.Threshold > 0 || spec.TimeoutMS > 0 || strings.TrimSpace(string(spec.Completion.Mode)) != "" || len(spec.OnComplete) > 0 || spec.OnTimeout != nil
-}
-
 func joinPathField(path, root string) string {
 	path = strings.TrimSpace(path)
 	prefix := root + "."
@@ -244,26 +224,6 @@ func joinDelayValid(source semanticview.Source, flowID, raw string) bool {
 }
 
 func joinStageCanReenter(source semanticview.Source, flowID, stage string) bool {
-	edges := workflowStageGraphEdges(source, flowID, nil)
-	stage = strings.TrimSpace(stage)
-	seen := map[string]struct{}{}
-	queue := make([]string, 0, len(edges[stage]))
-	for next := range edges[stage] {
-		queue = append(queue, next)
-	}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if current == stage {
-			return true
-		}
-		if _, ok := seen[current]; ok {
-			continue
-		}
-		seen[current] = struct{}{}
-		for next := range edges[current] {
-			queue = append(queue, next)
-		}
-	}
-	return false
+	topology, ok := semanticview.WorkflowStageTopology(source, flowID)
+	return ok && topology.StageCanReenter(stage)
 }

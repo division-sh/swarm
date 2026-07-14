@@ -1,7 +1,0 @@
-score.received:
-  swarm:
-    source: external
-  dimension: string
-  score: float
-scores.aggregated:
-  composite: float

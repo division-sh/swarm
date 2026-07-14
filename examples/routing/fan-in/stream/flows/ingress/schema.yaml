@@ -1,0 +1,12 @@
+name: ingress
+mode: static
+pins:
+  inputs:
+    events:
+      - name: operating_report_triggered
+        event: operating.report.triggered
+        source: external
+  outputs:
+    events:
+      - name: operating_report_requested
+        event: operating.report.requested

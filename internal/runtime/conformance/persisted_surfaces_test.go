@@ -786,143 +786,47 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	}
 }
 
-func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
-	pg := &store.PostgresStore{DB: db}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-
-	requireCanonicalRuntimeLogSurface(t, ctx, pg)
-
+func TestRetiredAccumulatorCompletionOutcomeSurfaceHasNoPositiveFixture(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-complete-rollback")
-	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
-
-	entityID := "11111111-1111-4111-8111-111111111111"
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
-		WorkflowName:    module.SemanticSource().WorkflowName(),
-		WorkflowVersion: module.SemanticSource().WorkflowVersion(),
-		CurrentState:    "collecting",
-		Metadata: map[string]any{
-			"expected_count": 3,
-		},
-	}); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
-		Runtime: config.RuntimeConfig{},
-		LLM:     config.LLMConfig{Backend: "anthropic"},
-	}, Stores: runtimepkg.Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:      pg,
-		RuntimeLogStore: pg,
-		ManagerStore:    pg,
-		ScheduleStore:   pg,
-	}, Options: runtimepkg.RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     conformanceNoopLLMRuntime{},
-	}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
+	retired := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-complete-rollback")
+	for _, name := range []string{"package.yaml", "schema.yaml", "nodes.yaml", "events.yaml"} {
+		path := filepath.Join(retired, name)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("retired finite-accumulator fixture artifact still exists at %s: %v", path, err)
 		}
-	}()
+	}
+}
 
-	for idx, score := range []int{80, 90, 70} {
-		payload, err := json.Marshal(map[string]any{"entity_id": entityID, "score": score})
+func TestRetiredAccumulationTimeoutSurfaceHasNoProductionConsumer(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	retiredTokens := []string{
+		"TimerHandleAccumulationTimeout",
+		"accumulate_timeout:",
+		"accumulate.timeout",
+		"accumulation_timeout",
+	}
+	for _, root := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, token := range retiredTokens {
+				if strings.Contains(string(raw), token) {
+					t.Errorf("retired accumulation-timeout token %q survives in production source %s", token, path)
+				}
+			}
+			return nil
+		})
 		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
+			t.Fatalf("walk production source %s: %v", root, err)
 		}
-		if err := rt.Bus.Publish(ctx, eventtest.RootIngress(
-			uuid.NewString(),
-			events.EventType("score.received"),
-			"",
-			"",
-			payload,
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Now().UTC().Add(time.Duration(idx)*time.Millisecond),
-		)); err != nil {
-			t.Fatalf("Publish(%d): %v", idx, err)
-		}
-	}
-	if err := rt.Bus.WaitForQuiescence(ctx); err != nil {
-		t.Fatalf("WaitForQuiescence: %v", err)
-	}
-
-	instance, ok, err := workflowStore.Load(ctx, entityID)
-	if err != nil {
-		t.Fatalf("Load workflow instance: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected workflow instance to persist")
-	}
-	if got := strings.TrimSpace(instance.CurrentState); got != "verified" {
-		t.Fatalf("current_state = %q, want verified", got)
-	}
-
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
-	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "workflow-runtime",
-		Type:      "accumulator_completion_outcome",
-	}, 10)
-	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
-	}
-	if len(logs) != 1 {
-		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
-	}
-	log := logs[0]
-	if log.Action != "accumulator_completion_outcome" {
-		t.Fatalf("log action = %q, want accumulator_completion_outcome", log.Action)
-	}
-	detail, _ := log.Detail.(map[string]any)
-	if got := readString(detail["decision_outcome"]); got != "completed" {
-		t.Fatalf("detail.decision_outcome = %q, want completed", got)
-	}
-	if got := readString(detail["decision_reason_code"]); got != "completion_committed" {
-		t.Fatalf("detail.decision_reason_code = %q, want completion_committed", got)
-	}
-	if got := readString(detail["evaluation_outcome"]); got != "succeeded" {
-		t.Fatalf("detail.evaluation_outcome = %q, want succeeded", got)
-	}
-	if got := readString(detail["commit_outcome"]); got != "committed" {
-		t.Fatalf("detail.commit_outcome = %q, want committed", got)
-	}
-	if got := readString(detail["selected_rule_id"]); got != "" {
-		t.Fatalf("detail.selected_rule_id = %q, want empty for anonymous true branch", got)
-	}
-	if got, _ := detail["received_count"].(float64); int(got) != 3 {
-		t.Fatalf("detail.received_count = %v, want 3", detail["received_count"])
-	}
-	if got, _ := detail["expected_count"].(float64); int(got) != 3 {
-		t.Fatalf("detail.expected_count = %v, want 3", detail["expected_count"])
 	}
 }
 

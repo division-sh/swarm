@@ -167,6 +167,9 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
+			if err := ValidateAccumulateHandlerIsolation(handler); err != nil {
+				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, eventType, err))
+			}
 			for _, site := range HandlerFanOutSites(handler) {
 				if _, err := bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, *site.Spec); err != nil {
 					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s: %v", ErrInvalidField, nodeID, eventType, site.Source, err))
@@ -204,10 +207,7 @@ func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler
 	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)
 }
 func workflowHandlerHasOnComplete(handler SystemNodeEventHandler) bool {
-	if len(handler.OnComplete) > 0 {
-		return true
-	}
-	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
+	return len(handler.OnComplete) > 0
 }
 func usesDeprecatedGuardFallback(spec *GuardSpec) bool {
 	if spec == nil {

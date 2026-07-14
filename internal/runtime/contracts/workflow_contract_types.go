@@ -328,6 +328,15 @@ type WorkflowJoinPlan struct {
 	HandlerEvent string
 	Spec         JoinSpec
 	ResultType   CatalogTypeReference
+	Derivation   WorkflowJoinPlanDerivation
+}
+
+type WorkflowJoinPlanDerivation struct {
+	FanInPin      string
+	MembersBy     string
+	MembersByFrom string
+	WindowBy      string
+	WindowByFrom  string
 }
 
 type WorkflowLoopPlan struct {
@@ -548,20 +557,13 @@ func ParseGuardFailureSpec(action string) (GuardFailureSpec, error) {
 }
 
 type AccumulateSpec struct {
-	Into         string               `yaml:"into"`
-	ExpectedFrom string               `yaml:"expected_from"`
-	From         string               `yaml:"from"`
-	Description  string               `yaml:"description"`
-	Window       string               `yaml:"window"`
-	WindowPath   paths.Path           `yaml:"-"`
-	ExpectedPath paths.Path           `yaml:"-"`
-	DedupBy      string               `yaml:"dedup_by"`
-	DedupPath    paths.Path           `yaml:"-"`
-	Threshold    int                  `yaml:"threshold"`
-	TimeoutMS    int                  `yaml:"timeout_ms"`
-	Completion   AccumulateCompletion `yaml:"completion"`
-	OnComplete   []HandlerRuleEntry   `yaml:"on_complete"`
-	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`
+	Into        string     `yaml:"into"`
+	From        string     `yaml:"from"`
+	Description string     `yaml:"description"`
+	Window      string     `yaml:"window"`
+	WindowPath  paths.Path `yaml:"-"`
+	DedupBy     string     `yaml:"dedup_by"`
+	DedupPath   paths.Path `yaml:"-"`
 }
 type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`

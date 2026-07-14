@@ -26,20 +26,17 @@ type Trigger struct {
 type TimerHandleKind string
 
 const (
-	TimerHandleWorkflowTimer       TimerHandleKind = "workflow_timer"
-	TimerHandleAccumulationTimeout TimerHandleKind = "accumulation_timeout"
-	TimerHandleJoinTimeout         TimerHandleKind = "join_timeout"
-	TimerHandleJoinComplete        TimerHandleKind = "join_complete"
-	timerHandlePayloadKey                          = "timer_handle"
-	accumulationTimeoutTaskPrefix                  = "accumulate_timeout:"
-	joinTimeoutTaskPrefix                          = "join_timeout:"
-	joinCompleteTaskPrefix                         = "join_complete:"
+	TimerHandleWorkflowTimer TimerHandleKind = "workflow_timer"
+	TimerHandleJoinTimeout   TimerHandleKind = "join_timeout"
+	TimerHandleJoinComplete  TimerHandleKind = "join_complete"
+	timerHandlePayloadKey                    = "timer_handle"
+	joinTimeoutTaskPrefix                    = "join_timeout:"
+	joinCompleteTaskPrefix                   = "join_complete:"
 )
 
 type TimerHandle struct {
 	Kind       TimerHandleKind
 	TimerID    string
-	Bucket     AccumulatorBucketRef
 	Join       JoinRef
 	Generation attemptgeneration.Generation
 }
@@ -164,14 +161,6 @@ func WorkflowTimerHandle(timerID string) TimerHandle {
 	}
 }
 
-func AccumulationTimeoutHandle(bucket AccumulatorBucketRef) TimerHandle {
-	return TimerHandle{
-		Kind:       TimerHandleAccumulationTimeout,
-		Bucket:     bucket.Normalize(),
-		Generation: bucket.Generation.Normalize(),
-	}
-}
-
 func JoinTimeoutHandle(ref JoinRef) TimerHandle {
 	return TimerHandle{Kind: TimerHandleJoinTimeout, Join: ref.Normalize(), Generation: ref.Generation.Normalize()}
 }
@@ -184,8 +173,6 @@ func (h TimerHandle) Valid() bool {
 	switch h.Kind {
 	case TimerHandleWorkflowTimer:
 		return strings.TrimSpace(h.TimerID) != ""
-	case TimerHandleAccumulationTimeout:
-		return h.Bucket.Valid()
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
 		return h.Join.Valid()
 	default:
@@ -204,11 +191,6 @@ func (h TimerHandle) TaskID() string {
 	switch h.Kind {
 	case TimerHandleWorkflowTimer:
 		return appendGeneration(strings.TrimSpace(h.TimerID))
-	case TimerHandleAccumulationTimeout:
-		if !h.Bucket.Valid() {
-			return ""
-		}
-		return accumulationTimeoutTaskPrefix + h.Bucket.Key()
 	case TimerHandleJoinTimeout:
 		return joinTimeoutTaskPrefix + h.Join.Key()
 	case TimerHandleJoinComplete:
@@ -228,8 +210,6 @@ func (h TimerHandle) PayloadMetadata() map[string]any {
 	switch h.Kind {
 	case TimerHandleWorkflowTimer:
 		handle["timer_id"] = strings.TrimSpace(h.TimerID)
-	case TimerHandleAccumulationTimeout:
-		handle["bucket"] = h.Bucket.PayloadValue()
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
 		handle["join"] = h.Join.PayloadValue()
 	}
@@ -250,14 +230,6 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 	switch TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) {
 	case TimerHandleWorkflowTimer:
 		handle := WorkflowTimerHandle(asString(handleMap["timer_id"]))
-		handle.Generation = generation
-		return handle, handle.Valid()
-	case TimerHandleAccumulationTimeout:
-		bucket, ok := bucketFromAny(handleMap["bucket"])
-		if !ok {
-			return TimerHandle{}, false
-		}
-		handle := AccumulationTimeoutHandle(bucket)
 		handle.Generation = generation
 		return handle, handle.Valid()
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
@@ -372,14 +344,6 @@ func NewAccumulatorBucketRefForGeneration(nodeID, eventType, window string, gene
 	return ref
 }
 
-func ParseAccumulatorBucketRef(payload map[string]any) (AccumulatorBucketRef, bool) {
-	handle, ok := ParseTimerHandle(payload)
-	if !ok || handle.Kind != TimerHandleAccumulationTimeout {
-		return AccumulatorBucketRef{}, false
-	}
-	return handle.Bucket, handle.Bucket.Valid()
-}
-
 func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -434,40 +398,12 @@ func (r AccumulatorBucketRef) Key() string {
 	return key
 }
 
-func (r AccumulatorBucketRef) PayloadValue() map[string]any {
-	r = r.Normalize()
-	if !r.Valid() {
-		return nil
-	}
-	payload := map[string]any{
-		"node_id":    r.NodeID,
-		"event_type": r.EventType,
-	}
-	if r.Window != "" {
-		payload["window"] = r.Window
-	}
-	if generation := r.Generation.Normalize(); generation.Valid() {
-		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
-	}
-	return payload
-}
-
 func stringAnyMap(value any) (map[string]any, bool) {
 	typed, ok := value.(map[string]any)
 	if !ok || typed == nil {
 		return nil, false
 	}
 	return typed, true
-}
-
-func bucketFromAny(value any) (AccumulatorBucketRef, bool) {
-	payload, ok := stringAnyMap(value)
-	if !ok {
-		return AccumulatorBucketRef{}, false
-	}
-	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: payload[attemptgeneration.PayloadKey]})
-	bucket := NewAccumulatorBucketRefForGeneration(asString(payload["node_id"]), asString(payload["event_type"]), asString(payload["window"]), generation)
-	return bucket, bucket.Valid()
 }
 
 func asString(value any) string {
