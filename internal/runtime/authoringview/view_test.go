@@ -63,6 +63,46 @@ func TestBuildIncludesHarnessInputSource(t *testing.T) {
 	}
 }
 
+func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
+		ID: "send_support_reply", Tool: "telegram_send",
+		Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "support_reply"},
+	}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"support": {
+				ID:            "support",
+				ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"support.reply_drafted": handler},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"support": {"support.reply_drafted": handler},
+			},
+			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
+				"support": {ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType},
+			},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram_send": {HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite)},
+		},
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(view.ApprovalPoints) != 1 {
+		t.Fatalf("approval points = %#v, want one", view.ApprovalPoints)
+	}
+	got := view.ApprovalPoints[0]
+	if got.NodeID != "support" || got.HandlerEvent != "support.reply_drafted" || got.Source != "handler.activity" ||
+		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" ||
+		got.EffectClass != string(runtimecontracts.ActivityEffectClassNonIdempotentWrite) {
+		t.Fatalf("approval point = %#v", got)
+	}
+}
+
 func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

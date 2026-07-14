@@ -352,9 +352,6 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("created cards/transaction = %#v/%#v", cards.created, cards.createTx)
 			}
-			if schema := cards.created[0].Snapshot.Outcomes["approve"].EmitSchema; schema.Len() == 0 {
-				t.Fatalf("created card did not freeze the resolved outcome event schema: %#v", cards.created[0].Snapshot)
-			}
 			loaded, ok, err := workflowStore.Load(ctx, entityID)
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
@@ -366,6 +363,10 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			activation, found, err := gateruntime.Load(carrier.StateBuckets, "", "launch_review")
 			if err != nil || !found {
 				t.Fatalf("gate activation = %#v, %v, %v", activation, found, err)
+			}
+			route, err := gateruntime.RouteFor(activation.RoutesJSON, "approve")
+			if err != nil || route.EmitSchema.Len() == 0 {
+				t.Fatalf("gate continuation did not freeze the resolved outcome event schema: %#v, %v", route, err)
 			}
 			cardAnchor := mustStageGateAnchor(t, cards.created[0])
 			if activation.CardID != cards.created[0].CardID || activation.ActivationID != cardAnchor.StageActivationID || activation.Status != gateruntime.StatusOpen {
@@ -431,14 +432,17 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			card.Verdict = "approve"
 			card.DecisionEventID = decisionEventID
 			card.DecidedAt = now.Add(time.Minute)
-			outcome := card.Snapshot.Outcomes[card.Verdict]
+			route, err := pc.loadStageGateRoute(ctx, card)
+			if err != nil {
+				t.Fatal(err)
+			}
 			parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", json.RawMessage(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.DecidedAt)
-			emitted, err := workflowGateOutcomeEvent(card, parent, outcome)
+			emitted, err := workflowGateOutcomeEvent(card, parent, route)
 			if err != nil || emitted == nil {
 				t.Fatalf("workflowGateOutcomeEvent = %#v, %v", emitted, err)
 			}
 			bus.publishErr = errors.New("planted outcome persistence failure")
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, outcome, emitted); !errors.Is(err, bus.publishErr) {
+			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); !errors.Is(err, bus.publishErr) {
 				t.Fatalf("route failure = %v", err)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
@@ -447,7 +451,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				t.Fatalf("rolled-back outcome rows = %d, %v", persisted, err)
 			}
 			bus.publishErr = nil
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, outcome, emitted); err != nil {
+			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
 				t.Fatal(err)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "operating", gateruntime.StatusRouted)
@@ -457,7 +461,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			if err := workflowStore.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gate_outcome_atomic_probe`).Scan(&persisted); err != nil || persisted != 1 {
 				t.Fatalf("committed outcome rows = %d, %v", persisted, err)
 			}
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, outcome, emitted); err != nil {
+			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
 				t.Fatalf("idempotent route recovery: %v", err)
 			}
 			if len(bus.publishes) != 1 {

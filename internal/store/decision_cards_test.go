@@ -25,6 +25,18 @@ import (
 	"github.com/google/uuid"
 )
 
+func testGateRoutes(t *testing.T) string {
+	t.Helper()
+	routes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "operating"},
+		"reject":  {Verdict: "reject", AdvancesTo: "building"},
+	})
+	if err != nil {
+		t.Fatalf("FreezeRoutes: %v", err)
+	}
+	return routes
+}
+
 func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
@@ -186,15 +198,8 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"revise": {
-						Verdict: "revise", AdvancesTo: "building",
-						Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
-						Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-							"feedback": runtimecontracts.CELExpression("decision.feedback"),
-						}},
-						EmitSchema: map[string]any{
-							"type": "object", "properties": map[string]any{"feedback": map[string]any{"type": "string"}},
-							"required": []string{"feedback"}, "additionalProperties": false,
-						},
+						Verdict: "revise",
+						Input:   map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
 					},
 				}),
 				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
@@ -286,18 +291,6 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			assertStoreSnapshotNumber(t, "provenance.safe_integer", provenanceNumber.Interface(), float64(safeInteger))
 			provenanceSubnormal, _ := loaded.Provenance.Lookup("subnormal")
 			assertStoreSnapshotNumber(t, "provenance.subnormal", provenanceSubnormal.Interface(), math.SmallestNonzeroFloat64)
-			outcome := loaded.Snapshot.Outcomes["approve"]
-			assertStoreSnapshotNumber(t, "outcome literal", outcome.Emit.Fields["large_integer"].Literal.Interface(), float64(safeInteger))
-			schema := outcome.EmitSchema.Interface().(map[string]any)
-			properties, ok := schema["properties"].(map[string]any)
-			if !ok {
-				t.Fatalf("emit schema properties = %#v", schema["properties"])
-			}
-			property, ok := properties["large_integer"].(map[string]any)
-			if !ok {
-				t.Fatalf("large_integer schema = %#v", properties["large_integer"])
-			}
-			assertStoreSnapshotNumber(t, "schema minimum", property["minimum"], float64(safeInteger))
 
 			decisionEventID := uuid.NewString()
 			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
@@ -422,23 +415,14 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 			ctx := context.Background()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
-			properties := map[string]any{
-				"code":      map[string]any{"type": "string", "pattern": "^[a-z]+$"},
-				"component": map[string]any{"type": "string"},
-				"owner":     map[string]any{"type": "string", "x-swarm-equalTo": "component"},
-			}
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("root", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
-						Verdict: "approve", AdvancesTo: "operating",
+						Verdict: "approve",
 						Input: map[string]runtimecontracts.WorkflowGateInputField{
 							"code": {Type: "text", Required: true}, "component": {Type: "text", Required: true}, "owner": {Type: "text", Required: true},
 						},
-						Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-							"code": runtimecontracts.CELExpression("decision.code"), "component": runtimecontracts.CELExpression("decision.component"), "owner": runtimecontracts.CELExpression("decision.owner"),
-						}},
-						EmitSchema: map[string]any{"type": "object", "properties": properties, "required": []string{"code", "component", "owner"}, "additionalProperties": false},
 					},
 				}),
 				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
@@ -451,7 +435,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			_, err = cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"code": "NOT-LOWER", "component": "api", "owner": "worker"}),
+				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"code": 7, "component": "api", "owner": "worker"}),
 				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if !errors.Is(err, decisioncard.ErrInvalidFields) {
@@ -614,7 +598,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -689,7 +673,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -898,27 +882,6 @@ func storeDecisionSnapshotStructuralDriftCases() []storeDecisionSnapshotStructur
 		}},
 		{name: "input_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
 			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback"), "label")
-		}},
-		{name: "emit_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit")["shadow_semantics"] = true
-		}},
-		{name: "emit_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit"), "Event")
-		}},
-		{name: "expression_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["shadow_semantics"] = true
-		}},
-		{name: "expression_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Ref")
-		}},
-		{name: "missing_emit_schema", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise"), "EmitSchema")
-		}},
-		{name: "missing_literal", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Literal")
-		}},
-		{name: "ignored_nonliteral_value", want: "does not preserve its exact semantic value", mutate: func(t *testing.T, root map[string]any) {
-			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["Literal"] = "shadow"
 		}},
 	}
 }

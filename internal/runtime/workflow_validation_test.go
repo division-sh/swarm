@@ -296,6 +296,58 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 	}
 }
 
+func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		effectClass     runtimecontracts.ActivityEffectClass
+		decision        string
+		includeConsumer bool
+		wantError       string
+	}{
+		{name: "valid", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: "support_reply", includeConsumer: true},
+		{name: "read only teaching error", effectClass: runtimecontracts.ActivityEffectClassReadOnly, decision: "support_reply", includeConsumer: true, wantError: "read-only activities don't need approval"},
+		{name: "missing revision consumer", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: "support_reply", wantError: "has no consumer"},
+		{name: "noncanonical programmatic decision", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := testRuntimeWorkflowValidationBundle()
+			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+				"provider_write": {
+					HandlerType: "http", EffectClass: string(tc.effectClass),
+					InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+					HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+				},
+			}
+			handlers := map[string]runtimecontracts.SystemNodeEventHandler{
+				"support.reply_drafted": {
+					Activity: runtimecontracts.ActivitySpec{
+						ID: "send_support_reply", Tool: "provider_write",
+						Approval: &runtimecontracts.ActivityApprovalSpec{Decision: tc.decision},
+					},
+				},
+			}
+			if tc.includeConsumer {
+				handlers["send_support_reply.revision_requested"] = runtimecontracts.SystemNodeEventHandler{}
+			}
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+				"support": {ID: "support", EventHandlers: handlers},
+			}
+			_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+				CheckMCPReachable: false, StrictEmitSchemas: false, FatalToolImplementationWarning: false, FatalBootWarnings: false,
+			})
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("validation error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
 func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{

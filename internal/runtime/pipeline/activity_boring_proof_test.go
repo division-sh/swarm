@@ -672,7 +672,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	return runtimeengine.ActivityIntent{
 		ActivityID:       resultEvents.ActivityID,
 		Tool:             "source_scrape",
-		Input:            map[string]any{"url": inputURL},
+		Input:            mustActivityInput(map[string]any{"url": inputURL}),
 		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
 		SuccessEvent:     resultEvents.SuccessEvent,
 		FailureEvent:     resultEvents.FailureEvent,
@@ -699,7 +699,7 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 	return runtimeengine.ActivityIntent{
 		ActivityID:       "scanner_source_scrape",
 		Tool:             "source_scrape",
-		Input:            map[string]any{"url": inputURL},
+		Input:            mustActivityInput(map[string]any{"url": inputURL}),
 		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
 		SuccessEvent:     "research.scanner_source_scrape.succeeded",
 		FailureEvent:     "research.scanner_source_scrape.failed",

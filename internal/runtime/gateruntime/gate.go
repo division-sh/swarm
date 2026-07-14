@@ -28,6 +28,7 @@ type Activation struct {
 	ActivationID     string    `json:"activation_id"`
 	CardID           string    `json:"card_id"`
 	BundleHash       string    `json:"bundle_hash"`
+	RoutesJSON       string    `json:"routes_json"`
 	Status           Status    `json:"status"`
 	StartedByEvent   string    `json:"started_by_event,omitempty"`
 	DecisionEventID  string    `json:"decision_event_id,omitempty"`
@@ -36,7 +37,7 @@ type Activation struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-func New(runID, flowInstance, entityID, flowID, stage, decisionID, bundleHash, sourceEvent string, enteredAt time.Time) (Activation, error) {
+func New(runID, flowInstance, entityID, flowID, stage, decisionID, bundleHash, routesJSON, sourceEvent string, enteredAt time.Time) (Activation, error) {
 	if enteredAt.IsZero() {
 		enteredAt = time.Now().UTC()
 	}
@@ -52,7 +53,7 @@ func New(runID, flowInstance, entityID, flowID, stage, decisionID, bundleHash, s
 	activation := Activation{
 		FlowID: strings.TrimSpace(flowID), Stage: strings.TrimSpace(stage), DecisionID: strings.TrimSpace(decisionID),
 		ActivationID: activationID, CardID: uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.decision.card.v1\x00"+cardIdentity)).String(),
-		BundleHash: strings.TrimSpace(bundleHash), Status: StatusOpen, StartedByEvent: strings.TrimSpace(sourceEvent),
+		BundleHash: strings.TrimSpace(bundleHash), RoutesJSON: strings.TrimSpace(routesJSON), Status: StatusOpen, StartedByEvent: strings.TrimSpace(sourceEvent),
 		OpenedAt: enteredAt.UTC(), UpdatedAt: enteredAt.UTC(),
 	}
 	if err := activation.Validate(); err != nil {
@@ -64,6 +65,9 @@ func New(runID, flowInstance, entityID, flowID, stage, decisionID, bundleHash, s
 func (a Activation) Validate() error {
 	if strings.TrimSpace(a.Stage) == "" || strings.TrimSpace(a.DecisionID) == "" || strings.TrimSpace(a.ActivationID) == "" || strings.TrimSpace(a.CardID) == "" || strings.TrimSpace(a.BundleHash) == "" {
 		return fmt.Errorf("gate activation identity is incomplete")
+	}
+	if err := ValidateRoutes(a.RoutesJSON); err != nil {
+		return err
 	}
 	if _, err := uuid.Parse(a.ActivationID); err != nil {
 		return fmt.Errorf("gate activation id is invalid: %w", err)

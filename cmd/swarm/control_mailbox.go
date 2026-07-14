@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/spf13/cobra"
 )
 
@@ -15,12 +16,14 @@ type mailboxProjection struct {
 	Kind         string                      `json:"kind"`
 	Notice       *mailboxItem                `json:"notice,omitempty"`
 	DecisionCard *mailboxDecisionCardSummary `json:"decision_card,omitempty"`
+	Effect       *mailboxEffectState         `json:"effect,omitempty"`
 }
 
 type mailboxDetailProjection struct {
 	Kind         string               `json:"kind"`
 	Notice       *mailboxNoticeDetail `json:"notice,omitempty"`
 	DecisionCard *mailboxDecisionCard `json:"decision_card,omitempty"`
+	Effect       *mailboxEffectState  `json:"effect,omitempty"`
 }
 
 type mailboxItem struct {
@@ -70,7 +73,17 @@ type mailboxDecisionCardAnchor struct {
 	RequesterAgentID  string                   `json:"requester_agent_id,omitempty"`
 	OperationID       string                   `json:"operation_id,omitempty"`
 	Category          string                   `json:"category,omitempty"`
+	RequestEventID    string                   `json:"request_event_id,omitempty"`
+	ActivityID        string                   `json:"activity_id,omitempty"`
+	Decision          string                   `json:"decision,omitempty"`
 	Scope             mailboxDecisionCardScope `json:"scope,omitempty"`
+}
+
+type mailboxEffectState struct {
+	ContinuationState string `json:"continuation_state"`
+	DispatchState     string `json:"dispatch_state"`
+	RequestEventID    string `json:"request_event_id"`
+	ActivityID        string `json:"activity_id"`
 }
 
 type mailboxDecisionCard struct {
@@ -312,6 +325,13 @@ func validateMailboxProjection(item mailboxProjection) error {
 		if err := validateMailboxDecisionCardAnchor(*item.DecisionCard); err != nil {
 			return err
 		}
+		if item.DecisionCard.AnchorKind == string(decisioncard.AnchorKindProposedEffect) {
+			if item.Effect == nil || item.Effect.RequestEventID == "" || item.Effect.ActivityID == "" || item.Effect.DispatchState == "" {
+				return fmt.Errorf("proposed_effect dispatch state is required")
+			}
+		} else if item.Effect != nil {
+			return fmt.Errorf("effect state is valid only for proposed_effect cards")
+		}
 	default:
 		return fmt.Errorf("kind must be notice or decision_card")
 	}
@@ -320,22 +340,29 @@ func validateMailboxProjection(item mailboxProjection) error {
 
 func validateMailboxDecisionCardAnchor(card mailboxDecisionCardSummary) error {
 	switch strings.TrimSpace(card.AnchorKind) {
-	case "stage_gate":
+	case string(decisioncard.AnchorKindStageGate):
 		if card.Anchor.FlowInstance == "" || card.Anchor.EntityID == "" || card.Anchor.Stage == "" || card.Anchor.StageActivationID == "" || card.Decision == "" {
 			return fmt.Errorf("stage_gate anchor detail is incomplete")
 		}
 		if card.Category != "" || card.Anchor.RequesterAgentID != "" || card.Anchor.OperationID != "" {
 			return fmt.Errorf("stage_gate card carries human_task selector fields")
 		}
-	case "human_task":
+	case string(decisioncard.AnchorKindHumanTask):
 		if card.Anchor.RequesterAgentID == "" || card.Anchor.OperationID == "" || card.Anchor.Category == "" || card.Category == "" {
 			return fmt.Errorf("human_task anchor detail is incomplete")
 		}
 		if card.Category != card.Anchor.Category || card.Decision != "" || card.Anchor.Stage != "" || card.Anchor.StageActivationID != "" {
 			return fmt.Errorf("human_task card carries conflicting anchor detail")
 		}
+	case string(decisioncard.AnchorKindProposedEffect):
+		if card.Anchor.RequestEventID == "" || card.Anchor.ActivityID == "" || card.Anchor.Decision == "" || card.Decision == "" {
+			return fmt.Errorf("proposed_effect anchor detail is incomplete")
+		}
+		if card.Decision != card.Anchor.Decision || card.Anchor.Stage != "" || card.Anchor.RequesterAgentID != "" {
+			return fmt.Errorf("proposed_effect card carries conflicting anchor detail")
+		}
 	default:
-		return fmt.Errorf("anchor_kind must be stage_gate or human_task")
+		return fmt.Errorf("anchor_kind must be one of: %s", decisioncard.RegisteredAnchorKindDescription())
 	}
 	if card.Scope.Kind == "" {
 		return fmt.Errorf("decision-card scope is required")
@@ -352,6 +379,16 @@ func validateMailboxDetailResult(result mailboxDetailProjection) error {
 	case "decision_card":
 		if result.DecisionCard == nil || strings.TrimSpace(result.DecisionCard.CardID) == "" || strings.TrimSpace(result.DecisionCard.CardContentHash) == "" || result.DecisionCard.Snapshot == nil {
 			return fmt.Errorf("malformed mailbox.get decision card")
+		}
+		if err := validateMailboxDecisionCardAnchor(result.DecisionCard.mailboxDecisionCardSummary); err != nil {
+			return err
+		}
+		if result.DecisionCard.AnchorKind == string(decisioncard.AnchorKindProposedEffect) {
+			if result.Effect == nil || result.Effect.RequestEventID == "" || result.Effect.ActivityID == "" || result.Effect.DispatchState == "" {
+				return fmt.Errorf("malformed mailbox.get proposed_effect dispatch state")
+			}
+		} else if result.Effect != nil {
+			return fmt.Errorf("mailbox.get effect state is valid only for proposed_effect cards")
 		}
 	default:
 		return fmt.Errorf("malformed mailbox.get result: kind must be notice or decision_card")
@@ -397,8 +434,12 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailProjection) {
 	writeCLIFieldLine(out, cliDetailField{Key: "status", Value: card.Status}, cliDetailField{Key: "anchor_kind", Value: card.AnchorKind}, cliDetailField{Key: "scope", Value: mailboxDecisionCardScopeLabel(card.Scope)})
 	if card.AnchorKind == "stage_gate" {
 		writeCLIFieldLine(out, cliDetailField{Key: "decision", Value: card.Decision}, cliDetailField{Key: "stage", Value: card.Anchor.Stage})
-	} else {
+	} else if card.AnchorKind == "human_task" {
 		writeCLIFieldLine(out, cliDetailField{Key: "category", Value: card.Category}, cliDetailField{Key: "requested_by", Value: card.Anchor.RequesterAgentID})
+	} else {
+		writeCLIFieldLine(out, cliDetailField{Key: "decision", Value: card.Decision}, cliDetailField{Key: "activity", Value: card.Anchor.ActivityID})
+		writeCLIFieldLine(out, cliDetailField{Key: "authorization", Value: card.Status}, cliDetailField{Key: "dispatch", Value: result.Effect.DispatchState})
+		fmt.Fprintf(out, "activity_request_id=%s\n", result.Effect.RequestEventID)
 	}
 	fmt.Fprintf(out, "card_content_hash=%s\n", card.CardContentHash)
 	writeMailboxObject(out, "snapshot", card.Snapshot)
@@ -408,7 +449,10 @@ func mailboxDecisionCardListLabels(card mailboxDecisionCardSummary) (string, str
 	if card.AnchorKind == "stage_gate" {
 		return "stage_gate:" + card.Decision, mailboxDecisionCardScopeLabel(card.Scope)
 	}
-	return "human_task:" + card.Category, mailboxDecisionCardScopeLabel(card.Scope)
+	if card.AnchorKind == "human_task" {
+		return "human_task:" + card.Category, mailboxDecisionCardScopeLabel(card.Scope)
+	}
+	return "proposed_effect:" + card.Decision, mailboxDecisionCardScopeLabel(card.Scope)
 }
 
 func mailboxDecisionCardScopeLabel(scope mailboxDecisionCardScope) string {

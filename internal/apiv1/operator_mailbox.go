@@ -102,8 +102,8 @@ func mailboxListOptionsFromParams(params map[string]any) (store.MailboxV1ListOpt
 		return out, err
 	}
 	out.AnchorKind = strings.TrimSpace(out.AnchorKind)
-	if out.AnchorKind != "" && out.AnchorKind != string(decisioncard.AnchorKindStageGate) && out.AnchorKind != string(decisioncard.AnchorKindHumanTask) {
-		return out, NewInvalidParamsError(map[string]any{"field": "anchor_kind", "reason": "must be stage_gate or human_task"})
+	if out.AnchorKind != "" && !decisioncard.IsRegisteredAnchorKind(out.AnchorKind) {
+		return out, NewInvalidParamsError(map[string]any{"field": "anchor_kind", "reason": "must be a registered decision-card anchor kind"})
 	}
 	out.Priority = strings.TrimSpace(strings.ToLower(out.Priority))
 	if out.Priority != "" && out.Priority != "normal" && out.Priority != "high" && out.Priority != "critical" {

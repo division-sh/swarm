@@ -1,6 +1,39 @@
 package contracts
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+func TestActivityApprovalYAMLIsStrictAndCanonical(t *testing.T) {
+	var valid ActivitySpec
+	if err := yaml.Unmarshal([]byte("tool: provider.write\napproval: {decision: support_reply}\n"), &valid); err != nil {
+		t.Fatal(err)
+	}
+	if valid.Approval == nil || valid.Approval.Decision != "support_reply" {
+		t.Fatalf("approval = %#v", valid.Approval)
+	}
+	for _, tc := range []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "scalar", yaml: "tool: provider.write\napproval: support_reply\n", want: "must be a mapping"},
+		{name: "missing decision", yaml: "tool: provider.write\napproval: {}\n", want: "approval.decision is required"},
+		{name: "unknown field", yaml: "tool: provider.write\napproval: {decision: support_reply, mode: once}\n", want: "mode"},
+		{name: "noncanonical decision", yaml: "tool: provider.write\napproval: {decision: ' support_reply '}\n", want: "is not canonical"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got ActivitySpec
+			err := yaml.Unmarshal([]byte(tc.yaml), &got)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Unmarshal error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.T) {
 	bundle := &WorkflowContractBundle{

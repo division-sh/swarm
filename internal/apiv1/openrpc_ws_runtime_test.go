@@ -271,6 +271,37 @@ func TestMailboxWebSocketSubscriptionPreservesHumanTaskAnchorKind(t *testing.T) 
 	}
 }
 
+func TestMailboxWebSocketSubscriptionProjectsProposedEffectDispatchState(t *testing.T) {
+	base := time.Unix(1700001500, 0).UTC()
+	state := &mutatingRuntimeProbeState{now: base}
+	cards := newMutatingProbeDecisionCardStore(state)
+	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: "00000000-0000-0000-0000-000000000303", ActivityID: "send_support_reply", Decision: "support_reply",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards.card.Anchor = anchor
+	handler, _ := newWebSocketRuntimeProbeHandler(t, webSocketRuntimeProbeObservability(base), time.Hour, cards)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0", "id": "proposed-effect-mailbox-subscribe", "method": "mailbox.subscribe", "params": map[string]any{},
+	})
+	response := readWSResponse(t, conn)
+	subscriptionID := assertWebSocketRuntimeSubscribeSuccess(t, "mailbox.subscribe", response)
+	notification := readWSNotification(t, conn)
+	assertWebSocketRuntimeNotification(t, "mailbox.subscribe", subscriptionID, notification)
+	result := asMap(t, notification.Params.Result)
+	effect := asMap(t, result["effect"])
+	if effect["dispatch_state"] != "held" || effect["request_event_id"] != "00000000-0000-0000-0000-000000000303" {
+		t.Fatalf("proposed-effect subscription dispatch state = %#v", effect)
+	}
+}
+
 func transportAdmissionRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) ([]string, []string) {
 	t.Helper()
 	openRPCMethods := map[string]struct{}{}

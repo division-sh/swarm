@@ -16,6 +16,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/google/cel-go/cel"
@@ -1765,24 +1766,28 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			params["entity_id"] = text
 		case "anchor_kind":
 			params["anchor_kind"] = text
-		case "card_id", "decision", "stage", "flow_instance", "requester_agent_id", "category", "scope":
+		case "card_id", "decision", "stage", "flow_instance", "requester_agent_id", "category", "scope", "request_event_id", "activity_id":
 		default:
 			return "", "", scenarioTestValidationError{err: fmt.Errorf("unsupported decision-card match field %q", key)}
 		}
 	}
 	anchorKind := evaluatedMatch["anchor_kind"]
-	if anchorKind != "stage_gate" && anchorKind != "human_task" {
-		return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.anchor_kind is required and must be stage_gate or human_task")}
+	if !decisioncard.IsRegisteredAnchorKind(anchorKind) {
+		return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.anchor_kind is required and must be one of: %s", decisioncard.RegisteredAnchorKindDescription())}
 	}
 	for key := range evaluatedMatch {
 		switch anchorKind {
-		case "stage_gate":
-			if key == "requester_agent_id" || key == "category" || key == "scope" {
-				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is valid only for anchor_kind human_task", key)}
+		case string(decisioncard.AnchorKindStageGate):
+			if key == "requester_agent_id" || key == "category" || key == "scope" || key == "request_event_id" || key == "activity_id" {
+				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind stage_gate", key)}
 			}
-		case "human_task":
-			if key == "decision" || key == "stage" {
-				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is valid only for anchor_kind stage_gate", key)}
+		case string(decisioncard.AnchorKindHumanTask):
+			if key == "decision" || key == "stage" || key == "request_event_id" || key == "activity_id" {
+				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind human_task", key)}
+			}
+		case string(decisioncard.AnchorKindProposedEffect):
+			if key == "stage" || key == "requester_agent_id" || key == "category" {
+				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is not valid for anchor_kind proposed_effect", key)}
 			}
 		}
 	}
@@ -1821,6 +1826,12 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			continue
 		}
 		if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
+			continue
+		}
+		if expected := evaluatedMatch["request_event_id"]; expected != "" && card.Anchor.RequestEventID != expected {
+			continue
+		}
+		if expected := evaluatedMatch["activity_id"]; expected != "" && card.Anchor.ActivityID != expected {
 			continue
 		}
 		if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {

@@ -27,9 +27,11 @@ type ActivitySite struct {
 }
 
 type ActivityResultEvents struct {
-	ActivityID   string
-	SuccessEvent string
-	FailureEvent string
+	ActivityID        string
+	SuccessEvent      string
+	FailureEvent      string
+	RevisionRequested string
+	Rejected          string
 }
 
 type ActivityRetryDefaults struct {
@@ -132,9 +134,47 @@ func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 	}
 	base = eventidentity.Normalize(base)
 	return ActivityResultEvents{
-		ActivityID:   activityID,
-		SuccessEvent: eventidentity.Normalize(base + "." + ActivityResultStatusSucceeded),
-		FailureEvent: eventidentity.Normalize(base + "." + ActivityResultStatusFailed),
+		ActivityID:        activityID,
+		SuccessEvent:      eventidentity.Normalize(base + "." + ActivityResultStatusSucceeded),
+		FailureEvent:      eventidentity.Normalize(base + "." + ActivityResultStatusFailed),
+		RevisionRequested: eventidentity.Normalize(base + ".revision_requested"),
+		Rejected:          eventidentity.Normalize(base + ".rejected"),
+	}
+}
+
+func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCatalogEntry {
+	note := "Generated durable activity approval rejection event"
+	required := []string{"card_id", "activity_id", "tool", "effect_class", "effect_content_hash", "decided_by", "decided_at"}
+	properties := map[string]EventFieldSpec{
+		"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
+		"activity_id":         {Type: "string", Description: "Generated durable activity id."},
+		"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
+		"effect_class":        {Type: "string", Description: "Authored durable activity effect class."},
+		"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
+		"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
+		"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
+		"reason":              {Type: "text", Description: "Optional operator rejection reason."},
+	}
+	if revision {
+		note = "Generated durable activity revision-request event"
+		required = append(required, "feedback")
+		properties = map[string]EventFieldSpec{
+			"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
+			"activity_id":         {Type: "string", Description: "Generated durable activity id."},
+			"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
+			"effect_class":        {Type: "string", Description: "Authored durable activity effect class."},
+			"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
+			"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
+			"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
+			"feedback":            {Type: "text", Description: "Required operator revision feedback."},
+		}
+	}
+	return EventCatalogEntry{
+		Swarm: EventSwarmMetadata{Note: note, Source: "contract_derived_activity_approval", Producer: []string{strings.TrimSpace(site.NodeID)}, Status: "generated"},
+		Note:  note, Emitter: EventEmitterRef{NodeID: strings.TrimSpace(site.NodeID)}, EmitterType: "system_node",
+		Producer: []string{strings.TrimSpace(site.NodeID)}, Source: "contract_derived_activity_approval", Status: "generated",
+		OwningNode: strings.TrimSpace(site.NodeID), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required}, Required: required,
+		Consumer: []string{},
 	}
 }
 
@@ -286,6 +326,10 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 		events := ActivityResultEventsForSite(site)
 		out[events.SuccessEvent] = ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusSucceeded)
 		out[events.FailureEvent] = ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusFailed)
+		if site.Spec.Approval != nil {
+			out[events.RevisionRequested] = ActivityApprovalEventCatalogEntry(site, true)
+			out[events.Rejected] = ActivityApprovalEventCatalogEntry(site, false)
+		}
 	}
 	return out
 }
@@ -303,8 +347,45 @@ func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]Even
 		for eventType, schema := range ActivityResultEventSchemasForSite(site, tool) {
 			out[eventType] = schema
 		}
+		if site.Spec.Approval != nil {
+			events := ActivityResultEventsForSite(site)
+			out[events.RevisionRequested] = activityApprovalEventSchema(true)
+			out[events.Rejected] = activityApprovalEventSchema(false)
+		}
 	}
 	return out
+}
+
+func activityApprovalEventSchema(revision bool) EventSchema {
+	description := "Generated durable activity approval rejection event"
+	required := []string{"card_id", "activity_id", "tool", "effect_class", "effect_content_hash", "decided_by", "decided_at"}
+	properties := map[string]any{
+		"card_id":             map[string]any{"type": "string"},
+		"activity_id":         map[string]any{"type": "string"},
+		"tool":                map[string]any{"type": "string"},
+		"effect_class":        map[string]any{"type": "string"},
+		"effect_content_hash": map[string]any{"type": "string"},
+		"decided_by":          map[string]any{"type": "string"},
+		"decided_at":          map[string]any{"type": "string"},
+		"reason":              map[string]any{"type": "string"},
+	}
+	if revision {
+		description = "Generated durable activity revision-request event"
+		required = append(required, "feedback")
+		properties = map[string]any{
+			"card_id":             map[string]any{"type": "string"},
+			"activity_id":         map[string]any{"type": "string"},
+			"tool":                map[string]any{"type": "string"},
+			"effect_class":        map[string]any{"type": "string"},
+			"effect_content_hash": map[string]any{"type": "string"},
+			"decided_by":          map[string]any{"type": "string"},
+			"decided_at":          map[string]any{"type": "string"},
+			"feedback":            map[string]any{"type": "string"},
+		}
+	}
+	return EventSchema{Description: description, Schema: map[string]any{
+		"type": "object", "additionalProperties": false, "required": required, "properties": properties,
+	}}
 }
 
 func (b *WorkflowContractBundle) ActivitySites() []ActivitySite {
@@ -357,6 +438,9 @@ func (b *WorkflowContractBundle) generatedActivityEventsForNode(nodeID string) [
 		}
 		events := ActivityResultEventsForSite(site)
 		out = append(out, events.SuccessEvent, events.FailureEvent)
+		if site.Spec.Approval != nil {
+			out = append(out, events.RevisionRequested, events.Rejected)
+		}
 	}
 	return uniqueOrderedStrings(out)
 }

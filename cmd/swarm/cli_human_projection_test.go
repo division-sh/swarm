@@ -477,7 +477,7 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Reason: "local context registry status is a separate local-targeting taxonomy",
 	},
 	"control_mailbox.go\x00writeMailboxDetailResult": {
-		Names:  []string{"status", "status"},
+		Names:  []string{"status", "status", "status"},
 		Reason: "typed mailbox notice/card status is a separate control taxonomy",
 	},
 	"control_mailbox.go\x00writeMailboxListResult": {

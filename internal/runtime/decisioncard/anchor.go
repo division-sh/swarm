@@ -11,8 +11,9 @@ import (
 type AnchorKind string
 
 const (
-	AnchorKindStageGate AnchorKind = "stage_gate"
-	AnchorKindHumanTask AnchorKind = "human_task"
+	AnchorKindStageGate      AnchorKind = "stage_gate"
+	AnchorKindHumanTask      AnchorKind = "human_task"
+	AnchorKindProposedEffect AnchorKind = "proposed_effect"
 )
 
 type ScopeKind string
@@ -64,6 +65,40 @@ type HumanTaskAnchor struct {
 	OperationID      string
 	Category         string
 	Scope            Scope
+}
+
+type ProposedEffectAnchor struct {
+	RequestEventID string
+	ActivityID     string
+	Decision       string
+	Scope          Scope
+}
+
+func RegisteredAnchorKinds() []AnchorKind {
+	return []AnchorKind{AnchorKindStageGate, AnchorKindHumanTask, AnchorKindProposedEffect}
+}
+
+func RegisteredAnchorKindNames() []string {
+	kinds := RegisteredAnchorKinds()
+	out := make([]string, len(kinds))
+	for i, kind := range kinds {
+		out[i] = string(kind)
+	}
+	return out
+}
+
+func RegisteredAnchorKindDescription() string {
+	return strings.Join(RegisteredAnchorKindNames(), ", ")
+}
+
+func IsRegisteredAnchorKind(value string) bool {
+	candidate := AnchorKind(strings.TrimSpace(value))
+	for _, kind := range RegisteredAnchorKinds() {
+		if candidate == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // Anchor is the closed decision-card identity union. Its semantic payload is
@@ -131,6 +166,28 @@ func NewHumanTaskAnchor(in HumanTaskAnchor) (Anchor, error) {
 	return Anchor{kind: AnchorKindHumanTask, data: data}, nil
 }
 
+func NewProposedEffectAnchor(in ProposedEffectAnchor) (Anchor, error) {
+	in.RequestEventID = strings.TrimSpace(in.RequestEventID)
+	in.ActivityID = strings.TrimSpace(in.ActivityID)
+	in.Decision = strings.TrimSpace(in.Decision)
+	if in.RequestEventID == "" || in.ActivityID == "" || in.Decision == "" {
+		return Anchor{}, fmt.Errorf("proposed_effect anchor request_event_id, activity_id, and decision are required")
+	}
+	if err := in.Scope.Validate(); err != nil {
+		return Anchor{}, err
+	}
+	data, err := canonicaljson.FromGo(map[string]any{
+		"request_event_id": in.RequestEventID,
+		"activity_id":      in.ActivityID,
+		"decision":         in.Decision,
+		"scope":            in.Scope,
+	})
+	if err != nil {
+		return Anchor{}, fmt.Errorf("admit proposed_effect anchor: %w", err)
+	}
+	return Anchor{kind: AnchorKindProposedEffect, data: data}, nil
+}
+
 func DecodeAnchor(kind string, raw []byte) (Anchor, error) {
 	value, err := canonicaljson.Decode(raw)
 	if err != nil {
@@ -155,6 +212,9 @@ func (a Anchor) Validate() error {
 	case AnchorKindHumanTask:
 		_, err := a.HumanTask()
 		return err
+	case AnchorKindProposedEffect:
+		_, err := a.ProposedEffect()
+		return err
 	default:
 		return fmt.Errorf("decision-card anchor kind %q is not registered", a.kind)
 	}
@@ -174,9 +234,54 @@ func (a Anchor) Scope() (Scope, error) {
 			return Scope{}, err
 		}
 		return task.Scope, nil
+	case AnchorKindProposedEffect:
+		effect, err := a.ProposedEffect()
+		if err != nil {
+			return Scope{}, err
+		}
+		return effect.Scope, nil
 	default:
 		return Scope{}, fmt.Errorf("decision-card anchor kind %q is not registered", a.kind)
 	}
+}
+
+func (a Anchor) ProposedEffect() (ProposedEffectAnchor, error) {
+	if a.kind != AnchorKindProposedEffect {
+		return ProposedEffectAnchor{}, fmt.Errorf("decision-card anchor %q is not proposed_effect", a.kind)
+	}
+	values, ok := a.data.ObjectMap()
+	if !ok {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor must be an object")
+	}
+	if err := exactAnchorFields(values, "proposed_effect", []string{"request_event_id", "activity_id", "decision", "scope"}, nil); err != nil {
+		return ProposedEffectAnchor{}, err
+	}
+	scopeValue, ok := values["scope"]
+	if !ok {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor scope is required")
+	}
+	scopeMap, ok := scopeValue.ObjectMap()
+	if !ok {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor scope must be an object")
+	}
+	if err := exactAnchorFields(scopeMap, "proposed_effect scope", []string{"kind"}, []string{"flow_instance", "entity_id"}); err != nil {
+		return ProposedEffectAnchor{}, err
+	}
+	out := ProposedEffectAnchor{
+		RequestEventID: requiredAnchorString(values, "request_event_id"),
+		ActivityID:     requiredAnchorString(values, "activity_id"),
+		Decision:       requiredAnchorString(values, "decision"),
+		Scope: Scope{
+			Kind: ScopeKind(requiredAnchorString(scopeMap, "kind")), FlowInstance: optionalAnchorString(scopeMap, "flow_instance"), EntityID: optionalAnchorString(scopeMap, "entity_id"),
+		},
+	}
+	if out.RequestEventID == "" || out.ActivityID == "" || out.Decision == "" {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor contains an empty required identity")
+	}
+	if err := out.Scope.Validate(); err != nil {
+		return ProposedEffectAnchor{}, err
+	}
+	return out, nil
 }
 
 func (a Anchor) StageGate() (StageGateAnchor, error) {

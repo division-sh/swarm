@@ -104,7 +104,7 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 	}
 	bindings := make([]runForkGateActivationBinding, 0, len(activations))
 	for _, source := range activations {
-		forked, err := gateruntime.New(forkRunID, flowInstance, entityID, source.FlowID, source.Stage, source.DecisionID, source.BundleHash, source.StartedByEvent, source.OpenedAt)
+		forked, err := gateruntime.New(forkRunID, flowInstance, entityID, source.FlowID, source.Stage, source.DecisionID, source.BundleHash, source.RoutesJSON, source.StartedByEvent, source.OpenedAt)
 		if err != nil {
 			return nil, nil, err
 		}

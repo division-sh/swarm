@@ -14,12 +14,52 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 )
+
+func TestAuthorActivityDecisionCardAdapterCoversRegisteredAnchors(t *testing.T) {
+	stage, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: "root/review", FlowID: "review", EntityID: uuid.NewString(), Stage: "pending", StageActivationID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	human, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+		RequesterAgentID: "reviewer", OperationID: "human-op", Category: "review",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "root/review"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: uuid.NewString(), ActivityID: "send_reply", Decision: "support_reply",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root/review", EntityID: uuid.NewString()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := map[decisioncard.AnchorKind]decisioncard.Anchor{
+		decisioncard.AnchorKindStageGate: stage, decisioncard.AnchorKindHumanTask: human, decisioncard.AnchorKindProposedEffect: proposed,
+	}
+	if len(registered) != len(decisioncard.RegisteredAnchorKinds()) {
+		t.Fatalf("author activity decision-card adapters = %d, registered anchors = %d", len(registered), len(decisioncard.RegisteredAnchorKinds()))
+	}
+	for _, kind := range decisioncard.RegisteredAnchorKinds() {
+		anchor, ok := registered[kind]
+		if !ok {
+			t.Fatalf("registered decision-card anchor %q has no author activity fixture", kind)
+		}
+		anchorID, _, _, err := decisionCardAuthorActivityIdentity(anchor)
+		if err != nil || anchorID == "" {
+			t.Fatalf("decision-card anchor %q author activity identity = %q, %v", kind, anchorID, err)
+		}
+	}
+}
 
 func TestAuthorActivityPlatformEventDispositionCoversSpecCatalog(t *testing.T) {
 	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(authorActivityRegistryRepoRoot(t)))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -75,6 +77,26 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
 	policy := runtimecontracts.ActivityForkPolicy(strings.TrimSpace(request.ForkPolicy))
+	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, event.SourceEventID)
+	if err != nil {
+		return event, err
+	}
+	if proposed {
+		if policy != runtimecontracts.ActivityForkRequireConfirmation {
+			return event, fmt.Errorf("approved activity request %s must retain require_manual_confirmation fork policy", event.SourceEventID)
+		}
+		evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
+		if err != nil {
+			return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
+		}
+		if evidence.Status == "uncertain" {
+			return event, fmt.Errorf("approved proposed effect %s has ambiguous dispatch evidence and cannot authorize a fork-local call", event.SourceEventID)
+		}
+		if err := copyRunForkActivityAttemptEvidence(ctx, tx, forkRunID, event.FlowInstance, request, generations, evidence); err != nil {
+			return event, err
+		}
+		return event, nil
+	}
 	switch policy {
 	case runtimecontracts.ActivityForkReexecuteRead:
 		if runtimecontracts.NormalizeActivityEffectClass(request.EffectClass) != runtimecontracts.ActivityEffectClassReadOnly {
@@ -96,6 +118,26 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	return event, nil
+}
+
+func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, requestEventID string) (bool, error) {
+	var status, verdict, state string
+	err := tx.QueryRowContext(ctx, `
+		SELECT c.status, COALESCE(c.verdict, ''), p.state
+		FROM proposed_effect_continuations p
+		JOIN decision_cards c ON c.card_id = p.card_id
+		WHERE p.request_event_id = $1::uuid
+	`, strings.TrimSpace(requestEventID)).Scan(&status, &verdict, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load proposed-effect fork authority for request %s: %w", requestEventID, err)
+	}
+	if status != decisioncard.StatusDecided || verdict != "approve" || state != decisioncard.ProposedEffectRequestReleased {
+		return false, fmt.Errorf("approved proposed effect %s is not terminal fork evidence: card=%s verdict=%s continuation=%s", requestEventID, status, verdict, state)
+	}
+	return true, nil
 }
 
 func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID string) (json.RawMessage, error) {
@@ -218,9 +260,6 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 			break
 		}
 	}
-	if !generation.Valid() {
-		return fmt.Errorf("fork activity %s has no fork-local loop generation", request.ActivityID)
-	}
 	if request.Attempt <= 0 {
 		request.Attempt = 1
 	}
@@ -232,7 +271,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	resultEventID := activityidentity.ResultEventID(fact, evidence.ResultEventType)
-	resultPayload, err := remintRunForkPayload(evidence.ResultPayload, forkRunID, []attemptgeneration.Generation{generation})
+	resultPayload, err := remintRunForkPayload(evidence.ResultPayload, forkRunID, generationsForRunForkActivity(generation))
 	if err != nil {
 		return fmt.Errorf("remint activity %s recorded result: %w", request.ActivityID, err)
 	}
@@ -280,7 +319,8 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 	if err := json.Unmarshal(gotGeneration, &got); err != nil {
 		return err
 	}
-	if gotRunID != forkRunID || gotStatus != evidence.Status || gotResultID != resultEventID || !got.Equal(generation) {
+	generationMatches := (!got.Valid() && !generation.Valid()) || got.Equal(generation)
+	if gotRunID != forkRunID || gotStatus != evidence.Status || gotResultID != resultEventID || !generationMatches {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
 	}
 	if !inserted {
@@ -306,4 +346,11 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 		},
 		Failure: canonicalFailure,
 	})
+}
+
+func generationsForRunForkActivity(generation attemptgeneration.Generation) []attemptgeneration.Generation {
+	if !generation.Valid() {
+		return nil
+	}
+	return []attemptgeneration.Generation{generation}
 }

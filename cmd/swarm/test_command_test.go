@@ -1402,9 +1402,9 @@ func TestSwarmTestRejectsCrossAnchorDecisionCardSelectorsBeforeLookup(t *testing
 		want  string
 	}{
 		{name: "missing kind", match: "decision: launch_review", want: "match.anchor_kind is required"},
-		{name: "human selector on stage gate", match: "anchor_kind: stage_gate\n        category: strategic_decision", want: "match.category is valid only for anchor_kind human_task"},
-		{name: "stage selector on human task", match: "anchor_kind: human_task\n        stage: review", want: "match.stage is valid only for anchor_kind stage_gate"},
-		{name: "unknown kind", match: "anchor_kind: proposed_effect", want: "must be stage_gate or human_task"},
+		{name: "human selector on stage gate", match: "anchor_kind: stage_gate\n        category: strategic_decision", want: "match.category is not valid for anchor_kind stage_gate"},
+		{name: "stage selector on human task", match: "anchor_kind: human_task\n        stage: review", want: "match.stage is not valid for anchor_kind human_task"},
+		{name: "unknown kind", match: "anchor_kind: external_effect", want: "must be one of: stage_gate, human_task, proposed_effect"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)

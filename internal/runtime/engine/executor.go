@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -29,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -2272,6 +2274,13 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		}
 		input[field] = value
 	}
+	semanticInput, err := canonicaljson.FromGo(input)
+	if err != nil {
+		return fmt.Errorf("admit activity input: %w", err)
+	}
+	if semanticInput.Kind() != semanticvalue.KindObject {
+		return fmt.Errorf("activity input must be a semantic object")
+	}
 	ruleID := ""
 	ruleIndex := -1
 	if frame.rule != nil {
@@ -2288,19 +2297,23 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	}
 	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
+	sourceRoute := emitSourceRoute(frame)
 	intent := ActivityIntent{
 		ActivityID:       resultEvents.ActivityID,
 		Tool:             toolID,
-		Input:            input,
+		Input:            semanticInput,
 		EffectClass:      effectClass,
 		SuccessEvent:     resultEvents.SuccessEvent,
 		FailureEvent:     resultEvents.FailureEvent,
+		RevisionEvent:    resultEvents.RevisionRequested,
+		RejectedEvent:    resultEvents.Rejected,
 		RetryMaxAttempts: defaults.MaxAttempts,
 		RetryBackoff:     defaults.Backoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
 		EntityID:         frame.req.EntityID,
 		NodeID:           frame.req.NodeID,
 		FlowID:           frame.req.FlowID,
+		FlowInstance:     sourceRoute.FlowInstance,
 		HandlerEventKey:  frame.req.HandlerEventKey,
 		SourceEventID:    frame.req.Event.ID(),
 		SourceRunID:      frame.req.Event.RunID(),
@@ -2309,6 +2322,9 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		ChainDepth:       frame.req.ChainDepth,
 		Attempt:          1,
 	}.Normalized()
+	if activitySpec.Approval != nil {
+		intent.ApprovalDecision = strings.TrimSpace(activitySpec.Approval.Decision)
+	}
 	if frame.loopActivation != nil {
 		intent.Generation = frame.loopActivation.Generation()
 		intent.LoopStage = frame.loopActivation.CurrentStage

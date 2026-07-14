@@ -468,13 +468,18 @@ const (
 )
 
 type ActivitySpec struct {
-	ID    string                     `yaml:"id,omitempty"`
-	Tool  string                     `yaml:"tool"`
-	Input map[string]ExpressionValue `yaml:"input"`
+	ID       string                     `yaml:"id,omitempty"`
+	Tool     string                     `yaml:"tool"`
+	Input    map[string]ExpressionValue `yaml:"input"`
+	Approval *ActivityApprovalSpec      `yaml:"approval,omitempty"`
 }
 
 func (a ActivitySpec) Empty() bool {
-	return strings.TrimSpace(a.ID) == "" && strings.TrimSpace(a.Tool) == "" && len(a.Input) == 0
+	return strings.TrimSpace(a.ID) == "" && strings.TrimSpace(a.Tool) == "" && len(a.Input) == 0 && a.Approval == nil
+}
+
+type ActivityApprovalSpec struct {
+	Decision string `yaml:"decision"`
 }
 
 func NormalizeActivityEffectClass(raw string) ActivityEffectClass {

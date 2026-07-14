@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -76,9 +77,9 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	query := `
 			INSERT INTO decision_cards (
 				card_id, run_id, anchor_kind, anchor, status, snapshot,
-				card_content_hash, decision_schema_hash, bundle_hash, workflow_version,
+				card_content_hash, effect_content_hash, decision_schema_hash, bundle_hash, workflow_version,
 				effective_cadence, provenance, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (card_id) DO NOTHING`
 	if postgres {
 		query = strings.ReplaceAll(query, "?", "$%d")
@@ -86,7 +87,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	}
 	res, err := db.ExecContext(ctx, query,
 		card.CardID, card.RunID, card.Anchor.Kind(), string(anchor), card.Status, string(snapshot),
-		card.CardContentHash, card.DecisionSchemaHash, card.BundleHash, nullString(card.WorkflowVersion),
+		card.CardContentHash, card.EffectContentHash, card.DecisionSchemaHash, card.BundleHash, nullString(card.WorkflowVersion),
 		string(cadence), string(provenance), card.CreatedAt.UTC(), card.UpdatedAt.UTC(),
 	)
 	if err != nil {
@@ -104,7 +105,9 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 		if loadErr != nil {
 			return loadErr
 		}
-		return fmt.Errorf("decision card identity collision: %s", card.CardID)
+		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "decision_card_identity_conflict", "decision-card-store", "create", map[string]any{
+			"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(),
+		})
 	}
 	_, err = appendDecisionCardChangeDTO(ctx, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
 		"status": card.Status, "anchor_kind": card.Anchor.Kind(),
@@ -130,7 +133,7 @@ func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (de
 
 const decisionCardSelect = `SELECT
 	card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
-	decision_schema_hash, bundle_hash, COALESCE(workflow_version, ''),
+	COALESCE(effect_content_hash, ''), decision_schema_hash, bundle_hash, COALESCE(workflow_version, ''),
 	effective_cadence, provenance, COALESCE(verdict, ''), COALESCE(fields, '{}'),
 	COALESCE(decided_by, ''), decided_at, deferred_until,
 	COALESCE(CAST(decision_event_id AS TEXT), ''), COALESCE(delivery_receipt_id, ''),
@@ -159,7 +162,7 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	var decidedAt, deferredUntil, createdAt, updatedAt any
 	err := row.Scan(
 		&card.CardID, &card.RunID, &anchorKind, &anchor, &card.Status, &snapshot, &card.CardContentHash,
-		&card.DecisionSchemaHash, &card.BundleHash, &card.WorkflowVersion,
+		&card.EffectContentHash, &card.DecisionSchemaHash, &card.BundleHash, &card.WorkflowVersion,
 		&cadence, &provenance, &card.Verdict, &fields, &card.DecidedBy, &decidedAt, &deferredUntil,
 		&card.DecisionEventID, &card.DeliveryReceiptID, &card.DeliveryRenderHash, &card.SupersededReason,
 		&createdAt, &updatedAt,
@@ -261,9 +264,9 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 		placeholder := "?"
 		if postgres {
 			placeholder = "$" + strconv.Itoa(len(args))
-			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND anchor->>'entity_id' = "+placeholder+") OR (anchor_kind = 'human_task' AND anchor->'scope'->>'entity_id' = "+placeholder+"))")
+			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND anchor->>'entity_id' = "+placeholder+") OR (anchor_kind IN ('human_task', 'proposed_effect') AND anchor->'scope'->>'entity_id' = "+placeholder+"))")
 		} else {
-			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = "+placeholder+") OR (anchor_kind = 'human_task' AND json_extract(anchor, '$.scope.entity_id') = "+placeholder+"))")
+			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = "+placeholder+") OR (anchor_kind IN ('human_task', 'proposed_effect') AND json_extract(anchor, '$.scope.entity_id') = "+placeholder+"))")
 		}
 	}
 	if value := strings.TrimSpace(opts.AnchorKind); value != "" {
@@ -323,6 +326,13 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 			}
 			row.Category = human.Category
 			row.Decision = ""
+		} else if row.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
+			effect, err := row.Anchor.ProposedEffect()
+			if err != nil {
+				return nil, "", err
+			}
+			row.Category = "proposed_effect"
+			row.Decision = effect.Decision
 		}
 		if at, ok, err := sqliteTimeValue(deferred); err != nil {
 			return nil, "", err
@@ -426,6 +436,13 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 				return decisioncard.DecisionOutcome{}, err
 			}
 			return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID, ForcedDeferred: true}, nil
+		}
+	}
+	if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
+		proposed := card
+		proposed.Verdict = strings.TrimSpace(req.Verdict)
+		if err := commitProposedEffectDecision(ctx, tx, proposed, req.DecisionEventID, now, postgres); err != nil {
+			return decisioncard.DecisionOutcome{}, err
 		}
 	}
 	if strings.TrimSpace(req.InputDraftID) != "" {
@@ -928,6 +945,11 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 				return err
 			}
 		}
+		if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
+			if err := supersedeProposedEffectContinuation(ctx, tx, card.CardID, reason, now, postgres); err != nil {
+				return err
+			}
+		}
 		update := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
 		if postgres {
 			update = `UPDATE decision_cards SET status = $1, superseded_reason = $2, updated_at = $3 WHERE card_id = $4 AND status = 'pending'`
@@ -1186,24 +1208,9 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 	if err != nil {
 		return err
 	}
-	anchorID := ""
-	entityID := ""
-	flowID := ""
-	switch card.Anchor.Kind() {
-	case decisioncard.AnchorKindStageGate:
-		anchor, err := card.Anchor.StageGate()
-		if err != nil {
-			return err
-		}
-		anchorID, entityID, flowID = anchor.StageActivationID, anchor.EntityID, anchor.FlowInstance
-	case decisioncard.AnchorKindHumanTask:
-		anchor, err := card.Anchor.HumanTask()
-		if err != nil {
-			return err
-		}
-		anchorID, entityID, flowID = anchor.OperationID, anchor.Scope.EntityID, anchor.Scope.FlowInstance
-	default:
-		return fmt.Errorf("decision card anchor kind %q has no author activity adapter", card.Anchor.Kind())
+	anchorID, entityID, flowID, err := decisionCardAuthorActivityIdentity(card.Anchor)
+	if err != nil {
+		return err
 	}
 	identity := strconv.FormatInt(changeID, 10)
 	projection := runtimeauthoractivity.Projection{
@@ -1221,6 +1228,31 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 		OccurredAt: now.UTC(), RunID: strings.TrimSpace(runID), EntityID: entityID, FlowID: flowID,
 		Projection: projection,
 	})
+}
+
+func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, entityID, flowID string, err error) {
+	switch anchor.Kind() {
+	case decisioncard.AnchorKindStageGate:
+		stage, err := anchor.StageGate()
+		if err != nil {
+			return "", "", "", err
+		}
+		return stage.StageActivationID, stage.EntityID, stage.FlowInstance, nil
+	case decisioncard.AnchorKindHumanTask:
+		task, err := anchor.HumanTask()
+		if err != nil {
+			return "", "", "", err
+		}
+		return task.OperationID, task.Scope.EntityID, task.Scope.FlowInstance, nil
+	case decisioncard.AnchorKindProposedEffect:
+		effect, err := anchor.ProposedEffect()
+		if err != nil {
+			return "", "", "", err
+		}
+		return effect.RequestEventID, effect.Scope.EntityID, effect.Scope.FlowInstance, nil
+	default:
+		return "", "", "", fmt.Errorf("decision card anchor kind %q has no author activity adapter", anchor.Kind())
+	}
 }
 
 func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {

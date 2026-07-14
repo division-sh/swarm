@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -61,6 +65,30 @@ func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Cont
 	instance, ok, err := pc.workflowStore.Load(ctx, strings.TrimSpace(entityID))
 	if err != nil || !ok {
 		return err
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		return fmt.Errorf("decode current loop state: %w", err)
+	}
+	loops, err := loopruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return fmt.Errorf("list current loop state: %w", err)
+	}
+	current := make([]attemptgeneration.Generation, 0, len(loops))
+	for _, activation := range loops {
+		if generation := activation.Generation(); generation.Valid() && activation.Status == loopruntime.StatusOpen {
+			current = append(current, generation)
+		}
+	}
+	if pc.decisionCards != nil {
+		store, ok := pc.decisionCards.(decisioncard.ProposedEffectStore)
+		if !ok || store == nil {
+			return fmt.Errorf("proposed-effect continuation store is required for loop supersession")
+		}
+		runID := firstNonEmptyString(runtimecorrelation.RunIDFromContext(ctx), asString(instance.Metadata["run_id"]))
+		if err := store.SupersedeProposedEffectsForLoopGenerations(ctx, runID, entityID, current, "loop_generation_superseded", time.Now().UTC()); err != nil {
+			return err
+		}
 	}
 	source := pc.SemanticSource()
 	for _, state := range instance.TimerState {

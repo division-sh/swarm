@@ -38,6 +38,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "decision_card_route_obligations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_route_obligations.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_card_changes", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_changes.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_card_input_drafts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_card_input_drafts.run_id", DeleteOrderGroup: 1},
+		{Table: "proposed_effect_continuations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "proposed_effect_continuations.run_id", DeleteOrderGroup: 1},
 		{Table: "human_task_continuations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "human_task_continuations.run_id", DeleteOrderGroup: 1},
 		{Table: "decision_cards", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "decision_cards.run_id", DeleteOrderGroup: 2},
 		{Table: "agent_directive_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupRetainDirectiveAuthority, PredicateOwner: "agent_directive_operations.resolved_run_id plus operation state/expires_at", PreservationProof: "runtime.nuke fails closed while nonterminal, indeterminate, or unexpired terminal directive authority exists"},

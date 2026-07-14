@@ -355,7 +355,12 @@ func (r *SubscriptionRuntime) runDecisionCardSubscription(ctx context.Context, s
 			return false
 		}
 		for _, change := range changes {
-			if !session.notify(subscriptionID, change) {
+			notification, err := r.decisionCardChangeProjection(ctx, change)
+			if err != nil {
+				session.close()
+				return false
+			}
+			if !session.notify(subscriptionID, notification) {
 				return false
 			}
 			cursor = change.Sequence
@@ -377,6 +382,29 @@ func (r *SubscriptionRuntime) runDecisionCardSubscription(ctx context.Context, s
 			}
 		}
 	}
+}
+
+func (r *SubscriptionRuntime) decisionCardChangeProjection(ctx context.Context, change decisioncard.Change) (any, error) {
+	card, err := r.decisionCards.GetDecisionCard(ctx, change.CardID)
+	if err != nil {
+		return nil, err
+	}
+	if card.Anchor.Kind() != decisioncard.AnchorKindProposedEffect {
+		return change, nil
+	}
+	store, ok := r.decisionCards.(decisioncard.ProposedEffectStore)
+	if !ok || store == nil {
+		return nil, fmt.Errorf("proposed-effect subscription readback store is not configured")
+	}
+	effect, err := store.ProposedEffectReadback(ctx, change.CardID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"sequence": change.Sequence, "card_id": change.CardID, "run_id": change.RunID,
+		"change_type": change.ChangeType, "payload": change.Payload.Interface(), "created_at": change.CreatedAt,
+		"effect": effect,
+	}, nil
 }
 
 func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, filter store.OperatorEventListFilter, since *time.Time, seen map[string]string) bool {

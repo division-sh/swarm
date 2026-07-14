@@ -150,7 +150,7 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 		}
 
 		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
-		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectSQLite, path, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations")
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectSQLite, path, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
 		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
 		var continuations int
 		if err := store.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='human_task_continuations'`).Scan(&continuations); err != nil {
@@ -158,6 +158,12 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 		}
 		if continuations != 0 {
 			t.Fatal("incompatible bootstrap created human_task_continuations")
+		}
+		if err := store.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='proposed_effect_continuations'`).Scan(&continuations); err != nil {
+			t.Fatal(err)
+		}
+		if continuations != 0 {
+			t.Fatal("incompatible bootstrap created proposed_effect_continuations")
 		}
 	})
 
@@ -175,7 +181,7 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
 			t.Fatal("stage-only PostgreSQL fixture has unexpected decision-card columns")
 		}
-		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectPostgres, target, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations")
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectPostgres, target, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
 		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
 			t.Fatal("incompatible bootstrap mutated stage-only decision-card columns")
 		}
@@ -185,6 +191,12 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 		}
 		if continuations {
 			t.Fatal("incompatible bootstrap created human_task_continuations")
+		}
+		if err := db.QueryRow(`SELECT to_regclass('public.proposed_effect_continuations') IS NOT NULL`).Scan(&continuations); err != nil {
+			t.Fatal(err)
+		}
+		if continuations {
+			t.Fatal("incompatible bootstrap created proposed_effect_continuations")
 		}
 	})
 }
@@ -200,10 +212,10 @@ func stageOnlyDecisionCardSchemaRequest(t testing.TB) SchemaBootstrapRequest {
 	t.Helper()
 	request := canonicalSchemaBootstrapTestRequest(t)
 	request.Origin.SwarmVersion = "stage-only-card-schema"
-	plans := make([]SchemaTableDDL, 0, len(request.PlatformPlans)-1)
+	plans := make([]SchemaTableDDL, 0, len(request.PlatformPlans)-2)
 	for _, plan := range request.PlatformPlans {
 		switch plan.TableName {
-		case "human_task_continuations":
+		case "human_task_continuations", "proposed_effect_continuations":
 			continue
 		case "decision_cards":
 			plan = stageOnlyDecisionCardTablePlan()

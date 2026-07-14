@@ -357,6 +357,9 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	if err := materializeRunForkDecisionCards(ctx, tx, forkRunID, entityID, gateBindings, now); err != nil {
 		return err
 	}
+	if err := materializeRunForkProposedEffectCards(ctx, tx, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
+		return err
+	}
 	return mutationlog.InsertEntityStateDiff(ctx, tx, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,

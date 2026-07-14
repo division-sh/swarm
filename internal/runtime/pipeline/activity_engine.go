@@ -3,7 +3,6 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,17 +15,20 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -44,7 +46,29 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 	if outbox == nil {
 		return fmt.Errorf("activity intent writer requires pipeline outbox")
 	}
-	requests, err := activityRequestEmitIntents(intents)
+	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
+	for _, intent := range intents {
+		intent = intent.Normalized()
+		if intent.ApprovalDecision == "" {
+			immediate = append(immediate, intent)
+			continue
+		}
+		if _, ok := PipelineSQLTxFromContext(ctx); !ok {
+			return fmt.Errorf("approved activity %s must be materialized in the workflow mutation", intent.ActivityID)
+		}
+		store, ok := w.coordinator.decisionCards.(decisioncard.ProposedEffectStore)
+		if !ok || store == nil {
+			return fmt.Errorf("proposed-effect continuation store is required for approved activity %s", intent.ActivityID)
+		}
+		card, continuation, err := w.coordinator.buildProposedEffectCard(ctx, intent)
+		if err != nil {
+			return err
+		}
+		if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+			return err
+		}
+	}
+	requests, err := activityRequestEmitIntents(immediate)
 	if err != nil {
 		return err
 	}
@@ -63,10 +87,15 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			detail["loop_generation"] = intent.Generation.PayloadValue()
 			detail["loop_stage"] = intent.LoopStage
 		}
+		action := "intent_persisted"
+		if intent.ApprovalDecision != "" {
+			action = "proposal_persisted"
+			detail["approval_decision"] = intent.ApprovalDecision
+		}
 		entry := RuntimeLogEntry{
 			Level:     "info",
 			Component: "activity",
-			Action:    "intent_persisted",
+			Action:    action,
 			EventID:   activityRequestEventID(intent),
 			EventType: intent.SuccessEvent,
 			EntityID:  intent.EntityID.String(),
@@ -105,16 +134,116 @@ func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, inte
 	if dispatcher == nil {
 		return fmt.Errorf("activity dispatcher requires pipeline outbox dispatcher")
 	}
-	requests, err := activityRequestEmitIntents(intents)
+	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
+	for _, intent := range intents {
+		intent = intent.Normalized()
+		if intent.ApprovalDecision == "" {
+			immediate = append(immediate, intent)
+		}
+	}
+	requests, err := activityRequestEmitIntents(immediate)
 	if err != nil {
 		return err
 	}
 	return dispatcher.DispatchPostCommit(ctx, requests)
 }
 
+func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
+	intent = intent.Normalized()
+	if intent.ApprovalDecision == "" {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("approved activity decision is required")
+	}
+	if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("approved activity %s must be non_idempotent_write", intent.ActivityID)
+	}
+	runID := strings.TrimSpace(intent.SourceRunID)
+	requestEventID := activityRequestEventID(intent)
+	flowInstance := firstNonEmptyString(intent.FlowInstance, intent.FlowID.String(), "root")
+	createdAt := time.Now().UTC()
+	bundleHash := workflowGateBundleHash(ctx, pc)
+	if bundleHash == "" {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("bundle identity is required before proposing approved activity %s", intent.ActivityID)
+	}
+	workflowVersion := ""
+	if source := pc.SemanticSource(); source != nil {
+		workflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if workflowVersion == "" {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("workflow version is required before proposing approved activity %s", intent.ActivityID)
+	}
+	continuation := decisioncard.ProposedEffectContinuation{
+		CardID: decisioncard.ProposedEffectCardID(requestEventID, intent.ApprovalDecision), RunID: runID,
+		RequestEventID: requestEventID, ActivityID: intent.ActivityID, Tool: intent.Tool,
+		BundleHash: bundleHash, WorkflowVersion: workflowVersion, Input: intent.Input,
+		EffectClass: intent.EffectClass, SuccessEvent: intent.SuccessEvent, FailureEvent: intent.FailureEvent,
+		RevisionEvent: intent.RevisionEvent, RejectedEvent: intent.RejectedEvent,
+		RetryMaxAttempts: intent.RetryMaxAttempts, RetryBackoff: intent.RetryBackoff, ForkPolicy: intent.ForkPolicy,
+		EntityID: intent.EntityID.String(), NodeID: intent.NodeID.String(), FlowID: intent.FlowID.String(), FlowInstance: flowInstance,
+		HandlerEventKey: intent.HandlerEventKey, SourceEventID: intent.SourceEventID, SourceRunID: intent.SourceRunID,
+		SourceTaskID: intent.SourceTaskID, ParentEventID: intent.ParentEventID, ChainDepth: intent.ChainDepth,
+		Attempt: intent.Attempt, Generation: intent.Generation, LoopStage: intent.LoopStage,
+		ReplyContextID: intent.Context.ReplyContextID(), State: decisioncard.ProposedEffectPending,
+		CreatedAt: createdAt, UpdatedAt: createdAt,
+	}.Canonical()
+	effect, err := continuation.EffectValue()
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("encode proposed activity effect: %w", err)
+	}
+	effectHash, err := canonicaljson.HashValue(effect)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("hash proposed activity effect: %w", err)
+	}
+	continuation.EffectContentHash = effectHash
+	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: requestEventID, ActivityID: intent.ActivityID, Decision: intent.ApprovalDecision,
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: flowInstance, EntityID: intent.EntityID.String()},
+	})
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", Label: "Approve"},
+		"revise": {
+			Verdict: "revise", Label: "Request revision",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Label: "Feedback", Required: true}},
+		},
+		"reject": {
+			Verdict: "reject", Label: "Reject",
+			Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Label: "Reason"}},
+		},
+	}
+	snapshot, err := decisioncard.FreezeSnapshot(intent.ApprovalDecision, "", map[string]any{
+		"activity_id": intent.ActivityID, "tool": intent.Tool, "effect_class": string(intent.EffectClass), "input": intent.Input.Interface(),
+	}, outcomes)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
+	provenance, err := canonicaljson.FromGo(map[string]any{
+		"source_event": intent.SourceEventID, "flow_id": intent.FlowID.String(), "flow_instance": flowInstance, "node_id": intent.NodeID.String(),
+	})
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("admit proposed-effect provenance: %w", err)
+	}
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		EffectContentHash: effectHash, BundleHash: bundleHash, WorkflowVersion: workflowVersion,
+		EffectiveCadence: pc.decisionCardCadence.Stamp(createdAt), Provenance: provenance, CreatedAt: createdAt,
+	})
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
+	if err := continuation.Validate(card); err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
+	return card, continuation, nil
+}
+
 func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent) error {
 	intent = intent.Normalized()
 	source := d.coordinator.SemanticSource()
+	if err := d.admitActivityContractPin(ctx, intent, source); err != nil {
+		return err
+	}
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
@@ -195,6 +324,38 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	failureIntent := intent
 	failureIntent.Attempt = maxAttempts
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+}
+
+func (d pipelineActivityDispatcher) admitActivityContractPin(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source) error {
+	if intent.BundleHash == "" && intent.WorkflowVersion == "" {
+		return nil
+	}
+	if intent.BundleHash == "" || intent.WorkflowVersion == "" {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_contract_pin_incomplete", "activity-runtime", "admit_activity_contract", map[string]any{
+			"activity_id": intent.ActivityID, "bundle_hash": intent.BundleHash, "workflow_version": intent.WorkflowVersion,
+		})
+	}
+	currentBundleHash := workflowGateBundleHash(ctx, d.coordinator)
+	currentWorkflowVersion := ""
+	if source != nil {
+		currentWorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if currentBundleHash == intent.BundleHash && currentWorkflowVersion == intent.WorkflowVersion {
+		return nil
+	}
+	return DeferPipelineReceipt(runtimefailures.New(
+		runtimefailures.ClassDependencyUnavailable,
+		"activity_contract_pin_unavailable",
+		"activity-runtime",
+		"admit_activity_contract",
+		map[string]any{
+			"activity_id":               intent.ActivityID,
+			"required_bundle_hash":      intent.BundleHash,
+			"current_bundle_hash":       currentBundleHash,
+			"required_workflow_version": intent.WorkflowVersion,
+			"current_workflow_version":  currentWorkflowVersion,
+		},
+	))
 }
 
 func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.Context, intent runtimeengine.ActivityIntent) error {
@@ -412,16 +573,20 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 type activityRequestPayload struct {
 	ActivityID       string                       `json:"activity_id"`
 	Tool             string                       `json:"tool"`
-	Input            map[string]any               `json:"input"`
+	BundleHash       string                       `json:"bundle_hash,omitempty"`
+	WorkflowVersion  string                       `json:"workflow_version,omitempty"`
 	EffectClass      string                       `json:"effect_class"`
 	SuccessEvent     string                       `json:"success_event"`
 	FailureEvent     string                       `json:"failure_event"`
+	RevisionEvent    string                       `json:"revision_event,omitempty"`
+	RejectedEvent    string                       `json:"rejected_event,omitempty"`
 	RetryMaxAttempts int                          `json:"retry_max_attempts"`
 	RetryBackoff     string                       `json:"retry_backoff"`
 	ForkPolicy       string                       `json:"fork_policy"`
 	EntityID         string                       `json:"entity_id"`
 	NodeID           string                       `json:"node_id"`
 	FlowID           string                       `json:"flow_id"`
+	FlowInstance     string                       `json:"flow_instance,omitempty"`
 	HandlerEventKey  string                       `json:"handler_event_key"`
 	SourceEventID    string                       `json:"source_event_id"`
 	SourceRunID      string                       `json:"source_run_id"`
@@ -451,7 +616,15 @@ func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runti
 func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
 	payload := activityRequestPayloadFromIntent(intent)
-	raw, err := json.Marshal(payload)
+	value, err := canonicaljson.FromGo(payload)
+	if err != nil {
+		return runtimeengine.EmitIntent{}, err
+	}
+	value, err = value.With("input", intent.Input)
+	if err != nil {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("attach admitted activity input: %w", err)
+	}
+	raw, err := canonicaljson.Encode(value)
 	if err != nil {
 		return runtimeengine.EmitIntent{}, err
 	}
@@ -550,16 +723,20 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 	return activityRequestPayload{
 		ActivityID:       intent.ActivityID,
 		Tool:             intent.Tool,
-		Input:            cloneStringAnyMap(intent.Input),
+		BundleHash:       intent.BundleHash,
+		WorkflowVersion:  intent.WorkflowVersion,
 		EffectClass:      string(intent.EffectClass),
 		SuccessEvent:     intent.SuccessEvent,
 		FailureEvent:     intent.FailureEvent,
+		RevisionEvent:    intent.RevisionEvent,
+		RejectedEvent:    intent.RejectedEvent,
 		RetryMaxAttempts: intent.RetryMaxAttempts,
 		RetryBackoff:     intent.RetryBackoff,
 		ForkPolicy:       string(intent.ForkPolicy),
 		EntityID:         intent.EntityID.String(),
 		NodeID:           intent.NodeID.String(),
 		FlowID:           intent.FlowID.String(),
+		FlowInstance:     intent.FlowInstance,
 		HandlerEventKey:  intent.HandlerEventKey,
 		SourceEventID:    intent.SourceEventID,
 		SourceRunID:      intent.SourceRunID,
@@ -573,24 +750,37 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 }
 
 func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityIntent, error) {
-	var payload activityRequestPayload
-	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+	semanticPayload, err := canonicaljson.Decode(evt.Payload())
+	if err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
+	}
+	var payload activityRequestPayload
+	if err := canonicaljson.ValueInto(semanticPayload, &payload); err != nil {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
+	}
+	input, ok := semanticPayload.Lookup("input")
+	if !ok || input.Kind() != semanticvalue.KindObject {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s input must be a semantic object", evt.ID())
 	}
 	intent := runtimeengine.ActivityIntent{
 		Context:          evt.DeliveryContext(),
 		ActivityID:       payload.ActivityID,
 		Tool:             payload.Tool,
-		Input:            cloneStringAnyMap(payload.Input),
+		BundleHash:       payload.BundleHash,
+		WorkflowVersion:  payload.WorkflowVersion,
+		Input:            input,
 		EffectClass:      runtimecontracts.NormalizeActivityEffectClass(payload.EffectClass),
 		SuccessEvent:     payload.SuccessEvent,
 		FailureEvent:     payload.FailureEvent,
+		RevisionEvent:    payload.RevisionEvent,
+		RejectedEvent:    payload.RejectedEvent,
 		RetryMaxAttempts: payload.RetryMaxAttempts,
 		RetryBackoff:     payload.RetryBackoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicy(strings.TrimSpace(payload.ForkPolicy)),
 		EntityID:         identity.NormalizeEntityID(payload.EntityID),
 		NodeID:           identity.NormalizeNodeID(payload.NodeID),
 		FlowID:           identity.NormalizeFlowID(payload.FlowID),
+		FlowInstance:     payload.FlowInstance,
 		HandlerEventKey:  payload.HandlerEventKey,
 		SourceEventID:    payload.SourceEventID,
 		SourceRunID:      payload.SourceRunID,
@@ -603,6 +793,9 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	}.Normalized()
 	if intent.ActivityID == "" || intent.Tool == "" || intent.SuccessEvent == "" || intent.FailureEvent == "" {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s is missing required activity identity", evt.ID())
+	}
+	if (intent.BundleHash == "") != (intent.WorkflowVersion == "") {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s carries an incomplete contract pin", evt.ID())
 	}
 	return intent, nil
 }
@@ -660,8 +853,15 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "managed_credential_effect_class_unsupported")
 		}
 	}
-	input := cloneStringAnyMap(intent.Input)
-	env := map[string]any{"input": input, "credentials": credentials}
+	input, ok := intent.Input.ObjectMap()
+	if !ok {
+		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "input_not_object")
+	}
+	inputDTO := make(map[string]any, len(input))
+	for name, value := range input {
+		inputDTO[name] = value.Interface()
+	}
+	env := map[string]any{"input": inputDTO, "credentials": credentials}
 	url, err := resolveActivityHTTPURLTemplate(tool.HTTP.URL, env)
 	if err != nil {
 		return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "url", secrets)
@@ -725,7 +925,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		secrets:     secrets,
 		managedAuth: managedAuth,
 		success:     cloneActivityResponseSuccess(tool.ResponseSuccess),
-		inputHash:   activityInputHash(input),
+		inputHash:   activityInputHash(intent.Input),
 	}, nil
 }
 
@@ -944,33 +1144,22 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 	}, nil
 }
 
-func activityManagedCredentialInputValue(input map[string]any, key string) string {
+func activityManagedCredentialInputValue(input semanticvalue.Value, key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
 	}
-	value, ok := input[key]
-	if !ok || value == nil {
+	value, ok := input.Lookup(key)
+	if !ok || value.Kind() == semanticvalue.KindNull {
 		return ""
 	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case json.Number:
-		return strings.TrimSpace(typed.String())
-	case float64:
-		return strings.TrimSpace(strconv.FormatFloat(typed, 'f', -1, 64))
-	case float32:
-		return strings.TrimSpace(strconv.FormatFloat(float64(typed), 'f', -1, 32))
-	case int:
-		return strconv.Itoa(typed)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	case uint64:
-		return strconv.FormatUint(typed, 10)
-	default:
-		return strings.TrimSpace(fmt.Sprint(typed))
+	if text, ok := value.String(); ok {
+		return strings.TrimSpace(text)
 	}
+	if number, ok := value.Number(); ok {
+		return strings.TrimSpace(strconv.FormatFloat(number, 'g', -1, 64))
+	}
+	return strings.TrimSpace(fmt.Sprint(value.Interface()))
 }
 
 type activityHTTPUncertainError struct {
@@ -1349,7 +1538,7 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 		SourceEventID:   intent.SourceEventID,
 		ParentEventID:   intent.ParentEventID,
 		EntityID:        intent.EntityID.String(),
-		FlowInstance:    intent.FlowID.String(),
+		FlowInstance:    firstNonEmptyString(intent.FlowInstance, intent.FlowID.String()),
 		NodeID:          intent.NodeID.String(),
 		HandlerEventKey: intent.HandlerEventKey,
 		ActivityID:      intent.ActivityID,
@@ -1376,11 +1565,10 @@ func (rec ActivityAttemptRecord) withTerminal(status, eventID, eventType string,
 	return rec
 }
 
-func activityInputHash(input map[string]any) string {
-	raw, err := json.Marshal(input)
+func activityInputHash(input semanticvalue.Value) string {
+	hash, err := canonicaljson.HashValue(input)
 	if err != nil {
-		raw = []byte(fmt.Sprintf("%#v", input))
+		panic(fmt.Sprintf("hash admitted activity input: %v", err))
 	}
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("sha256:%x", sum[:])
+	return hash
 }

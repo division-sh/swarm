@@ -2,42 +2,16 @@ package decisioncard
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
-// FrozenExpression is the decision-card-owned form of an authored expression.
-// Literal values are admitted once when the card is materialized.
-type FrozenExpression struct {
-	Kind    runtimecontracts.ExpressionKind
-	Literal semanticvalue.Value
-	Ref     string
-	CEL     string
-}
-
-func (e FrozenExpression) HasLiteralValue() bool {
-	return e.Kind == runtimecontracts.ExpressionKindLiteral
-}
-
-type FrozenEmit struct {
-	Event  string
-	Fields map[string]FrozenExpression
-}
-
-func (e FrozenEmit) Empty() bool {
-	return strings.TrimSpace(e.Event) == "" && len(e.Fields) == 0
-}
-
 type FrozenOutcome struct {
-	Verdict    string
-	Label      string
-	Input      map[string]runtimecontracts.WorkflowGateInputField
-	AdvancesTo string
-	Emit       FrozenEmit
-	EmitSchema semanticvalue.Value
+	Verdict string
+	Label   string
+	Input   map[string]runtimecontracts.WorkflowGateInputField
 }
 
 func FreezeSnapshot(decision, title string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (Snapshot, error) {
@@ -53,32 +27,7 @@ func FreezeSnapshot(decision, title string, context map[string]any, outcomes map
 	}
 	frozen := make(map[string]FrozenOutcome, len(outcomes))
 	for verdict, outcome := range outcomes {
-		item := FrozenOutcome{
-			Verdict: outcome.Verdict, Label: outcome.Label, Input: cloneGateInputs(outcome.Input),
-			AdvancesTo: outcome.AdvancesTo,
-			Emit:       FrozenEmit{Event: outcome.Emit.Event, Fields: make(map[string]FrozenExpression, len(outcome.Emit.Fields))},
-			EmitSchema: semanticvalue.EmptyObject(),
-		}
-		for field, expression := range outcome.Emit.Fields {
-			frozenExpression := FrozenExpression{Kind: expression.Kind, Ref: expression.Ref, CEL: expression.CEL}
-			if expression.HasLiteralValue() {
-				frozenExpression.Literal, err = canonicaljson.FromGo(expression.Literal)
-				if err != nil {
-					return Snapshot{}, fmt.Errorf("admit decision card outcome %s literal %s: %w", verdict, field, err)
-				}
-			}
-			item.Emit.Fields[field] = frozenExpression
-		}
-		if len(outcome.EmitSchema) > 0 {
-			item.EmitSchema, err = canonicaljson.FromGo(outcome.EmitSchema)
-			if err != nil {
-				return Snapshot{}, fmt.Errorf("admit decision card outcome %s schema: %w", verdict, err)
-			}
-			if item.EmitSchema.Kind() != semanticvalue.KindObject {
-				return Snapshot{}, fmt.Errorf("decision card outcome %s schema must be an object", verdict)
-			}
-		}
-		frozen[verdict] = item
+		frozen[verdict] = FrozenOutcome{Verdict: outcome.Verdict, Label: outcome.Label, Input: cloneGateInputs(outcome.Input)}
 	}
 	return Snapshot{Decision: decision, Title: title, Context: contextValue, Outcomes: frozen}, nil
 }
@@ -126,37 +75,9 @@ func (o FrozenOutcome) semanticValue() (semanticvalue.Value, error) {
 	if err != nil {
 		return semanticvalue.Value{}, err
 	}
-	expressions := make(map[string]semanticvalue.Value, len(o.Emit.Fields))
-	for name, expression := range o.Emit.Fields {
-		fields := map[string]semanticvalue.Value{}
-		if expression.HasLiteralValue() {
-			fields["Literal"] = expression.Literal
-		} else {
-			fields["Literal"] = semanticvalue.Null()
-		}
-		encoded, err := semanticObjectWithText(
-			map[string]string{"Kind": string(expression.Kind), "Ref": expression.Ref, "CEL": expression.CEL},
-			fields,
-		)
-		if err != nil {
-			return semanticvalue.Value{}, fmt.Errorf("encode emit field %s: %w", name, err)
-		}
-		expressions[name] = encoded
-	}
-	expressionValue, err := semanticvalue.ObjectFromMap(expressions)
-	if err != nil {
-		return semanticvalue.Value{}, err
-	}
-	emit, err := semanticObjectWithText(
-		map[string]string{"Event": o.Emit.Event},
-		map[string]semanticvalue.Value{"Fields": expressionValue},
-	)
-	if err != nil {
-		return semanticvalue.Value{}, err
-	}
 	return semanticObjectWithText(
-		map[string]string{"Verdict": o.Verdict, "Label": o.Label, "AdvancesTo": o.AdvancesTo},
-		map[string]semanticvalue.Value{"Input": inputValue, "Emit": emit, "EmitSchema": o.EmitSchema},
+		map[string]string{"Verdict": o.Verdict, "Label": o.Label},
+		map[string]semanticvalue.Value{"Input": inputValue},
 	)
 }
 
@@ -227,7 +148,7 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 	if !ok {
 		return FrozenOutcome{}, fmt.Errorf("outcome must be an object")
 	}
-	if err := requireExactSemanticFields(root, "outcome", "Verdict", "Label", "Input", "AdvancesTo", "Emit", "EmitSchema"); err != nil {
+	if err := requireExactSemanticFields(root, "outcome", "Verdict", "Label", "Input"); err != nil {
 		return FrozenOutcome{}, err
 	}
 	verdict, err := requiredSemanticString(root, "Verdict")
@@ -235,10 +156,6 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		return FrozenOutcome{}, err
 	}
 	label, err := requiredSemanticString(root, "Label")
-	if err != nil {
-		return FrozenOutcome{}, err
-	}
-	advancesTo, err := requiredSemanticString(root, "AdvancesTo")
 	if err != nil {
 		return FrozenOutcome{}, err
 	}
@@ -273,68 +190,7 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		}
 		inputs[name] = runtimecontracts.WorkflowGateInputField{Type: kind, Required: required, Label: label}
 	}
-	emitValue, ok := root["Emit"]
-	if !ok {
-		return FrozenOutcome{}, fmt.Errorf("outcome emit is required")
-	}
-	emitFields, ok := emitValue.ObjectMap()
-	if !ok {
-		return FrozenOutcome{}, fmt.Errorf("outcome emit must be an object")
-	}
-	if err := requireExactSemanticFields(emitFields, "outcome emit", "Event", "Fields"); err != nil {
-		return FrozenOutcome{}, err
-	}
-	event, err := requiredSemanticString(emitFields, "Event")
-	if err != nil {
-		return FrozenOutcome{}, err
-	}
-	expressionContainer, ok := emitFields["Fields"]
-	if !ok {
-		return FrozenOutcome{}, fmt.Errorf("outcome emit fields are required")
-	}
-	expressionMembers, ok := expressionContainer.ObjectMap()
-	if !ok {
-		return FrozenOutcome{}, fmt.Errorf("outcome emit fields must be an object")
-	}
-	expressions := make(map[string]FrozenExpression, len(expressionMembers))
-	for name, encoded := range expressionMembers {
-		fields, ok := encoded.ObjectMap()
-		if !ok {
-			return FrozenOutcome{}, fmt.Errorf("emit field %s must be an object", name)
-		}
-		if err := requireExactSemanticFields(fields, "emit field "+name, "Kind", "Ref", "CEL", "Literal"); err != nil {
-			return FrozenOutcome{}, err
-		}
-		kind, err := requiredSemanticString(fields, "Kind")
-		if err != nil {
-			return FrozenOutcome{}, fmt.Errorf("emit field %s: %w", name, err)
-		}
-		ref, err := requiredSemanticString(fields, "Ref")
-		if err != nil {
-			return FrozenOutcome{}, fmt.Errorf("emit field %s: %w", name, err)
-		}
-		cel, err := requiredSemanticString(fields, "CEL")
-		if err != nil {
-			return FrozenOutcome{}, fmt.Errorf("emit field %s: %w", name, err)
-		}
-		expression := FrozenExpression{Kind: runtimecontracts.ExpressionKind(kind), Ref: ref, CEL: cel}
-		if expression.HasLiteralValue() {
-			literal, ok := fields["Literal"]
-			if !ok {
-				return FrozenOutcome{}, fmt.Errorf("emit field %s literal is required", name)
-			}
-			expression.Literal = literal
-		}
-		expressions[name] = expression
-	}
-	schema := root["EmitSchema"]
-	if schema.Kind() != semanticvalue.KindObject {
-		return FrozenOutcome{}, fmt.Errorf("outcome emit schema must be an object")
-	}
-	return FrozenOutcome{
-		Verdict: verdict, Label: label, Input: inputs, AdvancesTo: advancesTo,
-		Emit: FrozenEmit{Event: event, Fields: expressions}, EmitSchema: schema,
-	}, nil
+	return FrozenOutcome{Verdict: verdict, Label: label, Input: inputs}, nil
 }
 
 func requireExactSemanticFields(values map[string]semanticvalue.Value, label string, expected ...string) error {

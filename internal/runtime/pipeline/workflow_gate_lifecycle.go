@@ -105,14 +105,22 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 			enteredAt = now
 		}
 		identity := StoredFlowInstance(pc.SemanticSource(), *instance)
-		activation, err := gateruntime.New(runID, identity.InstancePath, entityID, flowID, nextStage, plan.Decision, bundleHash, sourceEvent, enteredAt)
+		frozenOutcomes, err := pc.resolvedWorkflowGateOutcomes(plan)
+		if err != nil {
+			return err
+		}
+		routesJSON, err := gateruntime.FreezeRoutes(frozenOutcomes)
+		if err != nil {
+			return fmt.Errorf("freeze gate %s continuation routes: %w", plan.Decision, err)
+		}
+		activation, err := gateruntime.New(runID, identity.InstancePath, entityID, flowID, nextStage, plan.Decision, bundleHash, routesJSON, sourceEvent, enteredAt)
 		if err != nil {
 			return err
 		}
 		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return err
 		}
-		card, err := pc.buildWorkflowDecisionCard(ctx, entityID, *instance, identity.InstancePath, activation, plan)
+		card, err := pc.buildWorkflowDecisionCard(ctx, entityID, *instance, identity.InstancePath, activation, plan, frozenOutcomes)
 		if err != nil {
 			return err
 		}
@@ -197,7 +205,7 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 	return ""
 }
 
-func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, entityID string, instance WorkflowInstance, flowInstance string, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan) (decisioncard.Card, error) {
+func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, entityID string, instance WorkflowInstance, flowInstance string, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
 	contextSnapshot := make(map[string]any, len(plan.Context))
 	for name, expression := range plan.Context {
 		value, err := evalWorkflowGateContext(expression, instance, pc.SemanticSource(), plan.FlowID)
@@ -209,25 +217,6 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if runID == "" {
 		runID = asString(instance.Metadata["run_id"])
-	}
-	frozenOutcomes := make(map[string]runtimecontracts.WorkflowGateOutcomePlan, len(plan.Outcomes))
-	for verdict, outcome := range plan.Outcomes {
-		if eventName := strings.TrimSpace(outcome.Emit.Event); eventName != "" {
-			source := pc.SemanticSource()
-			if source == nil {
-				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: semantic source is unavailable", plan.Decision, verdict)
-			}
-			resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventName)
-			if !resolution.HasSchema {
-				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: event %s has no resolvable payload schema", plan.Decision, verdict, eventName)
-			}
-			if err := resolution.UnresolvedTypeError(); err != nil {
-				return decisioncard.Card{}, fmt.Errorf("freeze gate %s outcome %s event schema: %w", plan.Decision, verdict, err)
-			}
-			outcome.Emit.Event = source.ResolveFlowEventReference(plan.FlowID, eventName)
-			outcome.EmitSchema = cloneWorkflowGateSchema(resolution.Schema.Schema)
-		}
-		frozenOutcomes[verdict] = outcome
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(plan.Decision, plan.Title, contextSnapshot, frozenOutcomes)
 	if err != nil {
@@ -254,6 +243,29 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 		CreatedAt:        activation.OpenedAt,
 	}
 	return decisioncard.New(card)
+}
+
+func (pc *PipelineCoordinator) resolvedWorkflowGateOutcomes(plan runtimecontracts.WorkflowGatePlan) (map[string]runtimecontracts.WorkflowGateOutcomePlan, error) {
+	frozenOutcomes := make(map[string]runtimecontracts.WorkflowGateOutcomePlan, len(plan.Outcomes))
+	for verdict, outcome := range plan.Outcomes {
+		if eventName := strings.TrimSpace(outcome.Emit.Event); eventName != "" {
+			source := pc.SemanticSource()
+			if source == nil {
+				return nil, fmt.Errorf("freeze gate %s outcome %s event schema: semantic source is unavailable", plan.Decision, verdict)
+			}
+			resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventName)
+			if !resolution.HasSchema {
+				return nil, fmt.Errorf("freeze gate %s outcome %s event schema: event %s has no resolvable payload schema", plan.Decision, verdict, eventName)
+			}
+			if err := resolution.UnresolvedTypeError(); err != nil {
+				return nil, fmt.Errorf("freeze gate %s outcome %s event schema: %w", plan.Decision, verdict, err)
+			}
+			outcome.Emit.Event = source.ResolveFlowEventReference(plan.FlowID, eventName)
+			outcome.EmitSchema = cloneWorkflowGateSchema(resolution.Schema.Schema)
+		}
+		frozenOutcomes[verdict] = outcome
+	}
+	return frozenOutcomes, nil
 }
 
 func cloneWorkflowGateSchema(in map[string]any) map[string]any {
