@@ -235,24 +235,24 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 }
 
 func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, eventType string) error {
-	return s.runScheduleMutation(ctx, runID, "cancel timer", func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'cancelled'
+	return s.runScheduleMutation(ctx, runID, "cancel timer", func(tx *sql.Tx) (bool, error) {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE timers
+			SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
 		  AND fire_event = $3
 		  AND status = 'active'
-	`, runID, agentID, eventType)
-		return err
+		`, runID, agentID, eventType)
+		return scheduleMutationChanged(result, err)
 	})
 }
 
 func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	return s.runScheduleMutation(ctx, sc.RunID, "cancel exact timer", func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE timers
-		SET status = 'cancelled'
+	return s.runScheduleMutation(ctx, sc.RunID, "cancel exact timer", func(tx *sql.Tx) (bool, error) {
+		result, err := tx.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE timers
+			SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
 		  AND fire_event = $3
@@ -260,8 +260,8 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 		  AND %s = $6
 		  AND status = 'active'
-	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
-		return err
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+		return scheduleMutationChanged(result, err)
 	})
 }
 
@@ -328,17 +328,17 @@ func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepip
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	return s.runScheduleMutation(ctx, sc.RunID, "mark timer fired", func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
-		UPDATE timers
+	return s.runScheduleMutation(ctx, sc.RunID, "mark timer fired", func(tx *sql.Tx) (bool, error) {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE timers
 		SET status = $4,
 		    fired_at = now()
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
 		  AND fire_event = $3
 		  AND status = 'active'
-	`, sc.RunID, sc.AgentID, sc.EventType, status)
-		return err
+		`, sc.RunID, sc.AgentID, sc.EventType, status)
+		return scheduleMutationChanged(result, err)
 	})
 }
 
@@ -347,9 +347,9 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	return s.runScheduleMutation(ctx, sc.RunID, "mark exact timer fired", func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE timers
+	return s.runScheduleMutation(ctx, sc.RunID, "mark exact timer fired", func(tx *sql.Tx) (bool, error) {
+		result, err := tx.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE timers
 		SET status = $7,
 		    fired_at = now()
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
@@ -359,21 +359,22 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 		  AND %s = $6
 		  AND status = 'active'
-	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
-		return err
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
+		return scheduleMutationChanged(result, err)
 	})
 }
 
-func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label string, mutate func(*sql.Tx) error) error {
+func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label string, mutate func(*sql.Tx) (bool, error)) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", label, err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := mutate(tx); err != nil {
+	changed, err := mutate(tx)
+	if err != nil {
 		return fmt.Errorf("%s: %w", label, err)
 	}
-	if strings.TrimSpace(runID) != "" {
+	if changed && strings.TrimSpace(runID) != "" {
 		if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyTimers); err != nil {
 			return err
 		}
@@ -382,6 +383,17 @@ func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label st
 		return fmt.Errorf("commit %s: %w", label, err)
 	}
 	return nil
+}
+
+func scheduleMutationChanged(result sql.Result, err error) (bool, error) {
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func extractPersistedScheduleTaskID(payload []byte) (string, []byte) {
