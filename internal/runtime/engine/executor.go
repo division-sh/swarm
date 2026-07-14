@@ -1014,7 +1014,11 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		acc.Received = map[string]bool{}
 	}
 	arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
-	if arrivalID != "" && !acc.Received[arrivalID] {
+	if arrivalID != "" && acc.Received[arrivalID] {
+		frame.result.Status = OutcomeDiscarded
+		return true, nil
+	}
+	if arrivalID != "" {
 		acc.Received[arrivalID] = true
 		item := cloneStringAnyMap(frame.payload)
 		if item == nil {

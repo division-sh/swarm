@@ -7,3 +7,7 @@ portfolio-collector:
       accumulate:
         into: operating_reports
         from: payload
+      data_accumulation:
+        writes:
+          - source_field: revenue
+            target_field: last_revenue

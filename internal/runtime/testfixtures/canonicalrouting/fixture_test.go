@@ -109,7 +109,6 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 					for _, required := range []string{
 						"swarm verify --contracts examples/routing/" + string(id),
 						"swarm serve --contracts examples/routing/" + string(id),
-						"swarm event publish",
 						"Expected:",
 					} {
 						if !strings.Contains(text, required) {
@@ -118,6 +117,14 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 					}
 					if !strings.Contains(text, "If ") && !strings.Contains(text, "On ") && !strings.Contains(text, "For ") {
 						t.Fatal("README must state recovery or fail-closed guidance")
+					}
+					validateCanonicalPublishCommands(t, text)
+					if id == FanInStream || id == FanInBarrier {
+						for _, required := range []string{"Proof boundary:", "#1835", "full producer-driven execution is not claimed here"} {
+							if !strings.Contains(text, required) {
+								t.Fatalf("fan-in README missing honest supported-path accounting %q", required)
+							}
+						}
 					}
 
 					err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -144,4 +151,39 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				})
 			}
 		})
+}
+
+func validateCanonicalPublishCommands(t *testing.T, readme string) {
+	t.Helper()
+	found := false
+	for _, line := range strings.Split(readme, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 3 || fields[0] != "swarm" || fields[1] != "event" || fields[2] != "publish" {
+			continue
+		}
+		found = true
+		payloadFlag := 0
+		for index, field := range fields[3:] {
+			switch {
+			case field == "--payload-json":
+				if index+4 >= len(fields) || strings.HasPrefix(fields[index+4], "--") {
+					t.Fatalf("canonical publish command has no --payload-json value: %s", line)
+				}
+				payloadFlag++
+			case strings.HasPrefix(field, "--payload-json="):
+				if strings.TrimPrefix(field, "--payload-json=") == "" {
+					t.Fatalf("canonical publish command has an empty --payload-json value: %s", line)
+				}
+				payloadFlag++
+			case field == "--payload" || strings.HasPrefix(field, "--payload="):
+				t.Fatalf("canonical publish command uses unsupported --payload flag: %s", line)
+			}
+		}
+		if payloadFlag != 1 {
+			t.Fatalf("canonical publish command must use exactly one --payload-json flag: %s", line)
+		}
+	}
+	if !found {
+		t.Fatal("README must contain a swarm event publish command")
+	}
 }

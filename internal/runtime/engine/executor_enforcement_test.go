@@ -336,10 +336,11 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	}
 }
 
-func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
+func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
 	repo := &persistentStateRepo{
 		found: true,
 		snapshot: StateSnapshot{
+			CurrentState: "active",
 			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
@@ -355,22 +356,53 @@ func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	req := ExecutionRequest{
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:    "items",
+			From:    "payload",
+			DedupBy: "payload.item_id",
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				SourceField: "marker",
+				TargetField: "marker",
+			}},
+		},
+		Emit: runtimecontracts.EmitSpec{Event: "task.recorded"},
+	}
+	first := ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
 		Event: eventtest.RootIngress("evt-1",
-			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-		},
+			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Handler: handler,
 	}
-	if _, err := exec.Execute(context.Background(), req); err != nil {
+	firstResult, err := exec.Execute(context.Background(), first)
+	if err != nil {
 		t.Fatalf("first Execute error: %v", err)
 	}
-	if _, err := exec.Execute(context.Background(), req); err != nil {
+	if len(firstResult.EmitIntents) != 1 {
+		t.Fatalf("first emit intents = %d, want 1", len(firstResult.EmitIntents))
+	}
+	duplicate := first
+	duplicate.Event = eventtest.RootIngress("evt-2",
+		"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"duplicate"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	duplicateResult, err := exec.Execute(context.Background(), duplicate)
+	if err != nil {
 		t.Fatalf("second Execute error: %v", err)
+	}
+	if duplicateResult.Status != OutcomeDiscarded {
+		t.Fatalf("duplicate status = %s, want discarded", duplicateResult.Status)
+	}
+	if len(duplicateResult.EmitIntents) != 0 {
+		t.Fatalf("duplicate emit intents = %#v, want none", duplicateResult.EmitIntents)
+	}
+	if got := duplicateResult.ExecutedSteps[len(duplicateResult.ExecutedSteps)-1]; got != StepAccumulate {
+		t.Fatalf("duplicate final executed step = %s, want %s", got, StepAccumulate)
+	}
+	if got := repo.snapshot.StateCarrier.Metadata["marker"]; got != "first" {
+		t.Fatalf("marker after duplicate = %#v, want first arrival value", got)
 	}
 	acc, ok := loadAccumulator(repo.snapshot, "node-1", events.EventType("task.completed"))
 	if !ok {

@@ -65,7 +65,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		applyClosedReplacement(t, receiverSchema, "mode: singleton\n", "mode: static\n")
 	case FanInMissingReceiverHandler:
 		applyClosedReplacement(t, receiverNodes, "  subscribes_to: [operating.reported]\n", "  subscribes_to: []\n")
-		applyClosedReplacement(t, receiverNodes, "  event_handlers:\n    operating.reported:\n      accumulate:\n        into: operating_reports\n        from: payload\n", "  event_handlers: {}\n")
+		applyClosedReplacement(t, receiverNodes, "  event_handlers:\n    operating.reported:\n      accumulate:\n        into: operating_reports\n        from: payload\n      data_accumulation:\n        writes:\n          - source_field: revenue\n            target_field: last_revenue\n", "  event_handlers: {}\n")
 	case FanInMissingRuntimeOwner:
 		applyClosedReplacement(t, receiverNodes, "      accumulate:\n        into: operating_reports\n        from: payload\n", "      advances_to: active\n")
 	case FanInAmbiguousReceiverInput:
