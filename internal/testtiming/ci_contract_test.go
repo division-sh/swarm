@@ -171,6 +171,34 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	_ = budgetFile.Close()
 
+	const runtimePackage = "github.com/division-sh/swarm/internal/runtime"
+	runtimeIsSpecial := false
+	for _, pkg := range policy.SpecialPackages {
+		if pkg == runtimePackage {
+			runtimeIsSpecial = true
+			break
+		}
+	}
+	if !runtimeIsSpecial {
+		t.Fatal("internal/runtime must remain isolated from broad package co-scheduling")
+	}
+	runtimeUnit, ok := policy.Units["runtime-full"]
+	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
+		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
+	}
+	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
+		found := false
+		for _, unit := range policy.Profiles[profileName].Units {
+			if unit == "runtime-full" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("profile %s does not include runtime-full", profileName)
+		}
+	}
+
 	for _, rel := range []string{".github/test-shards/go-test-shards.json", ".github/test-shards/full-conformance-packages.txt"} {
 		if _, err := os.Stat(filepath.Join(root, rel)); !os.IsNotExist(err) {
 			t.Fatalf("old authority survives at %s: %v", rel, err)
