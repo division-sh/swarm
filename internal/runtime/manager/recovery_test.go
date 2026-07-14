@@ -38,6 +38,37 @@ type directiveRecoveryTestBus struct {
 	order []string
 }
 
+type recoveryBudgetGuardStub struct {
+	err   error
+	calls int
+}
+
+func (s *recoveryBudgetGuardStub) ProjectRecoveryBudgetState(context.Context) error {
+	s.calls++
+	return s.err
+}
+func (*recoveryBudgetGuardStub) IsEntityEmergency(string) bool { return false }
+func (*recoveryBudgetGuardStub) IsEntityThrottle(string) bool  { return false }
+func (*recoveryBudgetGuardStub) IsEmergency(string) bool       { return false }
+func (*recoveryBudgetGuardStub) IsThrottle(string) bool        { return false }
+
+func TestRecoverReturnsBudgetRecoveryProjectionFailure(t *testing.T) {
+	projectionErr := errors.New("budget projection unavailable")
+	budget := &recoveryBudgetGuardStub{err: projectionErr}
+	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: budget}, &receiptReaderStub{})
+
+	err := am.Recover(context.Background())
+	if !errors.Is(err, projectionErr) {
+		t.Fatalf("Recover error = %v, want wrapped budget projection failure", err)
+	}
+	if !strings.Contains(err.Error(), "project recovered budget state") {
+		t.Fatalf("Recover error = %q, want explicit recovery projection context", err)
+	}
+	if budget.calls != 1 {
+		t.Fatalf("budget recovery projection calls = %d, want 1", budget.calls)
+	}
+}
+
 func (b *directiveRecoveryTestBus) Store() runtimebus.EventStore { return b }
 
 func (b *directiveRecoveryTestBus) ReconcileDirectiveOperations(ctx context.Context, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {

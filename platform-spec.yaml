@@ -4833,9 +4833,11 @@ engine:
       postgres_owner: internal/store.PostgresStore budget/spend methods over spend_ledger and entity_state
       scope: >
         SQLite supports explicit local-dev budget tracking construction, LLM spend recording, flow-instance resolution,
-        active entity enumeration, system/global/entity spend aggregation, threshold event evaluation, and emergency mailbox
-        side effects through the same BudgetTracker behavior owner. Postgres remains authoritative for production runtime
-        budget/spend semantics. SQLite must not substitute an in-memory spend ledger for persisted local runtime budget truth.
+        run-independent cross-run budget projection target enumeration, system/global/entity spend aggregation, threshold
+        event evaluation, and emergency mailbox side effects through the same BudgetTracker behavior owner. Startup recovery
+        projects process-wide scopes before enumerating active run-scoped entity targets and does not require or synthesize an
+        ambient run identity. Postgres remains authoritative for production runtime budget/spend semantics. SQLite must not
+        substitute an in-memory spend ledger for persisted local runtime budget truth.
       excludes:
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
@@ -28780,7 +28782,7 @@ llm_completion_execution_authority:
     heartbeat: Before launch and for the full lifetime of the HTTP request or provider process, the adapter renews the exact attempt lease through the selected-store authority. Renewal revalidates the authority, operation, attempt, execution owner, fence, and live attempt state; extends the lease monotonically without holding a transaction across provider work; and cancels the primitive plus forces outcome_uncertain settlement if renewal is lost. A completion controller without this capability fails before authorization.
     response_observed: Terminal provider bytes or a terminal process ResultMessage are durably marked response_observed before parsing or conversion.
     terminal: One selected-store transaction locks the attempt/fence, budget scopes, target, and optional Claude provider head; writes exactly one target usage fact and at most one spend row keyed by attempt_id; settles the effect; releases all reservations; and commits required transcript/audit mutation.
-    post_commit_budget_projection: After a transaction commits a spend row, the completion controller synchronously asks the runtime budget projector to re-read retained selected-store spend for the affected scopes. The projector updates warning/throttle/emergency suppression state and emits platform.budget_threshold_crossed without writing spend. Projection failure never reopens or redispatches the committed provider attempt. Startup recovery performs the same read-through projection after recovery settlement.
+    post_commit_budget_projection: After a transaction commits a spend row, the completion controller synchronously asks the runtime budget projector to re-read retained selected-store spend for the affected scopes. The projector updates warning/throttle/emergency suppression state and emits platform.budget_threshold_crossed without writing spend. Projection failure never reopens or redispatches the committed provider attempt. Startup recovery invokes the mandatory error-returning recovery projection owner from the process context without requiring or synthesizing a run ID. That owner evaluates system then global scope before using one backend-neutral selected-store query to enumerate active (run_id, entity_id) projection targets across every run, deduplicates shared entity identities, and evaluates entity scope. A projection read or event failure is returned to startup recovery and records explicit degraded recovery instead of silently continuing. Repeating recovery over unchanged retained spend is idempotent within the active runtime projection.
     recovery: Expired authorized attempts become terminal_failure without dispatch. Expired launched/response_observed attempts become outcome_uncertain, persist unavailable target evidence, create at most one pessimistic accounting row when positive reservations existed, release reservations, and never redispatch.
   usage:
     fields: [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, provider_reported_cost_usd, exactness, resolved_model]

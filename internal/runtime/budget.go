@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -121,37 +120,54 @@ func (t *BudgetTracker) IsThrottle(entityID string) bool {
 	return t.IsEntityThrottle(entityID)
 }
 
-// EvaluateAll periodically re-evaluates budget state to ensure month-boundary
-// "resume" transitions are emitted even when spend is paused (spec v2.0).
-func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
-	if t == nil || t.store == nil {
-		return
+// ProjectRecoveryBudgetState reconstructs runtime budget state from retained
+// selected-store spend without relying on one ambient run identity. Process
+// scopes are projected before the store enumerates active run-scoped entities.
+func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
+	if t == nil {
+		return nil
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		if t.logger != nil {
-			handleRuntimeLogPersistenceError("budget", "evaluate_run_context_missing", t.logger.Warn(ctx, "budget", "evaluate_run_context_missing", nil, err))
-		}
-		return
+	if t.store == nil {
+		return fmt.Errorf("budget recovery projection store is required")
 	}
-	// Evaluate system-wide budget.
-	if err := t.evaluateAndEmit(ctx, ""); err != nil {
-		if t.logger != nil {
-			handleRuntimeLogPersistenceError("budget", "evaluate_system_failed", t.logger.Warn(ctx, "budget", "evaluate_system_failed", nil, err))
-		}
+	if t.bus == nil || t.cfg == nil {
+		return fmt.Errorf("budget recovery projection runtime dependencies are required")
 	}
 
-	entityIDs, err := t.store.ListActiveEntityIDs(ctx, runID, t.TerminalInstanceStates())
-	if err != nil {
-		return
-	}
-	for _, id := range entityIDs {
-		if err := t.evaluateAndEmit(ctx, strings.TrimSpace(id)); err != nil {
-			if t.logger != nil {
-				handleRuntimeLogPersistenceError("budget", "evaluate_entity_failed", t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err))
-			}
+	budget := t.cfg.Budget()
+	if budget.SystemMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, string(budgetspend.ScopeSystem), "", budget.SystemMonthlyCap); err != nil {
+			return fmt.Errorf("project recovered system budget state: %w", err)
 		}
 	}
+	if budget.GlobalMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, string(budgetspend.ScopeGlobal), "", budget.GlobalMonthlyCap); err != nil {
+			return fmt.Errorf("project recovered global budget state: %w", err)
+		}
+	}
+	if budget.PerEntityMonthlyCap <= 0 {
+		return nil
+	}
+
+	targets, err := t.store.ListBudgetProjectionTargets(ctx, t.TerminalInstanceStates())
+	if err != nil {
+		return fmt.Errorf("list recovered budget projection targets: %w", err)
+	}
+	projected := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		entityID := strings.TrimSpace(target.EntityID)
+		if entityID == "" {
+			return fmt.Errorf("budget recovery projection target for run %q has no entity_id", strings.TrimSpace(target.RunID))
+		}
+		if _, ok := projected[entityID]; ok {
+			continue
+		}
+		projected[entityID] = struct{}{}
+		if err := t.evaluateScope(ctx, string(budgetspend.ScopeEntity), entityID, budget.PerEntityMonthlyCap); err != nil {
+			return fmt.Errorf("project recovered entity budget state for run %s entity %s: %w", strings.TrimSpace(target.RunID), entityID, err)
+		}
+	}
+	return nil
 }
 
 func (t *BudgetTracker) TerminalInstanceStates() []string {

@@ -57,26 +57,21 @@ func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, e
 	return strings.TrimSpace(flowInstance), nil
 }
 
-func (s *PostgresStore) ListActiveEntityIDs(ctx context.Context, runID string, terminalStates []string) ([]string, error) {
+func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
-	runID, err := validateBudgetRunID(runID)
-	if err != nil {
-		return nil, err
-	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT entity_id::text
+		SELECT run_id::text, entity_id::text
 		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND NOT (current_state = ANY($2::text[]))
-		ORDER BY created_at ASC
-	`, runID, pq.Array(normalizeBudgetTerminalStates(terminalStates)))
+		WHERE NOT (current_state = ANY($1::text[]))
+		ORDER BY run_id::text ASC, created_at ASC, entity_id::text ASC
+	`, pq.Array(normalizeBudgetTerminalStates(terminalStates)))
 	if err != nil {
-		return nil, fmt.Errorf("list postgres active budget entities: %w", err)
+		return nil, fmt.Errorf("list postgres budget projection targets: %w", err)
 	}
 	defer rows.Close()
-	return scanBudgetEntityIDs(rows)
+	return scanBudgetProjectionTargets(rows)
 }
 
 func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
@@ -161,19 +156,14 @@ func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID stri
 	return strings.TrimSpace(flowInstance), nil
 }
 
-func (s *SQLiteRuntimeStore) ListActiveEntityIDs(ctx context.Context, runID string, terminalStates []string) ([]string, error) {
+func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("sqlite budget spend store is required")
 	}
-	runID, err := validateBudgetRunID(runID)
-	if err != nil {
-		return nil, err
-	}
-	args := []any{runID}
+	args := make([]any, 0, len(terminalStates))
 	query := `
-		SELECT entity_id
+		SELECT run_id, entity_id
 		FROM entity_state
-		WHERE run_id = ?
 	`
 	states := normalizeBudgetTerminalStates(terminalStates)
 	if len(states) > 0 {
@@ -182,15 +172,15 @@ func (s *SQLiteRuntimeStore) ListActiveEntityIDs(ctx context.Context, runID stri
 			placeholders = append(placeholders, "?")
 			args = append(args, state)
 		}
-		query += " AND current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
+		query += " WHERE current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
 	}
-	query += " ORDER BY created_at ASC"
+	query += " ORDER BY run_id ASC, created_at ASC, entity_id ASC"
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list sqlite active budget entities: %w", err)
+		return nil, fmt.Errorf("list sqlite budget projection targets: %w", err)
 	}
 	defer rows.Close()
-	return scanBudgetEntityIDs(rows)
+	return scanBudgetProjectionTargets(rows)
 }
 
 func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
@@ -295,20 +285,21 @@ func normalizeBudgetTerminalStates(states []string) []string {
 	return out
 }
 
-func scanBudgetEntityIDs(rows *sql.Rows) ([]string, error) {
-	out := make([]string, 0)
+func scanBudgetProjectionTargets(rows *sql.Rows) ([]budgetspend.ProjectionTarget, error) {
+	out := make([]budgetspend.ProjectionTarget, 0)
 	for rows.Next() {
-		var entityID string
-		if err := rows.Scan(&entityID); err != nil {
-			return nil, fmt.Errorf("scan active budget entity: %w", err)
+		var target budgetspend.ProjectionTarget
+		if err := rows.Scan(&target.RunID, &target.EntityID); err != nil {
+			return nil, fmt.Errorf("scan budget projection target: %w", err)
 		}
-		entityID = strings.TrimSpace(entityID)
-		if entityID != "" {
-			out = append(out, entityID)
+		target.RunID = strings.TrimSpace(target.RunID)
+		target.EntityID = strings.TrimSpace(target.EntityID)
+		if target.RunID != "" && target.EntityID != "" {
+			out = append(out, target)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read active budget entities: %w", err)
+		return nil, fmt.Errorf("read budget projection targets: %w", err)
 	}
 	return out, nil
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -70,12 +71,13 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	if flow != "flow/active" {
 		t.Fatalf("flow instance = %q, want flow/active", flow)
 	}
-	active, err := store.ListActiveEntityIDs(ctx, runID, []string{"done"})
+	targets, err := store.ListBudgetProjectionTargets(ctx, []string{"done"})
 	if err != nil {
-		t.Fatalf("ListActiveEntityIDs: %v", err)
+		t.Fatalf("ListBudgetProjectionTargets: %v", err)
 	}
-	if len(active) != 1 || active[0] != activeEntity {
-		t.Fatalf("active entities = %#v, want only %s", active, activeEntity)
+	wantTargets := []budgetspend.ProjectionTarget{{RunID: runID, EntityID: activeEntity}}
+	if !reflect.DeepEqual(targets, wantTargets) {
+		t.Fatalf("budget projection targets = %#v, want %#v", targets, wantTargets)
 	}
 
 	since := now.Add(-time.Hour)
@@ -153,15 +155,16 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("flow = %q, want flow/1", flow)
 	}
 
-	mock.ExpectQuery("SELECT entity_id::text").
-		WithArgs(runID, sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"entity_id"}).AddRow(entityID))
-	active, err := pg.ListActiveEntityIDs(ctx, runID, []string{"done"})
+	mock.ExpectQuery("SELECT run_id::text, entity_id::text").
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"run_id", "entity_id"}).AddRow(runID, entityID))
+	targets, err := pg.ListBudgetProjectionTargets(ctx, []string{"done"})
 	if err != nil {
-		t.Fatalf("ListActiveEntityIDs: %v", err)
+		t.Fatalf("ListBudgetProjectionTargets: %v", err)
 	}
-	if len(active) != 1 || active[0] != entityID {
-		t.Fatalf("active entities = %#v, want %s", active, entityID)
+	wantTargets := []budgetspend.ProjectionTarget{{RunID: runID, EntityID: entityID}}
+	if !reflect.DeepEqual(targets, wantTargets) {
+		t.Fatalf("budget projection targets = %#v, want %#v", targets, wantTargets)
 	}
 
 	since := recordedAt.Add(-time.Hour)
