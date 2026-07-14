@@ -1,9 +1,7 @@
 package apiv1
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -49,9 +47,8 @@ type AgentConversationReadStore interface {
 	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
-	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
-	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
-	LoadCurrentOperatorConversationForAgent(context.Context, string) (*store.OperatorConversationDetail, error)
+	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
 }
 
 type AgentDeliveryLifecycleReadStore interface {
@@ -671,7 +668,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				}
 				return result, nil
 			},
-			"conversation.get": func(ctx context.Context, req Request) (any, error) {
+			"conversation.list_turns": func(ctx context.Context, req Request) (any, error) {
 				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
 				if err != nil {
 					return nil, err
@@ -680,9 +677,23 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorConversation(ctx, sessionID)
+				limit, err := boundedIntegerParam(req.Params, "limit", 1, 500)
+				if err != nil {
+					return nil, err
+				}
+				cursor, _, err := optionalStringParam(req.Params, "cursor")
+				if err != nil {
+					return nil, err
+				}
+				result, err := reads.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: limit, Cursor: cursor})
 				if errors.Is(err, store.ErrSessionNotFound) {
 					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
+				}
+				if errors.Is(err, store.ErrInvalidConversationCursor) {
+					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation turn cursor"})
+				}
+				if paramErr := entityReadParamError(err); paramErr != nil {
+					return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
 				}
 				if err != nil {
 					return nil, err
@@ -698,62 +709,16 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				turnIndex, err := requiredBoundedIntegerParam(req.Params, "turn_index", 1, 1000000)
+				turnID, err := requiredStringParam(req.Params, "turn_id")
 				if err != nil {
 					return nil, err
 				}
-				includeLogs, err := optionalBoolParam(req.Params, "include_logs", true)
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorConversationTurn(ctx, sessionID, turnIndex)
+				result, err := reads.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 				if errors.Is(err, store.ErrSessionNotFound) {
 					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
 				}
 				if errors.Is(err, store.ErrTurnNotFound) {
-					return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_index": turnIndex})
-				}
-				if err != nil {
-					return nil, err
-				}
-				if includeLogs {
-					observability, err := requireObservabilityReadStore(opts.Observability)
-					if err != nil {
-						return nil, err
-					}
-					logOpts := store.OperatorRuntimeLogListOptions{
-						SessionID: result.Session.SessionID,
-						Since:     &result.RuntimeLogWindowStart,
-						Until:     result.RuntimeLogWindowEnd,
-						Limit:     1000,
-						Order:     "asc",
-					}
-					logs, err := observability.ListOperatorRuntimeLogs(ctx, logOpts)
-					if errors.Is(err, store.ErrInvalidObservabilityCursor) {
-						return nil, NewInvalidParamsError(map[string]any{"field": "runtime_log_entries", "reason": "invalid runtime log cursor"})
-					}
-					if err != nil {
-						return nil, err
-					}
-					if logs.Logs == nil {
-						logs.Logs = []store.OperatorRuntimeLogEntry{}
-					}
-					result.Turn.RuntimeLogEntries = logs.Logs
-				}
-				return result, nil
-			},
-			"conversation.current_for_agent": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
-				if err != nil {
-					return nil, err
-				}
-				agentID, err := requiredStringParam(req.Params, "agent_id")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadCurrentOperatorConversationForAgent(ctx, agentID)
-				if errors.Is(err, store.ErrAgentNotFound) {
-					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+					return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_id": turnID})
 				}
 				if err != nil {
 					return nil, err
@@ -1074,19 +1039,6 @@ func validateAgentDiagnosisLastToolOutcomeResult(item *store.OperatorAgentLastTo
 	}
 	if strings.TrimSpace(item.ToolName) == "" {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.tool_name is required")
-	}
-	if item.Result != nil {
-		trimmed := bytes.TrimSpace(item.Result)
-		if len(trimmed) == 0 {
-			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result is empty")
-		}
-		var obj map[string]any
-		if err := json.Unmarshal(trimmed, &obj); err != nil {
-			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result must be a JSON object: %w", err)
-		}
-		if obj == nil {
-			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result must be a JSON object")
-		}
 	}
 	return nil
 }

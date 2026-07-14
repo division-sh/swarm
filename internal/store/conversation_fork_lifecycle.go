@@ -16,10 +16,10 @@ import (
 const ConversationForkLifecycleTTL = 24 * time.Hour
 
 type ConversationForkPointSelector struct {
-	Kind      string
-	TurnIndex int
-	EventID   string
-	At        *time.Time
+	Kind    string
+	TurnID  string
+	EventID string
+	At      *time.Time
 }
 
 type ConversationForkPointDescriptor struct {
@@ -450,153 +450,28 @@ func (s conversationForkStore) resolveConversationForkPoint(ctx context.Context,
 	kind := strings.ToLower(strings.TrimSpace(selector.Kind))
 	switch kind {
 	case "turn":
-		if selector.TurnIndex <= 0 || strings.TrimSpace(selector.EventID) != "" || selector.At != nil {
-			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "turn selector requires only turn_index"}
+		turnID := strings.TrimSpace(selector.TurnID)
+		if turnID == "" || strings.TrimSpace(selector.EventID) != "" || selector.At != nil {
+			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "turn selector requires only turn_id"}
 		}
-		return s.resolveConversationForkTurnPoint(ctx, sessionID, selector.TurnIndex, kind, "", nil)
+		return s.resolveConversationTurnCoordinateByID(ctx, sessionID, turnID)
 	case "event":
 		eventID, err := normalizeUUIDParam(selector.EventID, "fork_point.event_id")
 		if err != nil {
 			return ConversationForkPointDescriptor{}, err
 		}
-		if selector.TurnIndex != 0 || selector.At != nil {
+		if strings.TrimSpace(selector.TurnID) != "" || selector.At != nil {
 			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "event selector requires only event_id"}
 		}
-		return s.resolveConversationForkEventPoint(ctx, sessionID, eventID)
+		return s.resolveConversationTurnCoordinateByEvent(ctx, sessionID, eventID)
 	case "time":
-		if selector.At == nil || selector.TurnIndex != 0 || strings.TrimSpace(selector.EventID) != "" {
+		if selector.At == nil || strings.TrimSpace(selector.TurnID) != "" || strings.TrimSpace(selector.EventID) != "" {
 			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "time selector requires only at"}
 		}
-		return s.resolveConversationForkTimePoint(ctx, sessionID, selector.At.UTC())
+		return s.resolveConversationTurnCoordinateAt(ctx, sessionID, selector.At.UTC())
 	default:
 		return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.kind", Reason: "must be one of turn, event, time"}
 	}
-}
-
-func (s conversationForkStore) resolveConversationForkTurnPoint(ctx context.Context, sessionID string, turnIndex int, kind string, eventID string, at *time.Time) (ConversationForkPointDescriptor, error) {
-	row := s.queryRow(ctx, s.db, `
-		WITH ordered AS (
-			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
-				turn_id AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
-				created_at
-			FROM agent_turns
-			WHERE session_id = ?
-		)
-		SELECT CAST(turn_id AS TEXT), CAST(event_id AS TEXT), created_at
-		FROM ordered
-		WHERE turn_index = ?
-	`, sessionID, turnIndex)
-	var turnID string
-	var triggerEventID string
-	var selectedAt conversationForkTimeValue
-	if err := row.Scan(&turnID, &triggerEventID, &selectedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ConversationForkPointDescriptor{}, ErrTurnNotFound
-		}
-		return ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation fork turn point: %w", err)
-	}
-	if eventID == "" && kind != "turn" {
-		eventID = triggerEventID
-	}
-	return ConversationForkPointDescriptor{
-		Kind:       kind,
-		TurnIndex:  turnIndex,
-		TurnID:     turnID,
-		EventID:    eventID,
-		At:         at,
-		SelectedAt: selectedAt.Time,
-	}, nil
-}
-
-func (s conversationForkStore) resolveConversationForkEventPoint(ctx context.Context, sessionID string, eventID string) (ConversationForkPointDescriptor, error) {
-	rows, err := s.query(ctx, s.db, `
-		WITH ordered AS (
-			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
-				turn_id AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
-				created_at
-			FROM agent_turns
-			WHERE session_id = ?
-		)
-		SELECT turn_index, turn_id, created_at
-		FROM ordered
-		WHERE event_id = ?
-		LIMIT 2
-	`, sessionID, eventID)
-	if err != nil {
-		return ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation fork event point: %w", err)
-	}
-	defer rows.Close()
-	type match struct {
-		turnIndex int
-		turnID    string
-		createdAt conversationForkTimeValue
-	}
-	matches := []match{}
-	for rows.Next() {
-		var item match
-		if err := rows.Scan(&item.turnIndex, &item.turnID, &item.createdAt); err != nil {
-			return ConversationForkPointDescriptor{}, err
-		}
-		matches = append(matches, item)
-	}
-	if err := rows.Err(); err != nil {
-		return ConversationForkPointDescriptor{}, err
-	}
-	if len(matches) == 0 {
-		return ConversationForkPointDescriptor{}, ErrEventNotFound
-	}
-	if len(matches) > 1 {
-		return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.event_id", Reason: "event matches multiple source turns"}
-	}
-	return ConversationForkPointDescriptor{
-		Kind:       "event",
-		TurnIndex:  matches[0].turnIndex,
-		TurnID:     matches[0].turnID,
-		EventID:    eventID,
-		SelectedAt: matches[0].createdAt.Time,
-	}, nil
-}
-
-func (s conversationForkStore) resolveConversationForkTimePoint(ctx context.Context, sessionID string, at time.Time) (ConversationForkPointDescriptor, error) {
-	row := s.queryRow(ctx, s.db, `
-		WITH ordered AS (
-			SELECT
-				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS turn_index,
-				turn_id AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
-				created_at
-			FROM agent_turns
-			WHERE session_id = ?
-		)
-		SELECT turn_index, turn_id, event_id, created_at
-		FROM ordered
-		WHERE created_at <= ?
-		ORDER BY created_at DESC, turn_id DESC
-		LIMIT 1
-	`, sessionID, at.UTC())
-	var turnIndex int
-	var turnID string
-	var eventID string
-	var selectedAt conversationForkTimeValue
-	if err := row.Scan(&turnIndex, &turnID, &eventID, &selectedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
-		}
-		return ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation fork time point: %w", err)
-	}
-	atCopy := at.UTC()
-	return ConversationForkPointDescriptor{
-		Kind:       "time",
-		TurnIndex:  turnIndex,
-		TurnID:     turnID,
-		EventID:    eventID,
-		At:         &atCopy,
-		SelectedAt: selectedAt.Time,
-	}, nil
 }
 
 func scanConversationForkSession(scanner interface {

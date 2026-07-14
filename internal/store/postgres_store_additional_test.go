@@ -50,7 +50,7 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
 		},
 		"agent_turns": {
-			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID,\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    usage_exactness TEXT CHECK (usage_exactness IS NULL OR usage_exactness IN ('exact', 'estimated', 'unavailable')),\n    input_tokens BIGINT,\n    output_tokens BIGINT,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -5280,9 +5280,9 @@ func TestManagerStore_AppendAgentTurn_TaskEntityScopeSurvivesConversationUpsert(
 		t.Fatalf("linked task turn count = %d, want 1", turns)
 	}
 
-	detail, err := pg.LoadOperatorConversation(ctx, sessionID)
+	detail, err := pg.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
-		t.Fatalf("LoadOperatorConversation: %v", err)
+		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
 	if detail.Conversation.Scope != "entity" || detail.Conversation.ScopeKey != entityID || detail.Conversation.RuntimeMode != "task" || detail.Conversation.TurnCount != 1 {
 		t.Fatalf("operator conversation summary = %+v, want entity-scoped task audit with one turn", detail.Conversation)
@@ -5365,9 +5365,9 @@ func TestManagerStore_AppendAgentTurn_TaskFlowScopeSurvivesConversationUpsert(t 
 		t.Fatalf("linked task turn count = %d, want 1", turns)
 	}
 
-	detail, err := pg.LoadOperatorConversation(ctx, sessionID)
+	detail, err := pg.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
-		t.Fatalf("LoadOperatorConversation: %v", err)
+		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
 	if detail.Conversation.Scope != "flow" || detail.Conversation.ScopeKey != flowInstance || detail.Conversation.RuntimeMode != "task" || detail.Conversation.TurnCount != 1 {
 		t.Fatalf("operator conversation summary = %+v, want flow-scoped task audit with one turn", detail.Conversation)

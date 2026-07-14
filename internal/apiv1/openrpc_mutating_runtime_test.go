@@ -267,6 +267,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 	runID := "00000000-0000-0000-0000-000000000101"
 	otherRunID := "00000000-0000-0000-0000-000000000102"
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
+	sourceTurnID := "00000000-0000-0000-0000-000000000401"
+	conflictTurnID := "00000000-0000-0000-0000-000000000402"
 	forkID := "00000000-0000-0000-0000-000000000301"
 	setupRunID := "00000000-0000-0000-0000-000000000601"
 	setupEntityID := "00000000-0000-0000-0000-000000000602"
@@ -304,8 +306,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 1,
 		},
 		"conversation.fork": {
-			Params:         map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}},
-			ConflictParams: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(2)}},
+			Params:         map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}},
+			ConflictParams: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": conflictTurnID}},
 			ResultKeys:     []string{"fork", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
@@ -485,6 +487,7 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 	}
 	invalidBundleHashSetup := mergeProbeParams(validSetup, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
+	sourceTurnID := "00000000-0000-0000-0000-000000000401"
 	forkID := "00000000-0000-0000-0000-000000000301"
 	return []mutatingHTTPRuntimeErrorProbe{
 		{Method: "event.publish", Params: legacyOnlyEvent, Code: BundleScopeRequiredCode},
@@ -527,10 +530,10 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
-		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.createErr = store.ErrSessionNotFound
 		}}},
-		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}, "idempotency_key": "idem-error"}, Code: TurnNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: TurnNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.createErr = store.ErrTurnNotFound
 		}}},
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "event", "event_id": "00000000-0000-0000-0000-000000000901"}, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {

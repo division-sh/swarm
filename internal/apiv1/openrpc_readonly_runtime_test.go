@@ -247,12 +247,11 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"bundle.agents",
 		"bundle.get",
 		"bundle.list",
-		"conversation.current_for_agent",
 		"conversation.fork_list",
 		"conversation.fork_view",
-		"conversation.get",
 		"conversation.get_turn",
 		"conversation.list",
+		"conversation.list_turns",
 		"entity.aggregate",
 		"entity.get",
 		"entity.list",
@@ -274,37 +273,36 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
-		"agent.delivery_diagnostics":     {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
-		"agent.delivery_lifecycle":       {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
-		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
-		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
-		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
-		"agent.usage":                    {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
-		"bundle.agents":                  {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
-		"bundle.get":                     {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
-		"bundle.list":                    {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
-		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
-		"conversation.fork_list":         {Params: map[string]any{}, ResultKeys: []string{"forks"}},
-		"conversation.fork_view":         {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
-		"conversation.get":               {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
-		"conversation.get_turn":          {Params: map[string]any{"session_id": "sess-1", "turn_index": 1}, ResultKeys: []string{"session", "turn"}},
-		"conversation.list":              {Params: map[string]any{}, ResultKeys: []string{"conversations"}},
-		"entity.aggregate":               {Params: map[string]any{}, ResultKeys: []string{"counts"}},
-		"entity.get":                     {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "gates", "accumulated"}},
-		"entity.list":                    {Params: map[string]any{}, ResultKeys: []string{"entities"}},
-		"event.get":                      {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
-		"event.list":                     {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
-		"health.check":                   {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
-		"health.ping":                    {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
-		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "card-1"}, ResultKeys: []string{"kind", "decision_card"}},
-		"mailbox.list":                   {Params: map[string]any{}, ResultKeys: []string{"items"}},
-		"run.diagnose":                   {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics", "test_quiescence"}},
-		"run.get":                        {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
-		"run.list":                       {Params: map[string]any{}, ResultKeys: []string{"runs"}},
-		"run.trace":                      {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
-		"runtime.identity":               {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports"}},
-		"runtime.incidents":              {Params: map[string]any{}, ResultKeys: []string{"incidents"}},
-		"runtime.logs":                   {Params: map[string]any{}, ResultKeys: []string{"logs"}},
+		"agent.delivery_diagnostics": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
+		"agent.delivery_lifecycle":   {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
+		"agent.diagnose":             {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
+		"agent.get":                  {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
+		"agent.list":                 {Params: map[string]any{}, ResultKeys: []string{"agents"}},
+		"agent.usage":                {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
+		"bundle.agents":              {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
+		"bundle.get":                 {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
+		"bundle.list":                {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
+		"conversation.fork_list":     {Params: map[string]any{}, ResultKeys: []string{"forks"}},
+		"conversation.fork_view":     {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
+		"conversation.get_turn":      {Params: map[string]any{"session_id": "sess-1", "turn_id": "turn-1"}, ResultKeys: []string{"session", "turn"}},
+		"conversation.list":          {Params: map[string]any{}, ResultKeys: []string{"conversations"}},
+		"conversation.list_turns":    {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
+		"entity.aggregate":           {Params: map[string]any{}, ResultKeys: []string{"counts"}},
+		"entity.get":                 {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "gates", "accumulated"}},
+		"entity.list":                {Params: map[string]any{}, ResultKeys: []string{"entities"}},
+		"event.get":                  {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
+		"event.list":                 {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
+		"health.check":               {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
+		"health.ping":                {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
+		"mailbox.get":                {Params: map[string]any{"mailbox_id": "card-1"}, ResultKeys: []string{"kind", "decision_card"}},
+		"mailbox.list":               {Params: map[string]any{}, ResultKeys: []string{"items"}},
+		"run.diagnose":               {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics", "test_quiescence"}},
+		"run.get":                    {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
+		"run.list":                   {Params: map[string]any{}, ResultKeys: []string{"runs"}},
+		"run.trace":                  {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
+		"runtime.identity":           {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports"}},
+		"runtime.incidents":          {Params: map[string]any{}, ResultKeys: []string{"incidents"}},
+		"runtime.logs":               {Params: map[string]any{}, ResultKeys: []string{"logs"}},
 	}
 }
 
@@ -381,28 +379,18 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			},
 		},
 		{
-			Method: "conversation.current_for_agent",
-			Params: map[string]any{"agent_id": "missing"},
-			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
-				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{currentConversationErr: store.ErrAgentNotFound}
-				return opts
-			},
-		},
-		{
-			Method: "conversation.get",
+			Method: "conversation.list_turns",
 			Params: map[string]any{"session_id": "missing"},
 			Code:   SessionNotFoundCode,
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{conversationErr: store.ErrSessionNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnsErr: store.ErrSessionNotFound}
 				return opts
 			},
 		},
 		{
 			Method: "conversation.get_turn",
-			Params: map[string]any{"session_id": "missing", "turn_index": 1},
+			Params: map[string]any{"session_id": "missing", "turn_id": "turn-1"},
 			Code:   SessionNotFoundCode,
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -412,7 +400,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "conversation.get_turn",
-			Params: map[string]any{"session_id": "sess-1", "turn_index": 99},
+			Params: map[string]any{"session_id": "sess-1", "turn_id": "missing-turn"},
 			Code:   TurnNotFoundCode,
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -694,7 +682,6 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					ToolName:  "selected_tool",
 					ToolUseID: "toolu-selected",
 					OK:        true,
-					Result:    []byte(`{"status":"selected"}`),
 				},
 				RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 					Watchdog: &store.OperatorAgentDiagnosisWatchdog{
@@ -821,29 +808,15 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				MessageCount: 2,
 				Status:       "active",
 			}}},
-			conversationResult: store.OperatorConversationDetail{
+			conversationTurnsResult: store.OperatorConversationTurnListResult{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
+				Turns: []store.OperatorPublicConversationTurn{{TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
+					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []store.OperatorConversationActivity{}}},
 			},
-			conversationTurnResult: store.OperatorConversationTurnDetail{
+			conversationTurnResult: store.OperatorPublicConversationTurnDetail{
 				Session: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turn: store.OperatorConversationDeepTurn{
-					TurnIndex:                   1,
-					TurnID:                      "turn-1",
-					StartedAt:                   now,
-					CompletedAt:                 now.Add(time.Second),
-					ParseOK:                     true,
-					AdvertisedTools:             []string{},
-					RuntimeLogEntries:           []store.OperatorRuntimeLogEntry{},
-					FullPromptContextV2Reserved: true,
-					RawLLMResponseV2Reserved:    true,
-				},
-				TurnBlocksRaw:         []store.OperatorConversationTurnBlock{},
-				RuntimeLogWindowStart: now.Add(-time.Second),
-			},
-			currentConversationResult: &store.OperatorConversationDetail{
-				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
+				Turn: store.OperatorPublicConversationTurn{TurnID: "turn-1", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
+					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []store.OperatorConversationActivity{}},
 			},
 		},
 		AgentDeliveryLifecycle: &fakeAgentConversationReadStore{
@@ -1009,13 +982,13 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 			t.Fatalf("run.diagnose test_quiescence = %#v, want ready", quiescence)
 		}
 	}
-	if methodName == "conversation.get" || methodName == "conversation.current_for_agent" {
+	if methodName == "conversation.list_turns" {
 		turns, ok := result["turns"].([]any)
 		if !ok || len(turns) == 0 {
 			t.Fatalf("%s turns = %#v, want non-empty array", methodName, result["turns"])
 		}
-		if got := asMap(t, turns[0])["turn_index"]; got != float64(1) {
-			t.Fatalf("%s first turn_index = %#v, want 1", methodName, got)
+		if got := asMap(t, turns[0])["ordinal"]; got != float64(1) {
+			t.Fatalf("%s first ordinal = %#v, want 1", methodName, got)
 		}
 	}
 	if methodName == "agent.delivery_lifecycle" {
@@ -1087,9 +1060,8 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		if lastTool["turn_id"] != "22222222-2222-2222-2222-222222222222" || lastTool["tool_name"] != "selected_tool" || lastTool["tool_use_id"] != "toolu-selected" || lastTool["ok"] != true {
 			t.Fatalf("agent.diagnose last_tool_outcome = %#v", lastTool)
 		}
-		lastToolResult := asMap(t, lastTool["result"])
-		if lastToolResult["status"] != "selected" {
-			t.Fatalf("agent.diagnose last_tool_outcome.result = %#v", lastToolResult)
+		if _, ok := lastTool["result"]; ok {
+			t.Fatalf("agent.diagnose last_tool_outcome exposed raw result = %#v", lastTool)
 		}
 		for _, splitField := range []string{"bundle_version", "watchdog", "token_usage", "failures_recent", "dead_letters_recent"} {
 			if _, ok := result[splitField]; ok {

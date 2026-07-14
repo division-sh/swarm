@@ -39,10 +39,13 @@ func requireConversationSurfaceCapabilities(caps store.StoreSchemaCapabilities) 
 }
 
 func requireConversationTurnCapabilities(caps store.StoreSchemaCapabilities) error {
-	if caps.Conversations.Turns == store.SchemaFlavorCanonical {
-		return nil
+	if caps.Conversations.Turns != store.SchemaFlavorCanonical {
+		return unsupportedDashboardSchemaCapability("agent_turns", caps.Conversations.Turns)
 	}
-	return unsupportedDashboardSchemaCapability("agent_turns", caps.Conversations.Turns)
+	if !caps.Conversations.TurnBlocks {
+		return fmt.Errorf("dashboard: agent_turns.turn_blocks schema is unavailable at the explicit capability boundary")
+	}
+	return nil
 }
 
 func requireAgentOperatorProjectionCapabilities(caps store.StoreSchemaCapabilities) error {

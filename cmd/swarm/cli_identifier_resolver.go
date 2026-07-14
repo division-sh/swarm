@@ -125,12 +125,18 @@ func validateBundleIdentifierInput(value string) error {
 
 func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy cliIdentifierFamilyPolicy, scope map[string]string) ([]cliIdentifierCandidate, error) {
 	runID := ""
+	sessionID := ""
 	switch policy.ScopeMode {
 	case cliIdentifierScopeGlobalBounded, cliIdentifierScopeBoundedCatalog:
 	case cliIdentifierScopeFullRunRequired:
 		runID = strings.TrimSpace(scope["run_id"])
 		if runID == "" {
 			return nil, &cliAPIValidationError{message: "ERROR: entity prefixes require a full run ID.\n  Pass --run-id <full-run-id>, or use the full entity ID."}
+		}
+	case cliIdentifierScopeFullSessionRequired:
+		sessionID = strings.TrimSpace(scope["session_id"])
+		if sessionID == "" {
+			return nil, &cliAPIValidationError{message: "ERROR: turn prefixes require a full session ID.\n  Pass the full session ID, or use the full turn ID."}
 		}
 	default:
 		return nil, fmt.Errorf("identifier family %q scope %q is not resolver-backed", policy.Family, policy.ScopeMode)
@@ -154,9 +160,28 @@ func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy c
 		return listAllBundleIdentifierCandidates(ctx, client)
 	case cliIdentifierSourceEntityList:
 		return listAllEntityIdentifierCandidates(ctx, client, runID)
+	case cliIdentifierSourceTurnList:
+		return listAllTurnIdentifierCandidates(ctx, client, sessionID)
 	default:
 		return nil, fmt.Errorf("identifier family %q candidate source %q is not resolver-backed", policy.Family, policy.CandidateSource)
 	}
+}
+
+func listAllTurnIdentifierCandidates(ctx context.Context, client *cliAPIClient, sessionID string) ([]cliIdentifierCandidate, error) {
+	return listAllCLIIdentifierCandidatePages(map[string]any{"session_id": sessionID, "limit": 500}, func(params map[string]any) ([]cliIdentifierCandidate, string, error) {
+		var result conversationTurnPage
+		if err := client.call(ctx, conversationListTurnsMethod, params, &result); err != nil {
+			return nil, "", err
+		}
+		if err := validateConversationTurnPageResult("conversation.list_turns result", result); err != nil {
+			return nil, "", err
+		}
+		candidates := make([]cliIdentifierCandidate, 0, len(result.Turns))
+		for _, turn := range result.Turns {
+			candidates = append(candidates, cliIdentifierCandidate{ID: turn.TurnID, Status: turn.Outcome, CreatedAt: turn.CompletedAt})
+		}
+		return candidates, result.NextCursor, nil
+	}, "conversation.list_turns")
 }
 
 func listAllBundleIdentifierCandidates(ctx context.Context, client *cliAPIClient) ([]cliIdentifierCandidate, error) {
@@ -298,6 +323,8 @@ func cliIdentifierFamilyLabel(family cliIdentifierFamily) string {
 		return "bundle hash"
 	case cliIdentifierFamilyEntity:
 		return "entity ID"
+	case cliIdentifierFamilyTurn:
+		return "turn ID"
 	default:
 		return string(family) + " ID"
 	}
@@ -311,6 +338,8 @@ func cliIdentifierDiscoveryCommand(family cliIdentifierFamily) string {
 		return "`swarm bundle list`"
 	case cliIdentifierFamilyEntity:
 		return "`swarm entity list --run-id <full-run-id>`"
+	case cliIdentifierFamilyTurn:
+		return "`swarm conversation view <full-session-id>`"
 	default:
 		return "the corresponding list command"
 	}

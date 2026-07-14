@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -45,18 +43,6 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Co
 
 func (s *SQLiteRuntimeStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
 	return newSQLiteOperatorAgentConversationReadSurface(s, 0).ListOperatorConversations(ctx, opts)
-}
-
-func (s *SQLiteRuntimeStore) LoadOperatorConversation(ctx context.Context, sessionID string) (OperatorConversationDetail, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorConversation(ctx, sessionID)
-}
-
-func (s *SQLiteRuntimeStore) LoadOperatorConversationTurn(ctx context.Context, sessionID string, turnIndex int) (OperatorConversationTurnDetail, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorConversationTurn(ctx, sessionID, turnIndex)
-}
-
-func (s *SQLiteRuntimeStore) LoadCurrentOperatorConversationForAgent(ctx context.Context, agentID string) (*OperatorConversationDetail, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadCurrentOperatorConversationForAgent(ctx, agentID)
 }
 
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
@@ -255,10 +241,6 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 		where = append(where, `(conversations.updated_at < ? OR (conversations.updated_at = ? AND conversations.session_id > ?))`)
 		args = append(args, updatedAt.UTC(), updatedAt.UTC(), cursor.SessionID)
 	}
-	turnBlocksExpr := "'[]'"
-	if caps.Conversations.TurnBlocks {
-		turnBlocksExpr = "COALESCE(latest_turn.turn_blocks, '[]')"
-	}
 	args = append(args, opts.Limit+1)
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
@@ -273,28 +255,16 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 			COALESCE(conversations.turn_count, 0),
 			COALESCE(conversations.message_count, 0),
 			COALESCE(conversations.runtime_state, '{}'),
-			COALESCE(latest_turn.turn_id, ''),
-			COALESCE(latest_turn.task_id, ''),
-			COALESCE(latest_turn.parse_ok, 0),
-			%s AS turn_blocks,
 			conversations.started_at,
 			conversations.ended_at,
 			conversations.updated_at
 		FROM (
 			%s
 		) conversations
-		LEFT JOIN agent_turns latest_turn ON latest_turn.turn_id = (
-			SELECT turn_id
-			FROM agent_turns t
-			WHERE t.agent_id = conversations.agent_id
-			  AND t.session_id = conversations.session_id
-			ORDER BY t.created_at DESC, t.turn_id DESC
-			LIMIT 1
-		)
 		WHERE %s
 		ORDER BY conversations.updated_at DESC, conversations.session_id ASC
 		LIMIT ?
-	`, turnBlocksExpr, strings.Join(sources, "\nUNION ALL\n"), strings.Join(where, " AND ")), args...)
+	`, strings.Join(sources, "\nUNION ALL\n"), strings.Join(where, " AND ")), args...)
 	if err != nil {
 		return OperatorConversationListResult{}, operatorConversationReadQueryError("list sqlite operator conversations", err)
 	}
@@ -306,6 +276,11 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 		if err != nil {
 			return OperatorConversationListResult{}, err
 		}
+		turn, err := loadOperatorLatestConversationTurn(ctx, r.store, item.SessionID)
+		if err != nil {
+			return OperatorConversationListResult{}, err
+		}
+		item.Metadata.LiveTurn = operatorLiveTurnFromPublic(turn)
 		conversations = append(conversations, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -327,140 +302,6 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 	return OperatorConversationListResult{Conversations: conversations, NextCursor: nextCursor}, nil
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorConversation(ctx context.Context, sessionID string) (OperatorConversationDetail, error) {
-	if err := r.requireConversationCapabilities(ctx); err != nil {
-		return OperatorConversationDetail{}, err
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return OperatorConversationDetail{}, ErrSessionNotFound
-	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationDetail{}, err
-	}
-	sources := sqliteOperatorConversationQuerySources(caps)
-	if len(sources) == 0 {
-		return OperatorConversationDetail{}, ErrSessionNotFound
-	}
-	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT
-			session_id,
-			agent_id,
-			run_id,
-			kind,
-			COALESCE(scope_key, ''),
-			COALESCE(scope, ''),
-			COALESCE(runtime_mode, ''),
-			COALESCE(status, ''),
-			COALESCE(turn_count, 0),
-			COALESCE(message_count, 0),
-			COALESCE(runtime_state, '{}'),
-			COALESCE(conversation, '[]'),
-			started_at,
-			ended_at,
-			updated_at
-		FROM (
-			%s
-		) conversations
-		WHERE session_id = ?
-		LIMIT 1
-	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
-	item, err := scanSQLiteOperatorConversationDetail(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OperatorConversationDetail{}, ErrSessionNotFound
-	}
-	if err != nil {
-		return OperatorConversationDetail{}, operatorConversationReadQueryError("load sqlite operator conversation", err)
-	}
-	item.Turns, err = r.loadConversationTurns(ctx, item.Conversation.AgentID, item.Conversation.SessionID)
-	if err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("load sqlite operator conversation turns: %w", err)
-	}
-	if item.Turns == nil {
-		item.Turns = []OperatorConversationTurn{}
-	}
-	return item, nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorConversationTurn(ctx context.Context, sessionID string, turnIndex int) (OperatorConversationTurnDetail, error) {
-	if turnIndex < 1 {
-		return OperatorConversationTurnDetail{}, ErrTurnNotFound
-	}
-	detail, err := r.LoadOperatorConversation(ctx, sessionID)
-	if err != nil {
-		return OperatorConversationTurnDetail{}, err
-	}
-	if turnIndex > len(detail.Turns) {
-		return OperatorConversationTurnDetail{}, ErrTurnNotFound
-	}
-	selected := detail.Turns[turnIndex-1]
-	completedAt := selected.CreatedAt.UTC()
-	startedAt := completedAt
-	if selected.LatencyMS > 0 {
-		startedAt = completedAt.Add(-time.Duration(selected.LatencyMS) * time.Millisecond)
-	}
-	windowStart := startedAt.Add(-time.Nanosecond)
-	windowEnd := completedAt
-	out := OperatorConversationTurnDetail{
-		Session:               detail.Conversation,
-		TurnBlocksRaw:         cloneConversationTurnBlocks(selected.TurnBlocks),
-		RuntimeLogWindowStart: windowStart,
-		RuntimeLogWindowEnd:   &windowEnd,
-		Turn: OperatorConversationDeepTurn{
-			TurnIndex:   turnIndex,
-			TurnID:      selected.TurnID,
-			Scope:       selected.ScopeKey,
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			DurationMS:  selected.LatencyMS,
-			Outcome:     selected.Outcome,
-			ParseOK:     selected.ParseOK,
-			Failure:     runtimefailures.CloneEnvelope(selected.Failure),
-			RetryCount:  selected.RetryCount,
-			DispatchMetadata: OperatorConversationDispatchMetadata{
-				TriggerEventID:   selected.TriggerEventID,
-				TriggerEventType: selected.TriggerEventType,
-				EntityID:         selected.EntityID,
-				TaskID:           selected.TaskID,
-				RunID:            detail.Conversation.RunID,
-			},
-			AdvertisedTools:             cloneStrings(selected.AvailableTools),
-			MCPToolsListed:              cloneStrings(selected.MCPToolsListed),
-			MCPToolsVisible:             cloneStrings(selected.MCPToolsVisible),
-			ReasoningBlocks:             cloneStrings(selected.ReasoningBlocks),
-			ProgressUpdates:             cloneStrings(selected.ProgressUpdates),
-			ToolCalls:                   cloneConversationToolCalls(selected.ToolCalls),
-			ToolResults:                 cloneConversationToolResults(selected.ToolResults),
-			EmittedEvents:               cloneStrings(selected.EmittedEvents),
-			RuntimeLogEntries:           []OperatorRuntimeLogEntry{},
-			ProviderMetadata:            OperatorConversationProviderMetadata{LatencyMS: selected.LatencyMS},
-			RequestPayload:              cloneRawMessage(selected.RequestPayload),
-			ResponsePayload:             cloneRawMessage(selected.ResponsePayload),
-			FullPromptContext:           nil,
-			FullPromptContextV2Reserved: true,
-			RawLLMResponse:              nil,
-			RawLLMResponseV2Reserved:    true,
-			AssistantVisibleOutput:      selected.AssistantVisibleOutput,
-		},
-	}
-	if out.Turn.AdvertisedTools == nil {
-		out.Turn.AdvertisedTools = []string{}
-	}
-	return out, nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) LoadCurrentOperatorConversationForAgent(ctx context.Context, agentID string) (*OperatorConversationDetail, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return nil, ErrAgentNotFound
-	}
-	if _, err := r.LoadOperatorAgent(ctx, agentID); err != nil {
-		return nil, err
-	}
-	return r.loadCurrentActiveOperatorConversationForAgent(ctx, agentID)
-}
-
 func (r *sqliteOperatorAgentConversationReadSurface) requireAgentCapabilities(ctx context.Context) error {
 	if r == nil || r.db == nil || r.store == nil {
 		return fmt.Errorf("operator agent read surface requires sqlite store")
@@ -471,6 +312,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) requireAgentCapabilities(ct
 	}
 	if caps.Conversations.Turns != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
+	}
+	if !caps.Conversations.TurnBlocks {
+		return errors.New("operator agent read surface requires canonical agent_turns.turn_blocks")
 	}
 	return RequireCanonicalPendingAgentDeliveryCapabilities(caps)
 }
@@ -492,6 +336,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) requireConversationCapabili
 	if caps.Conversations.Turns != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
 	}
+	if !caps.Conversations.TurnBlocks {
+		return errors.New("operator conversation read surface requires canonical agent_turns.turn_blocks")
+	}
 	return nil
 }
 
@@ -502,72 +349,8 @@ func (r *sqliteOperatorAgentConversationReadSurface) resolveConversationCapabili
 	return r.store.ResolveSchemaCapabilities(ctx)
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) loadCurrentActiveOperatorConversationForAgent(ctx context.Context, agentID string) (*OperatorConversationDetail, error) {
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return nil, unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return nil, unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	sessionRunID := "''"
-	if caps.Conversations.SessionRunID {
-		sessionRunID = "COALESCE(run_id, '')"
-	}
-	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT
-			session_id,
-			agent_id,
-			%s AS run_id,
-			'live_session' AS kind,
-			COALESCE(scope_key, ''),
-			COALESCE(scope, ''),
-			COALESCE(runtime_mode, ''),
-			COALESCE(status, ''),
-			COALESCE(turn_count, 0),
-			json_array_length(COALESCE(conversation, '[]')) AS message_count,
-			COALESCE(runtime_state, '{}'),
-			COALESCE(conversation, '[]'),
-			created_at AS started_at,
-			NULL AS ended_at,
-			updated_at
-		FROM agent_sessions
-		WHERE agent_id = ?
-		  AND status = 'active'
-		  AND runtime_mode IN (?, ?)
-		ORDER BY updated_at DESC, created_at DESC, session_id ASC
-		LIMIT 1
-	`, sessionRunID), agentID, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
-	item, err := scanSQLiteOperatorConversationDetail(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load current sqlite operator conversation: %w", err)
-	}
-	item.Turns, err = r.loadConversationTurns(ctx, item.Conversation.AgentID, item.Conversation.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("load current sqlite operator conversation turns: %w", err)
-	}
-	if item.Turns == nil {
-		item.Turns = []OperatorConversationTurn{}
-	}
-	return &item, nil
-}
-
 func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[string]operatorAgentProjection, error) {
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	turnBlocksExpr := "'[]'"
-	if caps.Conversations.TurnBlocks {
-		turnBlocksExpr = "COALESCE(latest_turn.turn_blocks, '[]')"
-	}
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			a.agent_id,
 			COALESCE(a.status, 'active'),
@@ -576,16 +359,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			COALESCE(sess.turn_count, 0),
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
-			COALESCE(sess.runtime_state, '{}'),
-			0,
-			0,
-			COALESCE(latest_turn.turn_id, ''),
-			COALESCE(latest_turn.task_id, ''),
-			COALESCE(latest_turn.entity_id, ''),
-			COALESCE(latest_turn.parse_ok, 0),
-			COALESCE(latest_turn.failure, 'null'),
-			latest_turn.created_at,
-			%s AS turn_blocks
+				COALESCE(sess.runtime_state, '{}'),
+				0,
+				0
 		FROM agents a
 		LEFT JOIN agent_sessions sess ON sess.session_id = (
 			SELECT session_id
@@ -596,18 +372,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			ORDER BY s.updated_at DESC, s.created_at DESC, s.session_id ASC
 			LIMIT 1
 		)
-		LEFT JOIN agent_turns latest_turn ON latest_turn.turn_id = (
-			SELECT turn_id
-			FROM agent_turns t
-			WHERE t.agent_id = a.agent_id
-			  AND sess.session_id IS NOT NULL
-			  AND t.session_id = sess.session_id
-			ORDER BY t.created_at DESC, t.turn_id DESC
-			LIMIT 1
-		)
-		WHERE a.status NOT IN ('terminated', 'ephemeral')
-		ORDER BY a.created_at ASC, a.agent_id ASC
-	`, turnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+			WHERE a.status NOT IN ('terminated', 'ephemeral')
+			ORDER BY a.created_at ASC, a.agent_id ASC
+		`, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite agent operator projections: %w", err)
 	}
@@ -617,18 +384,11 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 	agentIDs := make([]string, 0)
 	for rows.Next() {
 		var (
-			id                 string
-			projection         operatorAgentProjection
-			lockExpiresAtRaw   any
-			sessionStartedRaw  any
-			runtimeStateRaw    []byte
-			latestTurnID       string
-			latestTaskID       string
-			latestEntityID     string
-			latestParseOK      bool
-			latestFailureRaw   []byte
-			latestCompletedRaw any
-			latestTurnRaw      []byte
+			id                string
+			projection        operatorAgentProjection
+			lockExpiresAtRaw  any
+			sessionStartedRaw any
+			runtimeStateRaw   []byte
 		)
 		if err := rows.Scan(
 			&id,
@@ -641,13 +401,6 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			&runtimeStateRaw,
 			&projection.PendingEvents,
 			&projection.OldestPendingAgeSec,
-			&latestTurnID,
-			&latestTaskID,
-			&latestEntityID,
-			&latestParseOK,
-			&latestFailureRaw,
-			&latestCompletedRaw,
-			&latestTurnRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent operator projection: %w", err)
 		}
@@ -661,26 +414,16 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 		} else if ok {
 			projection.LockExpiresAt = at
 		}
-		latestCompleted, latestCompletedOK, err := sqliteTimeValue(latestCompletedRaw)
-		if err != nil {
-			return nil, fmt.Errorf("scan sqlite latest turn created_at: %w", err)
-		}
-		if latestCompletedOK && strings.TrimSpace(latestTurnID) != "" {
-			latestFailure, err := decodeStoredFailure(latestFailureRaw)
-			if err != nil {
-				return nil, fmt.Errorf("decode sqlite latest agent turn failure: %w", err)
-			}
-			projection.LastTurnRef = &OperatorTurnRef{
-				TurnID:      strings.TrimSpace(latestTurnID),
-				CompletedAt: latestCompleted,
-				ParseOK:     latestParseOK,
-				Failure:     latestFailure,
-			}
-		}
-		if err := enrichOperatorAgentProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
+		if err := enrichOperatorAgentProjectionRuntimeState(&projection, runtimeStateRaw); err != nil {
 			return nil, err
 		}
-		projection.DiagnosisActive = operatorAgentDiagnosisActiveFromLatestTurn(latestTurnID, latestTaskID, latestEntityID)
+		if projection.SessionID != "" {
+			turn, err := loadOperatorLatestConversationTurn(ctx, r.store, projection.SessionID)
+			if err != nil {
+				return nil, fmt.Errorf("load sqlite latest agent turn: %w", err)
+			}
+			enrichOperatorProjectionWithPublicTurn(&projection, turn)
+		}
 		id = strings.TrimSpace(id)
 		out[id] = projection
 		agentIDs = append(agentIDs, id)
@@ -711,81 +454,10 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 	return out, nil
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) loadConversationTurns(ctx context.Context, agentID, sessionID string) ([]OperatorConversationTurn, error) {
-	agentID = strings.TrimSpace(agentID)
-	sessionID = strings.TrimSpace(sessionID)
-	if agentID == "" || sessionID == "" {
-		return []OperatorConversationTurn{}, nil
-	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return nil, unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	turnBlocksExpr := "COALESCE(turn_blocks, '[]')"
-	if !caps.Conversations.TurnBlocks {
-		turnBlocksExpr = "'[]'"
-	}
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			turn_id,
-			agent_id,
-			session_id,
-			COALESCE(runtime_mode, ''),
-			COALESCE(scope_key, ''),
-			COALESCE(entity_id, ''),
-			COALESCE(trigger_event_id, ''),
-			COALESCE(trigger_event_type, ''),
-			COALESCE(task_id, ''),
-			COALESCE(available_tools, '[]'),
-			COALESCE(tool_calls, '[]'),
-			COALESCE(emitted_events, '[]'),
-			COALESCE(mcp_servers, '{}'),
-			COALESCE(mcp_tools_listed, '[]'),
-			COALESCE(mcp_tools_visible, '[]'),
-			COALESCE(request_payload, '{}'),
-			COALESCE(response_payload, '{}'),
-			%s AS turn_blocks,
-			parse_ok,
-			COALESCE(latency_ms, 0),
-			COALESCE(retry_count, 0),
-			COALESCE(failure, 'null'),
-			created_at
-		FROM agent_turns
-		WHERE agent_id = ?
-		  AND session_id = ?
-		ORDER BY created_at ASC, turn_id ASC
-	`, turnBlocksExpr), agentID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []OperatorConversationTurn{}
-	for rows.Next() {
-		item, err := scanSQLiteOperatorConversationTurn(rows)
-		if err != nil {
-			return nil, err
-		}
-		item.TurnIndex = len(out) + 1
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func scanSQLiteOperatorConversationSummary(scanner operatorRowScanner) (OperatorConversationSummary, error) {
 	var (
 		item            OperatorConversationSummary
 		runtimeStateRaw []byte
-		turnID          string
-		taskID          string
-		parseOK         bool
-		turnBlocksRaw   []byte
 		startedAtRaw    any
 		endedAtRaw      any
 		updatedAtRaw    any
@@ -802,10 +474,6 @@ func scanSQLiteOperatorConversationSummary(scanner operatorRowScanner) (Operator
 		&item.TurnCount,
 		&item.MessageCount,
 		&runtimeStateRaw,
-		&turnID,
-		&taskID,
-		&parseOK,
-		&turnBlocksRaw,
 		&startedAtRaw,
 		&endedAtRaw,
 		&updatedAtRaw,
@@ -833,159 +501,6 @@ func scanSQLiteOperatorConversationSummary(scanner operatorRowScanner) (Operator
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
-	item.Metadata.LiveTurn, err = projectOperatorLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
-	if err != nil {
-		return OperatorConversationSummary{}, fmt.Errorf("decode conversation live_turn: %w", err)
-	}
-	return item, nil
-}
-
-func scanSQLiteOperatorConversationDetail(scanner operatorRowScanner) (OperatorConversationDetail, error) {
-	var (
-		item            OperatorConversationDetail
-		runtimeStateRaw []byte
-		messagesRaw     []byte
-		startedAtRaw    any
-		endedAtRaw      any
-		updatedAtRaw    any
-	)
-	if err := scanner.Scan(
-		&item.Conversation.SessionID,
-		&item.Conversation.AgentID,
-		&item.Conversation.RunID,
-		&item.Conversation.Kind,
-		&item.Conversation.ScopeKey,
-		&item.Conversation.Scope,
-		&item.Conversation.RuntimeMode,
-		&item.Conversation.Status,
-		&item.Conversation.TurnCount,
-		&item.Conversation.MessageCount,
-		&runtimeStateRaw,
-		&messagesRaw,
-		&startedAtRaw,
-		&endedAtRaw,
-		&updatedAtRaw,
-	); err != nil {
-		return OperatorConversationDetail{}, err
-	}
-	if at, ok, err := sqliteTimeValue(startedAtRaw); err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("scan sqlite conversation started_at: %w", err)
-	} else if ok {
-		item.Conversation.StartedAt = at
-	}
-	if at, ok, err := sqliteTimeValue(endedAtRaw); err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("scan sqlite conversation ended_at: %w", err)
-	} else if ok {
-		item.Conversation.EndedAt = &at
-	}
-	if at, ok, err := sqliteTimeValue(updatedAtRaw); err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("scan sqlite conversation updated_at: %w", err)
-	} else if ok {
-		item.Conversation.UpdatedAt = at
-	}
-	runtimeState, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
-	if err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("decode conversation runtime_state: %w", err)
-	}
-	item.Conversation.Summary = runtimeState.Summary
-	item.Conversation.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
-	item.RuntimeState = projectOperatorConversationState(runtimeState)
-	item.Messages, err = decodeStoreJSONArray[OperatorConversationMessage](messagesRaw)
-	if err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("decode conversation messages: %w", err)
-	}
-	if item.Messages == nil {
-		item.Messages = []OperatorConversationMessage{}
-	}
-	return item, nil
-}
-
-func scanSQLiteOperatorConversationTurn(scanner operatorRowScanner) (OperatorConversationTurn, error) {
-	var (
-		item                                  OperatorConversationTurn
-		availableToolsRaw, toolCallsRaw       []byte
-		emittedEventsRaw, mcpServersRaw       []byte
-		mcpToolsListedRaw, mcpToolsVisibleRaw []byte
-		requestPayloadRaw, responsePayloadRaw []byte
-		turnBlocksRaw, failureRaw             []byte
-		createdAtRaw                          any
-	)
-	if err := scanner.Scan(
-		&item.TurnID,
-		&item.AgentID,
-		&item.SessionID,
-		&item.RuntimeMode,
-		&item.ScopeKey,
-		&item.EntityID,
-		&item.TriggerEventID,
-		&item.TriggerEventType,
-		&item.TaskID,
-		&availableToolsRaw,
-		&toolCallsRaw,
-		&emittedEventsRaw,
-		&mcpServersRaw,
-		&mcpToolsListedRaw,
-		&mcpToolsVisibleRaw,
-		&requestPayloadRaw,
-		&responsePayloadRaw,
-		&turnBlocksRaw,
-		&item.ParseOK,
-		&item.LatencyMS,
-		&item.RetryCount,
-		&failureRaw,
-		&createdAtRaw,
-	); err != nil {
-		return OperatorConversationTurn{}, err
-	}
-	decodedFailure, err := decodeStoredFailure(failureRaw)
-	if err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode sqlite turn failure: %w", err)
-	}
-	item.Failure = decodedFailure
-	if at, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("scan sqlite conversation turn created_at: %w", err)
-	} else if ok {
-		item.CreatedAt = at
-	}
-	summary, hasSummary, err := decodeOperatorTurnSummaryProjection(turnBlocksRaw)
-	if err != nil {
-		return OperatorConversationTurn{}, err
-	}
-	if item.AvailableTools, err = decodeStoreJSONArray[string](availableToolsRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn available_tools: %w", err)
-	}
-	if item.ToolCalls, err = decodeStoreJSONArray[OperatorConversationToolCall](toolCallsRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn tool_calls: %w", err)
-	}
-	if item.EmittedEvents, err = decodeStoreJSONArray[string](emittedEventsRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn emitted_events: %w", err)
-	}
-	if item.MCPToolsListed, err = decodeStoreJSONArray[string](mcpToolsListedRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn mcp_tools_listed: %w", err)
-	}
-	if item.MCPToolsVisible, err = decodeStoreJSONArray[string](mcpToolsVisibleRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn mcp_tools_visible: %w", err)
-	}
-	if item.MCPServers, err = decodeStoreJSONStringMap(mcpServersRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn mcp_servers: %w", err)
-	}
-	if item.RequestPayload, err = decodeStoreJSONObjectRaw(requestPayloadRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn request_payload: %w", err)
-	}
-	if item.ResponsePayload, err = decodeStoreJSONObjectRaw(responsePayloadRaw); err != nil {
-		return OperatorConversationTurn{}, fmt.Errorf("decode turn response_payload: %w", err)
-	}
-	if len(turnBlocksRaw) > 0 {
-		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocksJSON(turnBlocksRaw); err != nil {
-			return OperatorConversationTurn{}, fmt.Errorf("decode canonical runtime_log turn_blocks: %w", err)
-		}
-		if item.TurnBlocks, err = decodeStoreJSONArray[OperatorConversationTurnBlock](turnBlocksRaw); err != nil {
-			return OperatorConversationTurn{}, fmt.Errorf("decode turn turn_blocks: %w", err)
-		}
-	}
-	if hasSummary {
-		item.AssistantVisibleOutput, item.Outcome, item.ReasoningBlocks, item.ProgressUpdates, item.ToolResults = projectedOperatorTurnSummaryConversationFields(summary)
-	}
 	return item, nil
 }
 

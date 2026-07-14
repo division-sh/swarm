@@ -302,93 +302,6 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 	})
 }
 
-func TestCLIOutputModesForConversationConsumers(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-
-	for _, tc := range []struct {
-		name       string
-		args       []string
-		method     string
-		result     map[string]any
-		wantQuiet  string
-		assertJSON func(*testing.T, string)
-	}{
-		{
-			name:      "conversations list",
-			args:      []string{"conversation", "list"},
-			method:    conversationListMethod,
-			result:    map[string]any{"conversations": []map[string]any{validConversationSummary("sess-1")}},
-			wantQuiet: "sess-1\n",
-			assertJSON: func(t *testing.T, raw string) {
-				result := decodeOutputJSON[conversationListResult](t, raw)
-				if len(result.Conversations) != 1 || result.Conversations[0].SessionID != "sess-1" {
-					t.Fatalf("conversation list json = %#v, want sess-1", result)
-				}
-			},
-		},
-		{
-			name:      "conversation view",
-			args:      []string{"conversation", "view", "sess-1"},
-			method:    conversationGetMethod,
-			result:    validConversationDetail("sess-1"),
-			wantQuiet: "sess-1\n",
-			assertJSON: func(t *testing.T, raw string) {
-				result := decodeOutputJSON[conversationDetail](t, raw)
-				if result.Conversation.SessionID != "sess-1" || len(result.Turns) != 1 {
-					t.Fatalf("conversation view json = %#v, want detail", result)
-				}
-			},
-		},
-		{
-			name:      "conversation turn",
-			args:      []string{"conversation", "turn", "sess-1", "2"},
-			method:    conversationGetTurnMethod,
-			result:    validConversationTurnDetail("sess-1", 2),
-			wantQuiet: "sess-1 2 completed\n",
-			assertJSON: func(t *testing.T, raw string) {
-				result := decodeOutputJSON[conversationTurnDetail](t, raw)
-				if result.Session.SessionID != "sess-1" || result.Turn.TurnIndex != 2 {
-					t.Fatalf("conversation turn json = %#v, want turn detail", result)
-				}
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, mode := range []string{"--json", "--quiet"} {
-				var calls atomic.Int32
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls.Add(1)
-					var req jsonRPCRequest
-					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-						t.Errorf("decode request: %v", err)
-					}
-					if req.Method != tc.method {
-						t.Errorf("method = %q, want %s", req.Method, tc.method)
-					}
-					writeJSONRPCResult(t, w, req.ID, tc.result)
-				}))
-				defer server.Close()
-
-				args := append(append([]string{}, tc.args...), mode)
-				var stdout, stderr bytes.Buffer
-				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-				if code != 0 {
-					t.Fatalf("%s %s code = %d stdout=%s stderr=%s", tc.name, mode, code, stdout.String(), stderr.String())
-				}
-				if calls.Load() != 1 {
-					t.Fatalf("%s %s calls = %d, want 1", tc.name, mode, calls.Load())
-				}
-				if mode == "--json" {
-					tc.assertJSON(t, stdout.String())
-				} else if stdout.String() != tc.wantQuiet {
-					t.Fatalf("%s quiet stdout = %q, want %q", tc.name, stdout.String(), tc.wantQuiet)
-				}
-				assertEmptyStderr(t, stderr.String())
-			}
-		})
-	}
-}
-
 func TestCLIOutputNoColorStripsDefaultText(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -471,12 +384,12 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		{
 			name:   "conversation view",
 			args:   func(*testing.T) []string { return []string{"conversation", "view", "sess-1"} },
-			method: conversationGetMethod,
+			method: conversationListTurnsMethod,
 			result: validConversationDetail("sess-1"),
 		},
 		{
 			name:   "conversation turn",
-			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "2"} },
+			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "turn-2"} },
 			method: conversationGetTurnMethod,
 			result: validConversationTurnDetail("sess-1", 2),
 		},

@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"strings"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -14,9 +12,9 @@ import (
 )
 
 const (
-	conversationListMethod    = "conversation.list"
-	conversationGetMethod     = "conversation.get"
-	conversationGetTurnMethod = "conversation.get_turn"
+	conversationListMethod      = "conversation.list"
+	conversationListTurnsMethod = "conversation.list_turns"
+	conversationGetTurnMethod   = "conversation.get_turn"
 )
 
 type conversationListCommandOptions struct {
@@ -39,6 +37,10 @@ type conversationViewCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
 	logging    cliLoggingOptions
+	limit      int
+	cursor     string
+	limitSet   bool
+	cursorSet  bool
 }
 
 type conversationTurnCommandOptions struct {
@@ -63,72 +65,49 @@ type conversationSummary struct {
 	Status       string `json:"status"`
 }
 
-type conversationDetail struct {
+type conversationTurnPage struct {
 	Conversation conversationSummary `json:"conversation"`
 	Turns        []conversationTurn  `json:"turns"`
+	NextCursor   string              `json:"next_cursor,omitempty"`
 }
 
 type conversationTurn struct {
-	TurnIndex        int                       `json:"turn_index"`
-	TurnID           string                    `json:"turn_id"`
-	TriggerEventID   string                    `json:"trigger_event_id"`
-	TriggerEventType string                    `json:"trigger_event_type"`
-	RequestPayload   map[string]any            `json:"request_payload,omitempty"`
-	ResponsePayload  map[string]any            `json:"response_payload,omitempty"`
-	ToolCalls        []map[string]any          `json:"tool_calls,omitempty"`
-	TurnBlocks       []map[string]any          `json:"turn_blocks,omitempty"`
-	ParseOK          *bool                     `json:"parse_ok"`
-	LatencyMS        *int                      `json:"latency_ms"`
-	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
+	Ordinal                int                       `json:"ordinal"`
+	TurnID                 string                    `json:"turn_id"`
+	CompletedAt            string                    `json:"completed_at"`
+	DurationMS             *int                      `json:"duration_ms"`
+	TriggerEventID         string                    `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string                    `json:"trigger_event_type,omitempty"`
+	EntityID               string                    `json:"entity_id,omitempty"`
+	TaskID                 string                    `json:"task_id,omitempty"`
+	Activity               []conversationActivity    `json:"activity"`
+	Tokens                 *conversationTokenUsage   `json:"tokens,omitempty"`
+	Outcome                string                    `json:"outcome,omitempty"`
+	ParseOK                *bool                     `json:"parse_ok"`
+	Failure                *runtimefailures.Envelope `json:"failure,omitempty"`
+	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
+	RetryCount             int                       `json:"retry_count,omitempty"`
 }
 
 type conversationTurnDetail struct {
-	Session       conversationSummary  `json:"session"`
-	Turn          conversationDeepTurn `json:"turn"`
-	TurnBlocksRaw []map[string]any     `json:"turn_blocks_raw"`
+	Session conversationSummary `json:"session"`
+	Turn    conversationTurn    `json:"turn"`
 }
 
-type conversationDeepTurn struct {
-	TurnIndex                   int                           `json:"turn_index"`
-	TurnID                      string                        `json:"turn_id"`
-	Scope                       string                        `json:"scope,omitempty"`
-	StartedAt                   string                        `json:"started_at"`
-	CompletedAt                 string                        `json:"completed_at"`
-	DurationMS                  *int                          `json:"duration_ms"`
-	Outcome                     string                        `json:"outcome,omitempty"`
-	ParseOK                     *bool                         `json:"parse_ok"`
-	Failure                     *runtimefailures.Envelope     `json:"failure,omitempty"`
-	RetryCount                  int                           `json:"retry_count,omitempty"`
-	DispatchMetadata            *conversationDispatchMetadata `json:"dispatch_metadata"`
-	AdvertisedTools             []string                      `json:"advertised_tools"`
-	MCPToolsListed              []string                      `json:"mcp_tools_listed,omitempty"`
-	MCPToolsVisible             []string                      `json:"mcp_tools_visible,omitempty"`
-	ReasoningBlocks             []string                      `json:"reasoning_blocks,omitempty"`
-	ProgressUpdates             []string                      `json:"progress_updates,omitempty"`
-	ToolCalls                   []map[string]any              `json:"tool_calls,omitempty"`
-	ToolResults                 []map[string]any              `json:"tool_results,omitempty"`
-	EmittedEvents               []string                      `json:"emitted_events,omitempty"`
-	RuntimeLogEntries           []runtimeLogEntry             `json:"runtime_log_entries"`
-	ProviderMetadata            *conversationProviderMetadata `json:"provider_metadata"`
-	RequestPayload              map[string]any                `json:"request_payload,omitempty"`
-	ResponsePayload             map[string]any                `json:"response_payload,omitempty"`
-	FullPromptContext           json.RawMessage               `json:"full_prompt_context"`
-	FullPromptContextV2Reserved *bool                         `json:"full_prompt_context_v2_reserved"`
-	RawLLMResponse              json.RawMessage               `json:"raw_llm_response"`
-	RawLLMResponseV2Reserved    *bool                         `json:"raw_llm_response_v2_reserved"`
-	AssistantVisibleOutput      string                        `json:"assistant_visible_output,omitempty"`
+type conversationActivity struct {
+	Kind      string `json:"kind"`
+	ToolName  string `json:"tool_name,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	EventID   string `json:"event_id,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+	Text      string `json:"text,omitempty"`
+	OK        *bool  `json:"ok,omitempty"`
 }
 
-type conversationDispatchMetadata struct {
-	TriggerEventID   string `json:"trigger_event_id,omitempty"`
-	TriggerEventType string `json:"trigger_event_type,omitempty"`
-	EntityID         string `json:"entity_id,omitempty"`
-	TaskID           string `json:"task_id,omitempty"`
-	RunID            string `json:"run_id,omitempty"`
-}
-
-type conversationProviderMetadata struct {
-	LatencyMS *int `json:"latency_ms"`
+type conversationTokenUsage struct {
+	Input     int64  `json:"input"`
+	Output    int64  `json:"output"`
+	Exactness string `json:"exactness"`
 }
 
 var conversationOpaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
@@ -200,6 +179,8 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one conversation.",
 		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			viewOpts.limitSet = cmd.Flags().Changed("limit")
+			viewOpts.cursorSet = cmd.Flags().Changed("cursor")
 			if err := viewOpts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -210,6 +191,8 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	setCLIArgDiscoveryHint(cmd, "List conversation session ids with `swarm conversation list`.")
+	cmd.Flags().IntVar(&viewOpts.limit, "limit", 0, "Optional turn page size, 1-500")
+	cmd.Flags().StringVar(&viewOpts.cursor, "cursor", "", "Turn pagination cursor")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLILoggingFlags(cmd, &viewOpts.logging)
@@ -219,7 +202,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 	turnOpts := conversationTurnCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "turn <session-id> <turn-index>",
+		Use:   "turn <session-id> <turn-id-or-prefix>",
 		Short: "View one conversation turn.",
 		Args:  cliExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -271,11 +254,25 @@ func runConversationViewCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err != nil {
 		return returnCLIAPIError(errOut, err, conversationViewAPIErrorClassifier())
 	}
-	var result conversationDetail
-	if err := client.call(ctx, conversationGetMethod, map[string]any{"session_id": sessionID}, &result); err != nil {
+	params := map[string]any{"session_id": sessionID}
+	if opts.limitSet {
+		if opts.limit < 1 || opts.limit > 500 {
+			return returnCLIValidationError(errOut, fmt.Errorf("--limit must be between 1 and 500"))
+		}
+		params["limit"] = opts.limit
+	}
+	if opts.cursorSet {
+		cursor, err := conversationNonEmptyFlag("--cursor", opts.cursor)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		params["cursor"] = cursor
+	}
+	var result conversationTurnPage
+	if err := client.call(ctx, conversationListTurnsMethod, params, &result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationViewAPIErrorClassifier())
 	}
-	if err := validateConversationDetailResult("conversation.get result", result); err != nil {
+	if err := validateConversationTurnPageResult("conversation.list_turns result", result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationViewAPIErrorClassifier())
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
@@ -285,35 +282,41 @@ func runConversationViewCommand(ctx context.Context, out, errOut io.Writer, opts
 	})
 }
 
-func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts conversationTurnCommandOptions, sessionID, turnIndexRaw string) error {
+func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts conversationTurnCommandOptions, sessionID, turnID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if err := validateConversationOpaqueIDArg("session id", sessionID); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	turnIndex, err := parseConversationTurnIndex(turnIndexRaw)
-	if err != nil {
+	turnID = strings.TrimSpace(turnID)
+	if err := validateConversationOpaqueIDArg("turn id or prefix", turnID); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
 	}
-	params := map[string]any{"session_id": sessionID, "turn_index": turnIndex}
+	params := map[string]any{"session_id": sessionID, "turn_id": turnID}
 	var result conversationTurnDetail
 	if err := client.call(ctx, conversationGetTurnMethod, params, &result); err != nil {
-		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
+		resolved, resolveErr := resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
+			Command: "swarm conversation turn", Selector: "arg:turn-id-or-prefix", Value: turnID,
+			Scope: map[string]string{"session_id": sessionID},
+		}, err, "TURN_NOT_FOUND")
+		if resolveErr != nil {
+			return returnCLIAPIError(errOut, resolveErr, conversationTurnAPIErrorClassifier())
+		}
+		params["turn_id"] = resolved
+		if err := client.call(ctx, conversationGetTurnMethod, params, &result); err != nil {
+			return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
+		}
 	}
 	if err := validateConversationTurnDetailResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
 	}
-	runtimeLogProjections, err := projectRuntimeLogEntries("conversation.get_turn result.turn.runtime_log_entries", result.Turn.RuntimeLogEntries)
-	if err != nil {
-		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
-	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeConversationTurnDetailResult(w, result, runtimeLogProjections)
+		writeConversationTurnDetailResult(w, result)
 	}, func() ([]string, error) {
-		return []string{fmt.Sprintf("%s %d %s", result.Session.SessionID, result.Turn.TurnIndex, firstNonEmpty(result.Turn.Outcome, result.Session.Status))}, nil
+		return []string{fmt.Sprintf("%s %s %s", result.Session.SessionID, result.Turn.TurnID, firstNonEmpty(result.Turn.Outcome, result.Session.Status))}, nil
 	})
 }
 
@@ -363,18 +366,6 @@ func (opts conversationListCommandOptions) params() (map[string]any, error) {
 	return params, nil
 }
 
-func parseConversationTurnIndex(raw string) (int, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, fmt.Errorf("turn index is required")
-	}
-	index, err := strconv.Atoi(raw)
-	if err != nil || index < 1 || index > 1000000 {
-		return 0, fmt.Errorf("turn index must be an integer from 1 to 1000000")
-	}
-	return index, nil
-}
-
 func conversationNonEmptyFlag(name, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -408,7 +399,7 @@ func validateConversationListResult(result conversationListResult) error {
 	return nil
 }
 
-func validateConversationDetailResult(prefix string, result conversationDetail) error {
+func validateConversationTurnPageResult(prefix string, result conversationTurnPage) error {
 	if err := validateConversationSummary(prefix+".conversation", result.Conversation); err != nil {
 		return err
 	}
@@ -427,13 +418,7 @@ func validateConversationTurnDetailResult(result conversationTurnDetail) error {
 	if err := validateConversationSummary("conversation.get_turn result.session", result.Session); err != nil {
 		return err
 	}
-	if err := validateConversationDeepTurn("conversation.get_turn result.turn", result.Turn); err != nil {
-		return err
-	}
-	if result.TurnBlocksRaw == nil {
-		return fmt.Errorf("malformed conversation.get_turn result: turn_blocks_raw is required")
-	}
-	return nil
+	return validateConversationTurn("conversation.get_turn result.turn", result.Turn)
 }
 
 func validateConversationSummary(prefix string, item conversationSummary) error {
@@ -484,49 +469,14 @@ func validateConversationSummary(prefix string, item conversationSummary) error 
 }
 
 func validateConversationTurn(prefix string, turn conversationTurn) error {
-	if turn.TurnIndex < 1 {
-		return fmt.Errorf("malformed %s: turn_index must be at least 1", prefix)
+	if turn.Ordinal < 1 {
+		return fmt.Errorf("malformed %s: ordinal must be at least 1", prefix)
 	}
 	for _, field := range []struct {
 		name  string
 		value string
 	}{
 		{name: "turn_id", value: turn.TurnID},
-		{name: "trigger_event_id", value: turn.TriggerEventID},
-		{name: "trigger_event_type", value: turn.TriggerEventType},
-	} {
-		if strings.TrimSpace(field.value) == "" {
-			return fmt.Errorf("malformed %s: %s is required", prefix, field.name)
-		}
-	}
-	if err := validateConversationOpaqueIDArg(prefix+".turn_id", turn.TurnID); err != nil {
-		return fmt.Errorf("malformed %s: %w", prefix, err)
-	}
-	if err := validateConversationOpaqueIDArg(prefix+".trigger_event_id", turn.TriggerEventID); err != nil {
-		return fmt.Errorf("malformed %s: %w", prefix, err)
-	}
-	if turn.ParseOK == nil {
-		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
-	}
-	if turn.LatencyMS == nil {
-		return fmt.Errorf("malformed %s: latency_ms is required", prefix)
-	}
-	if *turn.LatencyMS < 0 {
-		return fmt.Errorf("malformed %s: latency_ms must be non-negative", prefix)
-	}
-	return nil
-}
-
-func validateConversationDeepTurn(prefix string, turn conversationDeepTurn) error {
-	if turn.TurnIndex < 1 {
-		return fmt.Errorf("malformed %s: turn_index must be at least 1", prefix)
-	}
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{name: "turn_id", value: turn.TurnID},
-		{name: "started_at", value: turn.StartedAt},
 		{name: "completed_at", value: turn.CompletedAt},
 	} {
 		if strings.TrimSpace(field.value) == "" {
@@ -536,11 +486,13 @@ func validateConversationDeepTurn(prefix string, turn conversationDeepTurn) erro
 	if err := validateConversationOpaqueIDArg(prefix+".turn_id", turn.TurnID); err != nil {
 		return fmt.Errorf("malformed %s: %w", prefix, err)
 	}
-	if err := validateRequiredTimestamp(prefix+".started_at", turn.StartedAt); err != nil {
-		return err
+	if strings.TrimSpace(turn.TriggerEventID) != "" {
+		if err := validateConversationOpaqueIDArg(prefix+".trigger_event_id", turn.TriggerEventID); err != nil {
+			return fmt.Errorf("malformed %s: %w", prefix, err)
+		}
 	}
-	if err := validateRequiredTimestamp(prefix+".completed_at", turn.CompletedAt); err != nil {
-		return err
+	if turn.ParseOK == nil {
+		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
 	}
 	if turn.DurationMS == nil {
 		return fmt.Errorf("malformed %s: duration_ms is required", prefix)
@@ -548,61 +500,24 @@ func validateConversationDeepTurn(prefix string, turn conversationDeepTurn) erro
 	if *turn.DurationMS < 0 {
 		return fmt.Errorf("malformed %s: duration_ms must be non-negative", prefix)
 	}
-	if turn.ParseOK == nil {
-		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
+	if err := validateRequiredTimestamp(prefix+".completed_at", turn.CompletedAt); err != nil {
+		return err
 	}
 	if turn.RetryCount < 0 {
 		return fmt.Errorf("malformed %s: retry_count must be non-negative", prefix)
 	}
-	if turn.DispatchMetadata == nil {
-		return fmt.Errorf("malformed %s: dispatch_metadata is required", prefix)
+	if turn.Activity == nil {
+		return fmt.Errorf("malformed %s: activity is required", prefix)
 	}
-	if strings.TrimSpace(turn.DispatchMetadata.TriggerEventID) != "" {
-		if err := validateConversationOpaqueIDArg(prefix+".dispatch_metadata.trigger_event_id", turn.DispatchMetadata.TriggerEventID); err != nil {
-			return fmt.Errorf("malformed %s: %w", prefix, err)
+	if turn.Tokens != nil {
+		if turn.Tokens.Input < 0 || turn.Tokens.Output < 0 {
+			return fmt.Errorf("malformed %s: token totals must be non-negative", prefix)
 		}
-	}
-	if strings.TrimSpace(turn.DispatchMetadata.EntityID) != "" {
-		if err := validateConversationOpaqueIDArg(prefix+".dispatch_metadata.entity_id", turn.DispatchMetadata.EntityID); err != nil {
-			return fmt.Errorf("malformed %s: %w", prefix, err)
+		switch turn.Tokens.Exactness {
+		case "exact", "estimated":
+		default:
+			return fmt.Errorf("malformed %s: token exactness is invalid", prefix)
 		}
-	}
-	if strings.TrimSpace(turn.DispatchMetadata.RunID) != "" {
-		if err := validateConversationOpaqueIDArg(prefix+".dispatch_metadata.run_id", turn.DispatchMetadata.RunID); err != nil {
-			return fmt.Errorf("malformed %s: %w", prefix, err)
-		}
-	}
-	if turn.AdvertisedTools == nil {
-		return fmt.Errorf("malformed %s: advertised_tools is required", prefix)
-	}
-	if turn.RuntimeLogEntries == nil {
-		return fmt.Errorf("malformed %s: runtime_log_entries is required", prefix)
-	}
-	for i, log := range turn.RuntimeLogEntries {
-		if err := validateRuntimeLogEntry(fmt.Sprintf("%s.runtime_log_entries[%d]", prefix, i), log); err != nil {
-			return err
-		}
-	}
-	if turn.ProviderMetadata == nil {
-		return fmt.Errorf("malformed %s: provider_metadata is required", prefix)
-	}
-	if turn.ProviderMetadata.LatencyMS == nil {
-		return fmt.Errorf("malformed %s: provider_metadata.latency_ms is required", prefix)
-	}
-	if *turn.ProviderMetadata.LatencyMS < 0 {
-		return fmt.Errorf("malformed %s: provider_metadata.latency_ms must be non-negative", prefix)
-	}
-	if turn.FullPromptContext == nil {
-		return fmt.Errorf("malformed %s: full_prompt_context is required", prefix)
-	}
-	if turn.FullPromptContextV2Reserved == nil || !*turn.FullPromptContextV2Reserved {
-		return fmt.Errorf("malformed %s: full_prompt_context_v2_reserved must be true", prefix)
-	}
-	if turn.RawLLMResponse == nil {
-		return fmt.Errorf("malformed %s: raw_llm_response is required", prefix)
-	}
-	if turn.RawLLMResponseV2Reserved == nil || !*turn.RawLLMResponseV2Reserved {
-		return fmt.Errorf("malformed %s: raw_llm_response_v2_reserved must be true", prefix)
 	}
 	return nil
 }
@@ -645,7 +560,7 @@ func writeConversationListResult(out io.Writer, result conversationListResult) {
 	})
 }
 
-func writeConversationDetailResult(out io.Writer, result conversationDetail) {
+func writeConversationDetailResult(out io.Writer, result conversationTurnPage) {
 	if out == nil {
 		return
 	}
@@ -663,88 +578,129 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 	rows := make([][]string, 0, len(result.Turns))
 	for _, turn := range result.Turns {
 		rows = append(rows, []string{
-			fmt.Sprintf("%d", turn.TurnIndex),
 			turn.TurnID,
-			turn.TriggerEventID,
-			turn.TriggerEventType,
-			fmt.Sprintf("%t", *turn.ParseOK),
-			fmt.Sprintf("%d", *turn.LatencyMS),
-			conversationFailureSummary(turn.Failure),
+			fmt.Sprintf("%d", turn.Ordinal),
+			turn.CompletedAt,
+			conversationTriggerSummary(turn),
+			conversationActivitySummary(turn.Activity),
+			conversationTokenSummary(turn.Tokens),
+			fmt.Sprintf("%dms", *turn.DurationMS),
+			conversationOutcomeSummary(turn),
 		})
+	}
+	footers := []string{}
+	if strings.TrimSpace(result.NextCursor) != "" {
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "TURN"},
-			{Header: "TURN_ID", KeyColumn: true},
-			{Header: "EVENT_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
-			{Header: "EVENT_TYPE"},
-			{Header: "PARSE_OK"},
-			{Header: "LATENCY_MS"},
-			{Header: "FAILURE", Truncatable: true},
+			{Header: "TURN", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyTurn},
+			{Header: "#"},
+			{Header: "TIME"},
+			{Header: "TRIGGER", Truncatable: true},
+			{Header: "ACTIVITY", Truncatable: true},
+			{Header: "TOKENS"},
+			{Header: "DURATION"},
+			{Header: "OUTCOME", Truncatable: true},
 		},
 		Rows:         rows,
 		EmptyMessage: "No turns recorded.",
+		FooterLines:  footers,
 	})
 }
 
-func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDetail, runtimeLogProjections []runtimeLogSemanticProjection) {
+func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDetail) {
 	if out == nil {
 		return
 	}
 	session := result.Session
 	turn := result.Turn
-	writeCLITitle(out, fmt.Sprintf("Conversation %s turn %d", session.SessionID, turn.TurnIndex))
-	writeCLIFieldLine(out,
-		cliDetailField{Key: "turn_id", Value: turn.TurnID},
-		cliDetailField{Key: "agent_id", Value: session.AgentID},
-		cliDetailField{Key: "run_id", Value: conversationDash(session.RunID)},
-		cliDetailField{Key: "status", Value: session.Status},
-		cliDetailField{Key: "started_at", Value: turn.StartedAt},
-		cliDetailField{Key: "completed_at", Value: turn.CompletedAt},
-		cliDetailField{Key: "duration_ms", Value: fmt.Sprintf("%d", *turn.DurationMS)},
-		cliDetailField{Key: "parse_ok", Value: fmt.Sprintf("%t", *turn.ParseOK)},
-		cliDetailField{Key: "outcome", Value: conversationDash(turn.Outcome)},
-		cliDetailField{Key: "failure", Value: conversationFailureSummary(turn.Failure)},
-	)
-	dispatch := turn.DispatchMetadata
-	writeCLIFieldLine(out,
-		cliDetailField{Key: "dispatch.trigger_event_id", Value: conversationDash(dispatch.TriggerEventID)},
-		cliDetailField{Key: "dispatch.trigger_event_type", Value: conversationDash(dispatch.TriggerEventType)},
-		cliDetailField{Key: "dispatch.entity_id", Value: conversationDash(dispatch.EntityID)},
-		cliDetailField{Key: "dispatch.task_id", Value: conversationDash(dispatch.TaskID)},
-		cliDetailField{Key: "dispatch.run_id", Value: conversationDash(dispatch.RunID)},
-	)
-	writeCLIFieldLine(out,
-		cliDetailField{Key: "advertised_tools", Value: conversationListDash(turn.AdvertisedTools)},
-		cliDetailField{Key: "runtime_log_entries", Value: fmt.Sprintf("%d", len(turn.RuntimeLogEntries))},
-		cliDetailField{Key: "turn_blocks_raw", Value: conversationCompactJSON(result.TurnBlocksRaw)},
-	)
-	if strings.TrimSpace(turn.AssistantVisibleOutput) != "" {
-		writeCLIFieldLine(out, cliDetailField{Key: "assistant_visible_output", Value: strings.TrimSpace(turn.AssistantVisibleOutput)})
+	activity := make([]string, 0, len(turn.Activity))
+	for _, item := range turn.Activity {
+		activity = append(activity, conversationActivityDetail(item))
 	}
-	if len(turn.RuntimeLogEntries) > 0 {
-		fmt.Fprintln(out, "Runtime logs:")
-		for i, log := range turn.RuntimeLogEntries {
-			projection := runtimeLogProjections[i]
-			fields := []string{
-				"log_id=" + log.LogID,
-				"ts=" + log.TS,
-				"level=" + log.Level,
-				"component=" + log.Component,
-			}
-			if projection.Action != "" {
-				fields = append(fields, "action="+projection.Action)
-			}
-			fields = append(fields, "source="+log.Source)
-			if projection.Failure != "" {
-				fields = append(fields, "failure="+projection.Failure)
-			}
-			if projection.MessageVisible {
-				fields = append(fields, "message="+projection.Message)
-			}
-			fmt.Fprintln(out, strings.Join(fields, " "))
+	sections := []cliLabeledDetailSection{{Label: "ACTIVITY", Items: activity}}
+	if output := strings.TrimSpace(turn.AssistantVisibleOutput); output != "" {
+		sections = append(sections, cliLabeledDetailSection{Label: "ASSISTANT OUTPUT", Items: []string{output}})
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{
+		Title: fmt.Sprintf("Conversation %s turn #%d", session.SessionID, turn.Ordinal),
+		Rows: []cliLabeledDetailRow{
+			{Label: "Turn", Value: turn.TurnID},
+			{Label: "Agent", Value: session.AgentID},
+			{Label: "Run", Value: session.RunID},
+			{Label: "Completed", Value: turn.CompletedAt},
+			{Label: "Duration", Value: fmt.Sprintf("%dms", *turn.DurationMS)},
+			{Label: "Trigger", Value: conversationTriggerSummary(turn)},
+			{Label: "Entity", Value: turn.EntityID},
+			{Label: "Task", Value: turn.TaskID},
+			{Label: "Tokens", Value: conversationTokenSummary(turn.Tokens)},
+			{Label: "Outcome", Value: conversationOutcomeSummary(turn)},
+			{Label: "Retries", Value: fmt.Sprintf("%d", turn.RetryCount)},
+		},
+		Sections: sections,
+	})
+}
+
+func conversationTriggerSummary(turn conversationTurn) string {
+	return firstNonEmpty(strings.TrimSpace(turn.TriggerEventType), strings.TrimSpace(turn.TriggerEventID))
+}
+
+func conversationActivitySummary(activity []conversationActivity) string {
+	counts := map[string]int{}
+	order := []string{}
+	for _, item := range activity {
+		kind := strings.TrimSpace(item.Kind)
+		if kind == "" {
+			continue
+		}
+		if counts[kind] == 0 {
+			order = append(order, kind)
+		}
+		counts[kind]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, kind := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[kind], strings.ReplaceAll(kind, "_", " ")))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func conversationActivityDetail(item conversationActivity) string {
+	fields := []string{strings.ReplaceAll(strings.TrimSpace(item.Kind), "_", " ")}
+	for _, value := range []string{item.ToolName, item.ToolUseID, item.EventType, item.EventID, item.Text} {
+		if value = strings.TrimSpace(value); value != "" {
+			fields = append(fields, value)
 		}
 	}
+	if item.OK != nil {
+		fields = append(fields, fmt.Sprintf("ok=%t", *item.OK))
+	}
+	return strings.Join(fields, " · ")
+}
+
+func conversationTokenSummary(tokens *conversationTokenUsage) string {
+	if tokens == nil {
+		return ""
+	}
+	suffix := ""
+	if tokens.Exactness == "estimated" {
+		suffix = " (est)"
+	}
+	return fmt.Sprintf("%d→%d%s", tokens.Input, tokens.Output, suffix)
+}
+
+func conversationOutcomeSummary(turn conversationTurn) string {
+	if turn.Failure != nil {
+		return conversationFailureSummary(turn.Failure)
+	}
+	if strings.TrimSpace(turn.Outcome) != "" {
+		return strings.TrimSpace(turn.Outcome)
+	}
+	if turn.ParseOK != nil && !*turn.ParseOK {
+		return "invalid response"
+	}
+	return ""
 }
 
 func conversationFailureSummary(failure *runtimefailures.Envelope) string {
@@ -772,28 +728,4 @@ func conversationDash(value string) string {
 		return "-"
 	}
 	return value
-}
-
-func conversationListDash(values []string) string {
-	if len(values) == 0 {
-		return "-"
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			out = append(out, strings.TrimSpace(value))
-		}
-	}
-	if len(out) == 0 {
-		return "-"
-	}
-	return strings.Join(out, ",")
-}
-
-func conversationCompactJSON(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "[]"
-	}
-	return string(raw)
 }

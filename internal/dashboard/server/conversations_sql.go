@@ -42,14 +42,20 @@ func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, o
 	return r.owner.ListOperatorConversations(ctx, opts)
 }
 
-func (r *SQLConversationReader) LoadOperatorConversation(ctx context.Context, sessionID string) (store.OperatorConversationDetail, error) {
-	if r == nil || r.owner == nil {
+func (r *SQLConversationReader) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+	if r == nil {
 		if _, err := r.resolveCapabilities(ctx); err != nil {
-			return store.OperatorConversationDetail{}, err
+			return store.OperatorConversationTurnListResult{}, err
 		}
-		return store.OperatorConversationDetail{}, store.ErrSessionNotFound
+		return store.OperatorConversationTurnListResult{}, store.ErrSessionNotFound
 	}
-	return r.owner.LoadOperatorConversation(ctx, sessionID)
+	owner, ok := r.capSource.(interface {
+		ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
+	})
+	if !ok {
+		return store.OperatorConversationTurnListResult{}, errors.New("conversation reader is not configured with the canonical turn owner")
+	}
+	return owner.ListOperatorConversationTurns(ctx, opts)
 }
 
 func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]ConversationSummary, error) {
@@ -69,12 +75,12 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	if err := requireConversationTurnCapabilities(caps); err != nil {
 		return nil, err
 	}
-	rows, err := r.owner.ListDashboardOperatorConversations(ctx, limit)
+	page, err := r.owner.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: limit})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ConversationSummary, 0, len(rows))
-	for _, item := range rows {
+	out := make([]ConversationSummary, 0, len(page.Conversations))
+	for _, item := range page.Conversations {
 		out = append(out, conversationSummaryFromOperator(item))
 	}
 	return out, nil
@@ -95,14 +101,14 @@ func (r *SQLConversationReader) Get(ctx context.Context, sessionID string) (Conv
 	if err := requireConversationSurfaceCapabilities(caps); err != nil {
 		return ConversationDetail{}, false, err
 	}
-	item, ok, err := r.owner.LoadDashboardOperatorConversation(ctx, sessionID)
+	page, err := r.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 500})
 	if err != nil {
-		if turnErr := requireConversationTurnCapabilities(caps); turnErr != nil {
-			return ConversationDetail{}, false, turnErr
+		if errors.Is(err, store.ErrSessionNotFound) {
+			return ConversationDetail{}, false, nil
 		}
 		return ConversationDetail{}, false, err
 	}
-	return conversationDetailFromOperator(item), ok, nil
+	return conversationDetailFromOperator(page), true, nil
 }
 
 func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
@@ -128,27 +134,14 @@ func conversationSummaryFromOperator(item store.OperatorConversationSummary) Con
 	}
 }
 
-func conversationDetailFromOperator(item store.OperatorConversationDetail) ConversationDetail {
+func conversationDetailFromOperator(item store.OperatorConversationTurnListResult) ConversationDetail {
 	out := ConversationDetail{
-		AgentID:      strings.TrimSpace(item.Conversation.AgentID),
-		SessionID:    strings.TrimSpace(item.Conversation.SessionID),
-		Kind:         strings.TrimSpace(item.Conversation.Kind),
-		ScopeKey:     strings.TrimSpace(item.Conversation.ScopeKey),
-		Scope:        strings.TrimSpace(item.Conversation.Scope),
-		RuntimeMode:  strings.TrimSpace(item.Conversation.RuntimeMode),
-		Status:       strings.TrimSpace(item.Conversation.Status),
-		TurnCount:    item.Conversation.TurnCount,
-		Summary:      strings.TrimSpace(item.Conversation.Summary),
-		UpdatedAt:    formatTime(item.Conversation.UpdatedAt),
-		Messages:     conversationMessagesFromOperator(item.Messages),
-		RuntimeState: conversationStateFromOperator(item.RuntimeState),
+		Conversation: conversationSummaryFromOperator(item.Conversation),
+		NextCursor:   strings.TrimSpace(item.NextCursor),
 	}
 	out.Turns = make([]ConversationTurn, 0, len(item.Turns))
 	for _, turn := range item.Turns {
 		out.Turns = append(out.Turns, conversationTurnFromOperator(turn))
-	}
-	if out.Messages == nil {
-		out.Messages = []ConversationMessage{}
 	}
 	return out
 }
@@ -161,23 +154,6 @@ func conversationMetadataFromOperator(item store.OperatorConversationSummaryMeta
 		Watchdog:             conversationWatchdogFromOperator(item.Watchdog),
 		LiveTurn:             dashboardLiveTurn(item.LiveTurn),
 	}
-}
-
-func conversationStateFromOperator(item store.OperatorConversationState) ConversationRuntimeState {
-	out := ConversationRuntimeState{
-		Summary:              strings.TrimSpace(item.Summary),
-		ProviderSessionID:    strings.TrimSpace(item.ProviderSessionID),
-		RetryReason:          strings.TrimSpace(item.RetryReason),
-		RetriesFromSessionID: strings.TrimSpace(item.RetriesFromSessionID),
-		Watchdog:             conversationWatchdogFromOperator(item.Watchdog),
-	}
-	if item.LastTurn != nil {
-		out.LastTurn = &ConversationRuntimeLastTurn{
-			TaskID:  strings.TrimSpace(item.LastTurn.TaskID),
-			ParseOK: item.LastTurn.ParseOK,
-		}
-	}
-	return out
 }
 
 func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) *ConversationRuntimeWatchdog {
@@ -194,112 +170,26 @@ func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) 
 	}
 }
 
-func conversationMessagesFromOperator(items []store.OperatorConversationMessage) []ConversationMessage {
-	if len(items) == 0 {
-		return []ConversationMessage{}
+func conversationTurnFromOperator(item store.OperatorPublicConversationTurn) ConversationTurn {
+	activity := make([]ConversationActivity, 0, len(item.Activity))
+	for _, fact := range item.Activity {
+		activity = append(activity, ConversationActivity{
+			Kind: fact.Kind, ToolName: fact.ToolName, ToolUseID: fact.ToolUseID,
+			EventID: fact.EventID, EventType: fact.EventType, Text: fact.Text, OK: fact.OK,
+		})
 	}
-	out := make([]ConversationMessage, 0, len(items))
-	for _, item := range items {
-		out = append(out, ConversationMessage{Role: strings.TrimSpace(item.Role), Content: item.Content})
+	var tokens *ConversationTokenUsage
+	if item.Tokens != nil {
+		tokens = &ConversationTokenUsage{Input: item.Tokens.Input, Output: item.Tokens.Output, Exactness: item.Tokens.Exactness}
 	}
-	return out
-}
-
-func conversationTurnFromOperator(item store.OperatorConversationTurn) ConversationTurn {
 	return ConversationTurn{
-		TurnIndex:              item.TurnIndex,
-		TurnID:                 strings.TrimSpace(item.TurnID),
-		AgentID:                strings.TrimSpace(item.AgentID),
-		SessionID:              strings.TrimSpace(item.SessionID),
-		RuntimeMode:            strings.TrimSpace(item.RuntimeMode),
-		ScopeKey:               strings.TrimSpace(item.ScopeKey),
-		EntityID:               strings.TrimSpace(item.EntityID),
-		TriggerEventID:         strings.TrimSpace(item.TriggerEventID),
-		TriggerEventType:       strings.TrimSpace(item.TriggerEventType),
-		TaskID:                 strings.TrimSpace(item.TaskID),
-		AvailableTools:         append([]string(nil), item.AvailableTools...),
-		ToolCalls:              conversationToolCallsFromOperator(item.ToolCalls),
-		ToolResults:            conversationToolResultsFromOperator(item.ToolResults),
-		TurnBlocks:             conversationTurnBlocksFromOperator(item.TurnBlocks),
-		EmittedEvents:          append([]string(nil), item.EmittedEvents...),
-		MCPServers:             cloneStringMap(item.MCPServers),
-		MCPToolsListed:         append([]string(nil), item.MCPToolsListed...),
-		MCPToolsVisible:        append([]string(nil), item.MCPToolsVisible...),
-		RequestPayload:         appendJSONRaw(item.RequestPayload),
-		ResponsePayload:        appendJSONRaw(item.ResponsePayload),
-		AssistantVisibleOutput: strings.TrimSpace(item.AssistantVisibleOutput),
-		ReasoningBlocks:        append([]string(nil), item.ReasoningBlocks...),
-		ProgressUpdates:        append([]string(nil), item.ProgressUpdates...),
-		Outcome:                strings.TrimSpace(item.Outcome),
-		ParseOK:                item.ParseOK,
-		LatencyMS:              item.LatencyMS,
-		RetryCount:             item.RetryCount,
-		Failure:                runtimefailures.CloneEnvelope(item.Failure),
-		CreatedAt:              formatTime(item.CreatedAt),
+		TurnID: item.TurnID, Ordinal: item.Ordinal, CompletedAt: formatTime(item.CompletedAt),
+		DurationMS: item.DurationMS, TriggerEventID: item.TriggerEventID,
+		TriggerEventType: item.TriggerEventType, EntityID: item.EntityID, TaskID: item.TaskID,
+		Activity: activity, Tokens: tokens, Outcome: item.Outcome, ParseOK: item.ParseOK,
+		Failure: runtimefailures.CloneEnvelope(item.Failure), AssistantVisibleOutput: item.AssistantVisibleOutput,
+		RetryCount: item.RetryCount,
 	}
-}
-
-func conversationToolCallsFromOperator(items []store.OperatorConversationToolCall) []ConversationToolCall {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]ConversationToolCall, 0, len(items))
-	for _, item := range items {
-		out = append(out, ConversationToolCall{Name: strings.TrimSpace(item.Name), Arguments: appendJSONRaw(item.Arguments)})
-	}
-	return out
-}
-
-func conversationToolResultsFromOperator(items []store.OperatorConversationToolResult) []ConversationToolResult {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]ConversationToolResult, 0, len(items))
-	for _, item := range items {
-		out = append(out, ConversationToolResult{
-			ToolName:  strings.TrimSpace(item.ToolName),
-			ToolUseID: strings.TrimSpace(item.ToolUseID),
-			Output:    appendJSONRaw(item.Output),
-		})
-	}
-	return out
-}
-
-func conversationTurnBlocksFromOperator(items []store.OperatorConversationTurnBlock) []ConversationTurnBlock {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]ConversationTurnBlock, 0, len(items))
-	for _, item := range items {
-		out = append(out, ConversationTurnBlock{
-			Kind:     strings.TrimSpace(item.Kind),
-			Title:    strings.TrimSpace(item.Title),
-			Text:     item.Text,
-			ToolName: strings.TrimSpace(item.ToolName),
-			Input:    appendJSONRaw(item.Input),
-			Output:   appendJSONRaw(item.Output),
-			Data:     appendJSONRaw(item.Data),
-		})
-	}
-	return out
-}
-
-func appendJSONRaw(in []byte) []byte {
-	if len(in) == 0 {
-		return nil
-	}
-	return append([]byte(nil), in...)
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
 }
 
 func readString(value any) string {

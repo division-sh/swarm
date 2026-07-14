@@ -19,12 +19,28 @@ import (
 )
 
 type fakeConversationCapabilitySource struct {
-	caps StoreSchemaCapabilities
-	err  error
+	caps    StoreSchemaCapabilities
+	turns   map[string]OperatorConversationTurnListResult
+	turnErr error
+	err     error
 }
 
 func (s fakeConversationCapabilitySource) ResolveSchemaCapabilities(context.Context) (StoreSchemaCapabilities, error) {
 	return s.caps, s.err
+}
+
+func (s fakeConversationCapabilitySource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+	if s.turnErr != nil {
+		return OperatorConversationTurnListResult{}, s.turnErr
+	}
+	page, ok := s.turns[strings.TrimSpace(opts.SessionID)]
+	if !ok {
+		page = OperatorConversationTurnListResult{Turns: []OperatorPublicConversationTurn{}}
+	}
+	if page.Turns == nil {
+		page.Turns = []OperatorPublicConversationTurn{}
+	}
+	return page, nil
 }
 
 type fakeAgentConversationReadSource struct {
@@ -33,6 +49,8 @@ type fakeAgentConversationReadSource struct {
 	pending   map[string]PendingAgentDeliveryFacts
 	details   map[string]PendingAgentDeliveryPage
 	lifecycle map[string]AgentDeliveryLifecycleFacts
+	turns     map[string]OperatorConversationTurnListResult
+	turnErr   error
 	err       error
 	detailErr error
 }
@@ -73,6 +91,20 @@ func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ conte
 		out[agentID] = s.lifecycle[agentID]
 	}
 	return out, s.err
+}
+
+func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+	if s.turnErr != nil {
+		return OperatorConversationTurnListResult{}, s.turnErr
+	}
+	page, ok := s.turns[strings.TrimSpace(opts.SessionID)]
+	if !ok {
+		page = OperatorConversationTurnListResult{Turns: []OperatorPublicConversationTurn{}}
+	}
+	if page.Turns == nil {
+		page.Turns = []OperatorPublicConversationTurn{}
+	}
+	return page, nil
 }
 
 func TestOperatorAgentSummaryPublishesModeWithoutLegacyConversationMode(t *testing.T) {
@@ -154,19 +186,6 @@ func canonicalAgentConversationReadCaps() StoreSchemaCapabilities {
 func operatorAgentProjectionColumns() []string {
 	return []string{
 		"agent_id", "status", "session_id", "session_started_at", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
-		"turn_id", "task_id", "entity_id", "parse_ok", "error", "turn_created_at", "turn_blocks",
-	}
-}
-
-func operatorConversationDetailColumns() []string {
-	return []string{
-		"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "conversation", "started_at", "ended_at", "updated_at",
-	}
-}
-
-func operatorConversationTurnColumns() []string {
-	return []string{
-		"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible", "request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
 	}
 }
 
@@ -251,9 +270,10 @@ func TestOperatorConversationReadSurfaceListRejectsRunIDFilterWithoutRunIDCapabi
 
 	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{caps: StoreSchemaCapabilities{
 		Conversations: ConversationSchemaCapabilities{
-			Sessions: SchemaFlavorCanonical,
-			Audits:   SchemaFlavorCanonical,
-			Turns:    SchemaFlavorCanonical,
+			Sessions:   SchemaFlavorCanonical,
+			Audits:     SchemaFlavorCanonical,
+			Turns:      SchemaFlavorCanonical,
+			TurnBlocks: true,
 		},
 	}})
 
@@ -307,20 +327,23 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 
 	runID := "11111111-1111-1111-1111-111111111111"
 	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{caps: StoreSchemaCapabilities{
-		Conversations: ConversationSchemaCapabilities{
+	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{
+		caps: StoreSchemaCapabilities{Conversations: ConversationSchemaCapabilities{
 			Sessions:     SchemaFlavorCanonical,
 			Turns:        SchemaFlavorCanonical,
 			TurnBlocks:   true,
 			SessionRunID: true,
+		}},
+		turns: map[string]OperatorConversationTurnListResult{
+			"sess-1": {Turns: []OperatorPublicConversationTurn{{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []OperatorConversationActivity{}}}},
 		},
-	}})
+	})
 
 	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
 		WithArgs("agent-1", runID, 3).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "started_at", "ended_at", "updated_at",
-		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 4, []byte(`{"summary":"brief"}`), "turn-1", "task-1", true, []byte(`[]`), now, nil, now))
+			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
+		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
 
 	result, err := reader.ListOperatorConversations(context.Background(), OperatorConversationListOptions{
 		AgentID: "agent-1",
@@ -336,6 +359,9 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 	row := result.Conversations[0]
 	if row.SessionID != "sess-1" || row.AgentID != "agent-1" || row.RunID != runID || row.MessageCount != 4 || row.Summary != "brief" {
 		t.Fatalf("unexpected conversation row: %+v", row)
+	}
+	if row.Metadata.LiveTurn == nil || row.Metadata.LiveTurn.TurnID != "turn-1" || row.Metadata.LiveTurn.TaskID != "task-1" {
+		t.Fatalf("latest public turn = %#v", row.Metadata.LiveTurn)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -353,20 +379,20 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	turnID := "22222222-2222-2222-2222-222222222222"
 	sessionStartedAt := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
+	turnFailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "model_error", "llm-runtime", "turn", nil), "llm-runtime", "turn")
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		turns: map[string]OperatorConversationTurnListResult{
+			sessionID: {Turns: []OperatorPublicConversationTurn{{
+				TurnID: turnID, CompletedAt: turnCompletedAt, ParseOK: false, Failure: &turnFailure,
+			}}},
+		},
 	}, 0)
-	turnFailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "model_error", "llm-runtime", "turn", nil), "llm-runtime", "turn")
-	turnFailureRaw, err := runtimefailures.MarshalEnvelope(turnFailure)
-	if err != nil {
-		t.Fatalf("marshal turn failure: %v", err)
-	}
-
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, turnID, "task-1", "entity-1", false, turnFailureRaw, turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
 
 	detail, err := reader.LoadOperatorAgent(context.Background(), "agent-1")
 	if err != nil {
@@ -416,7 +442,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
 	result, err := reader.ListOperatorAgents(context.Background(), OperatorAgentListOptions{})
 	if err != nil {
@@ -458,7 +484,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	eventTime := time.Date(2026, 5, 12, 8, 55, 0, 0, time.UTC)
 	runtimeState := []byte(`{"provider_session_id":"provider-sess-1","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-05-12T09:04:00Z","recorded_at":"2026-05-12T09:05:00Z"}}`)
-	turnBlocks := []byte(`[{"kind":"turn_summary","data":{"assistant_visible_output":"working","tool_results":[{"tool_name":"older_tool","tool_use_id":"toolu-old","output":{"status":"old"}},{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`)
 	agent := testOperatorAgent("agent-1")
 	agent.Config.EntityID = configuredEntityID
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
@@ -483,12 +508,21 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
 		},
+		turns: map[string]OperatorConversationTurnListResult{
+			sessionID: {Turns: []OperatorPublicConversationTurn{{
+				TurnID: turnID, TaskID: "task-1", EntityID: turnEntityID, CompletedAt: turnCompletedAt, ParseOK: true,
+				Activity: []OperatorConversationActivity{
+					{Kind: "tool_result", ToolName: "older_tool", ToolUseID: "toolu-old", OK: boolPointer(true)},
+					{Kind: "tool_result", ToolName: "selected_tool", ToolUseID: "toolu-selected", OK: boolPointer(true)},
+				},
+			}}},
+		},
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, turnID, "task-1", turnEntityID, true, "", turnCompletedAt, turnBlocks))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
@@ -537,13 +571,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	lastTool := diagnosis.LastToolOutcome
 	if lastTool.TurnID != turnID || lastTool.ToolName != "selected_tool" || lastTool.ToolUseID != "toolu-selected" || !lastTool.OK {
 		t.Fatalf("last_tool_outcome = %#v", lastTool)
-	}
-	var lastToolResult map[string]any
-	if err := json.Unmarshal(lastTool.Result, &lastToolResult); err != nil {
-		t.Fatalf("decode last_tool_outcome.result: %v", err)
-	}
-	if lastToolResult["status"] != "selected" {
-		t.Fatalf("last_tool_outcome.result = %#v", lastToolResult)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -1462,7 +1489,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -1493,7 +1520,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 
 func TestOperatorAgentReadSurfaceLoadAgentDiagnosisLastToolOutcomeUsesParseOK(t *testing.T) {
 	turnID := "22222222-2222-2222-2222-222222222222"
-	diagnosis, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", false, []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":{"ok":true}}]}}]`))
+	diagnosis, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", false, []byte(`[{"kind":"tool_result","tool_name":"read_file","output":{"ok":true},"data":{"tool_use_id":"toolu-1"}}]`))
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1529,7 +1556,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsLastToolOutcomeWithoutTo
 	}
 }
 
-func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLastToolOutcome(t *testing.T) {
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedPublicToolActivity(t *testing.T) {
 	turnID := "22222222-2222-2222-2222-222222222222"
 	for _, tc := range []struct {
 		name       string
@@ -1538,18 +1565,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLastToo
 	}{
 		{
 			name:       "missing tool name",
-			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_use_id":"toolu-1","output":{"status":"ok"}}]}}]`),
-			want:       "latest canonical tool_result is missing tool_name",
+			turnBlocks: []byte(`[{"kind":"tool_result","output":{"status":"ok"},"data":{"tool_use_id":"toolu-1"}}]`),
+			want:       "decode public tool result activity: tool_name is required",
 		},
 		{
-			name:       "non object result",
-			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":"ok"}]}}]`),
-			want:       "last_tool_outcome.result must be a JSON object",
-		},
-		{
-			name:       "null result",
-			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":null}]}}]`),
-			want:       "last_tool_outcome.result must be a JSON object",
+			name:       "malformed tool link",
+			turnBlocks: []byte(`[{"kind":"tool_result","tool_name":"read_file","output":"private","data":{"tool_use_id":[]}}]`),
+			want:       "decode public tool result activity",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1558,6 +1580,24 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLastToo
 				t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotInterpretRawToolOutput(t *testing.T) {
+	turnID := "22222222-2222-2222-2222-222222222222"
+	diagnosis, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", true, []byte(`[{"kind":"tool_result","tool_name":"read_file","output":"private-provider-payload","data":{"tool_use_id":"toolu-1"}}]`))
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+	}
+	if diagnosis.LastToolOutcome == nil || diagnosis.LastToolOutcome.ToolName != "read_file" || !diagnosis.LastToolOutcome.OK {
+		t.Fatalf("last_tool_outcome = %#v", diagnosis.LastToolOutcome)
+	}
+	raw, err := json.Marshal(diagnosis.LastToolOutcome)
+	if err != nil {
+		t.Fatalf("marshal last_tool_outcome: %v", err)
+	}
+	if strings.Contains(string(raw), "private-provider-payload") || strings.Contains(string(raw), "result") {
+		t.Fatalf("last_tool_outcome leaked raw tool output: %s", raw)
 	}
 }
 
@@ -1597,7 +1637,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -1629,7 +1669,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -1657,12 +1697,15 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		turns: map[string]OperatorConversationTurnListResult{
+			"sess-1": {Turns: []OperatorPublicConversationTurn{{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []OperatorConversationActivity{}}}},
+		},
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, turnID, "", "", true, "", time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -1694,7 +1737,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
@@ -1723,7 +1766,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
@@ -1788,19 +1831,35 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	source := fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	var turnCompletedAt any
-	if strings.TrimSpace(turnID) != "" {
-		turnCompletedAt = time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	}
+
+	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
+	if strings.TrimSpace(turnID) != "" {
+		turn, projectionErr := projectPublicConversationTurn(conversationTurnRecord{
+			TurnID:        turnID,
+			TaskID:        taskID,
+			EntityID:      entityID,
+			SessionID:     "11111111-1111-1111-1111-111111111111",
+			ParseOK:       parseOK,
+			TurnBlocksRaw: turnBlocks,
+			CreatedAt:     turnCompletedAt,
+		})
+		if projectionErr != nil {
+			source.turnErr = projectionErr
+		} else {
+			source.turns = map[string]OperatorConversationTurnListResult{
+				"11111111-1111-1111-1111-111111111111": {Turns: []OperatorPublicConversationTurn{turn}},
+			}
+		}
+	}
+	reader := NewOperatorAgentConversationReadSurface(db, source, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0, turnID, taskID, entityID, parseOK, "", turnCompletedAt, turnBlocks))
+			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
@@ -1809,209 +1868,6 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	return diagnosis, err
 }
 
-func TestOperatorConversationReadSurfaceCurrentForAgentUsesMostRecentActiveSessionOnly(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sessionID := "11111111-1111-1111-1111-111111111111"
-	runID := "33333333-3333-3333-3333-333333333333"
-	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
-		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, now.Add(-time.Hour), 2, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
-	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
-		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
-			AddRow(sessionID, "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 1, []byte(`{"summary":"active session"}`), []byte(`[{"role":"assistant","content":"ready"}]`), now.Add(-time.Hour), nil, now))
-	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns").
-		WithArgs("agent-1", sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()))
-
-	detail, err := reader.LoadCurrentOperatorConversationForAgent(context.Background(), "agent-1")
-	if err != nil {
-		t.Fatalf("LoadCurrentOperatorConversationForAgent: %v", err)
-	}
-	if detail == nil {
-		t.Fatal("expected active conversation")
-	}
-	if detail.Conversation.SessionID != sessionID || detail.Conversation.Kind != "live_session" || detail.Conversation.Status != "active" {
-		t.Fatalf("conversation = %+v", detail.Conversation)
-	}
-	if detail.Conversation.Summary != "active session" {
-		t.Fatalf("summary = %q", detail.Conversation.Summary)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorConversationReadSurfaceCurrentForAgentReturnsNullWithoutActiveLiveSession(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
-		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
-	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
-		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()))
-
-	detail, err := reader.LoadCurrentOperatorConversationForAgent(context.Background(), "agent-1")
-	if err != nil {
-		t.Fatalf("LoadCurrentOperatorConversationForAgent: %v", err)
-	}
-	if detail != nil {
-		t.Fatalf("expected nil current conversation without active live session, got %+v", detail)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorConversationReadSurfaceLoadConversationAssignsTurnIndexes(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sessionID := "11111111-1111-1111-1111-111111111111"
-	runID := "33333333-3333-3333-3333-333333333333"
-	firstTurnID := "44444444-4444-4444-4444-444444444444"
-	secondTurnID := "55555555-5555-5555-5555-555555555555"
-	startedAt := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
-		WithArgs(sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
-			AddRow(sessionID, "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 1, []byte(`{"summary":"active session"}`), []byte(`[{"role":"assistant","content":"ready"}]`), startedAt, nil, startedAt))
-	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
-		WithArgs("agent-1", sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()).
-			AddRow(firstTurnID, "agent-1", sessionID, "session", "global", "", "66666666-6666-6666-6666-666666666666", "input.received", "task-1", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"turn":1}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1000, 0, "", startedAt).
-			AddRow(secondTurnID, "agent-1", sessionID, "session", "global", "", "77777777-7777-7777-7777-777777777777", "input.received", "task-2", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"turn":2}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1500, 0, "", startedAt.Add(time.Second)))
-
-	detail, err := reader.LoadOperatorConversation(context.Background(), sessionID)
-	if err != nil {
-		t.Fatalf("LoadOperatorConversation: %v", err)
-	}
-	if len(detail.Turns) != 2 {
-		t.Fatalf("turn count = %d, want 2", len(detail.Turns))
-	}
-	if detail.Turns[0].TurnIndex != 1 || detail.Turns[0].TurnID != firstTurnID || detail.Turns[1].TurnIndex != 2 || detail.Turns[1].TurnID != secondTurnID {
-		t.Fatalf("turn indexes = %#v", detail.Turns)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorConversationReadSurfaceLoadTurnComposesConversationOwner(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sessionID := "11111111-1111-1111-1111-111111111111"
-	runID := "33333333-3333-3333-3333-333333333333"
-	firstTurnID := "44444444-4444-4444-4444-444444444444"
-	secondTurnID := "55555555-5555-5555-5555-555555555555"
-	startedAt := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	firstCompletedAt := startedAt.Add(time.Second)
-	secondCompletedAt := startedAt.Add(5 * time.Second)
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
-		WithArgs(sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
-			AddRow(sessionID, "agent-1", runID, "live_session", "global", "global", "session", "terminated", 2, 4, []byte(`{"summary":"active session"}`), []byte(`[{"role":"assistant","content":"ready"}]`), startedAt, secondCompletedAt, secondCompletedAt))
-	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
-		WithArgs("agent-1", sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()).
-			AddRow(firstTurnID, "agent-1", sessionID, "session", "global", "", "", "", "task-1", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"first":true}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1000, 0, "", firstCompletedAt).
-			AddRow(secondTurnID, "agent-1", sessionID, "session", "global", "", "66666666-6666-6666-6666-666666666666", "input.received", "task-2", []byte(`["emit_done","read_state"]`), []byte(`[{"name":"read_state","arguments":{"id":"entity-1"}}]`), []byte(`["task.completed"]`), []byte(`{}`), []byte(`["read_state"]`), []byte(`["read_state"]`), []byte(`{"turn":2}`), []byte(`{"ok":true}`), []byte(`[{"kind":"assistant","text":"done"}]`), true, 1500, 1, "", secondCompletedAt))
-
-	result, err := reader.LoadOperatorConversationTurn(context.Background(), sessionID, 2)
-	if err != nil {
-		t.Fatalf("LoadOperatorConversationTurn: %v", err)
-	}
-	if result.Session.SessionID != sessionID || result.Session.RunID != runID {
-		t.Fatalf("session = %#v", result.Session)
-	}
-	wantStarted := secondCompletedAt.Add(-1500 * time.Millisecond)
-	if result.Turn.TurnIndex != 2 || result.Turn.TurnID != secondTurnID || !result.Turn.StartedAt.Equal(wantStarted) || !result.Turn.CompletedAt.Equal(secondCompletedAt) {
-		t.Fatalf("turn timing/id = %#v", result.Turn)
-	}
-	if !result.RuntimeLogWindowStart.Equal(wantStarted.Add(-time.Nanosecond)) || result.RuntimeLogWindowEnd == nil || !result.RuntimeLogWindowEnd.Equal(secondCompletedAt) {
-		t.Fatalf("runtime log window start=%s end=%v", result.RuntimeLogWindowStart, result.RuntimeLogWindowEnd)
-	}
-	if result.Turn.DispatchMetadata.TaskID != "task-2" || result.Turn.DispatchMetadata.RunID != runID || result.Turn.DispatchMetadata.TriggerEventType != "input.received" {
-		t.Fatalf("dispatch metadata = %#v", result.Turn.DispatchMetadata)
-	}
-	if len(result.Turn.AdvertisedTools) != 2 || result.Turn.AdvertisedTools[1] != "read_state" {
-		t.Fatalf("advertised tools = %#v", result.Turn.AdvertisedTools)
-	}
-	if len(result.TurnBlocksRaw) != 1 || result.TurnBlocksRaw[0].Text != "done" {
-		t.Fatalf("turn_blocks_raw = %#v", result.TurnBlocksRaw)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorConversationReadSurfaceLoadTurnOutOfRange(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sessionID := "11111111-1111-1111-1111-111111111111"
-	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
-		WithArgs(sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
-			AddRow(sessionID, "agent-1", "", "live_session", "global", "global", "session", "active", 0, 0, []byte(`{}`), []byte(`[]`), now, nil, now))
-	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
-		WithArgs("agent-1", sessionID).
-		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()))
-
-	_, err = reader.LoadOperatorConversationTurn(context.Background(), sessionID, 1)
-	if !errors.Is(err, ErrTurnNotFound) {
-		t.Fatalf("LoadOperatorConversationTurn missing turn err = %v, want ErrTurnNotFound", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
+func boolPointer(value bool) *bool {
+	return &value
 }

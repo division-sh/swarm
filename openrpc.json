@@ -2230,74 +2230,6 @@
       ]
     },
     {
-      "name": "conversation.current_for_agent",
-      "description": "Read the agent's current (most-recent active) session. Replaces the\nownership-violating agent.get_session that earlier drafts proposed —\nagent.* doesn't own sessions; conversation.* does.\n",
-      "params": [
-        {
-          "name": "agent_id",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/OpaqueId"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "description": "Returns null if the agent has no active session.",
-        "schema": {
-          "oneOf": [
-            {
-              "$ref": "#/components/schemas/ConversationDetail"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "errors": [
-        {
-          "code": -32004,
-          "message": "Application error: AGENT_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "AGENT_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "agent_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "agent_id"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
       "name": "conversation.fork",
       "description": "Create a forkchat lifecycle session from an existing conversation source\nsession and a validated fork point. This first slice is lifecycle-only:\nit persists source session/run/agent lineage, fork point descriptor,\ncreator token, fixed 24-hour TTL, and deletion state. It does not\nexecute a forked LLM turn, return entity snapshots, expose inherited\ntranscript counts, or write into normal conversation/event/log surfaces.\n",
       "params": [
@@ -2388,14 +2320,13 @@
                   "session_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
-                  "turn_index": {
-                    "minimum": 1,
-                    "type": "integer"
+                  "turn_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
                 "required": [
                   "session_id",
-                  "turn_index"
+                  "turn_id"
                 ],
                 "type": "object"
               },
@@ -2884,68 +2815,8 @@
       ]
     },
     {
-      "name": "conversation.get",
-      "description": "Read one conversation in full — session metadata plus all turns and turn blocks.",
-      "params": [
-        {
-          "name": "session_id",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/OpaqueId"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/ConversationDetail"
-        }
-      },
-      "errors": [
-        {
-          "code": -32041,
-          "message": "Application error: SESSION_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "SESSION_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "session_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "session_id"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
       "name": "conversation.get_turn",
-      "description": "Read one deep single-turn diagnosis record for an existing conversation session.\nThis method composes the canonical conversation/session/turn owner with the canonical persisted runtime log owner; clients MUST NOT reconstruct this shape by independently joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.\n",
+      "description": "Read one closed author-safe turn projection by exact canonical full turn ID within a conversation. Raw provider payloads, private reasoning, unmarked progress, tool payloads, capability telemetry, and automatic runtime-log joins are not part of this contract.\n",
       "params": [
         {
           "name": "session_id",
@@ -2955,20 +2826,10 @@
           }
         },
         {
-          "name": "turn_index",
+          "name": "turn_id",
           "required": true,
-          "description": "1-based position in the session's canonical turn order, matching the `conversation.get` turns array order (`agent_turns.created_at ASC, turn_id ASC`).",
           "schema": {
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "include_logs",
-          "required": false,
-          "schema": {
-            "default": true,
-            "type": "boolean"
+            "$ref": "#/components/schemas/OpaqueId"
           }
         }
       ],
@@ -3037,14 +2898,13 @@
                   "session_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
-                  "turn_index": {
-                    "minimum": 1,
-                    "type": "integer"
+                  "turn_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
                   }
                 },
                 "required": [
                   "session_id",
-                  "turn_index"
+                  "turn_id"
                 ],
                 "type": "object"
               },
@@ -3121,6 +2981,83 @@
           "type": "object"
         }
       }
+    },
+    {
+      "name": "conversation.list_turns",
+      "description": "List the closed author-safe turn projection for one conversation. Pages are newest first, bounded to 500 rows, and use an opaque cursor over the canonical persisted created_at plus turn_id order. Ordinal is a stable display projection and is never an input identity.\n",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationTurnListPage"
+        }
+      },
+      "errors": [
+        {
+          "code": -32041,
+          "message": "Application error: SESSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SESSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
     },
     {
       "name": "entity.aggregate",
@@ -9122,11 +9059,6 @@
             "description": "Selected latest agent_turns.parse_ok; not a per-tool execution status.",
             "type": "boolean"
           },
-          "result": {
-            "additionalProperties": true,
-            "description": "Optional validated JSON object from the selected canonical tool_results entry.",
-            "type": "object"
-          },
           "tool_name": {
             "minLength": 1,
             "type": "string"
@@ -9960,180 +9892,41 @@
         ],
         "type": "object"
       },
-      "ConversationDeepTurn": {
+      "ConversationActivity": {
         "additionalProperties": false,
         "properties": {
-          "advertised_tools": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "assistant_visible_output": {
-            "type": "string"
-          },
-          "completed_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "dispatch_metadata": {
-            "$ref": "#/components/schemas/ConversationTurnDispatchMetadata"
-          },
-          "duration_ms": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "emitted_events": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/FailureEnvelope"
-          },
-          "full_prompt_context": {
-            "oneOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "full_prompt_context_v2_reserved": {
-            "const": true,
-            "type": "boolean"
-          },
-          "mcp_tools_listed": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "mcp_tools_visible": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "parse_ok": {
-            "type": "boolean"
-          },
-          "progress_updates": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "provider_metadata": {
-            "$ref": "#/components/schemas/ConversationTurnProviderMetadata"
-          },
-          "raw_llm_response": {
-            "oneOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "raw_llm_response_v2_reserved": {
-            "const": true,
-            "type": "boolean"
-          },
-          "reasoning_blocks": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "request_payload": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "response_payload": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "retry_count": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "runtime_log_entries": {
-            "items": {
-              "$ref": "#/components/schemas/LogEntry"
-            },
-            "type": "array"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "started_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "tool_calls": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "tool_results": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "turn_id": {
+          "event_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
-          "turn_index": {
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "turn_index",
-          "turn_id",
-          "started_at",
-          "completed_at",
-          "duration_ms",
-          "parse_ok",
-          "dispatch_metadata",
-          "advertised_tools",
-          "runtime_log_entries",
-          "provider_metadata",
-          "full_prompt_context",
-          "full_prompt_context_v2_reserved",
-          "raw_llm_response",
-          "raw_llm_response_v2_reserved"
-        ],
-        "type": "object"
-      },
-      "ConversationDetail": {
-        "additionalProperties": false,
-        "properties": {
-          "conversation": {
-            "$ref": "#/components/schemas/ConversationSummary"
+          "event_type": {
+            "type": "string"
           },
-          "turns": {
-            "items": {
-              "$ref": "#/components/schemas/Turn"
-            },
-            "type": "array"
+          "kind": {
+            "enum": [
+              "dispatch",
+              "tool",
+              "tool_result",
+              "publish",
+              "output",
+              "failure"
+            ],
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "tool_use_id": {
+            "type": "string"
           }
         },
         "required": [
-          "conversation",
-          "turns"
+          "kind"
         ],
         "type": "object"
       },
@@ -10280,7 +10073,7 @@
       },
       "ConversationForkPointSelector": {
         "additionalProperties": false,
-        "description": "Selector for the source conversation fork point. Exactly one selector kind is accepted. For `turn`, turn_index is the canonical 1-based conversation order used by conversation.get_turn. For `event`, event_id must be the trigger_event_id for exactly one turn in the source session. For `time`, at resolves to the latest source turn with agent_turns.created_at \u003c= at, using created_at ASC then turn_id ASC as the canonical order.",
+        "description": "Selector for the source conversation fork point. Exactly one selector kind is accepted. For turn, turn_id is an opaque canonical full ID and is resolved by exact session plus turn lookup; prefixes and ordinals are not accepted. Event and time use the same coordinate owner.\n",
         "properties": {
           "at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -10296,9 +10089,8 @@
             ],
             "type": "string"
           },
-          "turn_index": {
-            "minimum": 1,
-            "type": "integer"
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
           }
         },
         "required": [
@@ -10559,6 +10351,32 @@
         ],
         "type": "object"
       },
+      "ConversationTokenUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "exactness": {
+            "enum": [
+              "exact",
+              "estimated"
+            ],
+            "type": "string"
+          },
+          "input": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "exactness"
+        ],
+        "type": "object"
+      },
       "ConversationTurnDetail": {
         "additionalProperties": false,
         "properties": {
@@ -10566,54 +10384,34 @@
             "$ref": "#/components/schemas/ConversationSummary"
           },
           "turn": {
-            "$ref": "#/components/schemas/ConversationDeepTurn"
+            "$ref": "#/components/schemas/Turn"
+          }
+        },
+        "required": [
+          "session",
+          "turn"
+        ],
+        "type": "object"
+      },
+      "ConversationTurnListPage": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/ConversationSummary"
           },
-          "turn_blocks_raw": {
+          "next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "turns": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/Turn"
             },
             "type": "array"
           }
         },
         "required": [
-          "session",
-          "turn",
-          "turn_blocks_raw"
-        ],
-        "type": "object"
-      },
-      "ConversationTurnDispatchMetadata": {
-        "additionalProperties": false,
-        "properties": {
-          "entity_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "run_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "task_id": {
-            "type": "string"
-          },
-          "trigger_event_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "trigger_event_type": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "ConversationTurnProviderMetadata": {
-        "additionalProperties": false,
-        "properties": {
-          "latency_ms": {
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "latency_ms"
+          "conversation",
+          "turns"
         ],
         "type": "object"
       },
@@ -12737,31 +12535,48 @@
       "Turn": {
         "additionalProperties": false,
         "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationActivity"
+            },
+            "type": "array"
+          },
+          "assistant_visible_output": {
+            "type": "string"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "duration_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
-          "latency_ms": {
-            "minimum": 0,
+          "ordinal": {
+            "description": "Stable 1-based display position in canonical ascending order; never accepted as identity.",
+            "minimum": 1,
             "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
           },
           "parse_ok": {
             "type": "boolean"
           },
-          "request_payload": {
-            "additionalProperties": true,
-            "type": "object"
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
           },
-          "response_payload": {
-            "additionalProperties": true,
-            "type": "object"
+          "task_id": {
+            "type": "string"
           },
-          "tool_calls": {
-            "description": "Sandbox-observed tool calls requested during this fork-local turn. Entries may include snapshot-read evidence and requested side-effect tool results stubbed as fork-local facts; they are not synthesized for unrequested tools and are not live runtime side effects.",
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
+          "tokens": {
+            "$ref": "#/components/schemas/ConversationTokenUsage"
           },
           "trigger_event_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -12769,28 +12584,17 @@
           "trigger_event_type": {
             "type": "string"
           },
-          "turn_blocks": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
-          },
           "turn_id": {
             "$ref": "#/components/schemas/OpaqueId"
-          },
-          "turn_index": {
-            "minimum": 1,
-            "type": "integer"
           }
         },
         "required": [
-          "turn_index",
           "turn_id",
-          "trigger_event_id",
-          "trigger_event_type",
-          "parse_ok",
-          "latency_ms"
+          "ordinal",
+          "completed_at",
+          "duration_ms",
+          "activity",
+          "parse_ok"
         ],
         "type": "object"
       },
@@ -14807,14 +14611,13 @@
                 "session_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 },
-                "turn_index": {
-                  "minimum": 1,
-                  "type": "integer"
+                "turn_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
                 }
               },
               "required": [
                 "session_id",
-                "turn_index"
+                "turn_id"
               ],
               "type": "object"
             },

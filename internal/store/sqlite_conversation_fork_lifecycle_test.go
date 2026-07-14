@@ -21,7 +21,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 
 	turnFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})

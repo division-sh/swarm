@@ -89,6 +89,18 @@ type agentLifecycleFactSource interface {
 	ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error)
 }
 
+type operatorConversationTurnListSource interface {
+	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
+}
+
+func (s *dashboardAgentReadSource) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+	source, ok := s.source.(operatorConversationTurnListSource)
+	if !ok || source == nil {
+		return store.OperatorConversationTurnListResult{}, errors.New("dashboard agent reader requires the canonical turn owner")
+	}
+	return source.ListOperatorConversationTurns(ctx, opts)
+}
+
 func (s *dashboardAgentReadSource) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	source, ok := s.source.(dashboardLoadAgentsSource)
 	if !ok || source == nil {

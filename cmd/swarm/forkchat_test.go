@@ -42,7 +42,7 @@ func TestForkChatNewCreatesForkAndOptionalChatViaCanonicalRPC(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"forkchat", "new", "sess-1",
-		"--turn-index", "2",
+		"--turn-id", "turn-2",
 		"--message", "inspect fork",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -58,8 +58,8 @@ func TestForkChatNewCreatesForkAndOptionalChatViaCanonicalRPC(t *testing.T) {
 	wantCreateParams := map[string]any{
 		"source_session_id": "sess-1",
 		"fork_point": map[string]any{
-			"kind":       "turn",
-			"turn_index": float64(2),
+			"kind":    "turn",
+			"turn_id": "turn-2",
 		},
 		"idempotency_key": "idem-1",
 	}
@@ -91,6 +91,11 @@ func TestForkChatNewSelectorMappings(t *testing.T) {
 		args          []string
 		wantForkPoint map[string]any
 	}{
+		{
+			name:          "turn",
+			args:          []string{"forkchat", "new", "sess-1", "--turn-id", "turn-1"},
+			wantForkPoint: map[string]any{"kind": "turn", "turn_id": "turn-1"},
+		},
 		{
 			name:          "event",
 			args:          []string{"forkchat", "new", "sess-1", "--event-id", "event-1"},
@@ -236,11 +241,11 @@ func TestForkChatCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "new missing selector", args: []string{"forkchat", "new", "sess-1"}, wantStderr: "exactly one fork point selector is required"},
-		{name: "new multiple selectors", args: []string{"forkchat", "new", "sess-1", "--turn-index", "1", "--event-id", "event-1"}, wantStderr: "exactly one fork point selector is required"},
-		{name: "new turn index low", args: []string{"forkchat", "new", "sess-1", "--turn-index", "0"}, wantStderr: "--turn-index must be an integer from 1 to 1000000"},
+		{name: "new multiple selectors", args: []string{"forkchat", "new", "sess-1", "--turn-id", "turn-1", "--event-id", "event-1"}, wantStderr: "exactly one fork point selector is required"},
+		{name: "new blank turn id", args: []string{"forkchat", "new", "sess-1", "--turn-id", " "}, wantStderr: "--turn-id must be non-empty"},
 		{name: "new blank event id", args: []string{"forkchat", "new", "sess-1", "--event-id", " "}, wantStderr: "--event-id must be non-empty"},
 		{name: "new invalid at", args: []string{"forkchat", "new", "sess-1", "--at", "tomorrow"}, wantStderr: "--at must be an RFC3339 timestamp"},
-		{name: "new blank message", args: []string{"forkchat", "new", "sess-1", "--turn-index", "1", "--message", " "}, wantStderr: "--message must be non-empty"},
+		{name: "new blank message", args: []string{"forkchat", "new", "sess-1", "--turn-id", "turn-1", "--message", " "}, wantStderr: "--message must be non-empty"},
 		{name: "resume missing message", args: []string{"forkchat", "resume", "fork-1"}, wantStderr: "--message is required"},
 		{name: "resume invalid fork id", args: []string{"forkchat", "resume", "bad id!", "--message", "hello"}, wantStderr: "fork id must match OpaqueId pattern"},
 		{name: "list invalid limit", args: []string{"forkchat", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},

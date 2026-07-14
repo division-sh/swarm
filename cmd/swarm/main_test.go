@@ -5244,21 +5244,35 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		return result
 	}
 
+	missingKey := keyPrefix + "-missing-turn"
+	missingTurnID := uuid.NewString()
+	missing := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork", map[string]any{
+		"source_session_id": fixture.SessionID,
+		"fork_point":        map[string]any{"kind": "turn", "turn_id": missingTurnID},
+		"idempotency_key":   missingKey,
+	})
+	if missing.Data["code"] != apiv1.TurnNotFoundCode {
+		t.Fatalf("%s missing exact turn error = %#v", rt.Backend, missing.Data)
+	}
+	if got := servedConversationForkRequestArtifactCounts(t, rt.DB, rt.Backend, fixture.SessionID, missingKey); got != ([4]int{}) {
+		t.Fatalf("%s missing exact turn persisted request artifacts = %#v, want none", rt.Backend, got)
+	}
+
 	turnKey := keyPrefix + "-turn"
-	turnFork := create(map[string]any{"kind": "turn", "turn_index": 1}, turnKey)
+	turnFork := create(map[string]any{"kind": "turn", "turn_id": fixture.Turn1ID}, turnKey)
 	if turnFork.Fork.SourceRunID != fixture.RunID || turnFork.Fork.SourceAgentID != fixture.AgentID || turnFork.Fork.ForkPoint.TurnID != fixture.Turn1ID || turnFork.Fork.State != "active" {
 		t.Fatalf("%s turn fork = %#v", rt.Backend, turnFork)
 	}
 	if got := turnFork.Fork.ExpiresAt.Sub(turnFork.Fork.CreatedAt); got != store.ConversationForkLifecycleTTL {
 		t.Fatalf("%s fork TTL = %s, want %s", rt.Backend, got, store.ConversationForkLifecycleTTL)
 	}
-	turnReplay := create(map[string]any{"kind": "turn", "turn_index": 1}, turnKey)
+	turnReplay := create(map[string]any{"kind": "turn", "turn_id": fixture.Turn1ID}, turnKey)
 	if !turnReplay.IdempotencyReplayed || turnReplay.Fork.ForkID != turnFork.Fork.ForkID {
 		t.Fatalf("%s turn fork replay = %#v", rt.Backend, turnReplay)
 	}
 	conflict := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork", map[string]any{
 		"source_session_id": fixture.SessionID,
-		"fork_point":        map[string]any{"kind": "turn", "turn_index": 2},
+		"fork_point":        map[string]any{"kind": "turn", "turn_id": fixture.Turn2ID},
 		"idempotency_key":   turnKey,
 	})
 	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
@@ -5466,6 +5480,32 @@ func servedConversationForkLiveCounts(t *testing.T, db *sql.DB, backend, runID s
 		return servedConversationForkCounts{Runs: count(`SELECT COUNT(*) FROM runs`), Events: count(`SELECT COUNT(*) FROM events`), Mailbox: count(`SELECT COUNT(*) FROM mailbox`), Mutations: count(`SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, runID)}
 	}
 	return servedConversationForkCounts{Runs: count(`SELECT COUNT(*) FROM runs`), Events: count(`SELECT COUNT(*) FROM events`), Mailbox: count(`SELECT COUNT(*) FROM mailbox`), Mutations: count(`SELECT COUNT(*) FROM entity_mutations WHERE run_id = ?`, runID)}
+}
+
+func servedConversationForkRequestArtifactCounts(t *testing.T, db *sql.DB, backend, sessionID, idempotencyKey string) [4]int {
+	t.Helper()
+	queries := []string{
+		`SELECT COUNT(*) FROM api_idempotency WHERE method = 'conversation.fork' AND idempotency_key = ?`,
+		`SELECT COUNT(*) FROM conversation_forks WHERE source_session_id = ?`,
+		`SELECT COUNT(*) FROM conversation_fork_snapshots`,
+		`SELECT COUNT(*) FROM conversation_fork_turns`,
+	}
+	args := []any{idempotencyKey, sessionID, nil, nil}
+	if backend == "postgres" {
+		queries[0] = `SELECT COUNT(*) FROM api_idempotency WHERE method = 'conversation.fork' AND idempotency_key = $1`
+		queries[1] = `SELECT COUNT(*) FROM conversation_forks WHERE source_session_id = $1::uuid`
+	}
+	var counts [4]int
+	for i, query := range queries {
+		var queryArgs []any
+		if args[i] != nil {
+			queryArgs = []any{args[i]}
+		}
+		if err := db.QueryRowContext(context.Background(), query, queryArgs...).Scan(&counts[i]); err != nil {
+			t.Fatalf("%s count conversation fork request artifact %d: %v", backend, i, err)
+		}
+	}
+	return counts
 }
 
 func requireServedConversationForkRowCount(t *testing.T, db *sql.DB, backend, table, forkID string, want int) {

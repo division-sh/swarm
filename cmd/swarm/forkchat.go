@@ -24,13 +24,13 @@ type forkChatNewCommandOptions struct {
 	output     cliOutputOptions
 	logging    cliLoggingOptions
 
-	turnIndex      int
+	turnID         string
 	eventID        string
 	at             string
 	message        string
 	idempotencyKey string
 
-	turnIndexSet      bool
+	turnIDSet         bool
 	eventIDSet        bool
 	atSet             bool
 	messageSet        bool
@@ -201,7 +201,7 @@ func newForkChatNewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Create a sandboxed forkchat session.",
 		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			newOpts.turnIndexSet = cmd.Flags().Changed("turn-index")
+			newOpts.turnIDSet = cmd.Flags().Changed("turn-id")
 			newOpts.eventIDSet = cmd.Flags().Changed("event-id")
 			newOpts.atSet = cmd.Flags().Changed("at")
 			newOpts.messageSet = cmd.Flags().Changed("message")
@@ -216,7 +216,7 @@ func newForkChatNewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	setCLIArgDiscoveryHint(cmd, "List conversation session ids with `swarm conversation list`.")
-	cmd.Flags().IntVar(&newOpts.turnIndex, "turn-index", 0, "Fork at this 1-based source conversation turn index")
+	cmd.Flags().StringVar(&newOpts.turnID, "turn-id", "", "Fork at this full source conversation turn id")
 	cmd.Flags().StringVar(&newOpts.eventID, "event-id", "", "Fork at the source turn triggered by this event id")
 	cmd.Flags().StringVar(&newOpts.at, "at", "", "Fork at the latest source turn at or before this RFC3339 timestamp")
 	cmd.Flags().StringVarP(&newOpts.message, "message", "m", "", "Optional first sandboxed message after fork creation")
@@ -503,19 +503,23 @@ func (opts forkChatNewCommandOptions) createParams(sourceSessionID string) (map[
 
 func (opts forkChatNewCommandOptions) forkPoint() (map[string]any, error) {
 	count := 0
-	for _, set := range []bool{opts.turnIndexSet, opts.eventIDSet, opts.atSet} {
+	for _, set := range []bool{opts.turnIDSet, opts.eventIDSet, opts.atSet} {
 		if set {
 			count++
 		}
 	}
 	if count != 1 {
-		return nil, fmt.Errorf("exactly one fork point selector is required: --turn-index, --event-id, or --at")
+		return nil, fmt.Errorf("exactly one fork point selector is required: --turn-id, --event-id, or --at")
 	}
-	if opts.turnIndexSet {
-		if opts.turnIndex < 1 || opts.turnIndex > 1000000 {
-			return nil, fmt.Errorf("--turn-index must be an integer from 1 to 1000000")
+	if opts.turnIDSet {
+		turnID, err := optionalNonEmptyFlag("--turn-id", opts.turnID, true)
+		if err != nil {
+			return nil, err
 		}
-		return map[string]any{"kind": "turn", "turn_index": opts.turnIndex}, nil
+		if err := validateConversationOpaqueIDArg("--turn-id", turnID); err != nil {
+			return nil, err
+		}
+		return map[string]any{"kind": "turn", "turn_id": turnID}, nil
 	}
 	if opts.eventIDSet {
 		eventID, err := optionalNonEmptyFlag("--event-id", opts.eventID, opts.eventIDSet)

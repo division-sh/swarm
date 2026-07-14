@@ -64,65 +64,43 @@ type ConversationSummaryMetadata struct {
 }
 
 type ConversationDetail struct {
-	AgentID      string                   `json:"agent_id"`
-	SessionID    string                   `json:"session_id,omitempty"`
-	Kind         string                   `json:"kind,omitempty"`
-	ScopeKey     string                   `json:"scope_key,omitempty"`
-	Scope        string                   `json:"scope,omitempty"`
-	RuntimeMode  string                   `json:"runtime_mode,omitempty"`
-	Status       string                   `json:"status,omitempty"`
-	TurnCount    int                      `json:"turn_count,omitempty"`
-	Summary      string                   `json:"summary,omitempty"`
-	UpdatedAt    string                   `json:"updated_at,omitempty"`
-	Messages     []ConversationMessage    `json:"messages"`
-	Turns        []ConversationTurn       `json:"turns,omitempty"`
-	RuntimeState ConversationRuntimeState `json:"runtime_state,omitempty"`
+	Conversation ConversationSummary `json:"conversation"`
+	Turns        []ConversationTurn  `json:"turns"`
+	NextCursor   string              `json:"next_cursor,omitempty"`
 }
 
 type ConversationTurn struct {
-	TurnIndex              int                       `json:"turn_index,omitempty"`
 	TurnID                 string                    `json:"turn_id"`
-	AgentID                string                    `json:"agent_id,omitempty"`
-	SessionID              string                    `json:"session_id,omitempty"`
-	RuntimeMode            string                    `json:"runtime_mode,omitempty"`
-	ScopeKey               string                    `json:"scope_key,omitempty"`
-	EntityID               string                    `json:"entity_id,omitempty"`
+	Ordinal                int                       `json:"ordinal"`
+	CompletedAt            string                    `json:"completed_at"`
+	DurationMS             int                       `json:"duration_ms"`
 	TriggerEventID         string                    `json:"trigger_event_id,omitempty"`
 	TriggerEventType       string                    `json:"trigger_event_type,omitempty"`
+	EntityID               string                    `json:"entity_id,omitempty"`
 	TaskID                 string                    `json:"task_id,omitempty"`
-	AvailableTools         []string                  `json:"available_tools,omitempty"`
-	ToolCalls              []ConversationToolCall    `json:"tool_calls,omitempty"`
-	ToolResults            []ConversationToolResult  `json:"tool_results,omitempty"`
-	TurnBlocks             []ConversationTurnBlock   `json:"turn_blocks,omitempty"`
-	EmittedEvents          []string                  `json:"emitted_events,omitempty"`
-	MCPServers             map[string]string         `json:"mcp_servers,omitempty"`
-	MCPToolsListed         []string                  `json:"mcp_tools_listed,omitempty"`
-	MCPToolsVisible        []string                  `json:"mcp_tools_visible,omitempty"`
-	RequestPayload         json.RawMessage           `json:"request_payload,omitempty"`
-	ResponsePayload        json.RawMessage           `json:"response_payload,omitempty"`
-	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
-	ReasoningBlocks        []string                  `json:"reasoning_blocks,omitempty"`
-	ProgressUpdates        []string                  `json:"progress_updates,omitempty"`
+	Activity               []ConversationActivity    `json:"activity"`
+	Tokens                 *ConversationTokenUsage   `json:"tokens,omitempty"`
 	Outcome                string                    `json:"outcome,omitempty"`
 	ParseOK                bool                      `json:"parse_ok"`
-	LatencyMS              int                       `json:"latency_ms,omitempty"`
-	RetryCount             int                       `json:"retry_count,omitempty"`
 	Failure                *runtimefailures.Envelope `json:"failure,omitempty"`
-	CreatedAt              string                    `json:"created_at,omitempty"`
+	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
+	RetryCount             int                       `json:"retry_count,omitempty"`
 }
 
-type ConversationRuntimeState struct {
-	Summary              string                       `json:"summary,omitempty"`
-	LastTurn             *ConversationRuntimeLastTurn `json:"last_turn,omitempty"`
-	ProviderSessionID    string                       `json:"provider_session_id,omitempty"`
-	RetryReason          string                       `json:"retry_reason,omitempty"`
-	RetriesFromSessionID string                       `json:"retries_from_session_id,omitempty"`
-	Watchdog             *ConversationRuntimeWatchdog `json:"watchdog,omitempty"`
+type ConversationActivity struct {
+	Kind      string `json:"kind"`
+	ToolName  string `json:"tool_name,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	EventID   string `json:"event_id,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+	Text      string `json:"text,omitempty"`
+	OK        *bool  `json:"ok,omitempty"`
 }
 
-type ConversationRuntimeLastTurn struct {
-	TaskID  string `json:"task_id,omitempty"`
-	ParseOK bool   `json:"parse_ok"`
+type ConversationTokenUsage struct {
+	Input     int64  `json:"input"`
+	Output    int64  `json:"output"`
+	Exactness string `json:"exactness"`
 }
 
 type ConversationRuntimeWatchdog struct {
@@ -140,34 +118,7 @@ type OperatorLiveTurn struct {
 	ParseOK                bool           `json:"parse_ok"`
 	AssistantVisibleOutput string         `json:"assistant_visible_output,omitempty"`
 	Outcome                string         `json:"outcome,omitempty"`
-	ProgressUpdates        []string       `json:"progress_updates,omitempty"`
 	LastTool               *AgentLastTool `json:"last_tool,omitempty"`
-}
-
-type ConversationMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type ConversationToolCall struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
-}
-
-type ConversationToolResult struct {
-	ToolName  string          `json:"tool_name,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Output    json.RawMessage `json:"output,omitempty"`
-}
-
-type ConversationTurnBlock struct {
-	Kind     string          `json:"kind"`
-	Title    string          `json:"title,omitempty"`
-	Text     string          `json:"text,omitempty"`
-	ToolName string          `json:"tool_name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Output   json.RawMessage `json:"output,omitempty"`
-	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 type ConversationReader interface {
@@ -177,7 +128,7 @@ type ConversationReader interface {
 
 type canonicalConversationReader interface {
 	ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
-	LoadOperatorConversation(ctx context.Context, sessionID string) (store.OperatorConversationDetail, error)
+	ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
 }
 
 type ObservabilityReader interface {
@@ -336,10 +287,9 @@ type genericAgent struct {
 }
 
 type AgentLastTool struct {
-	Name      string          `json:"name"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	OK        bool            `json:"ok"`
-	Result    json.RawMessage `json:"result,omitempty"`
+	Name      string `json:"name"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	OK        bool   `json:"ok"`
 }
 
 type instanceAggregateGroup struct {
@@ -523,7 +473,7 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, errors.New("session id is required"))
 		return
 	}
-	row, err := reader.LoadOperatorConversation(r.Context(), sessionID)
+	row, err := reader.ListOperatorConversationTurns(r.Context(), store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 500})
 	if err != nil {
 		if errors.Is(err, store.ErrSessionNotFound) {
 			writeJSONError(w, http.StatusNotFound, errors.New("conversation not found"))
@@ -1078,7 +1028,6 @@ func dashboardAgentLastTool(item *store.OperatorAgentTool) *AgentLastTool {
 		Name:      strings.TrimSpace(item.Name),
 		ToolUseID: strings.TrimSpace(item.ToolUseID),
 		OK:        item.OK,
-		Result:    append(json.RawMessage(nil), item.Result...),
 	}
 }
 
@@ -1092,7 +1041,6 @@ func dashboardLiveTurn(item *store.OperatorLiveTurn) *OperatorLiveTurn {
 		ParseOK:                item.ParseOK,
 		AssistantVisibleOutput: strings.TrimSpace(item.AssistantVisibleOutput),
 		Outcome:                strings.TrimSpace(item.Outcome),
-		ProgressUpdates:        append([]string(nil), item.ProgressUpdates...),
 		LastTool:               dashboardAgentLastTool(item.LastTool),
 	}
 }
