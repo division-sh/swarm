@@ -72,17 +72,17 @@ type conversationTurnPage struct {
 }
 
 type conversationTurnListItem struct {
-	Ordinal          int                        `json:"ordinal"`
-	TurnID           string                     `json:"turn_id"`
-	CompletedAt      string                     `json:"completed_at"`
-	DurationMS       *int                       `json:"duration_ms"`
-	TriggerEventID   string                     `json:"trigger_event_id,omitempty"`
-	TriggerEventType string                     `json:"trigger_event_type,omitempty"`
-	ActivityCounts   conversationActivityCounts `json:"activity_counts"`
-	Tokens           *conversationTokenUsage    `json:"tokens,omitempty"`
-	Outcome          string                     `json:"outcome,omitempty"`
-	ParseOK          *bool                      `json:"parse_ok"`
-	Failure          *runtimefailures.Envelope  `json:"failure,omitempty"`
+	Ordinal          int                         `json:"ordinal"`
+	TurnID           string                      `json:"turn_id"`
+	CompletedAt      string                      `json:"completed_at"`
+	DurationMS       *int                        `json:"duration_ms"`
+	TriggerEventID   string                      `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                      `json:"trigger_event_type,omitempty"`
+	ActivityCounts   *conversationActivityCounts `json:"activity_counts"`
+	Tokens           *conversationTokenUsage     `json:"tokens,omitempty"`
+	Outcome          string                      `json:"outcome,omitempty"`
+	ParseOK          *bool                       `json:"parse_ok"`
+	Failure          *runtimefailures.Envelope   `json:"failure,omitempty"`
 }
 
 type conversationActivityCounts struct {
@@ -561,6 +561,9 @@ func validateConversationTurnListItem(prefix string, turn conversationTurnListIt
 	if turn.ParseOK == nil {
 		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
 	}
+	if turn.ActivityCounts == nil {
+		return fmt.Errorf("malformed %s: activity_counts is required", prefix)
+	}
 	if strings.TrimSpace(turn.TriggerEventID) != "" {
 		if err := validateConversationOpaqueIDArg(prefix+".trigger_event_id", turn.TriggerEventID); err != nil {
 			return fmt.Errorf("malformed %s: %w", prefix, err)
@@ -716,7 +719,10 @@ func conversationListTriggerSummary(turn conversationTurnListItem) string {
 	return firstNonEmpty(strings.TrimSpace(turn.TriggerEventType), strings.TrimSpace(turn.TriggerEventID))
 }
 
-func conversationActivityCountsSummary(counts conversationActivityCounts) string {
+func conversationActivityCountsSummary(counts *conversationActivityCounts) string {
+	if counts == nil {
+		return ""
+	}
 	parts := make([]string, 0, 6)
 	for _, item := range []struct {
 		count int
