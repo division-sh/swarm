@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -335,6 +338,82 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		if status != want {
 			t.Fatalf("lifecycle session revision %d status = %q, want %q", revision, status, want)
 		}
+	}
+}
+
+func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	store := &PostgresStore{DB: db}
+
+	tests := []struct {
+		name   string
+		mutate func(context.Context, *PostgresStore, runtimepipeline.Schedule) error
+	}{
+		{
+			name: "mark fired",
+			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
+				return store.MarkScheduleFired(ctx, schedule)
+			},
+		},
+		{
+			name: "mark exact fired",
+			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
+				return store.MarkScheduleFiredExact(ctx, schedule)
+			},
+		},
+		{
+			name: "cancel",
+			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
+				return store.CancelSchedule(ctx, schedule.AgentID, schedule.EventType)
+			},
+		},
+		{
+			name: "cancel exact",
+			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
+				return store.CancelScheduleExact(ctx, schedule)
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			schedule := runtimepipeline.Schedule{
+				RunID:        runID,
+				AgentID:      fmt.Sprintf("revision-agent-%d", index),
+				EventType:    fmt.Sprintf("revision.timer.%d", index),
+				Mode:         "once",
+				At:           time.Now().Add(time.Hour),
+				EntityID:     uuid.NewString(),
+				FlowInstance: fmt.Sprintf("revision-flow-%d", index),
+				TaskID:       fmt.Sprintf("revision-task-%d", index),
+				Payload:      []byte(`{}`),
+			}
+			if err := store.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("upsert schedule: %v", err)
+			}
+			if err := test.mutate(ctx, store, schedule); err != nil {
+				t.Fatalf("first mutation: %v", err)
+			}
+			var revision int64
+			if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&revision); err != nil {
+				t.Fatalf("load revision after terminal mutation: %v", err)
+			}
+			if err := test.mutate(ctx, store, schedule); err != nil {
+				t.Fatalf("duplicate mutation: %v", err)
+			}
+			var afterDuplicate int64
+			if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterDuplicate); err != nil {
+				t.Fatalf("load revision after duplicate mutation: %v", err)
+			}
+			if afterDuplicate != revision {
+				t.Fatalf("revision after duplicate mutation = %d, want unchanged %d", afterDuplicate, revision)
+			}
+		})
 	}
 }
 
