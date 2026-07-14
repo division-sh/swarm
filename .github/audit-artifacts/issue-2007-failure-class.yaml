@@ -2148,24 +2148,32 @@ superseded_terminal_decision_card_evidence_reaudit:
   blocking_condition: fresh_independent_gate_required_before_runtime_or_spec_implementation
 
 terminal_run_decision_card_supersession_reaudit:
-  status: approved_implementation_review_repair_active
-  audit_base: 94035056
+  status: approved_post_upstream_expiry_absorbed_implementation_active
+  audit_base: adcfa900
   architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
   migration_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
+  post_upstream_expiry_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4971103943
   superseded_migration_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
   supersedes_artifact_commits:
     - bb7c25f9c6bba983d0fcd04e4db88e5cd32c6308
     - bbc2399a3a9cf01ddcfe6594270c9c570d590c38
-  issue_category: high_risk_terminal_lifecycle_state_atomicity_backend_parity_and_pre_1_0_schema_compatibility_cutoff
+  issue_category: high_risk_decision_card_lifecycle_state_event_atomicity_backend_parity_and_pre_1_0_schema_compatibility_cutoff
   observed_symptom: >-
     Run-level terminalization already commits the authoritative superseded card,
     gate, draft, and append-only decision-card change state, but also creates a
     lifecycle outbox intent for an event-loop event whose catalog meaning is an
     active competing-stage exit. Releasing that intent after terminalization
     invents executable work for a lifecycle transition that is already fully
-    represented by domain state and its resumable change cursor.
+    represented by domain state and its resumable change cursor. Current master
+    also writes the same obsolete outbox for automatic human-task expiry, where
+    the event is a required executable requester outcome. Removing only the
+    terminal producer or table would retain dual ownership or silently break
+    human_task.expired delivery.
   exact_semantic_concepts:
     - terminal_run_decision_card_state_and_change_atomicity
+    - human_task_expiry_state_and_executable_outcome_atomicity
+    - human_task_continuation_owned_outcome_identity_and_dispatch_state
+    - transaction_local_expiry_and_event_publication
     - store_owned_normal_run_completion_eligibility
     - builder_observation_without_completion_interpretation
     - decision_card_changes_as_resumable_terminal_notification_authority
@@ -2176,17 +2184,23 @@ terminal_run_decision_card_supersession_reaudit:
     - ordered_batch_event_append_outcome_handoff
     - sqlite_postgres_atomicity_and_observation_parity
   chosen_working_failure_class: terminal_run_decision_card_supersession_state_and_change_atomicity
+  absorbed_working_failure_classes:
+    - human_task_expiry_state_and_executable_outcome_atomicity
+    - canonical_successful_run_completion_admission
+    - ordered_same_batch_event_append_outcome_dispatch
   immediate_parent_failure_class: status_specific_terminal_run_state_change_atomicity
   parent_failure_class: declaration_owned_standing_service_reconciliation_terminal_run_decision_card_supersession_state_change_atomicity_and_inbound_publication_operations
   broadest_parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
-  framing_decision: broad_enough_after_removing_terminal_event_and_receipt_semantics
+  framing_decision: broad_enough_after_absorbing_current_master_human_task_expiry_and_both_review_blockers
   entry_point_not_boundary: >-
     The outbox release failure was only the entry point. The audit boundary is
-    every run-level terminal producer, the private transaction-local card/change
-    mutation, standalone capability removal, mailbox subscription observation,
-    all outbox producers and releasers, schema compatibility refusal and
-    removal, active stage supersession preservation, rollback/retry/concurrency,
-    and both stores.
+    every run-level terminal producer, automatic human-task expiry from due-card
+    selection through requester outcome completion, the private transaction-local
+    card/change mutations, standalone capability removal, mailbox subscription
+    observation, all outbox producers and releasers, schema compatibility refusal
+    and removal, active stage supersession preservation, successful-completion
+    admission, ordered batch append outcomes, rollback/retry/concurrency, and
+    both stores.
 
   binding_governing_context:
     issue_and_thread: issue_2007_with_state_change_only_and_pre_1_0_hard_cutoff_lead_rulings
@@ -2194,8 +2208,11 @@ terminal_run_decision_card_supersession_reaudit:
       - platform-spec.yaml#platform_tables.decision_cards
       - platform-spec.yaml#platform_tables.decision_card_input_drafts
       - platform-spec.yaml#platform_tables.decision_card_changes
+      - platform-spec.yaml#platform_tables.human_task_continuations
       - platform-spec.yaml#platform_tables.decision_card_lifecycle_outbox
       - 'platform-spec.yaml#platform_events.catalog["mailbox.card_superseded"]'
+      - 'platform-spec.yaml#platform_events.catalog["mailbox.card_expired"]'
+      - 'platform-spec.yaml#platform_events.catalog["human_task.expired"]'
       - platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       - platform-spec.yaml#api_specification.methods.mailbox.subscribe
       - platform-spec.yaml#api_specification.methods.run.stop
@@ -2211,6 +2228,9 @@ terminal_run_decision_card_supersession_reaudit:
       mailbox.card_superseded event. Remove the obsolete table from fresh schema,
       drop only an existing empty table, and reject every non-empty legacy table
       before runtime initialization with explicit database-recreation remediation.
+      Move automatic human-task expiry to RunPipelineMutation plus
+      PublishInMutation in the same selected-store transaction while preserving
+      the mailbox.card_expired to human_task.expired executable chain.
 
   canonical_operation_contract:
     semantic_owner: selected_store_typed_terminal_run_transaction
@@ -2294,6 +2314,12 @@ terminal_run_decision_card_supersession_reaudit:
     schema_compatibility: selected_store_pre_runtime_platform_schema_compatibility_owner
     cleanup: existing_run_scoped_destructive_reset_cleanup_without_outbox_release
     active_supersession: existing_SupersedeDecisionCardsForStage_and_PublishInMutation_owner_unchanged
+    human_task_expiry_state_and_identity: decision_cards_and_human_task_continuations
+    human_task_expiry_selected_store_atomicity: workflowStore_RunPipelineMutation
+    human_task_expiry_event_operation: EventBus_PublishInMutation
+    human_task_expiry_requester_outcome: existing_handleDecisionCardExpiredEvent_pipeline_transaction
+    successful_completion: selected_store_ConvergeNormalRunCompletion
+    same_batch_append_results: ordered_per_intent_EventAppendOutcome_handoff
     owner_judgment: >-
       The terminal transaction is the semantic owner because it alone owns run
       terminality and all affected domain rows. The private helper is consumed
@@ -2432,6 +2458,16 @@ terminal_run_decision_card_supersession_reaudit:
       disposition: different_concept_and_unchanged
     workflow_gate_active_supersession_publishers:
       disposition: different_concept_and_keep_mailbox_card_superseded_event
+    PipelineCoordinator_RunMaintenance:
+      disposition: move_due_human_task_expiry_into_one_RunPipelineMutation
+    postgres_and_sqlite_human_task_expiry:
+      disposition: consume_the_existing_pipeline_SQL_transaction_and_return_deterministic_event_facts
+    mailbox_card_expired_publication:
+      disposition: consume_PublishInMutation_before_the_selected_store_transaction_commits
+    generic_EventBus_dispatch_and_recovery:
+      disposition: already_owns_post_commit_convergence_without_an_expiry_special_case
+    handleDecisionCardExpiredEvent:
+      disposition: retain_authoritative_expiry_validation_and_atomic_outcome_dispatched_plus_human_task_expired_product
     insertDecisionCardLifecycleOutbox:
       disposition: remove
     lifecycle_outbox_list_complete_and_release:
@@ -2519,6 +2555,15 @@ terminal_run_decision_card_supersession_reaudit:
       - eligible_no_gate_run_completes_only_through_ConvergeNormalRunCompletion
       - generic_MarkRunTerminal_completed_fails_closed_on_both_stores
       - builder_waiting_decision_remains_running_without_synthetic_failure_or_local_terminal_projection
+    human_task_expiry_absorption:
+      - one_and_multiple_due_tasks_commit_card_continuation_change_event_route_delivery_replay_and_receipt_authority_atomically
+      - no_due_task_creates_zero_state_event_or_dispatch_work
+      - failure_after_card_continuation_change_event_route_delivery_or_replay_rolls_back_the_whole_selected_store_transaction
+      - retry_and_concurrency_create_one_deterministic_expiry_operation_per_card
+      - post_commit_crash_converges_through_generic_EventBus_recovery_without_a_lifecycle_releaser
+      - requester_chain_commits_one_human_task_expired_and_marks_the_continuation_outcome_dispatched
+      - destructive_terminalization_first_creates_no_expiry_while_expiry_first_preserves_its_committed_outcome
+      - terminal_run_supersession_still_creates_zero_events
 
   parent_and_tracker_decisions:
     parent_sibling_probe: >-
@@ -2551,8 +2596,10 @@ terminal_run_decision_card_supersession_reaudit:
     chosen_class_closure_commitment: >-
       PR 2047 must eliminate terminal run decision-card state/change atomicity
       divergence on SQLite and PostgreSQL, remove every terminal event/outbox/
-      releaser and standalone supersession path, enforce the pre-1.0 hard schema
-      cutoff, and preserve active-run routable supersession.
+      releaser and standalone supersession path, move active human-task expiry
+      into one selected-store event operation, close canonical successful-run
+      admission and ordered same-batch append outcomes, enforce the pre-1.0 hard
+      schema cutoff, and preserve active-run routable supersession.
     closure_feasibility: >-
       Feasible in this PR because every production terminal producer already
       enters the same private helper inside its selected-store transaction,
@@ -2577,8 +2624,76 @@ terminal_run_decision_card_supersession_reaudit:
       - unchanged_generic_terminal_admission_dispatch_and_exact_duplicate_operation_matrix
       - dual_backend_normal_completion_gate_eligibility_and_builder_observation_proof
       - inserted_duplicate_all_duplicate_conflict_and_distinct_outbox_batch_matrix
+      - dual_backend_human_task_expiry_state_event_and_requester_outcome_matrix
+      - generic_post_commit_expiry_recovery_without_lifecycle_outbox_or_releaser
       - full_go_test_all_with_host_postgres
     parity_issue: true
+
+  post_upstream_human_task_expiry_absorption:
+    gate_outcome: approved
+    gate_ref: https://github.com/division-sh/swarm/issues/2007#issuecomment-4971103943
+    issue_body_repaired: true
+    chosen_working_failure_class: human_task_expiry_state_and_executable_outcome_atomicity
+    immediate_parent_failure_class: decision_card_lifecycle_state_and_outcome_atomicity
+    parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+    framing_decision: broad_enough_and_absorbed_into_issue_2007
+    entry_point_not_boundary: >-
+      ExpireHumanTaskCards and insertDecisionCardLifecycleOutbox were only entry
+      points. The audit covers due-card selection, card/continuation/change
+      mutation, deterministic event identity, event/routes/deliveries/replay and
+      receipt authority, generic recovery, expiry interception, requester
+      delivery, completion admission, destructive-terminal races, ordered batch
+      append results, and both selected stores.
+    canonical_operation: >-
+      PipelineCoordinator.RunMaintenance opens one workflowStore.RunPipelineMutation;
+      transaction-local expiry locks and mutates decision_cards,
+      human_task_continuations, and decision_card_changes and returns deterministic
+      mailbox.card_expired facts; the coordinator calls EventBus.PublishInMutation
+      for every fact before that same selected-store transaction commits.
+    full_relevant_execution_path:
+      - PipelineCoordinator_RunMaintenance_opens_one_RunPipelineMutation
+      - transaction_local_expiry_locks_due_cards_and_continuations
+      - card_continuation_and_one_expired_change_transition
+      - transaction_local_expiry_returns_deterministic_mailbox_card_expired_facts
+      - PublishInMutation_persists_event_routes_deliveries_replay_and_receipt_authority
+      - selected_store_transaction_commits_once
+      - generic_EventBus_dispatch_or_recovery_converges_the_event
+      - handleDecisionCardExpiredEvent_validates_card_and_continuation
+      - CompleteHumanTaskOutcome_and_requester_human_task_expired_publish_commit_together
+    reachability_gates:
+      due_card_and_continuation_lock: same_chosen_class
+      card_continuation_and_change_transition: same_chosen_class
+      mailbox_card_expired_event_operation: same_chosen_class
+      generic_event_dispatch_and_recovery: already_consumes_canonical_persisted_event_owner
+      requester_human_task_expired_product: same_chosen_class
+      approve_reject_and_defer: different_already_transactional_decision_event_operations
+      run_terminal_supersession: different_non_executable_state_change_concept
+      active_stage_supersession: different_executable_concept_already_using_PublishInMutation
+    race_contract: >-
+      Destructive terminalization and expiry serialize through selected-store
+      card and continuation locks. Supersession first leaves no due expiry and
+      creates no event. Expiry first preserves its committed executable outcome.
+      Completed is not supersession: pending human tasks and open or
+      decision_committed stage gates block successful completion.
+    old_invalid_paths:
+      - expiry_write_to_decision_card_lifecycle_outbox
+      - expiry_separate_store_transaction_before_event_publication
+      - lifecycle_specific_expiry_release_or_recovery
+      - generic_MarkRunTerminal_completed
+      - builder_derived_completed_from_local_quiescence
+      - one_pending_append_outcome_per_event_ID_map_entry
+    forbidden:
+      - replacement_outbox
+      - compatibility_or_dual_read_write_path
+      - store_side_separate_database_publication
+      - coordinator_completion_inference
+      - expiry_specific_recovery_abstraction
+      - event_identity_reconstruction_for_missing_append_outcomes
+    tracker_state_decision: issue_body_and_existing_checked_in_node_repaired_before_runtime_coding
+    watchlist_mapping_decision: refine_existing_node_no_new_issue
+    intended_closure_level: selected_and_absorbed_failure_classes_eliminated
+    closure_feasibility: true_existing_selected_store_event_and_recovery_owners_are_sufficient
+    blocking_ambiguity: none_after_post_upstream_gate
 
   architecture_feedback:
     smell: >-
@@ -2588,8 +2703,9 @@ terminal_run_decision_card_supersession_reaudit:
       terminal ownership.
     long_run_direction: >-
       Terminal domain transitions publish through their domain change ledger in
-      the same transaction. EventBus is reserved for active executable events,
-      and public store interfaces expose only capabilities with real independent
+      the same transaction, while active executable lifecycle outcomes use the
+      existing selected-store EventBus mutation in that same transaction.
+      Public store interfaces expose only capabilities with real independent
       semantic ownership. Normal completion is decided only by selected-store
       convergence, while the engine outbox carries each append result through
       exactly one post-commit batch dispatch instead of reconstructing it from
