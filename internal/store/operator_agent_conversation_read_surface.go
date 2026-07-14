@@ -20,6 +20,7 @@ import (
 type OperatorAgentConversationReadSource interface {
 	OperatorConversationReadSource
 	ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error)
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
 	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error)
 	ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)

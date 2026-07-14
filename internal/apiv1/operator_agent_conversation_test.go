@@ -294,10 +294,10 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		},
 		conversationTurnsResult: store.OperatorConversationTurnListResult{
 			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turns: []store.OperatorPublicConversationTurn{{
+			Turns: []store.OperatorConversationTurnListItem{{
 				TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
 				TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true,
-				Activity: []store.OperatorConversationActivity{{Kind: "tool", ToolName: "read_file", ToolUseID: "toolu-1"}},
+				ActivityCounts: store.OperatorConversationActivityCounts{Tool: 1},
 			}},
 			NextCursor: "turn-cursor-2",
 		},

@@ -20,7 +20,7 @@ import (
 
 type fakeConversationCapabilitySource struct {
 	caps    StoreSchemaCapabilities
-	turns   map[string]OperatorConversationTurnListResult
+	turns   map[string][]OperatorPublicConversationTurn
 	turnErr error
 	err     error
 }
@@ -33,14 +33,21 @@ func (s fakeConversationCapabilitySource) ListOperatorConversationTurns(_ contex
 	if s.turnErr != nil {
 		return OperatorConversationTurnListResult{}, s.turnErr
 	}
-	page, ok := s.turns[strings.TrimSpace(opts.SessionID)]
-	if !ok {
-		page = OperatorConversationTurnListResult{Turns: []OperatorPublicConversationTurn{}}
-	}
-	if page.Turns == nil {
-		page.Turns = []OperatorPublicConversationTurn{}
+	publicTurns := s.turns[strings.TrimSpace(opts.SessionID)]
+	page := OperatorConversationTurnListResult{Turns: []OperatorConversationTurnListItem{}}
+	for _, turn := range publicTurns {
+		page.Turns = append(page.Turns, operatorConversationTurnListItemFromPublic(turn))
 	}
 	return page, nil
+}
+
+func (s fakeConversationCapabilitySource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+	for _, turn := range s.turns[strings.TrimSpace(sessionID)] {
+		if turn.TurnID == strings.TrimSpace(turnID) {
+			return OperatorPublicConversationTurnDetail{Turn: turn}, nil
+		}
+	}
+	return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
 }
 
 type fakeAgentConversationReadSource struct {
@@ -49,7 +56,7 @@ type fakeAgentConversationReadSource struct {
 	pending   map[string]PendingAgentDeliveryFacts
 	details   map[string]PendingAgentDeliveryPage
 	lifecycle map[string]AgentDeliveryLifecycleFacts
-	turns     map[string]OperatorConversationTurnListResult
+	turns     map[string][]OperatorPublicConversationTurn
 	turnErr   error
 	err       error
 	detailErr error
@@ -97,14 +104,24 @@ func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context
 	if s.turnErr != nil {
 		return OperatorConversationTurnListResult{}, s.turnErr
 	}
-	page, ok := s.turns[strings.TrimSpace(opts.SessionID)]
-	if !ok {
-		page = OperatorConversationTurnListResult{Turns: []OperatorPublicConversationTurn{}}
-	}
-	if page.Turns == nil {
-		page.Turns = []OperatorPublicConversationTurn{}
+	publicTurns := s.turns[strings.TrimSpace(opts.SessionID)]
+	page := OperatorConversationTurnListResult{Turns: []OperatorConversationTurnListItem{}}
+	for _, turn := range publicTurns {
+		page.Turns = append(page.Turns, operatorConversationTurnListItemFromPublic(turn))
 	}
 	return page, nil
+}
+
+func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+	if s.turnErr != nil {
+		return OperatorPublicConversationTurnDetail{}, s.turnErr
+	}
+	for _, turn := range s.turns[strings.TrimSpace(sessionID)] {
+		if turn.TurnID == strings.TrimSpace(turnID) {
+			return OperatorPublicConversationTurnDetail{Turn: turn}, nil
+		}
+	}
+	return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
 }
 
 func TestOperatorAgentSummaryPublishesModeWithoutLegacyConversationMode(t *testing.T) {
@@ -334,8 +351,8 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 			TurnBlocks:   true,
 			SessionRunID: true,
 		}},
-		turns: map[string]OperatorConversationTurnListResult{
-			"sess-1": {Turns: []OperatorPublicConversationTurn{{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []OperatorConversationActivity{}}}},
+		turns: map[string][]OperatorPublicConversationTurn{
+			"sess-1": {{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []OperatorConversationActivity{}}},
 		},
 	})
 
@@ -383,10 +400,10 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		turns: map[string]OperatorConversationTurnListResult{
-			sessionID: {Turns: []OperatorPublicConversationTurn{{
+		turns: map[string][]OperatorPublicConversationTurn{
+			sessionID: {{
 				TurnID: turnID, CompletedAt: turnCompletedAt, ParseOK: false, Failure: &turnFailure,
-			}}},
+			}},
 		},
 	}, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
@@ -508,14 +525,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
 		},
-		turns: map[string]OperatorConversationTurnListResult{
-			sessionID: {Turns: []OperatorPublicConversationTurn{{
+		turns: map[string][]OperatorPublicConversationTurn{
+			sessionID: {{
 				TurnID: turnID, TaskID: "task-1", EntityID: turnEntityID, CompletedAt: turnCompletedAt, ParseOK: true,
 				Activity: []OperatorConversationActivity{
 					{Kind: "tool_result", ToolName: "older_tool", ToolUseID: "toolu-old", OK: boolPointer(true)},
 					{Kind: "tool_result", ToolName: "selected_tool", ToolUseID: "toolu-selected", OK: boolPointer(true)},
 				},
-			}}},
+			}},
 		},
 	}, 0)
 
@@ -1697,8 +1714,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		turns: map[string]OperatorConversationTurnListResult{
-			"sess-1": {Turns: []OperatorPublicConversationTurn{{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []OperatorConversationActivity{}}}},
+		turns: map[string][]OperatorPublicConversationTurn{
+			"sess-1": {{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []OperatorConversationActivity{}}},
 		},
 	}, 0)
 
@@ -1850,8 +1867,8 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 		if projectionErr != nil {
 			source.turnErr = projectionErr
 		} else {
-			source.turns = map[string]OperatorConversationTurnListResult{
-				"11111111-1111-1111-1111-111111111111": {Turns: []OperatorPublicConversationTurn{turn}},
+			source.turns = map[string][]OperatorPublicConversationTurn{
+				"11111111-1111-1111-1111-111111111111": {turn},
 			}
 		}
 	}

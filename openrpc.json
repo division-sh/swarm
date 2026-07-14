@@ -2984,7 +2984,7 @@
     },
     {
       "name": "conversation.list_turns",
-      "description": "List the closed author-safe turn projection for one conversation. Pages are newest first, bounded to 500 rows, and use an opaque cursor over the canonical persisted created_at plus turn_id order. Ordinal is a stable display projection and is never an input identity.\n",
+      "description": "List compact closed author-safe turn rows for one conversation. Pages are newest first, bounded to 500 rows, and use an opaque cursor over the canonical persisted created_at plus turn_id order. Rows contain owner-derived activity counts and never contain ordered activity or author-visible text. Ordinal is a stable display projection and is never an input identity.\n",
       "params": [
         {
           "name": "session_id",
@@ -9930,6 +9930,45 @@
         ],
         "type": "object"
       },
+      "ConversationActivityCounts": {
+        "additionalProperties": false,
+        "description": "Compact owner-derived counts for the closed public activity kinds in one turn.",
+        "properties": {
+          "dispatch": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failure": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "publish": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tool": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tool_result": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dispatch",
+          "tool",
+          "tool_result",
+          "publish",
+          "output",
+          "failure"
+        ],
+        "type": "object"
+      },
       "ConversationForkChatResult": {
         "additionalProperties": false,
         "properties": {
@@ -10393,6 +10432,57 @@
         ],
         "type": "object"
       },
+      "ConversationTurnListItem": {
+        "additionalProperties": false,
+        "description": "Compact single-row ledger projection. Ordered activity and author-visible text exist only in ConversationTurnDetail.",
+        "properties": {
+          "activity_counts": {
+            "$ref": "#/components/schemas/ConversationActivityCounts"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "duration_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
+          "ordinal": {
+            "description": "Stable 1-based display position in canonical ascending order; never accepted as identity.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "parse_ok": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/ConversationTokenUsage"
+          },
+          "trigger_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "trigger_event_type": {
+            "type": "string"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "turn_id",
+          "ordinal",
+          "completed_at",
+          "duration_ms",
+          "activity_counts",
+          "parse_ok"
+        ],
+        "type": "object"
+      },
       "ConversationTurnListPage": {
         "additionalProperties": false,
         "properties": {
@@ -10404,7 +10494,7 @@
           },
           "turns": {
             "items": {
-              "$ref": "#/components/schemas/Turn"
+              "$ref": "#/components/schemas/ConversationTurnListItem"
             },
             "type": "array"
           }

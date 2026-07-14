@@ -64,37 +64,32 @@ type ConversationSummaryMetadata struct {
 }
 
 type ConversationDetail struct {
-	Conversation ConversationSummary `json:"conversation"`
-	Turns        []ConversationTurn  `json:"turns"`
-	NextCursor   string              `json:"next_cursor,omitempty"`
+	Conversation ConversationSummary        `json:"conversation"`
+	Turns        []ConversationTurnListItem `json:"turns"`
+	NextCursor   string                     `json:"next_cursor,omitempty"`
 }
 
-type ConversationTurn struct {
-	TurnID                 string                    `json:"turn_id"`
-	Ordinal                int                       `json:"ordinal"`
-	CompletedAt            string                    `json:"completed_at"`
-	DurationMS             int                       `json:"duration_ms"`
-	TriggerEventID         string                    `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string                    `json:"trigger_event_type,omitempty"`
-	EntityID               string                    `json:"entity_id,omitempty"`
-	TaskID                 string                    `json:"task_id,omitempty"`
-	Activity               []ConversationActivity    `json:"activity"`
-	Tokens                 *ConversationTokenUsage   `json:"tokens,omitempty"`
-	Outcome                string                    `json:"outcome,omitempty"`
-	ParseOK                bool                      `json:"parse_ok"`
-	Failure                *runtimefailures.Envelope `json:"failure,omitempty"`
-	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
-	RetryCount             int                       `json:"retry_count,omitempty"`
+type ConversationTurnListItem struct {
+	TurnID           string                     `json:"turn_id"`
+	Ordinal          int                        `json:"ordinal"`
+	CompletedAt      string                     `json:"completed_at"`
+	DurationMS       int                        `json:"duration_ms"`
+	TriggerEventID   string                     `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                     `json:"trigger_event_type,omitempty"`
+	ActivityCounts   ConversationActivityCounts `json:"activity_counts"`
+	Tokens           *ConversationTokenUsage    `json:"tokens,omitempty"`
+	Outcome          string                     `json:"outcome,omitempty"`
+	ParseOK          bool                       `json:"parse_ok"`
+	Failure          *runtimefailures.Envelope  `json:"failure,omitempty"`
 }
 
-type ConversationActivity struct {
-	Kind      string `json:"kind"`
-	ToolName  string `json:"tool_name,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	EventID   string `json:"event_id,omitempty"`
-	EventType string `json:"event_type,omitempty"`
-	Text      string `json:"text,omitempty"`
-	OK        *bool  `json:"ok,omitempty"`
+type ConversationActivityCounts struct {
+	Dispatch   int `json:"dispatch"`
+	Tool       int `json:"tool"`
+	ToolResult int `json:"tool_result"`
+	Publish    int `json:"publish"`
+	Output     int `json:"output"`
+	Failure    int `json:"failure"`
 }
 
 type ConversationTokenUsage struct {
@@ -122,13 +117,9 @@ type OperatorLiveTurn struct {
 }
 
 type ConversationReader interface {
-	List(ctx context.Context, limit int) ([]ConversationSummary, error)
-	Get(ctx context.Context, sessionID string) (ConversationDetail, bool, error)
-}
-
-type canonicalConversationReader interface {
 	ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error)
 }
 
 type ObservabilityReader interface {
@@ -440,12 +431,11 @@ func (h *Handler) handleAgentReplay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
-	reader, ok := h.conversations.(canonicalConversationReader)
-	if h.conversations == nil || !ok {
+	if h.conversations == nil {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
-	result, err := reader.ListOperatorConversations(r.Context(), store.OperatorConversationListOptions{
+	result, err := h.conversations.ListOperatorConversations(r.Context(), store.OperatorConversationListOptions{
 		AgentID: strings.TrimSpace(r.URL.Query().Get("agent_id")),
 		RunID:   strings.TrimSpace(r.URL.Query().Get("run_id")),
 		Cursor:  strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -459,12 +449,11 @@ func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
 	for _, item := range result.Conversations {
 		rows = append(rows, conversationSummaryFromOperator(item))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": rows})
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": rows, "next_cursor": strings.TrimSpace(result.NextCursor)})
 }
 
 func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	reader, ok := h.conversations.(canonicalConversationReader)
-	if h.conversations == nil || !ok {
+	if h.conversations == nil {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
@@ -473,7 +462,11 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, errors.New("session id is required"))
 		return
 	}
-	row, err := reader.ListOperatorConversationTurns(r.Context(), store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 500})
+	row, err := h.conversations.ListOperatorConversationTurns(r.Context(), store.OperatorConversationTurnListOptions{
+		SessionID: sessionID,
+		Limit:     intQuery(r, "limit", 50),
+		Cursor:    strings.TrimSpace(r.URL.Query().Get("cursor")),
+	})
 	if err != nil {
 		if errors.Is(err, store.ErrSessionNotFound) {
 			writeJSONError(w, http.StatusNotFound, errors.New("conversation not found"))

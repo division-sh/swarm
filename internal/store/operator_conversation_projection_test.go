@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -32,8 +33,9 @@ type operatorConversationProjectionFixture struct {
 }
 
 type operatorConversationProjectionParityResult struct {
-	Pages          [][]OperatorPublicConversationTurn
+	Pages          [][]OperatorConversationTurnListItem
 	Exact          OperatorPublicConversationTurn
+	Mixed          OperatorPublicConversationTurn
 	TurnCoordinate ConversationForkPointDescriptor
 	TimeCoordinate ConversationForkPointDescriptor
 	AmbiguousEvent string
@@ -119,7 +121,15 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 		{"kind":"tool_result","tool_name":"inspect","output":{"secret":"private-tool-output"},"data":{"tool_use_id":"tool-use-2"}},
 		{"kind":"turn_summary","data":{"assistant_visible_output":"author-visible-two","outcome":"completed","reasoning_blocks":["private-summary-reasoning"],"progress_updates":["private-summary-progress"],"tool_results":[{"tool_name":"inspect","tool_use_id":"tool-use-2","output":{"secret":"private-summary-output"}}]}}
 	]`
-	publishBlocks := `[{"kind":"publish","title":"task.done","data":{"event_id":"` + publishEventID + `","entity_id":"` + entityID + `","routed_recipients":[{"subscriber_id":"private-recipient"}]}}]`
+	mixedBlocks := `[
+		{"kind":"dispatch","title":"task.done","data":{"trigger_event_id":"` + publishEventID + `","trigger_event_type":"task.done","entity_id":"` + entityID + `","task_id":"task-4"}},
+		{"kind":"tool_use","tool_name":"deliver","input":{"secret":"private-mixed-input"},"data":{"tool_use_id":"tool-use-4"}},
+		{"kind":"tool_result","tool_name":"deliver","output":{"secret":"private-mixed-output"},"data":{"tool_use_id":"tool-use-4"}},
+		{"kind":"publish","title":"task.done","data":{"event_id":"` + publishEventID + `","entity_id":"` + entityID + `","routed_recipients":[{"subscriber_id":"private-recipient"}]}},
+		{"kind":"assistant_text","text":"author-visible-mixed"},
+		{"kind":"turn_summary","data":{"assistant_visible_output":"author-visible-mixed","outcome":"failed"}}
+	]`
+	mixedFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "mixed_failure", nil))
 	malformedBlocks := `[{"kind":"tool_use","input":{"secret":"private-malformed-input"}}]`
 
 	if backend.sqlite {
@@ -130,7 +140,7 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, ?, 'task.one', 'task-1', ?, 1, 101, 0, ?)`, turnIDs[0], runID, agentID, sessionID, entityID, turnIDs[0], privateBlocks, firstAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, usage_exactness, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, ?, 'task.shared', 'task-2', ?, 1, 202, 1, 'exact', 12, 4, ?)`, turnIDs[1], runID, agentID, sessionID, entityID, sharedEventID, toolBlocks, tieAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, usage_exactness, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, ?, 'task.shared', 'task-3', '[]', 1, 303, 0, 'unavailable', ?)`, turnIDs[2], runID, agentID, sessionID, entityID, sharedEventID, tieAt)
-		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, ?, 'task.done', 'task-4', ?, 1, 404, 0, ?)`, turnIDs[3], runID, agentID, sessionID, entityID, publishEventID, publishBlocks, lastAt)
+		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, ?, 'task.done', 'task-4', ?, 0, 404, 0, ?, ?)`, turnIDs[3], runID, agentID, sessionID, entityID, publishEventID, mixedBlocks, mixedFailure, lastAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES (?, ?, ?, ?, 'session', 'global', ?, 'task.malformed', 'task-malformed', ?, 1, 1, 0, ?)`, turnIDs[4], runID, agentID, malformedSessionID, malformedEventID, malformedBlocks, lastAt)
 	} else {
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base)
@@ -140,7 +150,7 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, $6::uuid, 'task.one', 'task-1', $7::jsonb, true, 101, 0, $8)`, turnIDs[0], runID, agentID, sessionID, entityID, turnIDs[0], privateBlocks, firstAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, usage_exactness, input_tokens, output_tokens, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, $6::uuid, 'task.shared', 'task-2', $7::jsonb, true, 202, 1, 'exact', 12, 4, $8)`, turnIDs[1], runID, agentID, sessionID, entityID, sharedEventID, toolBlocks, tieAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, usage_exactness, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, $6::uuid, 'task.shared', 'task-3', '[]'::jsonb, true, 303, 0, 'unavailable', $7)`, turnIDs[2], runID, agentID, sessionID, entityID, sharedEventID, tieAt)
-		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, $6::uuid, 'task.done', 'task-4', $7::jsonb, true, 404, 0, $8)`, turnIDs[3], runID, agentID, sessionID, entityID, publishEventID, publishBlocks, lastAt)
+		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, $6::uuid, 'task.done', 'task-4', $7::jsonb, false, 404, 0, $8::jsonb, $9)`, turnIDs[3], runID, agentID, sessionID, entityID, publishEventID, mixedBlocks, mixedFailure, lastAt)
 		operatorConversationProjectionExec(t, backend.db, `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count, created_at) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'session', 'global', $5::uuid, 'task.malformed', 'task-malformed', $6::jsonb, true, 1, 0, $7)`, turnIDs[4], runID, agentID, malformedSessionID, malformedEventID, malformedBlocks, lastAt)
 	}
 
@@ -171,6 +181,9 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	if len(first.Turns) != 2 || first.NextCursor == "" || first.Turns[0].TurnID != fixture.turnIDs[3] || first.Turns[0].Ordinal != 4 || first.Turns[1].TurnID != fixture.turnIDs[2] || first.Turns[1].Ordinal != 3 {
 		t.Fatalf("first turn page = %#v", first)
 	}
+	if first.Turns[0].ActivityCounts != (OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1}) {
+		t.Fatalf("mixed compact activity counts = %#v", first.Turns[0].ActivityCounts)
+	}
 	second, err := backend.store.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatalf("list second turn page: %v", err)
@@ -185,7 +198,7 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 		t.Fatalf("nullable/unavailable token facts leaked values: first=%#v second=%#v", first.Turns[1].Tokens, second.Turns[1].Tokens)
 	}
 	seen := map[string]bool{}
-	for _, page := range [][]OperatorPublicConversationTurn{first.Turns, second.Turns} {
+	for _, page := range [][]OperatorConversationTurnListItem{first.Turns, second.Turns} {
 		for _, turn := range page {
 			if seen[turn.TurnID] {
 				t.Fatalf("turn %s repeated across cursor pages", turn.TurnID)
@@ -196,6 +209,15 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	if len(seen) != 4 {
 		t.Fatalf("cursor pages covered %d turns, want 4", len(seen))
 	}
+	listJSON, err := json.Marshal([]any{first.Turns, second.Turns})
+	if err != nil {
+		t.Fatalf("marshal compact turn pages: %v", err)
+	}
+	for _, forbidden := range []string{`"activity":`, `"assistant_visible_output":`, `"entity_id":`, `"task_id":`, `"retry_count":`, "author-visible-mixed", "private-mixed"} {
+		if strings.Contains(string(listJSON), forbidden) {
+			t.Fatalf("compact list leaked %q: %s", forbidden, listJSON)
+		}
+	}
 
 	detail, err := backend.store.LoadOperatorPublicConversationTurn(ctx, fixture.sessionID, fixture.turnIDs[1])
 	if err != nil {
@@ -204,7 +226,19 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	if detail.Turn.TurnID != fixture.turnIDs[1] || detail.Turn.Ordinal != 2 || detail.Turn.AssistantVisibleOutput != "author-visible-two" || detail.Turn.Outcome != "completed" || len(detail.Turn.Activity) != 2 {
 		t.Fatalf("exact turn detail = %#v", detail.Turn)
 	}
-	projectionJSON, err := json.Marshal([]any{first.Turns, second.Turns, detail.Turn})
+	mixed, err := backend.store.LoadOperatorPublicConversationTurn(ctx, fixture.sessionID, fixture.turnIDs[3])
+	if err != nil {
+		t.Fatalf("load mixed turn: %v", err)
+	}
+	wantMixedKinds := []string{"dispatch", "tool", "tool_result", "publish", "output", "failure"}
+	gotMixedKinds := make([]string, 0, len(mixed.Turn.Activity))
+	for _, item := range mixed.Turn.Activity {
+		gotMixedKinds = append(gotMixedKinds, item.Kind)
+	}
+	if !reflect.DeepEqual(gotMixedKinds, wantMixedKinds) || mixed.Turn.AssistantVisibleOutput != "author-visible-mixed" || mixed.Turn.Outcome != "failed" || mixed.Turn.Failure == nil {
+		t.Fatalf("mixed turn detail = %#v, kinds=%v", mixed.Turn, gotMixedKinds)
+	}
+	projectionJSON, err := json.Marshal([]any{first.Turns, second.Turns, detail.Turn, mixed.Turn})
 	if err != nil {
 		t.Fatalf("marshal public turn projection: %v", err)
 	}
@@ -236,8 +270,9 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	}
 
 	return operatorConversationProjectionParityResult{
-		Pages:          [][]OperatorPublicConversationTurn{first.Turns, second.Turns},
+		Pages:          [][]OperatorConversationTurnListItem{first.Turns, second.Turns},
 		Exact:          detail.Turn,
+		Mixed:          mixed.Turn,
 		TurnCoordinate: turnCoordinate,
 		TimeCoordinate: timeCoordinate,
 		AmbiguousEvent: ambiguousErr.Error(),

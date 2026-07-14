@@ -810,8 +810,8 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			}}},
 			conversationTurnsResult: store.OperatorConversationTurnListResult{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns: []store.OperatorPublicConversationTurn{{TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
-					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []store.OperatorConversationActivity{}}},
+				Turns: []store.OperatorConversationTurnListItem{{TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
+					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
 			conversationTurnResult: store.OperatorPublicConversationTurnDetail{
 				Session: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
