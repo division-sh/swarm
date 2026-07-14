@@ -50,6 +50,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -3949,6 +3950,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		BundleHash:         projection.BundleHash,
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
+		StoreModeSet:       true,
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
@@ -4127,6 +4129,12 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		t.Fatalf("wait for join source quiescence before fork frontier: %v", err)
 	}
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
+	if _, err := (&store.PostgresStore{DB: db}).PlanRunFork(context.Background(), store.RunForkPlanRequest{
+		SourceRunID: initial.RunID,
+		At:          forkEventID,
+	}); err != nil {
+		t.Fatalf("plan served join fork frontier: %v", err)
+	}
 
 	var fork apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, endpoint, "run.fork", map[string]any{
@@ -4240,6 +4248,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		BundleHashes:       []string{targetProjection.BundleHash},
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
+		StoreModeSet:       true,
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
@@ -7576,8 +7585,13 @@ func servedJoinEntityID(t *testing.T, db *sql.DB, runID string) string {
 
 func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourceEventID string) string {
 	t.Helper()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin served join fork frontier: %v", err)
+	}
+	defer tx.Rollback()
 	var flowInstance string
-	if err := db.QueryRowContext(context.Background(), `
+	if err := tx.QueryRowContext(context.Background(), `
 		SELECT COALESCE(flow_instance, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid
@@ -7588,10 +7602,10 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	eventID := uuid.NewString()
 	deliveryID := uuid.NewString()
 	var createdAt time.Time
-	if err := db.QueryRowContext(context.Background(), `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
+	if err := tx.QueryRowContext(context.Background(), `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
 		t.Fatalf("load served join fork frontier timestamp: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := tx.ExecContext(context.Background(), `
 		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, scope, source_event_id,
 			payload, produced_by, produced_by_type, created_at
@@ -7603,7 +7617,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	`, eventID, runID, entityID, flowInstance, sourceEventID, createdAt); err != nil {
 		t.Fatalf("seed served join fork event: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := tx.ExecContext(context.Background(), `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
 		)
@@ -7611,11 +7625,22 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	`, deliveryID, runID, eventID, createdAt); err != nil {
 		t.Fatalf("seed served join fork delivery: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := tx.ExecContext(context.Background(), `
 		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects)
 		VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}'::jsonb)
 	`, eventID); err != nil {
 		t.Fatalf("seed served join fork pipeline receipt: %v", err)
+	}
+	if _, err := runforkrevision.Capture(
+		context.Background(), tx, runID,
+		runforkrevision.FamilyEvents,
+		runforkrevision.FamilyEventDeliveries,
+		runforkrevision.FamilyEventReceipts,
+	); err != nil {
+		t.Fatalf("capture served join fork frontier revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit served join fork frontier: %v", err)
 	}
 	return eventID
 }
@@ -10662,6 +10687,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--store", "postgres",
@@ -10726,6 +10752,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed pending delivery: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
@@ -10779,6 +10806,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed pending node delivery: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	repo := repoRoot()
 	var buf bytes.Buffer
@@ -11098,6 +11126,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed post-fork source event: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
@@ -11148,7 +11177,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11176,6 +11205,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := repoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	var buf bytes.Buffer
@@ -11380,7 +11410,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	}
 }
 
-func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipientPlan(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplayWithoutPersistedRouteRecovery(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -11388,7 +11418,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSe
 	eventID := uuid.NewString()
 	at := time.Unix(1700000340, 0).UTC()
 	ctx := context.Background()
-	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
@@ -11397,6 +11427,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSe
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed safe pending delivery: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := repoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 
@@ -11427,8 +11458,8 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSe
 	if activateCode != 1 {
 		t.Fatalf("activate code=%d, want 1; output=%s", activateCode, activateOut.String())
 	}
-	if !strings.Contains(activateOut.String(), "no selected recipients") {
-		t.Fatalf("activate output = %q, want selected recipient-plan blocker", activateOut.String())
+	if !strings.Contains(activateOut.String(), "requires persisted route recovery before delivery replay") {
+		t.Fatalf("activate output = %q, want persisted route-recovery blocker", activateOut.String())
 	}
 	var sourceStatus, forkStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&sourceStatus); err != nil {
@@ -11469,9 +11500,13 @@ func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClos
 	}
 }
 
-func seedRunForkCLIActivationSource(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, runID, entityID, eventID string, at time.Time) {
+func seedRunForkCLIActivationSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+}
+
+func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -11484,7 +11519,7 @@ func seedRunForkCLIActivationSource(t *testing.T, db interface {
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11514,16 +11549,12 @@ func seedRunForkCLIActivationSource(t *testing.T, db interface {
 	}
 }
 
-func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, runID, entityID, eventID string, at time.Time) {
+func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, "item.received", "test-node", "pending", "CLI Selected Execution Entity", "cli-selected-execution-test", at)
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, runID, entityID, eventID, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -11572,11 +11603,10 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db interface {
 	`, runID, entityID, at, entityName, currentState); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 }
 
-func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, runID, eventID string, at time.Time) {
+func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -11602,6 +11632,24 @@ func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, d
 	`, eventID, at); err != nil {
 		t.Fatalf("seed diagnostic platform receipt: %v", err)
 	}
+	captureRunForkCLIRevision(t, db, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventReceipts)
+}
+
+func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin run-fork revision fixture: %v", err)
+	}
+	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("capture run-fork revision fixture: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit run-fork revision fixture: %v", err)
+	}
+	return revision
 }
 
 func runForkPlanHasBlocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {

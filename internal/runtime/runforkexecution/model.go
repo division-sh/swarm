@@ -55,6 +55,10 @@ func canonicalSelectedContractRouteTopology(frontier store.RunForkContractFronti
 		})
 	}
 	for _, blocker := range routeAdmission.UnsupportedBlockers {
+		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerFlowRouteHistoryUnproven &&
+			routeAdmission.SourceRouteFactsPresent && dynamicSupported {
+			continue
+		}
 		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
 	}
 
@@ -620,7 +624,7 @@ func selectedContractExecutionInvalidPaths() []store.RunForkSelectedContractExec
 		{
 			Concept:     "same_run_outbox_replay_as_fork_replay",
 			Disposition: store.RunForkSelectedContractDispositionInvalid,
-			Reason:      "same-run recovery does not define timestamp-fork selected-contract replay ownership",
+			Reason:      "same-run recovery does not define fixed-event fork selected-contract replay ownership",
 		},
 		{
 			Concept:     "source_outcome_suppression",

@@ -157,7 +157,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 	}, mutationWriter(update.Writer)); err != nil {
 		return 0, fmt.Errorf("record postgres entity mutation: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return 0, fmt.Errorf("commit postgres entity field update: %w", err)
 	}
 	committed = true
@@ -266,7 +266,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 	}, mutationWriter(rec.Writer)); err != nil {
 		return fmt.Errorf("record postgres entity create mutation: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit postgres entity create: %w", err)
 	}
 	committed = true

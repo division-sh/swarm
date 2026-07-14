@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 )
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -221,6 +223,11 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 	if err != nil {
 		return fmt.Errorf("insert timer: %w", err)
 	}
+	if strings.TrimSpace(sc.RunID) != "" {
+		if _, err := runforkrevision.Capture(ctx, tx, sc.RunID, runforkrevision.FamilyTimers); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit timer tx: %w", err)
 	}
@@ -228,7 +235,8 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 }
 
 func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, eventType string) error {
-	_, err := s.DB.ExecContext(ctx, `
+	return s.runScheduleMutation(ctx, runID, "cancel timer", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
@@ -236,14 +244,13 @@ func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, 
 		  AND fire_event = $3
 		  AND status = 'active'
 	`, runID, agentID, eventType)
-	if err != nil {
-		return fmt.Errorf("cancel timer: %w", err)
-	}
-	return nil
+		return err
+	})
 }
 
 func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
+	return s.runScheduleMutation(ctx, sc.RunID, "cancel exact timer", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
@@ -254,10 +261,8 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 		  AND %s = $6
 		  AND status = 'active'
 	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
-	if err != nil {
-		return fmt.Errorf("cancel exact timer: %w", err)
-	}
-	return nil
+		return err
+	})
 }
 
 func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimepipeline.Schedule, error) {
@@ -323,7 +328,8 @@ func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepip
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	return s.runScheduleMutation(ctx, sc.RunID, "mark timer fired", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
 		UPDATE timers
 		SET status = $4,
 		    fired_at = now()
@@ -332,10 +338,8 @@ func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepip
 		  AND fire_event = $3
 		  AND status = 'active'
 	`, sc.RunID, sc.AgentID, sc.EventType, status)
-	if err != nil {
-		return fmt.Errorf("mark timer fired: %w", err)
-	}
-	return nil
+		return err
+	})
 }
 
 func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -343,7 +347,8 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
+	return s.runScheduleMutation(ctx, sc.RunID, "mark exact timer fired", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = $7,
 		    fired_at = now()
@@ -355,8 +360,26 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		  AND %s = $6
 		  AND status = 'active'
 	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
+		return err
+	})
+}
+
+func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label string, mutate func(*sql.Tx) error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("mark exact timer fired: %w", err)
+		return fmt.Errorf("begin %s: %w", label, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := mutate(tx); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	if strings.TrimSpace(runID) != "" {
+		if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyTimers); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %s: %w", label, err)
 	}
 	return nil
 }

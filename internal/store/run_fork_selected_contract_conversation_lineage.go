@@ -45,7 +45,7 @@ func runForkSelectedContractSessionTurnAuditLineageAdmission(plan RunForkPlan, a
 		disposition.Owner = RunForkSelectedContractSessionTurnAuditLineagePolicyOwner
 		disposition.BlockerCode = ""
 		disposition.Classification = ""
-		disposition.Message = fmt.Sprintf("%s classifies at/before-T source %s as selected-contract lineage/no-action evidence only; fresh fork-local conversation rows must be created by normal runtime execution under the fork run_id", RunForkSelectedContractSessionTurnAuditLineagePolicyOwner, fact)
+		disposition.Message = fmt.Sprintf("%s classifies source %s present at the selected run revision as selected-contract lineage/no-action evidence only; fresh fork-local conversation rows must be created by normal runtime execution under the fork run_id", RunForkSelectedContractSessionTurnAuditLineagePolicyOwner, fact)
 		changed = true
 	}
 	if !changed {
@@ -198,7 +198,6 @@ func runForkSelectedContractSameSourceDeliveryForkPointEmission(plan RunForkPlan
 	}
 	if strings.TrimSpace(item.ActiveSessionID) != "" ||
 		item.StartedAt == nil ||
-		item.StartedAt.After(plan.ForkPoint.Timestamp) ||
 		item.DeliveredAt != nil ||
 		item.ReceiptAt != nil ||
 		strings.TrimSpace(item.ReceiptOutcome) != "" {

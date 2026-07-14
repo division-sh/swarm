@@ -322,7 +322,7 @@ func historicalReplayEventDeliveriesAdmission(replay store.RunForkReplayResumeAd
 			Admission:   store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
 			SourceOwner: store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner,
 			Tracker:     "#663",
-			Message:     "at/before-T source committed replay-scope marker rows are lineage/no-action evidence only for selected-contract timestamp forks; fork-local recovery proof must be written under the fork run_id",
+			Message:     "source committed replay-scope marker rows present at the selected revision are lineage/no-action evidence only for selected-contract forks; fork-local recovery proof must be written under the fork run_id",
 		}
 	}
 	if disposition, ok := replayDispositionForFact(replay, store.RunForkReplayResumeFactDeliveryInProgressHistory, store.RunForkReplayResumeDispositionLineageOnly); ok &&

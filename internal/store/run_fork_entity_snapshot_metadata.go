@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -32,7 +30,7 @@ type runForkSourceEntityStateMetadata struct {
 	Exists       bool
 }
 
-func (s *PostgresStore) attachRunForkMaterializedEntitySnapshotMetadata(ctx context.Context, sourceRunID string, cursor runForkEventCursor, entities []RunForkEntityState) ([]RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
+func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entities []RunForkEntityState) ([]RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
 	out := make([]RunForkEntityState, len(entities))
 	copy(out, entities)
 	admission := runForkMaterializedEntitySnapshotMetadataAdmission{}
@@ -45,10 +43,7 @@ func (s *PostgresStore) attachRunForkMaterializedEntitySnapshotMetadata(ctx cont
 			admission.Dispositions = append(admission.Dispositions, runForkMaterializedEntitySnapshotMetadataBlockerDisposition("", blocker.Message))
 			continue
 		}
-		metadata, message, ok, err := s.loadRunForkMaterializedEntitySnapshotMetadata(ctx, sourceRunID, cursor, out[i])
-		if err != nil {
-			return nil, runForkMaterializedEntitySnapshotMetadataAdmission{}, err
-		}
+		metadata, message, ok := loadRunForkMaterializedEntitySnapshotMetadata(snapshot, out[i])
 		if !ok {
 			blocker := runForkReplayResumeBlocker(RunForkBlockerEntitySnapshotMetadataUnproven)
 			blocker.Message = message
@@ -61,16 +56,10 @@ func (s *PostgresStore) attachRunForkMaterializedEntitySnapshotMetadata(ctx cont
 	return out, admission, nil
 }
 
-func (s *PostgresStore) loadRunForkMaterializedEntitySnapshotMetadata(ctx context.Context, sourceRunID string, cursor runForkEventCursor, entity RunForkEntityState) (RunForkMaterializedEntitySnapshotMetadata, string, bool, error) {
+func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entity RunForkEntityState) (RunForkMaterializedEntitySnapshotMetadata, string, bool) {
 	entityID := strings.TrimSpace(entity.EntityID)
-	eventFlow, err := s.loadRunForkEntityEventFlowInstance(ctx, sourceRunID, cursor, entityID)
-	if err != nil {
-		return RunForkMaterializedEntitySnapshotMetadata{}, "", false, err
-	}
-	sourceState, err := s.loadRunForkSourceEntityStateMetadata(ctx, sourceRunID, cursor, entityID)
-	if err != nil {
-		return RunForkMaterializedEntitySnapshotMetadata{}, "", false, err
-	}
+	eventFlow := loadRunForkEntityEventFlowInstance(snapshot, entityID)
+	sourceState := loadRunForkSourceEntityStateMetadata(snapshot, entityID)
 
 	flowInstance := strings.TrimSpace(eventFlow)
 	source := RunForkMaterializedEntitySnapshotMetadataSourceEvent
@@ -79,66 +68,55 @@ func (s *PostgresStore) loadRunForkMaterializedEntitySnapshotMetadata(ctx contex
 		source = RunForkMaterializedEntitySnapshotMetadataSourceEntityState
 	}
 	if !sourceState.Exists {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-T entity_state metadata for entity %s", entityID), false, nil
+		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision entity metadata for entity %s", entityID), false
 	}
 	entityType := strings.TrimSpace(sourceState.EntityType)
 	if reconstructedEntityType := stringFieldValue(entity.Fields, "entity_type"); reconstructedEntityType != "" && reconstructedEntityType != entityType {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-T entity_state entity_type %q for entity %s", reconstructedEntityType, entityType, entityID), false, nil
+		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-revision entity metadata %q for entity %s", reconstructedEntityType, entityType, entityID), false
 	}
 	if flowInstance == "" || entityType == "" {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-T flow_instance/entity_type metadata for entity %s", entityID), false, nil
+		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
 	return RunForkMaterializedEntitySnapshotMetadata{
 		Owner:        RunForkMaterializedEntitySnapshotMetadataOwner,
 		FlowInstance: flowInstance,
 		EntityType:   entityType,
 		Source:       source,
-	}, "", true, nil
+	}, "", true
 }
 
-func (s *PostgresStore) loadRunForkEntityEventFlowInstance(ctx context.Context, sourceRunID string, cursor runForkEventCursor, entityID string) (string, error) {
-	var flowInstance string
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(flow_instance, '')
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND COALESCE(flow_instance, '') <> ''
-		  AND (created_at, event_id) <= ($3::timestamptz, $4::uuid)
-		ORDER BY created_at DESC, event_id DESC
-		LIMIT 1
-	`, sourceRunID, entityID, cursor.CreatedAt, cursor.EventID).Scan(&flowInstance)
-	if err == sql.ErrNoRows {
-		return "", nil
+func loadRunForkEntityEventFlowInstance(snapshot *runForkRevisionSnapshot, entityID string) string {
+	if snapshot == nil {
+		return ""
 	}
-	if err != nil {
-		return "", fmt.Errorf("load fork-point event flow_instance metadata for %s: %w", entityID, err)
+	for index := len(snapshot.Events) - 1; index >= 0; index-- {
+		event := snapshot.Events[index]
+		if strings.TrimSpace(event.EntityID) == strings.TrimSpace(entityID) && strings.TrimSpace(event.FlowInstance) != "" {
+			return strings.TrimSpace(event.FlowInstance)
+		}
 	}
-	return strings.TrimSpace(flowInstance), nil
+	return ""
 }
 
-func (s *PostgresStore) loadRunForkSourceEntityStateMetadata(ctx context.Context, sourceRunID string, cursor runForkEventCursor, entityID string) (runForkSourceEntityStateMetadata, error) {
-	var metadata runForkSourceEntityStateMetadata
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(flow_instance, ''), COALESCE(NULLIF(entity_type, ''), 'default')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND created_at <= $3::timestamptz
-	`, sourceRunID, entityID, cursor.CreatedAt).Scan(&metadata.FlowInstance, &metadata.EntityType)
-	if err == sql.ErrNoRows {
-		return runForkSourceEntityStateMetadata{}, nil
+func loadRunForkSourceEntityStateMetadata(snapshot *runForkRevisionSnapshot, entityID string) runForkSourceEntityStateMetadata {
+	if snapshot == nil {
+		return runForkSourceEntityStateMetadata{}
 	}
-	if err != nil {
-		return runForkSourceEntityStateMetadata{}, fmt.Errorf("load source entity_state metadata for %s: %w", entityID, err)
+	for _, fact := range snapshot.EntityMetadata {
+		if strings.TrimSpace(fact.EntityID) != strings.TrimSpace(entityID) {
+			continue
+		}
+		entityType := strings.TrimSpace(fact.EntityType)
+		if entityType == "" {
+			entityType = "default"
+		}
+		return runForkSourceEntityStateMetadata{
+			FlowInstance: strings.TrimSpace(fact.FlowInstance),
+			EntityType:   entityType,
+			Exists:       true,
+		}
 	}
-	metadata.FlowInstance = strings.TrimSpace(metadata.FlowInstance)
-	metadata.EntityType = strings.TrimSpace(metadata.EntityType)
-	if metadata.EntityType == "" {
-		metadata.EntityType = "default"
-	}
-	metadata.Exists = true
-	return metadata, nil
+	return runForkSourceEntityStateMetadata{}
 }
 
 func runForkMaterializedEntitySnapshotMetadataBlockerDisposition(entityID, message string) RunForkReplayResumeDisposition {

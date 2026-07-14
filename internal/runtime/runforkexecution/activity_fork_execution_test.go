@@ -107,6 +107,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
 			})
+			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			if tt.sourceAttemptStatus != "" {
 				seedSelectedContractActivityAttempt(t, db, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}

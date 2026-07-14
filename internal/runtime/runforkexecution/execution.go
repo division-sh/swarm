@@ -142,6 +142,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ContractSelection: selection,
 		BundleHash:        materializationBundleHash,
 		BundleSource:      materializationBundleSource,
+		FrontierAdmission: frontier,
+		RouteTopology:     routeTopology,
+		RecipientPlanning: *model.RecipientPlanning,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
@@ -160,21 +163,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
-	if _, err := req.Store.RecordRunForkSelectedContractRouteRecovery(ctx, store.RunForkSelectedContractRouteRecoveryRequest{
-		ForkRunID:         materialization.ForkRunID,
-		SourceRunID:       plan.SourceRunID,
-		ForkEventID:       plan.ForkPoint.EventID,
-		ContractSelection: selection,
-		RouteTopology:     routeTopology,
-		RecipientPlanning: *model.RecipientPlanning,
-	}); err != nil {
-		return SelectedContractExecutionResult{
-			Owner:                              store.RunForkSelectedContractExecutionOwner,
-			Materialization:                    materialization,
-			SelectedContractExecutionAdmission: &admission,
-			AgentRuntimeMaterialization:        &agentRuntime.Proof,
-		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
-	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		Store:             req.Store,
 		Admission:         admission,
@@ -184,7 +172,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		SourceRunID:       plan.SourceRunID,
 		ForkRunID:         materialization.ForkRunID,
 		ForkEventID:       plan.ForkPoint.EventID,
-		ForkTime:          plan.ForkPoint.Timestamp,
 		SourceEvents:      sourceEventIDs,
 		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
 	})
@@ -223,6 +210,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	activation, err := req.Store.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialization.ForkRunID,
 		AllowedSourceEventIDs: sourceEventIDs,
+		FrontierAdmission:     frontier,
+		RouteTopology:         routeTopology,
+		RecipientPlanning:     *model.RecipientPlanning,
 	})
 	if err != nil {
 		if closeErr := container.Close(ctx); closeErr != nil {
@@ -295,7 +285,6 @@ type publishSelectedContractForkEventsRequest struct {
 	SourceRunID       string
 	ForkRunID         string
 	ForkEventID       string
-	ForkTime          time.Time
 	SourceEvents      []string
 	ExecutionOwner    string
 }

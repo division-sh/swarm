@@ -32,7 +32,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003100, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, requestEventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestJSON)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestJSON)); err != nil {
 		t.Fatal(err)
 	}
 	resultPayload, _ := json.Marshal(map[string]any{
@@ -82,6 +82,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), forkTestJSON(t, sourceGeneration), at); err != nil {
 		t.Fatal(err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
 		ContractSelection: RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},
@@ -148,7 +149,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003200, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, requestEventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -173,9 +174,10 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(payload)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(payload)); err != nil {
 		t.Fatal(err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
 		ContractSelection: RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},
@@ -225,7 +227,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003300, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, requestEventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -250,7 +252,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload)); err != nil {
 		t.Fatal(err)
 	}
 	failure := `{"class":"dependency_unavailable","code":"provider_unavailable","owner":"activity-runtime","operation":"execute","details":{"provider":"provider.write"}}`
@@ -273,6 +275,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), failure, forkTestJSON(t, generation), at); err != nil {
 		t.Fatal(err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
 		ContractSelection: RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},

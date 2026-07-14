@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -33,17 +34,35 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 	if db == nil {
 		return fmt.Errorf("dead letter db is required")
 	}
-	return insert(ctx, db, rec)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin dead letter transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	changed, err := insert(ctx, tx, rec)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if _, err := runforkrevision.CaptureForEvent(ctx, tx, rec.OriginalEventID, runforkrevision.FamilyDeadLetters); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit dead letter transaction: %w", err)
+	}
+	return nil
 }
 
 func InsertTx(ctx context.Context, tx *sql.Tx, rec Record) error {
 	if tx == nil {
 		return fmt.Errorf("dead letter tx is required")
 	}
-	return insert(ctx, tx, rec)
+	_, err := insert(ctx, tx, rec)
+	return err
 }
 
-func insert(ctx context.Context, db execer, rec Record) error {
+func insert(ctx context.Context, db execer, rec Record) (bool, error) {
 	rec.OriginalEventID = strings.TrimSpace(rec.OriginalEventID)
 	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)
@@ -51,7 +70,7 @@ func insert(ctx context.Context, db execer, rec Record) error {
 	rec.HandlerNode = strings.TrimSpace(rec.HandlerNode)
 	rec.Timestamp = strings.TrimSpace(rec.Timestamp)
 	if rec.OriginalEventID == "" {
-		return fmt.Errorf("dead letter original event id is required")
+		return false, fmt.Errorf("dead letter original event id is required")
 	}
 	if rec.EntityID != "" {
 		if _, err := uuid.Parse(rec.EntityID); err != nil {
@@ -60,7 +79,7 @@ func insert(ctx context.Context, db execer, rec Record) error {
 	}
 	failureJSON, err := runtimefailures.MarshalEnvelope(rec.Failure)
 	if err != nil {
-		return fmt.Errorf("dead letter failure is invalid: %w", err)
+		return false, fmt.Errorf("dead letter failure is invalid: %w", err)
 	}
 	if len(rec.OriginalPayload) == 0 {
 		rec.OriginalPayload = json.RawMessage(`{}`)
@@ -114,11 +133,11 @@ func insert(ctx context.Context, db execer, rec Record) error {
 		rec.Timestamp,
 	)
 	if err != nil {
-		return fmt.Errorf("insert dead letter: %w", err)
+		return false, fmt.Errorf("insert dead letter: %w", err)
 	}
 	rows, err := result.RowsAffected()
-	if err == nil && rows >= 0 {
-		return nil
+	if err != nil {
+		return false, fmt.Errorf("read inserted dead letter rows: %w", err)
 	}
-	return nil
+	return rows > 0, nil
 }

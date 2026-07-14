@@ -9,6 +9,7 @@ import (
 
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -101,6 +102,11 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 	}
 	if err != nil {
 		return runtimeruncontrol.State{}, err
+	}
+	if action == "stop" && state.AbandonedDeliveries > 0 {
+		if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyEventDeliveries, runforkrevision.FamilyEventReceipts); err != nil {
+			return runtimeruncontrol.State{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("commit run control transition: %w", err)

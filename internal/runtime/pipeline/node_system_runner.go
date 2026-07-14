@@ -15,6 +15,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -692,7 +693,7 @@ func persistSystemNodeProcessedReceiptAndSettleDelivery(ctx context.Context, db 
 	if err := persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx, tx, nodeID, eventID, sideEffects); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit system node processed receipt tx: %w", err)
 	}
 	committed = true
@@ -728,7 +729,7 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryForTarget(ctx context.Con
 	if err := persistSystemNodeProcessedReceiptAndSettleDeliveryForTargetTx(ctx, tx, nodeID, eventID, target, sideEffects); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit targeted system node processed receipt tx: %w", err)
 	}
 	committed = true
@@ -885,7 +886,7 @@ func markPostgresSystemNodeDeliveryInProgress(ctx context.Context, db *sql.DB, n
 	if err := markPostgresSystemNodeDeliveryInProgressTx(ctx, tx, nodeID, eventID, retryLimit); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit system node delivery start tx: %w", err)
 	}
 	committed = true
@@ -922,7 +923,7 @@ func markPostgresSystemNodeDeliveryInProgressForTarget(ctx context.Context, db *
 	if err := markPostgresSystemNodeDeliveryInProgressForTargetTx(ctx, tx, nodeID, eventID, target, retryLimit); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit targeted system node delivery start tx: %w", err)
 	}
 	committed = true
@@ -1035,7 +1036,7 @@ func markPostgresSystemNodeDeliveryFailed(ctx context.Context, db *sql.DB, nodeI
 	if err := markPostgresSystemNodeDeliveryFailedTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit system node delivery failure tx: %w", err)
 	}
 	committed = true
@@ -1072,7 +1073,7 @@ func markPostgresSystemNodeDeliveryFailedForTarget(ctx context.Context, db *sql.
 	if err := markPostgresSystemNodeDeliveryFailedForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit targeted system node delivery failure tx: %w", err)
 	}
 	committed = true
@@ -1190,7 +1191,7 @@ func markPostgresSystemNodeDeliveryDeadLetter(ctx context.Context, db *sql.DB, n
 	if err := markPostgresSystemNodeDeliveryDeadLetterTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit system node delivery dead-letter tx: %w", err)
 	}
 	committed = true
@@ -1226,11 +1227,18 @@ func markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, db *
 	if err := markPostgresSystemNodeDeliveryDeadLetterForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit targeted system node delivery dead-letter tx: %w", err)
 	}
 	committed = true
 	return nil
+}
+
+func commitSystemNodeRevisionTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func markPostgresSystemNodeDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {

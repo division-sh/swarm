@@ -1811,7 +1811,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), runtimeStoreBackendHelp)
 	runID := fs.String("run", "", "Source run ID to plan from")
-	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
+	at := fs.String("at", "", "Fork point event UUID")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
 	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
 	activate := fs.Bool("activate", false, "Activate an already materialized state-only fork")

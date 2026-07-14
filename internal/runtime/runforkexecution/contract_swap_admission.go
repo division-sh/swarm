@@ -232,9 +232,9 @@ func contractSwapBootResumeInvalidPaths() []store.RunForkSelectedContractExecuti
 			Reason:      "current routing_rules and flow-instance route rows are not selected-fork route truth",
 		},
 		{
-			Concept:     "same_run_outbox_replay_as_timestamp_fork_resume",
+			Concept:     "same_run_outbox_replay_as_fixed_event_fork_resume",
 			Disposition: store.RunForkSelectedContractDispositionInvalid,
-			Reason:      "same-run replay proof does not define timestamp-fork contract-swap boot/resume semantics",
+			Reason:      "same-run replay proof does not define fixed-event fork contract-swap boot/resume semantics",
 		},
 	}
 }

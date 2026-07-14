@@ -9,7 +9,6 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 const (
@@ -43,16 +42,17 @@ type RunForkActivation struct {
 }
 
 type runForkActivationLineage struct {
-	ForkRunID       string
-	ForkStatus      string
-	SourceRunID     string
-	ForkEventID     string
-	ForkEventName   string
-	ForkEventTime   time.Time
-	SourceRunStatus string
-	EntityIDs       []string
-	FlowInstances   []string
-	SourceFlows     []string
+	ForkRunID         string
+	ForkStatus        string
+	SourceRunID       string
+	ForkEventID       string
+	ForkEventName     string
+	ForkEventTime     time.Time
+	ForkEventRevision int64
+	SourceRunStatus   string
+	EntityIDs         []string
+	FlowInstances     []string
+	SourceFlows       []string
 }
 
 func RequireRunForkActivationCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -116,12 +116,15 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if err != nil {
 		return RunForkActivation{}, err
 	}
+	if err := lockRunForkSourceRevisionFrontier(ctx, tx, &lineage); err != nil {
+		return RunForkActivation{}, err
+	}
 	result := RunForkActivation{
 		SourceRunID:             lineage.SourceRunID,
 		ForkRunID:               lineage.ForkRunID,
 		ForkRunStatus:           lineage.ForkStatus,
 		SourceRunStatus:         lineage.SourceRunStatus,
-		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime},
+		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
 		ReplayResumeBlocked:     true,
 		MaterializedEntityCount: len(lineage.EntityIDs),
 	}
@@ -153,7 +156,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		result.UnsupportedBlockers = plan.UnsupportedBlockers
 		return result, fmt.Errorf("fork activation requires execution-ready materialized fork; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
 	}
-	if err := ensureRunForkSourceNotAdvanced(ctx, tx, catalog, lineage); err != nil {
+	if err := ensureRunForkSourceNotAdvanced(ctx, tx, lineage); err != nil {
 		result.SourceAdvancedAfterFork = true
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
@@ -219,7 +222,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	} else if affected != 1 {
 		return result, fmt.Errorf("fork activation blocked: fork_run_activation_not_applied")
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
@@ -358,134 +361,109 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 	return lineage, nil
 }
 
-func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
-	checks := []struct {
-		code  string
-		query string
-		args  []any
-	}{
-		{
-			code: "source_events_advanced_after_fork_point",
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM events
-					WHERE run_id = $1::uuid
-					  AND (created_at, event_id) > ($2::timestamptz, $3::uuid)
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
-		},
-		{
-			code: "source_mutations_advanced_after_fork_point",
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM entity_mutations
-					WHERE run_id = $1::uuid
-					  AND created_at > $2::timestamptz
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
-		},
-		{
-			code: "source_current_state_advanced_after_fork_point",
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM entity_state
-					WHERE run_id = $1::uuid
-					  AND updated_at > $2::timestamptz
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
-		},
-		{
-			code: "source_deliveries_advanced_after_fork_point",
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM event_deliveries d
-					WHERE d.run_id = $1::uuid
-					  AND (
-							d.created_at > $2::timestamptz
-							OR d.started_at > $2::timestamptz
-							OR d.delivered_at > $2::timestamptz
-					  )
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
-		},
+func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage *runForkActivationLineage) error {
+	if lineage == nil {
+		return fmt.Errorf("fork activation requires lineage")
 	}
-	for _, check := range checks {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, check.query, check.args...).Scan(&exists); err != nil {
-			return fmt.Errorf("check %s: %w", check.code, err)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT MIN(revision)
+		FROM run_fork_fact_revisions
+		WHERE run_id = $1::uuid
+		  AND family = 'events'
+		  AND fact_key = $2
+		  AND present
+	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+		return fmt.Errorf("resolve fork activation event revision: %w", err)
+	}
+	if lineage.ForkEventRevision <= 0 {
+		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
+	}
+	var currentRevision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT last_revision
+		FROM run_fork_revision_heads
+		WHERE run_id = $1::uuid
+		FOR UPDATE
+	`, lineage.SourceRunID).Scan(&currentRevision); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("fork activation source revision frontier is missing; recreate the store and retry")
 		}
-		if exists {
-			return runForkReplayResumeError(check.code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("fork activation blocked: %s", check.code))
-		}
+		return fmt.Errorf("lock fork activation source revision frontier: %w", err)
 	}
-	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, catalog, lineage); err != nil {
-		return err
-	}
-	if err := ensureRunForkNoRelevantPostForkRoutes(ctx, tx, catalog, lineage); err != nil {
-		return err
+	if currentRevision < lineage.ForkEventRevision {
+		return fmt.Errorf("fork activation source revision frontier is corrupt; recreate the store and retry")
 	}
 	return nil
 }
 
-func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
-	if !catalog.hasColumns("timers", "run_id", "entity_id", "flow_instance", "created_at") {
-		return nil
+func collectRunForkSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT family
+		FROM run_fork_fact_revisions
+		WHERE run_id = $1::uuid
+		  AND revision > $2
+		ORDER BY family
+	`, lineage.SourceRunID, lineage.ForkEventRevision)
+	if err != nil {
+		return nil, fmt.Errorf("read source revisions after fork point: %w", err)
 	}
-	if len(lineage.EntityIDs) == 0 && len(lineage.FlowInstances) == 0 {
-		return nil
+	defer rows.Close()
+	facts := []string{}
+	for rows.Next() {
+		var family string
+		if err := rows.Scan(&family); err != nil {
+			return nil, fmt.Errorf("scan source revision after fork point: %w", err)
+		}
+		code, ok := runForkSourceAdvancedCode(family)
+		if !ok {
+			return nil, fmt.Errorf("unsupported revisioned source family %q; recreate the store and retry", family)
+		}
+		facts = append(facts, code)
 	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM timers
-			WHERE run_id = $1::uuid
-			  AND created_at > $2::timestamptz
-			  AND (
-					(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
-					OR
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
-			  )
-		)
-	`, lineage.SourceRunID, lineage.ForkEventTime, pq.Array(lineage.EntityIDs), pq.Array(lineage.FlowInstances)).Scan(&exists); err != nil {
-		return fmt.Errorf("check source timer advancement: %w", err)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source revisions after fork point: %w", err)
 	}
-	if exists {
-		return runForkReplayResumeError("source_timers_advanced_after_fork_point", RunForkReplayResumeFactSourceAdvanced, "fork activation blocked: source_timers_advanced_after_fork_point")
-	}
-	return nil
+	return uniqueNonEmptyStrings(facts), nil
 }
 
-func ensureRunForkNoRelevantPostForkRoutes(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
-	if !catalog.hasColumns("routing_rules", "flow_instance", "source_flow", "created_at") {
+func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) error {
+	facts, err := collectRunForkSourceAdvancedFacts(ctx, tx, lineage)
+	if err != nil {
+		return err
+	}
+	if len(facts) == 0 {
 		return nil
 	}
-	if len(lineage.FlowInstances) == 0 && len(lineage.SourceFlows) == 0 {
-		return nil
+	return runForkReplayResumeError(facts[0], RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("fork activation blocked: %s", facts[0]))
+}
+
+func runForkSourceAdvancedCode(family string) (string, bool) {
+	switch strings.TrimSpace(family) {
+	case "events":
+		return "source_events_advanced_after_fork_point", true
+	case "entity_mutations":
+		return "source_mutations_advanced_after_fork_point", true
+	case "entity_metadata":
+		return "source_current_state_advanced_after_fork_point", true
+	case "event_deliveries":
+		return "source_deliveries_advanced_after_fork_point", true
+	case "event_receipts":
+		return "source_receipts_advanced_after_fork_point", true
+	case "dead_letters":
+		return "source_dead_letters_advanced_after_fork_point", true
+	case "timers":
+		return "source_timers_advanced_after_fork_point", true
+	case "agent_sessions":
+		return "source_sessions_advanced_after_fork_point", true
+	case "agent_turns":
+		return "source_turns_advanced_after_fork_point", true
+	case "agent_conversation_audits":
+		return "source_conversation_audits_advanced_after_fork_point", true
+	case "reply_contexts":
+		return "source_reply_contexts_advanced_after_fork_point", true
+	default:
+		return "", false
 	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM routing_rules
-			WHERE created_at > $1::timestamptz
-			  AND (
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($2::text[]))
-					OR
-					(COALESCE(source_flow, '') <> '' AND source_flow = ANY($3::text[]))
-			  )
-		)
-	`, lineage.ForkEventTime, pq.Array(lineage.FlowInstances), pq.Array(lineage.SourceFlows)).Scan(&exists); err != nil {
-		return fmt.Errorf("check source route advancement: %w", err)
-	}
-	if exists {
-		return runForkReplayResumeError("source_routes_advanced_after_fork_point", RunForkReplayResumeFactSourceAdvanced, "fork activation blocked: source_routes_advanced_after_fork_point")
-	}
-	return nil
 }
 
 func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string) error {

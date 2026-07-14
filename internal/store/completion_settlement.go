@@ -50,7 +50,7 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 	if err := settleExternalAttemptPostgres(ctx, tx, settlement.Settlement); err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("settle completion commit: %w", err)
 	}
 	return runtimeeffects.CompletionSettlementResult{

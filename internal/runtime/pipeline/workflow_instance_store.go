@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -394,7 +395,7 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 			}
 		}()
 	}
-	ctx = withSQLTxContext(ctx, tx)
+	ctx = WithPipelineSQLTxContext(ctx, tx)
 	if err := lockWorkflowInstanceMutation(ctx, tx, instanceID); err != nil {
 		return err
 	}
@@ -412,6 +413,13 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 		return err
 	}
 	if ownedTx {
+		runID, err := runtimecurrentstate.RequireRunID(ctx)
+		if err != nil {
+			return err
+		}
+		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -771,10 +779,15 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 	postCommit := make([]func(), 0, 4)
 	rollbackActions := make([]func(), 0, 4)
 	txctx := WithPipelineSQLConnContext(ctx, conn)
-	txctx = withSQLTxContext(txctx, tx)
+	txctx = WithPipelineSQLTxContext(txctx, tx)
 	txctx = withPipelinePostCommitActions(txctx, &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
+		_ = tx.Rollback()
+		flushPipelineRollbackActions(rollbackActions)
+		return err
+	}
+	if err := CapturePipelineRunForkRevisionChanges(txctx, tx); err != nil {
 		_ = tx.Rollback()
 		flushPipelineRollbackActions(rollbackActions)
 		return err
@@ -1237,6 +1250,11 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}); err != nil {
 		return err
 	}
+	if !ownedTx {
+		if err := declarePipelineRunForkRevisionChange(ctx, runID, runforkrevision.FamilyTimers); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM timers
 		WHERE run_id = $1::uuid
@@ -1275,6 +1293,9 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		}
 	}
 	if ownedTx {
+		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -1408,6 +1429,9 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		}
 	}
 	if ownedTx {
+		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -1452,6 +1476,14 @@ func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, er
 		return nil, false, err
 	}
 	return tx, true, nil
+}
+
+func captureWorkflowInstanceRevision(ctx context.Context, tx *sql.Tx, runID string) error {
+	if err := CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+		return err
+	}
+	_, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyTimers)
+	return err
 }
 
 func lockWorkflowInstanceMutation(ctx context.Context, tx *sql.Tx, instanceID string) error {

@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -140,7 +141,7 @@ func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, NULL, 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -300,6 +301,17 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 		RETURNING delivery_id::text
 	`, sourceRunID, sourceEventID, at).Scan(&sourceDeliveryID); err != nil {
 		t.Fatalf("seed source pending delivery: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin historical replay source revision: %v", err)
+	}
+	if _, err := runforkrevision.Capture(ctx, tx, sourceRunID, runforkrevision.AllFamilies()...); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("capture historical replay source revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit historical replay source revision: %v", err)
 	}
 
 	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{

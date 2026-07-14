@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/lib/pq"
 )
@@ -189,6 +190,9 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 			if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
 				return err
 			}
+		}
+		if _, err := runforkrevision.CaptureForEvent(ctx, tx, eventID, runforkrevision.FamilyEventDeliveries, runforkrevision.FamilyEventReceipts); err != nil {
+			return err
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit event receipt tx: %w", err)
@@ -415,7 +419,12 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		  )
 		  AND COALESCE(reason_code, '') <> ALL($4)
 	`
-	res, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes()))
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin mark event delivery in progress: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes()))
 	if err != nil {
 		return fmt.Errorf("mark event delivery in progress: %w", err)
 	}
@@ -426,6 +435,12 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 			return nil
 		}
 		return fmt.Errorf("mark event delivery in progress: delivery row required for event %s agent %s", eventID, agentID)
+	}
+	if _, err := runforkrevision.CaptureForEvent(ctx, tx, eventID, runforkrevision.FamilyEventDeliveries); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit mark event delivery in progress: %w", err)
 	}
 	return nil
 }

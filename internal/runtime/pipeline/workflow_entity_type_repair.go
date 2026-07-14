@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 )
@@ -115,6 +116,13 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 		if affected, err := res.RowsAffected(); err == nil {
 			repaired += int(affected)
 		}
+	}
+	changes := make([]runforkrevision.Change, 0, len(repairs))
+	for _, repair := range repairs {
+		changes = append(changes, runforkrevision.Change{RunID: repair.RunID, Families: []runforkrevision.Family{runforkrevision.FamilyEntityMetadata}})
+	}
+	if _, err := runforkrevision.CaptureChanges(ctx, tx, changes...); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit contract entity type repair: %w", err)

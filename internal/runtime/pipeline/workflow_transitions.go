@@ -11,6 +11,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -198,7 +199,15 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 		}
 		failureJSON = string(raw)
 	}
-	_, err = db.ExecContext(ctx, `
+	tx, borrowed := PipelineSQLTxFromContext(ctx)
+	if !borrowed || tx == nil {
+		tx, err = db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin pipeline transition receipt: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
 			outcome, reason_code, state_before, state_after, side_effects, failure, duration_ms, processed_at
@@ -218,5 +227,17 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 			duration_ms = EXCLUDED.duration_ms,
 			processed_at = now()
 	`, eventID, "pipeline:"+pipelineID, outcome, reasonCode, string(before), string(after), string(sideEffects), failureJSON, durationMS)
-	return err
+	if err != nil {
+		return err
+	}
+	if borrowed {
+		return nil
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit pipeline transition receipt: %w", err)
+	}
+	return nil
 }

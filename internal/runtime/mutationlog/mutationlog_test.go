@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -97,7 +98,7 @@ func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
-	if err := Insert(ctx, db, Record{
+	if err := insertMutationLogRecord(t, ctx, db, Record{
 		EntityID:   uuid.NewString(),
 		Field:      "status",
 		OldValue:   nil,
@@ -136,7 +137,7 @@ func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
-	err := Insert(ctx, db, Record{
+	err := insertMutationLogRecord(t, ctx, db, Record{
 		EntityID:   uuid.NewString(),
 		Field:      "status",
 		OldValue:   nil,
@@ -153,6 +154,22 @@ func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 	if count := countMutationRowsForRun(t, db, runID); count != 0 {
 		t.Fatalf("entity_mutations rows for %s = %d, want 0", runID, count)
 	}
+}
+
+func insertMutationLogRecord(t *testing.T, ctx context.Context, db *sql.DB, record Record) error {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin mutation log transaction: %v", err)
+	}
+	defer tx.Rollback()
+	if err := Insert(ctx, tx, record); err != nil {
+		return err
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {

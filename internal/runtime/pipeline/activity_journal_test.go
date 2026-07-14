@@ -83,6 +83,15 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			if inserted || terminalAgain.Status != ActivityAttemptStatusSucceeded {
 				t.Fatalf("terminal duplicate = (%v, %q), want existing succeeded", inserted, terminalAgain.Status)
 			}
+			if !sqlite {
+				var revisions int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1::uuid`, runID).Scan(&revisions); err != nil {
+					t.Fatalf("count activity-only run fork revisions: %v", err)
+				}
+				if revisions != 0 {
+					t.Fatalf("activity-only run fork revisions = %d, want 0 for post-frontier selected-execution evidence", revisions)
+				}
+			}
 		})
 	}
 }

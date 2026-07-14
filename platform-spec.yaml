@@ -10567,6 +10567,9 @@ platform_tables:
         - run_fork_selected_contract_route_recoveries
         - run_fork_selected_contract_bindings
       delete_by_run_id:
+        - run_fork_fact_revisions
+        - run_fork_revisions
+        - run_fork_revision_heads
         - activity_attempts
         - decision_card_lifecycle_outbox
         - decision_card_route_obligations
@@ -10642,6 +10645,48 @@ platform_tables:
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+    run_fork_revision_heads:
+      description: >-
+        Canonical per-run counter for the bounded supported-fork historical projection. The existing
+        store transaction owner increments this row while holding its row lock; all approved fork-reader
+        facts written by the same PostgreSQL transaction share the resulting revision.
+      ddl: |
+        CREATE TABLE run_fork_revision_heads (
+            run_id        UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+            last_revision BIGINT NOT NULL DEFAULT 0 CHECK (last_revision >= 0),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    run_fork_revisions:
+      description: >-
+        Commit-serialized revision ledger for the bounded supported-fork projection. transaction_id is
+        used only to reuse one revision inside one SQL transaction; it is not a public historical cursor.
+      ddl: |
+        CREATE TABLE run_fork_revisions (
+            run_id        UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            revision      BIGINT NOT NULL CHECK (revision > 0),
+            transaction_id BIGINT NOT NULL,
+            recorded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (run_id, revision),
+            UNIQUE (run_id, transaction_id)
+        );
+    run_fork_fact_revisions:
+      description: >-
+        Append-only, closed-registry projection of the eleven source fact families consumed by supported
+        PostgreSQL fork planning. This table is not a general temporal database and has no trigger,
+        migration, compatibility, or arbitrary-history API.
+      ddl: |
+        CREATE TABLE run_fork_fact_revisions (
+            run_id    UUID NOT NULL,
+            revision  BIGINT NOT NULL,
+            family    TEXT NOT NULL CHECK (family IN ('events', 'entity_mutations', 'entity_metadata', 'event_deliveries', 'event_receipts', 'dead_letters', 'timers', 'agent_sessions', 'agent_turns', 'agent_conversation_audits', 'reply_contexts')),
+            fact_key  TEXT NOT NULL CHECK (fact_key <> ''),
+            fact      JSONB NOT NULL,
+            present   BOOLEAN NOT NULL DEFAULT TRUE,
+            source_transaction_id BIGINT NOT NULL CHECK (source_transaction_id >= 0),
+            PRIMARY KEY (run_id, family, fact_key, revision),
+            FOREIGN KEY (run_id, revision) REFERENCES run_fork_revisions(run_id, revision) ON DELETE CASCADE,
+            INDEX idx_run_fork_fact_revision_snapshot (run_id, revision, family, fact_key)
+        );
     agent_directive_operations:
       description: >-
         Durable operation/outcome owner for agent.send_directive. One row reserves one
@@ -10853,7 +10898,7 @@ platform_tables:
         split/fail-closed.'
       ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
-      description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
+      description: Durable selected-contract source binding for fixed-event forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
@@ -10896,13 +10941,13 @@ platform_tables:
             ON run_fork_selected_contract_runtime_executions (fork_run_id)
             WHERE state <> 'closed';
     run_fork_selected_contract_executions:
-      description: Source-to-fork lineage table for mutating selected-contract timestamp-fork execution. The runtime
+      description: Source-to-fork lineage table for mutating selected-contract fixed-event fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
         frontier event each fork event executed from. Source events, deliveries, receipts, dead letters, retry state, and
         post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors.
       ddl: "CREATE TABLE run_fork_selected_contract_executions (\n    execution_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id     UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id   UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id UUID NOT NULL REFERENCES events(event_id),\n    fork_event_id   UUID NOT NULL REFERENCES events(event_id),\n    event_name      TEXT NOT NULL,\n    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id, source_event_id),\n    UNIQUE (fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)\n);"
     run_fork_selected_contract_branch_divergences:
-      description: Durable source/fork branch divergence evidence for selected-contract timestamp-fork execution. This
+      description: Durable source/fork branch divergence evidence for selected-contract fixed-event fork execution. This
         table is written only by the selected-contract execution owner when the source has advanced after the fork point
         and selected execution proceeds as a branch rather than freezing or rewinding the source. Source post-fork facts
         remain source-run evidence only; fork-local work is regenerated under the fork run_id.
@@ -10941,7 +10986,7 @@ platform_tables:
         \ (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
         );"
     run_fork_delivery_event_replays:
-      description: Source-to-fork lineage table for the supported timestamp-fork delivery/event replay primitive. The fork
+      description: Source-to-fork lineage table for the supported fixed-event fork delivery/event replay primitive. The fork
         run gets fresh fork-local event_id and delivery_id values; this table records which source event/delivery facts
         produced those fork-local rows. It is not a generic historical replay log and does not authorize session, turn,
         timer, route, source-advanced, or contract-swap reconstruction.
@@ -11761,7 +11806,7 @@ platform_tables:
       (search_entities, query_entities, get_entity) return entity_state rows from the current run context only. Cross-run
       duplicate detection or historical analysis must use an explicit cross-run read model rather than the live current-state
       registry.
-    rationale: Mutating timestamp forks require source and fork runs to preserve entity_id while diverging safely. Global
+    rationale: Mutating fixed-event forks require source and fork runs to preserve entity_id while diverging safely. Global
       live current state would let forked execution overwrite or read source-run state by accident. Products that need
       historical or portfolio-wide duplicate detection must consume explicit cross-run history/read surfaces.
     dedup_responsibility: Duplicate detection across runs is a product concern, not a live current-state registry concern.
@@ -11933,7 +11978,7 @@ run_model:
       - dashboard alert UI
       - CLI alert rendering
   fork:
-    description: 'Fork creates an isolated run by reconstructing provable current state at a point in time,
+    description: 'Fork creates an isolated run by reconstructing provable current state at a selected event revision,
       optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
       model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries,
       selected-contract frontier execution, and approved timer reconstruction. The system does not infer arbitrary
@@ -11944,8 +11989,8 @@ run_model:
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
-    planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
-      point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts
+    planning_admission: 'The canonical planner is a read-only planning/admission surface. It resolves the selected
+      event revision, reconstructs provable state, classifies replay candidates, optionally loads selected contracts
       for non-mutating contract/frontier/route admission, and returns execution_ready=false
       with named unsupported blockers whenever persisted recorder facts cannot prove safe execution. Dry-run
       MUST NOT create a forked run, mark the source run forked, copy entity state, redeliver events, or change
@@ -11957,23 +12002,24 @@ run_model:
       fork run_id after loading and validating that selected source, but that binding is prerequisite metadata only.
       It does not mark the source run forked, freeze the source run, redeliver pending work, resume event
       processing, change contracts, or mutate delivery/session/timer/route state. Materialized fork current-state
-      rows start a new fork-local revision sequence at revision=1; source-at-T entity_state.revision is not
+      rows start a new fork-local revision sequence at revision=1; source entity_state.revision at the selected event revision is not
       copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
       Materialization MUST consume runtime.run_fork.materialized_entity_snapshot_metadata for every reconstructed
-      entity before writing fork-local entity_state. That owner may use at/before-T event flow evidence, or source
-      entity_state creation metadata when the source row was created at or before T, for flow_instance. Entity_type
-      MUST come from source entity_state creation metadata when the source row was created at or before T; reconstructed
+      entity before writing fork-local entity_state. That owner may use event flow evidence present in the fixed revision,
+      or source entity_state creation metadata present in that revision, for flow_instance. Entity_type
+      MUST come from source entity_state creation metadata present in that revision; reconstructed
       fields.entity_type is projection state and MUST NOT authorize materialization, though a conflicting reconstructed
       value may fail closed. The owner MUST NOT read source current_state, gates, fields, accumulator, revision, or updated_at
       as fork-point projection truth. If flow_instance/entity_type cannot be proven for a reconstructed entity,
       materialization fails closed with entity_snapshot_metadata_unproven and writes no fork rows.
-      Materialized fork rows preserve entered_state_at from the source-at-T current_state mutation evidence; they
-      MUST NOT stamp entered_state_at with the fork point unless that is when the current_state was entered.
+      Materialized fork rows preserve entered_state_at from current_state mutation evidence present in the selected
+      revision; they MUST NOT stamp entered_state_at with the selected event occurrence time unless that is when the
+      current_state was entered.
       Full fork execution remains a separately gated operation.'
     activation_admission: 'The activate form consumes an already materialized state-only fork and is the
       supported activation slice for forks whose state was produced by materialize-only admission. Activation
       requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
-      execution_ready=true planner result at the original fork point. Activation atomically transitions the
+      execution_ready=true planner result at the original selected event revision. Activation atomically transitions the
       fork run to status=running and the source run to status=forked. It may create fork-local event and delivery
       rows only after runtime.run_fork.historical_replay_execution consumes a concrete
       runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
@@ -11982,16 +12028,64 @@ run_model:
       runtime.run_fork.historical_replay_execution and MUST NOT reselect replayable source deliveries directly from
       RunForkPlan or store.run_fork.replay_resume_admission. The store delivery-event replay primitive uses fresh fork
       event IDs, a direct committed replay-scope marker, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
-      after the fork point, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
+      after the materialized source revision, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
       failed, dead-letter, timer, route, session, active-turn, replay, or contract-swap facts
       would require unsupported historical replay. Source committed replay-scope marker facts remain fail-closed unless
-      an approved selected-contract marker policy classifies at/before-T markers as lineage/no-action evidence only.
+      an approved selected-contract marker policy classifies markers present in the selected revision as lineage/no-action evidence only.
       Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
+    fixed_event_revision_and_workset:
+      owner: store.run_fork.fixed_event_revision_and_workset
+      selector: >-
+        A supported fork selector is an event UUID in the source run. The event's first persisted run revision is
+        the inclusive historical boundary. Event and lifecycle timestamps are display and diagnostic values only;
+        they never decide historical membership, ordering, readiness, or blockers. There is no timestamp selector
+        or timestamp fallback.
+      historical_registry:
+      - events
+      - entity_mutations
+      - entity_metadata
+      - event_deliveries
+      - event_receipts
+      - dead_letters
+      - timers
+      - agent_sessions
+      - agent_turns
+      - agent_conversation_audits
+      - reply_contexts
+      write_contract: >-
+        Existing PostgreSQL store transactions allocate one commit-serialized revision per affected run after
+        provider, tool, agent, and network work. Every changed family in one transaction shares that revision;
+        repeated capture in the transaction reuses it; rollback publishes neither facts nor revision. Transactions
+        affecting multiple runs lock revision heads in deterministic run-ID order. No revision lock may span external
+        work. Deletion emits present=false for the removed fact in the same transaction.
+      read_contract: >-
+        PlanRunFork resolves the event UUID to its first revision and reads all eleven families through one read-only
+        repeatable-read PostgreSQL snapshot. Every generic and selected planning, readiness, materialization, and
+        historical activation replan consumes that projection. Missing, ambiguous, lineage-invalid, partially deleted,
+        or unrevisioned facts fail closed; old stores are unsupported and must be recreated. SQLite returns typed
+        unsupported for fork mutation and does not emulate this owner.
+      route_projection: >-
+        Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
+        projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
+        Generic materialization and activation preserve flow_route_history_unproven. Selected execution may discharge
+        unknown_unversioned only with matching selected binding, frontier, static/dynamic topology, and recipient proof;
+        activation revalidates the persisted selected route recovery and never queries current routing_rules.
+      distinct_current_evidence: >-
+        activity_attempts are post-frontier selected-execution evidence, not a twelfth historical family. Source
+        preparation reads the immutable selected request event and current terminal attempt in one serializable
+        transaction and copies accepted evidence under fork-local identity. Missing or nonterminal evidence fails
+        closed without changing PlanRunFork membership or readiness. Fresh source-advancement validation is likewise
+        an activation safety owner and is not answered from the historical snapshot.
+      retention: >-
+        The eleven authoritative source families remain available while a live dependent fork requires them. Partial
+        fact deletion is unsupported. Existing whole-run cleanup may remove the complete source only when no live
+        dependent fork remains; no tombstone subsystem, migration, backfill, export, purge, or compatibility reader is
+        provided for old selected stores.
     replay_resume_admission_taxonomy: 'Fork planning, materialization, and activation surfaces expose the
       canonical store-backed replay_resume_admission taxonomy. This taxonomy classifies
       historical source-run facts as reconstruct, lineage-only, fail-closed blockers, split siblings, or
@@ -12002,7 +12096,7 @@ run_model:
       receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or runtime-wide replay
       mutation. There is no separately promised arbitrary source-run resume lane: unsupported fact families remain
       fail-closed unless a consumer-named successor promotes a new owner.'
-    selected_contract_readiness_classifier: 'Selected-contract timestamp-fork readiness explanation is owned by
+    selected_contract_readiness_classifier: 'Selected-contract fixed-event revision readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected
       route admission/topology/dynamic topology, runtime.run_fork.selected_contract_recipient_planning, selected
@@ -12025,7 +12119,7 @@ run_model:
       handler execution, fork-local event/delivery writes, receipts, dead letters, idempotency, emitted follow-up events,
       timers, routes, sessions, turns, source advancement, and contract-swap boot/resume. The model MUST NOT create
       fork-local executable work, run handlers, accept source outcomes as fork suppressors, or treat same-run outbox
-      replay as timestamp-fork selected-contract execution.'
+      replay as fixed-event selected-contract execution.'
     selected_contract_execution_admission: 'Selected-contract fork execution admission is a non-mutating runtime-side
       prerequisite for future selected-contract execution. The canonical owner consumes the durable
       store.run_fork.selected_contract_binding by fork run_id, loads and validates the selected semantic source from that
@@ -12045,8 +12139,8 @@ run_model:
       creation, or fork delivery row creation. This gate does not run handlers, create selected fork-local executable
       event/delivery rows, write receipts, dead letters, idempotency state, emitted follow-up events, timers, routes,
       sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.'
-    selected_contract_source_advanced_branch: 'Mutating selected-contract timestamp-fork execution treats a source run
-      that advanced after the fork point as branch divergence evidence, not as executable fork work and not as a fork
+    selected_contract_source_advanced_branch: 'Mutating selected-contract fixed-event execution treats a source run
+      that advanced after the materialized source revision as branch divergence evidence, not as executable fork work and not as a fork
       suppressor. This policy is owned by runtime.run_fork.selected_contract_execution and its store-owned durable branch
       divergence evidence. It is selected-contract execution only: generic/state-only activation still requires no source
       advancement and may freeze the source run. A selected-contract branch must not freeze or rewind an already-advanced
@@ -12058,9 +12152,9 @@ run_model:
         branch-divergence evidence. Same-source in-progress delivery coupling admitted by
         runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy is also
         branch-divergence lineage evidence and not executable delivery/session truth.'
-    selected_contract_source_advanced_conversation_history_policy: 'Mutating selected-contract timestamp-fork execution
+    selected_contract_source_advanced_conversation_history_policy: 'Mutating selected-contract fixed-event execution
       may consume runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify
-      post-fork-T source agent_sessions, agent_turns, and agent_conversation_audits as source-advanced branch-divergence
+      source agent_sessions, agent_turns, and agent_conversation_audits committed after the selected revision as source-advanced branch-divergence
       lineage/no-action evidence only. This policy is selected-contract execution only and is not conversation-history
       reconstruction. Source session, provider-session, transcript, audit, turn, receipt, outcome, or task-audit rows
       MUST NOT be copied into the fork, reused as fork-local runtime truth, or used as selected-fork suppressors. Fresh
@@ -12068,58 +12162,59 @@ run_model:
       Pending or in-progress source delivery/session coupling, fork-local pre-existing conversation rows, generic/state-only
       activation, broad source-run resumption, timers, routes, non-agent replay, restart recovery, and operator surfaces
       remain fail-closed or split siblings unless separately approved.'
-    selected_contract_active_source_delivery_conversation_coupling_policy: 'Mutating selected-contract timestamp-fork
+    selected_contract_active_source_delivery_conversation_coupling_policy: 'Mutating selected-contract fixed-event
       execution may consume runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy
-      to classify exactly one narrow at-T active delivery/session coupling case as lineage/no-action and branch-divergence
-      evidence: the in-progress source agent delivery is for the source event referenced by the fork-point event
-      source_event_id, the fork-point event was produced by the same agent subscriber, the delivery started at/before T,
-      and the delivery row has no active_session_id, receipt, receipt outcome, or delivered_at at T. The policy does not
+      to classify exactly one narrow selected-revision active delivery/session coupling case as lineage/no-action and branch-divergence
+      evidence: the delivery fact present in the selected revision is in progress for the source event referenced by the selected event
+      source_event_id, the selected event was produced by the same agent subscriber, and that revision has no
+      active_session_id, receipt, receipt outcome, or delivered_at. The policy does not
       authorize copying source delivery rows, sessions, turns, audits, provider session IDs, transcripts, receipts,
-      outcomes, or conversation audits into the fork and does not let a source terminal outcome after T suppress or decide
+      outcomes, or conversation audits into the fork and does not let a later source terminal outcome suppress or decide
       selected fork execution. Unrelated in-flight deliveries, active_session_id coupling, partial receipt/outcome state,
-      fork-local pre-existing conversation rows, post-T source conversation facts outside the source-advanced
+      fork-local pre-existing conversation rows, post-revision source conversation facts outside the source-advanced
       conversation-history owner, non-agent replay, timers, routes, retry/idempotency, follow-up policy, restart recovery,
       and operator surfaces remain fail-closed or split siblings unless separately approved.'
-    selected_contract_timer_route_policy: 'Mutating selected-contract timestamp-fork execution treats source route facts
-      as evidence-only fail-closed blockers until a separately approved route reconstruction owner exists. Active source
+    selected_contract_timer_route_policy: 'Mutating selected-contract fixed-event execution consumes a typed route-history
+      projection rather than current routing_rules. not_applicable adds no route blocker; unknown_unversioned remains
+      flow_route_history_unproven for generic execution and may be discharged for selected execution only by matching
+      selected binding, frontier, static/dynamic topology, recipient, and persisted route-recovery proof. Active source
       timers may be reconstructed only by runtime.run_fork.historical_replay_execution.timer_reconstruction, which
       consumes store.run_fork.replay_resume_admission timer_history as lineage, writes fresh fork-local timer rows under
       the fork run_id with source_timer_id/forked_from_run_id/forked_from_event_id/reconstruction_owner lineage, and
       requires scheduler claim/fire/recovery identity to include run_id. Source timer rows are never copied as executable
-      truth, fired as source work, or used as selected-fork suppressors. Unsupported source timer histories and post-T
-      source timer facts remain fail-closed. The runtime.run_fork.selected_contract_execution owner must continue to
-      consume flow_route_history blockers and MUST NOT copy routing_rules, persist fork-local route rows, derive
+      truth, fired as source work, or used as selected-fork suppressors. Unsupported source timer histories and timer
+      facts committed after the selected revision remain fail-closed. The runtime.run_fork.selected_contract_execution owner must continue to
+      consume unresolved flow_route_history blockers and MUST NOT copy or query current routing_rules as historical truth, persist fork-local route rows, derive
       selected-source recipients for execution outside recipient planning, or use source route outcomes as selected-fork
       suppressors.'
-    selected_contract_session_turn_audit_lineage_policy: 'Mutating selected-contract timestamp-fork execution may consume
+    selected_contract_session_turn_audit_lineage_policy: 'Mutating selected-contract fixed-event execution may consume
       runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy to classify
-      at/before-fork-T source agent_sessions, agent_turns, and agent_conversation_audits as lineage/no-action evidence
+      source agent_sessions, agent_turns, and agent_conversation_audits present in the selected revision as lineage/no-action evidence
       only. This policy is selected-contract execution only and is not session, turn, or audit reconstruction. It applies
       only when selected-contract execution regenerates fresh fork-local work through canonical owners and no pending or
-      in-progress source delivery at T requires live session continuity through active_session_id, started_at, partial
+      in-progress source delivery in the selected revision requires live session continuity through active_session_id, partial
       receipt/outcome state, or equivalent active execution evidence, except for the separately owned same-source
-      fork-point emission case admitted by runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy.
+      selected-event emission case admitted by runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy.
       Source session, turn, audit, provider-session,
       transcript, receipt, outcome, or task-audit rows MUST NOT be copied into the fork, reused as fork-local runtime
       truth, or used as selected-fork suppressors. Fork-local conversation rows before the selected execution owner
-      creates them remain fail-closed. Post-T source session, turn, and conversation-audit facts are outside this
-      at/before-T lineage owner and may be classified only by the selected-contract source-advanced conversation-history
+      creates them remain fail-closed. Post-revision source session, turn, and conversation-audit facts are outside this
+      selected-revision lineage owner and may be classified only by the selected-contract source-advanced conversation-history
       policy. Committed replay-scope marker policy is a split sibling.'
-    selected_contract_committed_replay_scope_marker_policy: 'Mutating selected-contract timestamp-fork execution may
+    selected_contract_committed_replay_scope_marker_policy: 'Mutating selected-contract fixed-event execution may
       consume runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to
-      classify at/before-fork-T source committed replay-scope marker rows as lineage/no-action evidence only. This policy
+      classify source committed replay-scope marker delivery facts present in the selected revision as lineage/no-action evidence only. This policy
       is selected-contract execution only and is not same-run replay recovery, fork-local delivery-event replay recovery,
-      or generic historical replay. At/before-T classification is determined by the underlying source event position
-      relative to the fork point, not by the committed marker delivery row write timestamp; delayed marker delivery
-      write-skew for an at/before-T source event remains lineage/no-action and MUST NOT be reclassified as generic
-      selected-contract source-delivery advancement. Source marker rows MUST NOT be copied into the fork, reused as
+      or generic historical replay. The delivery fact and its source event lineage must be committed in the selected
+      revision projection. A marker delivery committed after that revision is source advancement and MUST NOT be admitted
+      by the underlying event''s occurrence timestamp or position. Source marker rows MUST NOT be copied into the fork, reused as
       fork-local recovery proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local
       committed replay-scope truth must be freshly written under the fork run_id by selected-contract execution or
-      approved fork-local delivery-event replay owners. Source marker facts whose underlying source event is after T
+      approved fork-local delivery-event replay owners. Source marker facts absent from the selected revision
       remain fail-closed unless a separate approved source-advanced/reconstruction owner changes that policy.'
-    selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract timestamp-fork execution may consume
+    selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract fixed-event execution may consume
       runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify
-      at/before-fork-T source outcome facts for spec-declared diagnostic/non-routed platform events as lineage/no-action
+      source outcome facts present in the selected revision for spec-declared diagnostic/non-routed platform events as lineage/no-action
       evidence only. The diagnostic event set is defined by platform_events.routing_rules.diagnostic_events, currently
       platform.runtime_log and platform.inbound_recorded. This policy is selected-contract frontier admission only. It
       MUST NOT route diagnostic platform events through selected contracts, synthesize selected recipients, copy source
@@ -12129,9 +12224,11 @@ run_model:
       unless a separate approved owner changes that policy.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
-      runtime.run_fork.contract_frontier_admission for selected frontier work, consumes selected-source static route
-      derivation through internal/runtime/bus.DeriveRouteTable for historical route evidence, and treats source
-      routing_rules and flow_instance_routes as evidence-only fail-closed facts. It MUST NOT copy source route rows,
+      runtime.run_fork.contract_frontier_admission for selected frontier work, consumes the fixed planner route state,
+      and consumes selected-source static route derivation through internal/runtime/bus.DeriveRouteTable. A planner
+      unknown_unversioned state is carried as an unresolved requirement with SourceRouteFactsPresent=true; admission
+      does not claim source route history and does not clear flow_route_history_unproven. It MUST NOT read or copy
+      current/source routing_rules or flow_instance_routes as historical evidence,
       persist fork-local route rows, derive executable recipients, create event_deliveries, run handlers, or absorb
       timer reconstruction, session/turn reconstruction, source-advanced policy, contract-swap ownership, or UI/API
       route ownership.'
@@ -12140,7 +12237,9 @@ run_model:
       runtime.run_fork.selected_contract_route_admission as prerequisite evidence, classifies selected-source static
       route topology as fork-local truth only through internal/runtime/bus.DeriveRouteTable and the durable selected
       contract/frontier binding, and classifies dynamic flow-instance topology as fork-local-proven or fail-closed with
-      a named blocker. It MUST NOT copy source routing_rules or materialized flow-instance route rows, persist
+      a named blocker. It is the only selected owner allowed to discharge unknown_unversioned, and only when selected
+      owner identity, binding, frontier IDs/fingerprint, and complete static/dynamic topology all match. It MUST NOT
+      read or copy source/current routing_rules or materialized flow-instance route rows, persist
       fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
       event_deliveries, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
     selected_contract_dynamic_route_topology: 'Selected-contract dynamic route topology proof is a non-mutating
@@ -12158,7 +12257,8 @@ run_model:
       topology proof or fail-closed state, recipient-plan evidence, selected binding identity, and evidence
       fingerprints under the fork run_id. Topology and recipient-planning fingerprints MUST be computed and verified
       over canonical JSON semantics rather than raw JSONB storage bytes. Runtime recovery MUST read this owner after restart for selected-contract
-      fork route truth and MUST NOT read source/current routing_rules, source flow_instance_routes, current
+      fork route truth, revalidate the selected frontier/binding/topology fingerprint before clearing the planner''s
+      unknown_unversioned requirement, and MUST NOT read source/current routing_rules, source flow_instance_routes, current
       ListFlowInstanceRoutes output, or source event_deliveries as executable fork route or recipient truth. Recipient
       planning and EventBus.Publish recipient-plan guards remain authoritative before publish. This owner MUST NOT write
       event_deliveries, run handlers, replay timers, reconstruct sessions/turns/audits, replay non-agent work,
@@ -12261,7 +12361,7 @@ run_model:
       source rows, suppress fork-local execution with source outcomes, own current-state/entity
       materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
       recovery.'
-    selected_contract_supported_execution: 'The historical selected-contract timestamp-fork execution harness was
+    selected_contract_supported_execution: 'The historical selected-contract fork execution harness was
       swarm fork --contracts; that legacy harness flag remains rejected unless a later source-authority PR promotes it.
       The intended public command is now `swarm run fork <source-run-id> ...` (CLI v2.2 spelling) defined by
       multi_bundle_persistence.cli_surface.run_fork and blocked on #989 API/runtime/CLI implementation. The runtime
@@ -12285,23 +12385,27 @@ run_model:
       the connector exactly once under that fork-local generation and does not copy a source attempt;
       non_idempotent_write with reuse_recorded_result copies only terminal succeeded, failed, or uncertain evidence under
       fork-local request/result identities and publishes that recorded result without calling the connector. Failed and
-      uncertain evidence MUST preserve its typed failure, including platform.outcome_uncertain. Source events are
+      uncertain evidence MUST preserve its typed failure, including platform.outcome_uncertain. activity_attempts is
+      deliberately post-frontier selected-execution evidence rather than historical workset membership: source
+      preparation reads the selected immutable request event and current terminal attempt in one serializable transaction,
+      copies accepted evidence under fork-local identity, and fails closed on missing/nonterminal evidence without
+      changing PlanRunFork membership or readiness. Source events are
       payload/lineage inputs only;
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
-      NOT become executable fork work or fork suppressors. At/before-T source committed replay-scope marker rows may be
+      NOT become executable fork work or fork suppressors. Source committed replay-scope marker rows present in the selected revision may be
       consumed only as lineage/no-action evidence by the selected-contract marker policy; fork-local recovery must use
-      fresh fork-run marker rows. At/before-T source outcome facts for spec-declared diagnostic/non-routed platform
+      fresh fork-run marker rows. Source outcome facts present in the selected revision for spec-declared diagnostic/non-routed platform
       events may be consumed only as lineage/no-action evidence by the selected-contract diagnostic platform outcome
       policy. Route persistence, timer reconstruction, session/turn/audit
       reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
       frontier execution, and UI/API ownership remain separately gated siblings.'
-    contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for timestamp forks is owned by
+    contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
       store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,
       store.run_fork.replay_resume_admission, selected route topology, selected recipient planning, and fork-local
       selected route recovery evidence before answering whether full boot/resume under selected or swapped contracts is
       allowed. It MUST fail closed with named blockers for source deliveries, receipts, dead letters, retry/idempotency
-      state, post-fork source outcomes, timers, current/source routes, sessions, turns, audits, source committed
+      state, post-revision source outcomes, timers, current/source routes, sessions, turns, audits, source committed
       replay-scope rows not admitted by the selected-contract marker policy, non-agent replay, missing selected route
       recovery, or any missing/stale selected binding/source evidence. It
       MUST NOT run handlers, create fork-local events or event_deliveries, copy source rows, write receipts, dead
@@ -12318,7 +12422,7 @@ run_model:
       activation delivery/event replay, it may consume the canonical replay_resume_admission taxonomy directly and must
       still classify every historical fact family before mutation. It classifies source events, event deliveries, receipts,
       dead letters, retry/idempotency state, emitted follow-ups, timers, routes/current route rows, sessions, turns,
-      audits, non-agent/node/system work, source-advanced/post-T source outcomes, runtime restart recovery, and
+      audits, non-agent/node/system work, source-advanced/post-revision source outcomes, runtime restart recovery, and
       CLI/API/dashboard/operator consumers exactly once as executable fork work, reconstructed fork-local state,
       lineage-only evidence, fail-closed blockers, or split siblings. Source events and outcomes are lineage/proof only;
       the only admitted executable delivery family is the separately proven delivery_event_replay_ready primitive from
@@ -12335,7 +12439,7 @@ run_model:
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
       level is canonical owner promotion with delivery_event_replay_ready plus the selected-contract active-timer
       reconstruction child runtime.run_fork.historical_replay_execution.timer_reconstruction. The timer reconstruction
-      child may reconstruct only active source timers at T into fresh fork-local timer rows under fork run_id with
+      child may reconstruct only active source timers present in the selected revision into fresh fork-local timer rows under fork run_id with
       lineage fields; it does not copy source rows, fire source timers, clear route/session/turn/audit/non-agent
       blockers, or authorize full scheduler/recovery replay beyond run-scoped timer claim/fire/reload identity. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
@@ -12360,7 +12464,7 @@ run_model:
       through EventBus with selected recipient-plan guards, run selected handlers through the normal runtime pipeline,
       and record fork-local lineage without copying source event IDs or source delivery rows. Source delivery
       subscriber identity, source receipts, source dead letters, source retry/idempotency, emitted source follow-ups,
-      timers, source/current routes, sessions, turns, audits, non-agent/node/system work, source-advanced/post-T facts,
+      timers, source/current routes, sessions, turns, audits, non-agent/node/system work, source-advanced/post-revision facts,
       runtime restart state, and CLI/API/dashboard/Builder state are lineage-only, fail-closed blockers, split siblings,
       or consumers; they MUST NOT become selected-fork recipient truth, executable fork work, or fork suppressors. This
       child MUST NOT use store.run_fork.delivery_event_replay as-is when that writer preserves source subscriber
@@ -12380,7 +12484,7 @@ run_model:
       runtime delivery pipeline process the fork-local pending delivery. It MUST NOT copy source event IDs, source
       delivery IDs, receipts, dead letters,
       retry/idempotency state, emitted follow-ups, timers, route rows, sessions, turns, audits, non-agent/node/system
-      work, runtime restart state, API/UI/dashboard state, or use source/post-T outcomes as fork suppressors. Timers,
+      work, runtime restart state, API/UI/dashboard state, or use source/post-revision outcomes as fork suppressors. Timers,
       routes, sessions, turns, audits, non-agent replay, contract-swap/full resume, restart recovery, and operator
       surfaces remain separately gated siblings under #564/#549/#618.'
     historical_replay_delivery_event_replay_recovery: 'Restart and sweeper recovery for the admitted
@@ -12397,30 +12501,28 @@ run_model:
       This owner MUST NOT reconstruct timers, routes, sessions, turns, audits, non-agent/node/system work,
       contract-swap boot/resume, runtime-wide restart recovery, API/UI/dashboard state, or close successor concepts
       such as #1721 memoized re-execution or #1722 fleet fork reporting.'
-    event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
-      timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
-      a moment without looking up timestamps manually.'
+    event_id_shorthand: 'The --at-event value is the historical authority, not shorthand. The system resolves the
+      source event UUID to that event''s first persisted commit-ordered run revision. Occurrence and lifecycle
+      timestamps remain diagnostics and are never a fallback selector or historical membership predicate.'
     semantics:
-      1_reconstruct_state: 'Reconstruct all entity states at timestamp T. For every entity touched by the source
-        run (SELECT DISTINCT entity_id FROM entity_mutations WHERE run_id = :source_run_id), reverse-apply
-        all mutations with created_at > T (newest first, set each field to old_value). Alternative: forward-apply
-        from empty entity for reliability. Only committed mutations are included — in-progress deliveries at T
-        are excluded, their partial mutations are not applied. A reconstructed entity is materializable only after
-        runtime.run_fork.materialized_entity_snapshot_metadata authorizes its source-at-T flow_instance/entity_type
-        metadata or produces a named fail-closed blocker.'
-      2_detect_pending: 'Identify events that were pending at timestamp T — events with created_at <= T whose
-        delivery chain was incomplete. This includes deliveries with status pending or in_progress at T and
-        entities in non-terminal states expecting further events. Open-stream accumulator buckets are persisted
-        entity state, not pending finite-completion work. These are the events the system will re-deliver.'
+      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the eleven-family projection at
+        revision <= R in one repeatable-read snapshot, and forward-apply revisioned entity_mutations in deterministic
+        revision/fact order. A reconstructed entity is materializable only after
+        runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present
+        in the same fixed projection or produces a named fail-closed blocker. No created_at predicate participates.'
+      2_detect_pending: 'Classify event_deliveries and event_receipts present in the same fixed revision R together
+        with their revisioned source-event lineage, dead letters, sessions, turns, audits, timers, and reply contexts.
+        Only owner-admitted delivery_event_replay_ready work may be redelivered; incomplete, ambiguous, unrevisioned,
+        or unsupported facts fail closed. Later lifecycle transitions do not change repeated planning at R.'
       3_create_run: 'Insert new run row with forked_from_run_id = source run, forked_from_event_id = target event
         (if event ID was provided). Copy reconstructed entity states into the fork context.'
       3a_materialize_only_run: 'For a materialize-only fork, insert the fork run row with status=paused,
         forked_from_run_id = source run, forked_from_event_id = target event, and event_count = 0.
         Source run status is unchanged. Copy reconstructed entity states into the fork context with fork-local
-        revision=1 and source-at-T entered_state_at for the reconstructed current_state, then stop; do not boot,
+        revision=1 and entered_state_at from the selected revision''s current_state mutation evidence, then stop; do not boot,
         resume, redeliver, or mutate runtime delivery/session/timer/route state.'
       3b_activate_materialized_fork: 'For an activation fork, consume a previously materialized fork run.
-        Revalidate the original fork point against current source-run facts, require no source advancement and
+        Revalidate the original selected revision against current source-run facts, require no source advancement and
         no unsupported replay/timer/route/session/turn/contract-swap facts, optionally create fork-local event/delivery
         rows and direct committed replay-scope markers for the delivery_event_replay_ready subset only through
         runtime.run_fork.historical_replay_execution consuming historical replay execution admission and owner-authorized
@@ -12428,7 +12530,7 @@ run_model:
         does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
         run_id, fork-local entity_state rows, and fork-local pending delivery rows; broader source-run replay remains
         unsupported outside the gated delivery/event primitive.'
-      3b1_selected_contract_readiness_classifier: 'For selected-contract timestamp-fork dry-run/explain, the
+      3b1_selected_contract_readiness_classifier: 'For selected-contract fixed-event readiness explanation, the
         runtime.run_fork.selected_contract_readiness_classifier owner consumes existing planner, replay taxonomy,
         contract-frontier, route/topology, recipient-planning, selected-execution, current-state/materialization,
         contract-swap, historical-replay, and fork-local runtime lineage owners to emit one read-only readiness matrix
@@ -12439,14 +12541,14 @@ run_model:
         their own canonical owners and fail closed. CLI/API/dashboard/Builder surfaces may consume the matrix but MUST
         NOT compute readiness semantics independently.'
       3c_selected_contract_source_advanced_branch: 'For selected-contract mutating fork execution, source advancement
-        after the fork point is explicit branch divergence evidence when the selected execution owner can regenerate
+        after the materialized source revision is explicit branch divergence evidence when the selected execution owner can regenerate
         fork-local work under the fork run_id. The source run remains in its current status and is not frozen or rewound.
         Post-fork source events, deliveries, receipts, dead letters, retry state, outcomes, current state, and mutations
         remain source-run evidence only; they are not copied into the fork and do not suppress fork-local selected
         execution. Generic/state-only activation continues to use 3b no-source-advancement/freeze semantics.'
-      3c1_selected_contract_source_advanced_conversation_history_policy: 'For selected-contract timestamp-fork
+      3c1_selected_contract_source_advanced_conversation_history_policy: 'For selected-contract fixed-event
         execution, runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy consumes
-        post-fork-T source agent_sessions, agent_turns, and agent_conversation_audits as source-advanced
+        post-revision source agent_sessions, agent_turns, and agent_conversation_audits as source-advanced
         branch-divergence lineage/no-action evidence only. The owner covers all three conversation-history source fact
         families together and records the admitted fact codes in replay_resume_admission and selected-contract branch
         divergence evidence. It is not session, turn, audit, provider-session, transcript, receipt, outcome, or task-audit
@@ -12456,23 +12558,25 @@ run_model:
         pre-existing conversation rows, generic/state-only activation, broad source-run resumption, timers, routes,
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
-      3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer and route
-        facts remain evidence-only blockers. The selected execution owner consumes timer_history_unproven and
-        flow_route_history_unproven from the canonical replay/resume taxonomy and fails before materializing,
-        activating, firing timers, copying routing rules, deriving selected-source recipients, or creating fork-local
-        executable work. Timer reconstruction and route reconstruction are separately gated fork replay/resume
-        children.'
+      3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer facts
+        remain revisioned evidence and unsupported histories remain blockers. Route history is projected as
+        not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
+        flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
+        frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
+        publish, or activation. Timer reconstruction remains a separately gated fork replay/resume child.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
-        route reconstruction, uses the selected contract route table only as route evidence, and fails closed before
-        route persistence, executable recipient derivation, delivery writes, or handler execution. Source routing rows,
-        source flow-instance routes, and source recipients are never copied into the fork.'
+        route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
+        route table only as selected-source evidence. Only the matching selected topology owner may discharge that
+        requirement. Source/current routing_rules, source flow-instance routes, and source recipients are neither read
+        as historical authority nor copied into the fork.'
       3f_selected_contract_route_topology: 'For selected-contract mutating fork execution, fork-local route/topology
         truth is a separate owner beyond route admission. The selected execution model and admission consume
         runtime.run_fork.selected_contract_route_topology rather than treating route admission as final truth. Static
         selected-source topology is classified from selected-source route derivation and selected binding/frontier
         evidence only. Dynamic flow-instance topology requires explicit fork-local topology proof and otherwise
-        remains fail-closed. This owner is still non-mutating: it does not persist route rows, derive executable
+        remains fail-closed. A matching complete topology is the only authority that may discharge the planner''s
+        unknown_unversioned route requirement for selected execution. This owner is still non-mutating: it does not persist route rows, derive executable
         recipients, write deliveries, or run handlers.'
       3f1_selected_contract_dynamic_route_topology: 'For selected-contract mutating fork execution, dynamic
         flow-instance route topology is proven by runtime.run_fork.selected_contract_dynamic_route_topology as a
@@ -12551,42 +12655,42 @@ run_model:
         lineage, and regenerates follow-up events under the fork run_id. This bounded owner does not include route
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
-        parents or siblings. At/before-T source session/turn/audit facts may be admitted only as lineage/no-action
-        evidence by the separate selected-contract session/turn/audit lineage policy. Post-T source session/turn/audit
+        parents or siblings. Source session/turn/audit facts present in the selected revision may be admitted only as lineage/no-action
+        evidence by the separate selected-contract session/turn/audit lineage policy. Post-revision source session/turn/audit
         facts may be admitted only as source-advanced branch-divergence lineage/no-action evidence by the separate
-        selected-contract source-advanced conversation-history policy. At/before-T source committed replay-scope marker
+        selected-contract source-advanced conversation-history policy. Source committed replay-scope marker facts present in the selected revision
         rows may be admitted only as lineage/no-action evidence by the separate selected-contract committed replay-scope
-        marker policy. Same-source in-progress source delivery coupling at the fork-point emission boundary may be
+        marker policy. Same-source in-progress source delivery coupling at the selected-event emission boundary may be
         admitted only by the separate selected-contract active source delivery conversation-coupling policy.'
-      3h1_selected_contract_session_turn_audit_lineage_policy: 'For selected-contract timestamp-fork execution,
+      3h1_selected_contract_session_turn_audit_lineage_policy: 'For selected-contract fixed-event execution,
         runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy consumes the
         canonical replay_resume_admission session_history, active_turn_history, and conversation_audit_history facts and
-        may demote those at/before-T source facts from fail-closed blockers to lineage/no-action evidence only. The owner
+        may demote those source facts present in the selected revision from fail-closed blockers to lineage/no-action evidence only. The owner
         must keep pending/in-progress delivery session coupling and fork-local pre-existing conversation rows
         fail-closed except when the separate selected-contract active source delivery conversation-coupling policy has
-        admitted the same-source fork-point emission case. It must not copy or reuse source session IDs, provider session IDs, transcripts, task audits, turns,
+        admitted the same-source selected-event emission case. It must not copy or reuse source session IDs, provider session IDs, transcripts, task audits, turns,
         receipts, outcomes, or source audit rows as fork-local runtime truth or suppressors. Fresh fork-local sessions,
-        turns, and audits may appear only through normal selected fork runtime execution under the fork run_id. Post-T
-        source conversation facts are outside this at/before-T owner and may be admitted only by
+        turns, and audits may appear only through normal selected fork runtime execution under the fork run_id. Post-revision
+        source conversation facts are outside this selected-revision owner and may be admitted only by
         runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy. This owner does not
         close full session reconstruction, committed replay-scope marker policy, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
-      3h2_selected_contract_committed_replay_scope_marker_policy: 'For selected-contract timestamp-fork execution,
+      3h2_selected_contract_committed_replay_scope_marker_policy: 'For selected-contract fixed-event execution,
         runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy consumes the
-        canonical replay_resume_admission committed_replay_scope fact and may demote at/before-T source committed
+        canonical replay_resume_admission committed_replay_scope fact and may demote source committed
         replay-scope marker rows from fail-closed blockers to lineage/no-action evidence only. Source marker rows are
         same-run proof only: they are not executable fork work, not fork-local recovery truth, not copied into the fork,
-        and not selected-fork suppressors. The cutoff for marker facts is the underlying source event position, so
-        marker delivery write-skew after T for an at/before-T source event is lineage/no-action and must be excluded from
-        generic selected-contract `source_deliveries_advanced_after_fork_point` evidence. Fork-local replay/recovery
+        and not selected-fork suppressors. The marker delivery fact must itself be present in the selected revision;
+        a later marker write is source advancement and cannot inherit the underlying event''s earlier revision or
+        occurrence time. Fork-local replay/recovery
         proof must be newly written under the fork run_id by selected-contract execution or approved fork-local
-        delivery-event replay owners. Source committed replay-scope marker facts whose underlying source event is after T
+        delivery-event replay owners. Source committed replay-scope marker facts absent from the selected revision
         remain fail-closed unless a separate approved owner changes that policy. This owner does not close same-run
         recovery, fork-local delivery-event replay recovery, sessions, turns, audits, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
-      3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract timestamp-fork execution,
+      3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract fixed-event execution,
         runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy consumes
-        at/before-T source outcome facts for platform_events.routing_rules.diagnostic_events and may demote those
+        source outcome facts present in the selected revision for platform_events.routing_rules.diagnostic_events and may demote those
         diagnostic/non-routed platform facts from selected frontier work to lineage/no-action evidence only. The owner is
         part of selected-contract frontier admission before route topology, recipient planning, and selected execution.
         Diagnostic platform source facts are not executable fork work, route truth, selected recipients, copied source
@@ -12594,22 +12698,22 @@ run_model:
         generic non-agent replay, delivery-event replay, committed replay-scope marker policy, sessions, turns, audits,
         timers, routes, retry/idempotency, follow-up policy, restart recovery, contract-swap boot/resume, and operator
         surfaces remain separate fail-closed or split siblings unless independently approved.'
-      3h4_selected_contract_active_source_delivery_conversation_coupling_policy: 'For selected-contract timestamp-fork
+      3h4_selected_contract_active_source_delivery_conversation_coupling_policy: 'For selected-contract fixed-event
         execution, runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy
-        consumes replay_resume_admission delivery_in_progress_history evidence and fork-point source-event causality to
-        admit only the same-source delivery fork-point emission case: the source delivery is in progress at T, belongs to
-        the fork-point event source_event_id, and its agent subscriber produced the fork-point event, with no
-        active_session_id, receipt, receipt outcome, or delivered_at at T. This owner may demote that delivery fact from a
+        consumes replay_resume_admission delivery_in_progress_history evidence and selected-event source-event causality to
+        admit only the same-source delivery selected-event emission case: the source delivery is in progress in the selected revision, belongs to
+        the selected event source_event_id, and its agent subscriber produced the selected event, with no
+        active_session_id, receipt, receipt outcome, or delivered_at in that revision. This owner may demote that delivery fact from a
         generic delivery_history_unproven blocker to lineage/no-action evidence and may allow the session/turn/audit
-        lineage policy to classify at/before-T source conversation rows. It records the admitted case as selected-contract
+        lineage policy to classify source conversation rows present in the selected revision. It records the admitted case as selected-contract
         branch-divergence evidence. It must not copy source delivery/session/turn/audit rows, use source terminal outcomes
-        after T as fork suppressors, or admit unrelated active deliveries, active_session_id coupling, post-T source
+        committed after the selected revision as fork suppressors, or admit unrelated active deliveries, active_session_id coupling, post-revision source
         conversation facts, fork-local pre-existing rows, non-agent replay, timers, routes, retry/idempotency, follow-up
         policy, restart recovery, or operator surfaces.'
-      3i_contract_swap_boot_resume_admission: 'For timestamp forks with selected or swapped contracts, full boot/resume
+      3i_contract_swap_boot_resume_admission: 'For fixed-event forks with selected or swapped contracts, full boot/resume
         readiness is answered by runtime.run_fork.contract_swap_boot_resume_admission before any mutating historical
         replay/resume work. The owner consumes selected binding/source admission, replay/resume taxonomy, selected route
-        topology, selected recipient planning, and selected route recovery evidence. Source rows and post-T outcomes
+        topology, selected recipient planning, and selected route recovery evidence. Source rows and post-revision outcomes
         remain lineage/evidence or fail-closed blockers; they are not executable fork work and do not suppress future
         fork-local work. This owner is non-mutating and does not authorize handler execution, delivery writes, receipts,
         dead letters, idempotency, emitted follow-ups, timers, sessions, turns, non-agent replay, route row mutation, or
@@ -12658,19 +12762,20 @@ run_model:
         idempotency, or arbitrary in-flight work.'
       5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
         delivery_event_replay_ready primitive, selected-contract frontier execution when independently admitted, and
-        timer reconstruction where the timer owner has proven active-at-T lineage. Unsupported historical fact families
+        timer reconstruction where the timer owner has proven active lineage in the selected revision. Unsupported historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
-    parallel_safety: 'Timestamp-based fork handles parallel agent execution naturally. At timestamp T, all
-      concurrent branches either committed their mutations or did not. No DAG traversal, no branch
-      classification, no sibling carry-over logic. The reconstructed state is simply "what was the world at T."'
+    parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized
+      per-run revision. Concurrent same-run transactions serialize through the revision head; multi-run transactions
+      lock heads in deterministic run-ID order. A selected event revision therefore includes complete committed
+      transactions and excludes later ones without comparing application or database clocks.'
     contract_swap: 'When --contracts specifies a new contract path, any admitted fork-local delivery/event work must use
       the selected handler logic uniformly with no mixed-version state. This intent is not itself an execution owner.
       Runtime/store readiness for selected-contract boot/resume is governed by
       runtime.run_fork.contract_swap_boot_resume_admission, and mutation remains limited to separately approved bounded
       owners for admitted fork work.'
-    timestamp_precision: 'Events committed in the same millisecond are disambiguated by (created_at, event_id)
-      composite ordering. The fork point is inclusive: mutations from the target moment are included in
-      reconstructed state. Only mutations strictly after T are undone.'
+    timestamp_precision: 'Timestamp precision has no fork semantics. Event UUID resolves to the event''s first
+      commit-ordered run revision, and the boundary is inclusive of every fact present at that revision. Facts in later
+      revisions are excluded regardless of equal, earlier, or later occurrence timestamps.'
     isolation: 'Forked runs are fully isolated. They get their own event stream, their own entity state copies,
       and their own agent sessions. Fork state materialization writes entity_state rows under the fork run_id while
       preserving entity_id from the source run. Results can be compared side-by-side with the original run.'

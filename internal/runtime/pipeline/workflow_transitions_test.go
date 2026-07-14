@@ -24,9 +24,13 @@ func TestRecordPipelineTransition_PersistsViaCanonicalCapabilityOwner(t *testing
 	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM events WHERE event_id = \$1::uuid\)`).
 		WithArgs(eventID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO event_receipts").
 		WithArgs(eventID, "pipeline:"+pipelineID, "success", "pipeline_transition_applied", "", "", sqlmock.AnyArg(), nil, 0).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("FROM information_schema.columns").
+		WillReturnRows(sqlmock.NewRows([]string{"table_name", "column_name"}))
+	mock.ExpectCommit()
 
 	pg := &store.PostgresStore{DB: db}
 	err = runtimepipeline.RecordPipelineTransition(context.Background(), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{

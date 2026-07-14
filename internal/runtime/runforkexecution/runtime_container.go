@@ -77,9 +77,6 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	if req.ForkTime.IsZero() {
-		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires fork point timestamp", store.RunForkSelectedContractForkLocalRuntimeContainerOwner)
-	}
 	if strings.TrimSpace(req.RecipientPlanning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s; got %q",
 			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
@@ -178,7 +175,7 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 
 func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) ([]SelectedContractExecutionForkEvent, error) {
 	req := c.req
-	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID, req.ForkTime); err != nil {
+	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID); err != nil {
 		return nil, err
 	}
 	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents)

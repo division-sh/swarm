@@ -30,6 +30,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
@@ -68,6 +69,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("stamp source-only delivery identity: %v", err)
 	}
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -279,6 +281,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
 		t.Fatalf("stamp source run bundle identity: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -343,6 +346,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -392,6 +396,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	at := time.Unix(1700002202, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	agent := &selectedContractForkTestAgent{}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -594,6 +599,7 @@ func TestExecuteSelectedContractRunForkProviderCompletionRecordsDurableAuthority
 	at := time.Unix(1700002203, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
 		At:           sourceEventID,
@@ -739,7 +745,6 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		SourceRunID:       sourceRunID,
 		ForkRunID:         forkRunID,
 		ForkEventID:       forkEventID,
-		ForkTime:          now,
 		SourceEvents:      []string{forkEventID},
 		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
 	}
@@ -1021,6 +1026,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	at := time.Unix(1700002215, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1126,15 +1132,9 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	`, sourceRunID, sourceEventID); err != nil {
 		t.Fatalf("seed replayable source agent delivery: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		ContractSelection: &selection,
-	})
-	if err != nil {
-		t.Fatalf("MaterializeRunFork: %v", err)
-	}
+	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded.Source, selection, sourceRunID, sourceEventID)
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:    materialized.ForkRunID,
@@ -1254,17 +1254,12 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	`, sourceRunID, sourceEventID); err != nil {
 		t.Fatalf("seed replayable source agent delivery: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		ContractSelection: &selection,
-	})
-	if err != nil {
-		t.Fatalf("MaterializeRunFork: %v", err)
-	}
+	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded.Source, selection, sourceRunID, sourceEventID)
 	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:    materialized.ForkRunID,
@@ -1341,6 +1336,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1472,6 +1468,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1567,6 +1564,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	`, at); err != nil {
 		t.Fatalf("seed source session agent: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -1597,6 +1595,11 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, after); err != nil {
 		t.Fatalf("seed post-T source turn: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
+		runforkrevision.FamilyAgentSessions,
+		runforkrevision.FamilyAgentConversationAudits,
+		runforkrevision.FamilyAgentTurns,
+	)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1682,6 +1685,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	at := time.Unix(1700002315, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1735,7 +1739,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	}
 }
 
-func TestExecuteSelectedContractRunForkTreatsSameEventReplayScopeMarkerWriteSkewAsLineage(t *testing.T) {
+func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeMarkerWriteSkew(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1756,6 +1760,7 @@ func TestExecuteSelectedContractRunForkTreatsSameEventReplayScopeMarkerWriteSkew
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002320, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		CREATE OR REPLACE FUNCTION seed_post_t_replay_scope_marker_after_route_recovery()
 		RETURNS trigger AS $$
@@ -1789,16 +1794,13 @@ func TestExecuteSelectedContractRunForkTreatsSameEventReplayScopeMarkerWriteSkew
 			contractsRoot,
 		),
 	})
-	if err != nil {
-		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want committed replay-scope advancement rejection", err)
 	}
-	if !result.Activation.Activated || result.Activation.SourceAdvancedAfterFork || result.Activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want marker write-skew to avoid source advancement", result.Activation)
+	if result.Activation.Activated {
+		t.Fatalf("activation = %#v, want rejection before activation", result.Activation)
 	}
-	if result.ExecutedEventCount == 0 || len(result.ForkEvents) == 0 {
-		t.Fatalf("result = %#v, want selected fork events published", result)
-	}
-	assertNoCopiedSourceReplayScopeMarkers(t, db, result.Materialization.ForkRunID, sourceEventID)
+	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
@@ -1822,6 +1824,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002325, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "ghost.event", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1885,6 +1888,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002335, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -1932,6 +1936,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	afterDeliveryID := uuid.NewString()
 	at := time.Unix(1700002350, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
@@ -1956,6 +1961,12 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	`, sourceRunID, at.Add(3*time.Second)); err != nil {
 		t.Fatalf("mark source complete after fork point: %v", err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
+		runforkrevision.FamilyEvents,
+		runforkrevision.FamilyEventDeliveries,
+		runforkrevision.FamilyEventReceipts,
+		runforkrevision.FamilyDeadLetters,
+	)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -2429,6 +2440,74 @@ func runForkExecutionRepoRoot(t *testing.T) string {
 		t.Fatalf("repo root: %v", err)
 	}
 	return root
+}
+
+func captureSelectedExecutionSourceRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
+	t.Helper()
+	if len(families) == 0 {
+		families = runforkrevision.AllFamilies()
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin selected execution source revision: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
+	if err != nil {
+		t.Fatalf("capture selected execution source revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit selected execution source revision: %v", err)
+	}
+	return revision
+}
+
+func materializeSelectedExecutionForkForTest(
+	t *testing.T,
+	ctx context.Context,
+	pg *store.PostgresStore,
+	source semanticview.Source,
+	selection store.RunForkContractSelection,
+	sourceRunID string,
+	sourceEventID string,
+) store.RunForkMaterialization {
+	t.Helper()
+	plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceEventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
+		Plan: plan, Source: source, ContractSelection: selection,
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
+		Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	topology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
+		Admission: frontier, RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRouteTopology: %v", err)
+	}
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission: frontier, RouteAdmission: routeAdmission, RouteTopology: topology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
+	}
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection,
+		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	return materialized
 }
 
 func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, sourceEventID, eventName string, at time.Time) {
