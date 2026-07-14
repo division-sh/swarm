@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +34,7 @@ func TestHumanTaskExpiryPublishesInsideSelectedStoreMutation(t *testing.T) {
 	runID := uuid.NewString()
 	expiry := &transactionProbeHumanTaskExpiry{
 		runID: runID,
-		event: events.NewRuntimeControlEvent(
+		event: eventtest.RuntimeControl(
 			uuid.NewString(), events.EventType("mailbox.card_expired"), "platform", "", []byte(`{"card_id":"card-a"}`),
 			0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
 		),

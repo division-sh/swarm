@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,7 +59,7 @@ type terminalEventAdmissionState struct {
 type terminalEventAdmissionHarness struct {
 	append          func(context.Context, events.Event) error
 	appendTx        func(context.Context, events.Event) error
-	markTerminal    func(context.Context, string, string) error
+	markTerminal    func(context.Context, string, string, string) error
 	loadState       func(context.Context, string, string) (terminalEventAdmissionState, error)
 	persistVariants map[string]func(context.Context, events.Event, string) error
 }
@@ -81,9 +82,53 @@ type runtimeLogStatusState struct {
 
 type runtimeLogStatusHarness struct {
 	appendOrdinary func(context.Context, events.Event) error
-	transition     func(context.Context, string, string) error
+	transition     func(context.Context, string, string, string) error
 	persistLog     func(context.Context, runtimepkg.RuntimeLogPersistenceRecord) error
 	loadState      func(context.Context, string) (runtimeLogStatusState, error)
+}
+
+type terminalAdmissionCompletionOwner interface {
+	UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error
+	ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error
+}
+
+func convergeTerminalAdmissionRun(
+	ctx context.Context,
+	db *sql.DB,
+	postgres bool,
+	owner terminalAdmissionCompletionOwner,
+	runID string,
+	eventID string,
+) error {
+	entityID := uuid.NewString()
+	now := time.Now().UTC()
+	query := `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (?, ?, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission', 'done',
+			'{}', '{}', '{}', 1, ?, ?, ?)
+	`
+	args := []any{runID, entityID, now, now, now}
+	if postgres {
+		query = `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission', 'done',
+				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $4, $5)
+		`
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("seed terminal completion entity: %w", err)
+	}
+	if err := owner.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
+		return fmt.Errorf("settle terminal completion event: %w", err)
+	}
+	if err := owner.ConvergeNormalRunCompletion(ctx, eventID, nil, map[string][]string{"terminal-admission": {"done"}}); err != nil {
+		return fmt.Errorf("converge terminal completion run: %w", err)
+	}
+	return nil
 }
 
 func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
@@ -102,7 +147,10 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			}
 			return tx.Commit()
 		},
-		markTerminal: func(ctx context.Context, runID, status string) error {
+		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
+			if status == "completed" {
+				return convergeTerminalAdmissionRun(ctx, db, true, pg, runID, eventID)
+			}
 			failure := terminalEventAdmissionFailure(status)
 			_, err := pg.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
 			return err
@@ -148,7 +196,10 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			}
 			return tx.Commit()
 		},
-		markTerminal: func(ctx context.Context, runID, status string) error {
+		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
+			if status == "completed" {
+				return convergeTerminalAdmissionRun(ctx, sqliteStore.DB, false, sqliteStore, runID, eventID)
+			}
 			failure := terminalEventAdmissionFailure(status)
 			_, err := sqliteStore.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
 			return err
@@ -184,7 +235,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := &PostgresStore{DB: db}
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
 		appendOrdinary: store.AppendEvent,
-		transition: func(ctx context.Context, runID, status string) error {
+		transition: func(ctx context.Context, runID, eventID, status string) error {
 			switch status {
 			case "running":
 				return nil
@@ -198,6 +249,8 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
 				return err
+			case "completed":
+				return convergeTerminalAdmissionRun(ctx, db, true, store, runID, eventID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
 				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
@@ -263,7 +316,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
 		appendOrdinary: store.AppendEvent,
-		transition: func(ctx context.Context, runID, status string) error {
+		transition: func(ctx context.Context, runID, eventID, status string) error {
 			switch status {
 			case "running":
 				return nil
@@ -277,6 +330,8 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
 				return err
+			case "completed":
+				return convergeTerminalAdmissionRun(ctx, store.DB, false, store, runID, eventID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
 				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
@@ -352,7 +407,7 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runt
 			if err := harness.appendOrdinary(ctx, seed); err != nil {
 				t.Fatalf("seed ordinary event: %v", err)
 			}
-			if err := harness.transition(ctx, runID, status); err != nil {
+			if err := harness.transition(ctx, runID, seed.ID(), status); err != nil {
 				t.Fatalf("transition run to %s: %v", status, err)
 			}
 			before, err := harness.loadState(ctx, runID)
@@ -446,7 +501,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			if err := harness.append(ctx, original); err != nil {
 				t.Fatalf("seed event: %v", err)
 			}
-			if err := harness.markTerminal(ctx, runID, status); err != nil {
+			if err := harness.markTerminal(ctx, runID, original.ID(), status); err != nil {
 				t.Fatalf("mark terminal: %v", err)
 			}
 
@@ -494,7 +549,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 				if err := harness.append(ctx, seed); err != nil {
 					t.Fatalf("seed event: %v", err)
 				}
-				if err := harness.markTerminal(ctx, runID, status); err != nil {
+				if err := harness.markTerminal(ctx, runID, seed.ID(), status); err != nil {
 					t.Fatalf("mark %s: %v", status, err)
 				}
 				if err := persist(ctx, seed, "agent-terminal-duplicate"); err != nil {
@@ -556,7 +611,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 		if err := harness.append(ctx, seed); err != nil {
 			t.Fatalf("seed event: %v", err)
 		}
-		if err := harness.markTerminal(ctx, runID, "completed"); err != nil {
+		if err := harness.markTerminal(ctx, runID, seed.ID(), "completed"); err != nil {
 			t.Fatalf("mark completed: %v", err)
 		}
 		diagnostic := eventtest.DiagnosticDirect(
