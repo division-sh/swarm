@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -39,6 +41,48 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("run-fork revision registry = %q, want exact 11-family registry %q", got, want)
+	}
+}
+
+func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
+	root := repoRootForRuntimeWriterGuard(t)
+	want := []string{
+		"internal/runtime/destructivereset/cleanup_catalog.go",
+		"internal/runtime/runforkrevision/revision.go",
+		"internal/store/destructive_reset_cleanup.go",
+		"internal/store/platformschema/platformschema.go",
+		"internal/store/run_fork_activation.go",
+		"internal/store/run_fork_selected_contract_execution_mutation.go",
+	}
+	var got []string
+	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(body)
+		if !strings.Contains(text, "run_fork_revision_heads") && !strings.Contains(text, "run_fork_revisions") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		got = append(got, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan run-fork revision accessors: %v", err)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("run-fork revision accessor inventory = %q, want exact classified set %q", got, want)
 	}
 }
 
@@ -180,6 +224,169 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	}
 	if firstCount != 1 || secondCount != 2 {
 		t.Fatalf("visible event facts = revision1:%d revision2:%d, want 1/2", firstCount, secondCount)
+	}
+}
+
+func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	runID := uuid.NewString()
+	seedEventID := uuid.NewString()
+	publishedEventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type)
+		VALUES ($1::uuid,$2::uuid,'revision.delivery.seed','global','platform')
+	`, runID, seedEventID); err != nil {
+		t.Fatalf("seed delivery event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id,run_id,event_id,subscriber_type,subscriber_id,status,created_at)
+		VALUES ($1::uuid,$2::uuid,$3::uuid,'agent','revision-agent','pending',NOW())
+	`, deliveryID, runID, seedEventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	publishTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin event publication: %v", err)
+	}
+	defer func() { _ = publishTx.Rollback() }()
+	var status string
+	if err := publishTx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid FOR UPDATE`, runID).Scan(&status); err != nil {
+		t.Fatalf("lock event publication run: %v", err)
+	}
+	if _, err := publishTx.ExecContext(ctx, `
+		INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type)
+		VALUES ($1::uuid,$2::uuid,'revision.delivery.concurrent','global','platform')
+	`, runID, publishedEventID); err != nil {
+		t.Fatalf("stage published event: %v", err)
+	}
+
+	deliveryTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin delivery start: %v", err)
+	}
+	defer func() { _ = deliveryTx.Rollback() }()
+	if _, err := deliveryTx.ExecContext(ctx, `UPDATE event_deliveries SET status='in_progress', started_at=NOW() WHERE delivery_id=$1::uuid`, deliveryID); err != nil {
+		t.Fatalf("stage delivery start: %v", err)
+	}
+	var deliveryBackendPID int
+	if err := deliveryTx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&deliveryBackendPID); err != nil {
+		t.Fatalf("load delivery backend PID: %v", err)
+	}
+	type captureResult struct {
+		revision int64
+		err      error
+	}
+	deliveryCapture := make(chan captureResult, 1)
+	go func() {
+		revision, err := runforkrevision.CaptureForEvent(ctx, deliveryTx, seedEventID, runforkrevision.FamilyEventDeliveries)
+		deliveryCapture <- captureResult{revision: revision, err: err}
+	}()
+	waitForPostgresBackendLock(t, ctx, db, deliveryBackendPID)
+
+	publishRevision, err := runforkrevision.Capture(ctx, publishTx, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
+	if err != nil {
+		t.Fatalf("capture event publication revision: %v", err)
+	}
+	if err := publishTx.Commit(); err != nil {
+		t.Fatalf("commit event publication: %v", err)
+	}
+	var delivered captureResult
+	select {
+	case delivered = <-deliveryCapture:
+	case <-ctx.Done():
+		t.Fatalf("delivery capture did not resume after parent commit: %v", ctx.Err())
+	}
+	if delivered.err != nil {
+		t.Fatalf("capture delivery-start revision: %v", delivered.err)
+	}
+	if err := deliveryTx.Commit(); err != nil {
+		t.Fatalf("commit delivery start: %v", err)
+	}
+	if publishRevision != 1 || delivered.revision != 2 {
+		t.Fatalf("concurrent revisions = publish:%d delivery:%d, want 1 then 2", publishRevision, delivered.revision)
+	}
+
+	for revision, wantStatus := range map[int64]string{1: "pending", 2: "in_progress"} {
+		var gotStatus string
+		if err := db.QueryRowContext(ctx, `
+			SELECT fact->>'status'
+			FROM run_fork_fact_revisions
+			WHERE run_id=$1::uuid AND revision=$2 AND family='event_deliveries' AND fact_key=$3 AND present
+		`, runID, revision, deliveryID).Scan(&gotStatus); err != nil {
+			t.Fatalf("load delivery revision %d: %v", revision, err)
+		}
+		if gotStatus != wantStatus {
+			t.Fatalf("delivery revision %d status = %q, want %q", revision, gotStatus, wantStatus)
+		}
+	}
+	var publishedFacts, ledgerRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=1 AND family='events' AND present`, runID).Scan(&publishedFacts); err != nil {
+		t.Fatalf("count published event facts: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, runID).Scan(&ledgerRows); err != nil {
+		t.Fatalf("count revision ledger: %v", err)
+	}
+	if publishedFacts != 2 || ledgerRows != 2 {
+		t.Fatalf("revision evidence = events:%d ledger:%d, want 2/2", publishedFacts, ledgerRows)
+	}
+}
+
+func waitForPostgresBackendLock(t *testing.T, ctx context.Context, db *sql.DB, backendPID int) {
+	t.Helper()
+	for {
+		var waiting bool
+		var query string
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(wait_event_type = 'Lock', false), COALESCE(query, '')
+			FROM pg_stat_activity
+			WHERE pid = $1
+		`, backendPID).Scan(&waiting, &query)
+		if err != nil {
+			t.Fatalf("inspect PostgreSQL backend %d: %v", backendPID, err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("PostgreSQL backend %d did not reach lock barrier; last query %q: %v", backendPID, query, ctx.Err())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func waitForPostgresQueryLock(t *testing.T, ctx context.Context, db *sql.DB, queryFragment string) {
+	t.Helper()
+	for {
+		var waiting bool
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%' || $1 || '%'
+			)
+		`, queryFragment).Scan(&waiting)
+		if err != nil {
+			t.Fatalf("inspect PostgreSQL query lock %q: %v", queryFragment, err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("PostgreSQL query %q did not reach lock barrier: %v", queryFragment, ctx.Err())
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 

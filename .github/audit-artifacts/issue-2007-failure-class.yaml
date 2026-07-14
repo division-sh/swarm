@@ -2148,13 +2148,13 @@ superseded_terminal_decision_card_evidence_reaudit:
   blocking_condition: fresh_independent_gate_required_before_runtime_or_spec_implementation
 
 terminal_run_decision_card_supersession_reaudit:
-  status: implementation_frozen_pending_widened_runtime_lock_order_gate
-  audit_base: 949a8ff6
+  status: widened_runtime_lock_order_implemented_and_proven_pending_review
+  audit_base: 3d5975d0
   architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
   migration_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
   post_upstream_expiry_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4971103943
   post_rebase_allocator_only_lock_order_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4973223013
-  widened_runtime_lock_order_gate: pending
+  widened_runtime_lock_order_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4974212009
   superseded_migration_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
   supersedes_artifact_commits:
     - bb7c25f9c6bba983d0fcd04e4db88e5cd32c6308
@@ -2689,7 +2689,7 @@ terminal_run_decision_card_supersession_reaudit:
     parity_issue: true
 
   post_rebase_run_revision_lock_order_discovery:
-    status: implementation_frozen_pending_widened_independent_gate
+    status: implemented_and_proven_pending_review
     supersedes_incorrect_classification: https://github.com/division-sh/swarm/issues/2007#issuecomment-4972959490
     allocator_only_gate_rejection: https://github.com/division-sh/swarm/issues/2007#issuecomment-4973223013
     observed_entry_point: selected_contract_fork_local_agent_delivery_start
@@ -2717,15 +2717,15 @@ terminal_run_decision_card_supersession_reaudit:
     exhaustive_runtime_accessor_audit:
       shared_Capture_CaptureChanges_CaptureForEvent_and_CaptureCurrentTransaction:
         classification: moved_to_canonical_owner
-        proof: all_new_head_and_revision_allocation_converges_on_allocate
-        required_change: allocator_locks_each_parent_run_before_its_revision_head
+        proof: >-
+          all_new_head_and_revision_allocation_converges_on_allocate_and_CaptureChanges_locks_every_sorted_parent_run_before_any_revision_state_read_or_write
+        implemented_change: allocator_uses_the_minimum_FOR_KEY_SHARE_parent_lock_before_revision_state
       run_fork_activation_frontier:
         classification: already_consumes_parent_before_head
         proof: loadRunForkActivationLineage_locks_fork_and_source_runs_before_lockRunForkSourceRevisionFrontier
       selected_contract_discard:
-        classification: still_bypasses_and_moves_to_canonical_owner_in_this_work
-        proof: direct_run_fork_revisions_and_head_deletes_precede_current_parent_run_update_or_delete
-        required_change: initial_materialized_status_read_locks_parent_run_before_any_child_or_revision_delete
+        classification: moved_to_canonical_owner
+        proof: initial_materialized_status_read_now_locks_the_parent_run_FOR_UPDATE_before_any_child_fact_revision_ledger_or_head_delete
       destructive_reset_cleanup:
         classification: already_consumes_parent_before_revision_delete
         proof: lockDestructiveResetCleanupRuns_locks_complete_sorted_run_set_before_cleanup_catalog_deletes
@@ -2751,10 +2751,18 @@ terminal_run_decision_card_supersession_reaudit:
       - structural_accessor_inventory_guard_covers_all_direct_revision_state_SQL
       - event_and_delivery_revision_evidence_remains_complete_adjacent_and_fork_readable
       - both_selected_contract_supported_surface_proofs_pass_on_host_PostgreSQL
+    proof_results:
+      - TestRunForkRevisionCaptureLocksParentBeforeRevisionState_passed_10_repetitions_on_host_PostgreSQL_with_adjacent_revisions
+      - TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres_passed_10_repetitions_on_host_PostgreSQL
+      - contended_serializable_discard_returns_40001_with_zero_partial_mutation_and_explicit_caller_retry_succeeds
+      - TestRunForkRevisionStateAccessorInventoryIsClosed_passed
+      - both_selected_contract_supported_surface_tests_passed_on_host_PostgreSQL
+      - internal_store_bus_pipeline_api_spec_and_cli_package_suites_passed_on_host_PostgreSQL
+      - serialized_full_go_test_suite_passed_with_host_PostgreSQL
     closure_feasibility: true_shared_allocator_and_one_direct_discard_repair_plus_deterministic_PostgreSQL_proof
-    tracker_state_decision: repair_issue_body_artifact_and_existing_watchlist_before_runtime_coding
+    tracker_state_decision: issue_body_artifact_and_existing_watchlist_repaired_before_runtime_coding
     watchlist_mapping_decision: refine_existing_inbound_publication_operation_ownership_node
-    blocking_condition: fresh_widened_independent_absorb_gate_required
+    blocking_condition: none_widened_independent_gate_approved
 
   post_upstream_human_task_expiry_absorption:
     gate_outcome: approved

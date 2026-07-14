@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -407,6 +408,131 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	assertSelectedCompletionEvidenceAbsent(t, db, "fork fact revisions", `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
 	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision ledger", `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
 	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision head", `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun)
+}
+
+func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := &PostgresStore{DB: db}
+	fixture := newSelectedCompletionFixture(t, store, db, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+	if err != nil {
+		t.Fatalf("issue selected completion authority: %v", err)
+	}
+	seedEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type)
+		VALUES ($1::uuid,$2::uuid,'selected.discard.seed','global','platform')
+	`, seedEventID, fixture.forkRun); err != nil {
+		t.Fatalf("seed selected discard event: %v", err)
+	}
+	firstRevision := captureRunForkTestRevision(t, db, fixture.forkRun, runforkrevision.FamilyEvents)
+	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
+		t.Fatalf("mark selected fork materialized: %v", err)
+	}
+
+	allocationTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin competing revision allocation: %v", err)
+	}
+	defer func() { _ = allocationTx.Rollback() }()
+	concurrentEventID := uuid.NewString()
+	if _, err := allocationTx.ExecContext(ctx, `
+		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type)
+		VALUES ($1::uuid,$2::uuid,'selected.discard.concurrent','global','platform')
+	`, concurrentEventID, fixture.forkRun); err != nil {
+		t.Fatalf("stage competing selected event: %v", err)
+	}
+	allocatedRevision, err := runforkrevision.Capture(ctx, allocationTx, fixture.forkRun, runforkrevision.FamilyEvents)
+	if err != nil {
+		t.Fatalf("capture competing selected revision: %v", err)
+	}
+	if allocatedRevision <= firstRevision {
+		t.Fatalf("competing revision = %d, want after %d", allocatedRevision, firstRevision)
+	}
+
+	discardDone := make(chan error, 1)
+	go func() {
+		discardDone <- store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
+	}()
+	waitForPostgresQueryLock(t, ctx, db, "SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE")
+
+	var status string
+	var committedRevisionRows int
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&status); err != nil {
+		t.Fatalf("load blocked discard run: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&committedRevisionRows); err != nil {
+		t.Fatalf("count blocked discard revisions: %v", err)
+	}
+	if status != RunForkMaterializedStatus || committedRevisionRows != int(firstRevision) {
+		t.Fatalf("blocked discard state = status:%q revisions:%d, want %q/%d", status, committedRevisionRows, RunForkMaterializedStatus, firstRevision)
+	}
+
+	if err := allocationTx.Commit(); err != nil {
+		t.Fatalf("commit competing revision allocation: %v", err)
+	}
+	var discardErr error
+	select {
+	case discardErr = <-discardDone:
+	case <-ctx.Done():
+		t.Fatalf("selected fork discard did not resume after allocation: %v", ctx.Err())
+	}
+	if discardErr == nil || !strings.Contains(discardErr.Error(), "could not serialize access") || !strings.Contains(discardErr.Error(), "40001") {
+		t.Fatalf("contended discard error = %v, want fail-closed PostgreSQL serialization failure", discardErr)
+	}
+	if strings.Contains(strings.ToLower(discardErr.Error()), "deadlock") {
+		t.Fatalf("contended discard retained deadlock outcome: %v", discardErr)
+	}
+
+	var currentRevision, revisionRows, eventRows int
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&status); err != nil {
+		t.Fatalf("load serialized selected run: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&currentRevision); err != nil {
+		t.Fatalf("load serialized revision head: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&revisionRows); err != nil {
+		t.Fatalf("count serialized revision ledger: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&eventRows); err != nil {
+		t.Fatalf("count serialized selected events: %v", err)
+	}
+	if status != RunForkMaterializedStatus || currentRevision != int(allocatedRevision) || revisionRows != int(allocatedRevision) || eventRows != 2 {
+		t.Fatalf("failed discard partial state = status:%q head:%d ledger:%d events:%d, want %q/%d/%d/2", status, currentRevision, revisionRows, eventRows, RunForkMaterializedStatus, allocatedRevision, allocatedRevision)
+	}
+	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
+		t.Fatalf("retry selected fork discard after contention: %v", err)
+	}
+
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&status); err != nil {
+		t.Fatalf("load retained selected run: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("retained selected run status = %q, want cancelled", status)
+	}
+	for label, query := range map[string]string{
+		"revision head":   `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`,
+		"revision ledger": `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`,
+		"revision facts":  `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query, fixture.forkRun).Scan(&count); err != nil {
+			t.Fatalf("count %s after discard: %v", label, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows after discard = %d, want 0", label, count)
+		}
+	}
+	var authorityRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1::uuid`, issued.ExecutionID).Scan(&authorityRows); err != nil {
+		t.Fatalf("count retained selected authority: %v", err)
+	}
+	if authorityRows != 1 {
+		t.Fatalf("retained selected authority rows = %d, want 1", authorityRows)
+	}
 }
 
 func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {

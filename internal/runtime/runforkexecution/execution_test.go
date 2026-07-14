@@ -353,33 +353,61 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		t.Fatalf("fork projection key = %q, want UUID: %v", forkKey, err)
 	}
 
-	// Execute the original pending delivery only after the fork committed. The
-	// source and fork now traverse the same canonical constructor independently.
+	// A forked source rejects ordinary post-terminal event production. Exercise
+	// the same canonical constructor on an independent active control run instead.
+	controlRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, controlRunID); err != nil {
+		t.Fatalf("seed control run: %v", err)
+	}
+	controlEventID := uuid.NewString()
+	controlEvent := eventtest.RootIngress(
+		controlEventID,
+		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
+		controlRunID,
+		"",
+		payload,
+		0,
+		controlRunID,
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	controlCtx := runtimecorrelation.WithRunID(ctx, controlRunID)
+	controlPreflight, err := sourceBus.CheckPublishRecipientPlan(controlCtx, controlEvent)
+	if err != nil {
+		t.Fatalf("plan control create event: %v", err)
+	}
+	if controlPreflight.TargetFailure != "" || len(controlPreflight.DeliveryRoutes) == 0 {
+		t.Fatalf("control root preflight = failure:%s routes:%#v", controlPreflight.TargetFailure, controlPreflight.DeliveryRoutes)
+	}
+	if err := pg.PersistEventWithDeliveryRouteSetAndScope(controlCtx, controlEvent, controlPreflight.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("persist control event: %v", err)
+	}
 	sourceBus.SetInterceptors(sourcePipeline)
-	if err := sourceBus.RecoverPersistedPipeline(sourceCtx, sourceEvent, nil); err != nil {
-		t.Fatalf("execute source pending delivery: %v", err)
+	if err := sourceBus.RecoverPersistedPipeline(controlCtx, controlEvent, nil); err != nil {
+		t.Fatalf("execute control delivery: %v", err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := sourceBus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for source pending delivery: %v", err)
+		t.Fatalf("wait for control delivery: %v", err)
 	}
-	var sourceRequestedEventID string
+	var controlRequestedEventID string
 	if err := db.QueryRowContext(ctx, `
 		SELECT event_id::text
 		FROM events
 		WHERE run_id = $1::uuid
 		  AND event_name = 'producer/validation.requested'
-	`, sourceRunID).Scan(&sourceRequestedEventID); err != nil {
-		t.Fatalf("load source request event: %v", err)
+	`, controlRunID).Scan(&controlRequestedEventID); err != nil {
+		t.Fatalf("load control request event: %v", err)
 	}
-	sourceRoute := requireSyntheticProjectionRoute(t, pg, sourceRequestedEventID, "validator-node")
-	sourceKey := sourceRoute.PayloadProjection.Fields()["validation_case_id"]
-	if _, err := uuid.Parse(sourceKey); err != nil {
-		t.Fatalf("source projection key = %q, want UUID: %v", sourceKey, err)
+	controlRoute := requireSyntheticProjectionRoute(t, pg, controlRequestedEventID, "validator-node")
+	controlKey := controlRoute.PayloadProjection.Fields()["validation_case_id"]
+	if _, err := uuid.Parse(controlKey); err != nil {
+		t.Fatalf("control projection key = %q, want UUID: %v", controlKey, err)
 	}
-	if forkKey == sourceKey || forkRoute.Target.FlowInstance == sourceRoute.Target.FlowInstance {
-		t.Fatalf("fork reused source stamped identity: source=%s/%s fork=%s/%s", sourceKey, sourceRoute.Target.FlowInstance, forkKey, forkRoute.Target.FlowInstance)
+	if forkKey == controlKey || forkRoute.Target.FlowInstance == controlRoute.Target.FlowInstance {
+		t.Fatalf("fork reused control stamped identity: control=%s/%s fork=%s/%s", controlKey, controlRoute.Target.FlowInstance, forkKey, forkRoute.Target.FlowInstance)
 	}
 	var forkPayloadRaw string
 	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id = $1::uuid`, forkEventID).Scan(&forkPayloadRaw); err != nil {
