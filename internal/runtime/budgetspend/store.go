@@ -20,8 +20,15 @@ const (
 type Store interface {
 	RecordSpend(ctx context.Context, rec SpendRecord) error
 	ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error)
-	ListActiveEntityIDs(ctx context.Context, runID string, terminalStates []string) ([]string, error)
+	ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]ProjectionTarget, error)
 	SumSpendUSD(ctx context.Context, query SpendQuery) (float64, error)
+}
+
+// ProjectionTarget identifies one active run-scoped entity whose retained
+// spend must be reflected in runtime budget state during startup recovery.
+type ProjectionTarget struct {
+	RunID    string
+	EntityID string
 }
 
 type SpendRecord struct {

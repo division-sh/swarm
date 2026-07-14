@@ -65,6 +65,8 @@ type budgetSpendStoreCapture struct {
 	records    []budgetspend.SpendRecord
 	sum        float64
 	sumQueries []budgetspend.SpendQuery
+	targets    []budgetspend.ProjectionTarget
+	calls      []string
 }
 
 func (s *budgetSpendStoreCapture) RecordSpend(_ context.Context, rec budgetspend.SpendRecord) error {
@@ -76,12 +78,14 @@ func (s *budgetSpendStoreCapture) ResolveFlowInstance(context.Context, string, s
 	return "", nil
 }
 
-func (s *budgetSpendStoreCapture) ListActiveEntityIDs(context.Context, string, []string) ([]string, error) {
-	return nil, nil
+func (s *budgetSpendStoreCapture) ListBudgetProjectionTargets(context.Context, []string) ([]budgetspend.ProjectionTarget, error) {
+	s.calls = append(s.calls, "targets")
+	return append([]budgetspend.ProjectionTarget(nil), s.targets...), nil
 }
 
 func (s *budgetSpendStoreCapture) SumSpendUSD(_ context.Context, query budgetspend.SpendQuery) (float64, error) {
 	s.sumQueries = append(s.sumQueries, query)
+	s.calls = append(s.calls, string(query.Scope)+"|"+query.EntityID)
 	return s.sum, nil
 }
 
@@ -152,6 +156,64 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 	}
 	if !tracker.IsEmergency("") || !tracker.IsThrottle("") {
 		t.Fatalf("projected budget state emergency=%v throttle=%v, want both true", tracker.IsEmergency(""), tracker.IsThrottle(""))
+	}
+}
+
+func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext(t *testing.T) {
+	entityA := "10000000-0000-4000-8000-000000000001"
+	entityB := "20000000-0000-4000-8000-000000000002"
+	store := &budgetSpendStoreCapture{
+		sum: 0.95,
+		targets: []budgetspend.ProjectionTarget{
+			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA},
+			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB},
+		},
+	}
+	eventStore := &bootSelfCheckDescriptorStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"budget_warning_percent":   {Value: 50},
+			"budget_throttle_percent":  {Value: 75},
+			"budget_emergency_percent": {Value: 90},
+		}},
+	})
+	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+		"budget": map[string]any{
+			"system_monthly_cap":     1,
+			"global_monthly_cap":     1,
+			"per_entity_monthly_cap": 1,
+		},
+	}}, nil, nil, source)
+
+	if err := tracker.ProjectRecoveryBudgetState(context.Background()); err != nil {
+		t.Fatalf("ProjectRecoveryBudgetState: %v", err)
+	}
+	wantCalls := []string{
+		"system|",
+		"global|",
+		"targets",
+		"entity|" + entityA,
+		"entity|" + entityB,
+	}
+	if !reflect.DeepEqual(store.calls, wantCalls) {
+		t.Fatalf("recovery projection calls = %#v, want %#v", store.calls, wantCalls)
+	}
+	if !tracker.IsEmergency("") || !tracker.IsEmergency(entityA) || !tracker.IsEmergency(entityB) {
+		t.Fatalf("recovered emergency states system=%v entityA=%v entityB=%v, want all true", tracker.IsEmergency(""), tracker.IsEmergency(entityA), tracker.IsEmergency(entityB))
+	}
+	if got := len(eventStore.appendedEvents()); got != 4 {
+		t.Fatalf("threshold events = %d, want system, global, and two entity transitions", got)
+	}
+
+	if err := tracker.ProjectRecoveryBudgetState(context.Background()); err != nil {
+		t.Fatalf("second ProjectRecoveryBudgetState: %v", err)
+	}
+	if got := len(eventStore.appendedEvents()); got != 4 {
+		t.Fatalf("threshold events after repeated recovery = %d, want idempotent 4", got)
 	}
 }
 

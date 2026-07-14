@@ -55,6 +55,9 @@ type recordingCompletionReceiptBus struct {
 
 type projectedEmergencyBudgetGuard struct{}
 
+func (projectedEmergencyBudgetGuard) ProjectRecoveryBudgetState(context.Context) error {
+	return nil
+}
 func (projectedEmergencyBudgetGuard) IsEntityEmergency(string) bool { return true }
 func (projectedEmergencyBudgetGuard) IsEntityThrottle(string) bool  { return true }
 func (projectedEmergencyBudgetGuard) IsEmergency(string) bool       { return true }

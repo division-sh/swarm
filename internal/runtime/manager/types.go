@@ -192,6 +192,7 @@ type ManagerPersistence interface {
 }
 
 type BudgetGuard interface {
+	ProjectRecoveryBudgetState(ctx context.Context) error
 	IsEntityEmergency(entityID string) bool
 	IsEntityThrottle(entityID string) bool
 	IsEmergency(entityID string) bool
