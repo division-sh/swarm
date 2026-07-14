@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,53 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 		resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"retired","method":"`+retired+`","params":{}}`)
 		if resp.Error == nil || resp.Error.Code != codeMethodNotFound {
 			t.Fatalf("%s error = %#v, want method not found", retired, resp.Error)
+		}
+	}
+}
+
+func TestOperatorMailboxProjectsProposedEffectAuthorizationAndDispatchSeparately(t *testing.T) {
+	state := newMutatingRuntimeProbeState(t, "mailbox.get")
+	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: "00000000-0000-0000-0000-000000000303", ActivityID: "send_support_reply", Decision: "support_reply",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.decisionCards.card.Anchor = anchor
+	state.decisionCards.card.Snapshot = mustTestDecisionSnapshot("support_reply", "Send support reply", map[string]any{"input": map[string]any{"text": "Exact reply"}}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve"}, "revise": {Verdict: "revise"}, "reject": {Verdict: "reject"},
+	})
+	state.decisionCards.card.EffectContentHash = "sha256:" + strings.Repeat("e", 64)
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorReadHandlers(state.options(t))})
+
+	for _, method := range []string{"mailbox.list", "mailbox.get"} {
+		params := `{}`
+		if method == "mailbox.get" {
+			params = `{"mailbox_id":"card-1"}`
+		}
+		response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"proof","method":"`+method+`","params":`+params+`}`)
+		if response.Error != nil {
+			t.Fatalf("%s error = %#v", method, response.Error)
+		}
+		projection := asMap(t, response.Result)
+		if method == "mailbox.list" {
+			items := asSlice(t, projection["items"])
+			for _, item := range items {
+				candidate := asMap(t, item)
+				if candidate["kind"] == decisioncard.KindDecisionCard {
+					projection = candidate
+					break
+				}
+			}
+		}
+		card := asMap(t, projection["decision_card"])
+		effect := asMap(t, projection["effect"])
+		if card["status"] != decisioncard.StatusPending || card["anchor_kind"] != string(decisioncard.AnchorKindProposedEffect) {
+			t.Fatalf("%s authorization projection = %#v", method, card)
+		}
+		if effect["dispatch_state"] != "held" || effect["request_event_id"] != "00000000-0000-0000-0000-000000000303" || effect["activity_id"] != "send_support_reply" {
+			t.Fatalf("%s dispatch projection = %#v", method, effect)
 		}
 	}
 }

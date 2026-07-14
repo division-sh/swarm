@@ -2760,8 +2760,8 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 		t.Fatalf("activity intents writer=%d dispatcher=%d, want 1/1", len(writer.intents), len(dispatcher.intents))
 	}
 	intent := writer.intents[0]
-	if got := intent.Input["url"]; got != "https://example.com" {
-		t.Fatalf("activity input url = %#v", got)
+	if got, ok := intent.Input.Lookup("url"); !ok || got.Interface() != "https://example.com" {
+		t.Fatalf("activity input url = %#v, present=%v", got.Interface(), ok)
 	}
 	if intent.SuccessEvent != "research.scanner_source_requested_source_scrape.succeeded" {
 		t.Fatalf("success event = %q", intent.SuccessEvent)

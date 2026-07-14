@@ -20,7 +20,7 @@ func (s *WorkflowInstanceStore) CommitDecision(ctx context.Context, card decisio
 	switch card.Anchor.Kind() {
 	case decisioncard.AnchorKindStageGate:
 		return s.commitGateDecision(ctx, card, eventID, now)
-	case decisioncard.AnchorKindHumanTask:
+	case decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect:
 		return nil
 	default:
 		return fmt.Errorf("decision-card anchor kind %q is not registered", card.Anchor.Kind())

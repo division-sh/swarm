@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
+const testRoutesJSON = `{"approve":{"advances_to":"operating","emit":{"event":"","fields":{}},"emit_schema":{}}}`
+
 func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
-	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", "stage.entered", now)
+	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", testRoutesJSON, "stage.entered", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +34,7 @@ func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 
 func TestActivationRouteRequiresCommittedEventIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
-	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", "stage.entered", now)
+	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", testRoutesJSON, "stage.entered", now)
 	if err != nil {
 		t.Fatal(err)
 	}

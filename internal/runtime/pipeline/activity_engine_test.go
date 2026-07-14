@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -28,6 +29,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -65,8 +67,17 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	if payload.Tool != "source_scrape" || payload.SuccessEvent != "research.scanner_source_scrape.succeeded" {
 		t.Fatalf("request payload = %#v", payload)
 	}
-	if got := payload.Input["url"]; got != "https://example.com/source" {
-		t.Fatalf("request input url = %#v", got)
+	semanticPayload, err := canonicaljson.Decode(request.Event.Payload())
+	if err != nil {
+		t.Fatalf("admit request payload: %v", err)
+	}
+	input, ok := semanticPayload.Lookup("input")
+	if !ok {
+		t.Fatal("request input is missing")
+	}
+	url, ok := input.Lookup("url")
+	if got, isText := url.String(); !ok || !isText || got != "https://example.com/source" {
+		t.Fatalf("request input url = %q (string=%v)", got, isText)
 	}
 }
 
@@ -601,7 +612,7 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "acme.create_widget"
 	intent.ActivityID = "acme_create_widget"
-	intent.Input = map[string]any{"account_id": "account-7", "name": "proof widget"}
+	intent.Input = mustActivityInput(map[string]any{"account_id": "account-7", "name": "proof widget"})
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
@@ -709,7 +720,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 	intent := testNonIdempotentActivityIntent(runID, inboundEvent.ID(), entityID)
 	intent.Tool = "telegram.send_message"
 	intent.ActivityID = "telegram_send_message"
-	intent.Input = map[string]any{"chat_id": chatID, "text": "reply: " + incomingText}
+	intent.Input = mustActivityInput(map[string]any{"chat_id": chatID, "text": "reply: " + incomingText})
 	intent.SuccessEvent = "telegram.send_message.succeeded"
 	intent.FailureEvent = "telegram.send_message.failed"
 	intent.SourceTaskID = inboundEvent.TaskID()
@@ -1205,7 +1216,7 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "telegram.send_message"
 	intent.ActivityID = "telegram_send_message"
-	intent.Input = map[string]any{"chat_id": "42", "text": "reply"}
+	intent.Input = mustActivityInput(map[string]any{"chat_id": "42", "text": "reply"})
 	intent.SuccessEvent = "telegram.send_message.succeeded"
 	intent.FailureEvent = "telegram.send_message.failed"
 	intent = intent.Normalized()
@@ -1255,7 +1266,7 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 	return runtimeengine.ActivityIntent{
 		ActivityID:    "scanner_source_scrape",
 		Tool:          "source_scrape",
-		Input:         map[string]any{"url": inputURL},
+		Input:         mustActivityInput(map[string]any{"url": inputURL}),
 		EffectClass:   runtimecontracts.ActivityEffectClassReadOnly,
 		SuccessEvent:  "research.scanner_source_scrape.succeeded",
 		FailureEvent:  "research.scanner_source_scrape.failed",
@@ -1268,6 +1279,14 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		ChainDepth:    4,
 		Attempt:       1,
 	}.Normalized()
+}
+
+func mustActivityInput(input map[string]any) semanticvalue.Value {
+	value, err := canonicaljson.FromGo(input)
+	if err != nil {
+		panic(err)
+	}
+	return value
 }
 
 func testNonIdempotentActivityIntent(runID, sourceEventID, entityID string) runtimeengine.ActivityIntent {

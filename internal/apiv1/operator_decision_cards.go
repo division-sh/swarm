@@ -74,7 +74,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			id := strings.TrimSpace(firstStringParam(req.Params, "mailbox_id", "card_id"))
 			card, err := opts.DecisionCards.GetDecisionCard(ctx, id)
 			if err == nil {
-				return map[string]any{"kind": decisioncard.KindDecisionCard, "decision_card": card}, nil
+				return decisionCardProjection(ctx, opts.DecisionCards, card, card.Anchor.Kind())
 			}
 			if !errors.Is(err, decisioncard.ErrNotFound) {
 				return nil, err
@@ -313,7 +313,11 @@ func listMailboxProjection(ctx context.Context, req Request, opts OperatorReadOp
 		entries = append(entries, mailboxProjectionEntry{Value: map[string]any{"kind": decisioncard.KindNotice, "notice": notice}, Kind: decisioncard.KindNotice, ID: notice.MailboxID, CreatedAt: createdAt})
 	}
 	for _, card := range cards {
-		entries = append(entries, mailboxProjectionEntry{Value: map[string]any{"kind": decisioncard.KindDecisionCard, "decision_card": card}, Kind: decisioncard.KindDecisionCard, ID: card.CardID, CreatedAt: card.CreatedAt})
+		projection, err := decisionCardProjection(ctx, opts.DecisionCards, card, card.Anchor.Kind())
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, mailboxProjectionEntry{Value: projection, Kind: decisioncard.KindDecisionCard, ID: card.CardID, CreatedAt: card.CreatedAt})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		if !entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
@@ -344,6 +348,32 @@ func listMailboxProjection(ctx context.Context, req Request, opts OperatorReadOp
 		next = encodeMailboxProjectionCursor(nextState)
 	}
 	return mailboxProjectionListResult{Items: items, NextCursor: next}, nil
+}
+
+func decisionCardProjection(ctx context.Context, cards decisioncard.Store, card any, kind decisioncard.AnchorKind) (map[string]any, error) {
+	out := map[string]any{"kind": decisioncard.KindDecisionCard, "decision_card": card}
+	if kind != decisioncard.AnchorKindProposedEffect {
+		return out, nil
+	}
+	store, ok := cards.(decisioncard.ProposedEffectStore)
+	if !ok || store == nil {
+		return nil, fmt.Errorf("proposed-effect readback store is not configured")
+	}
+	var cardID string
+	switch typed := card.(type) {
+	case decisioncard.Card:
+		cardID = typed.CardID
+	case decisioncard.ListItem:
+		cardID = typed.CardID
+	default:
+		return nil, fmt.Errorf("unsupported decision-card projection %T", card)
+	}
+	readback, err := store.ProposedEffectReadback(ctx, cardID)
+	if err != nil {
+		return nil, err
+	}
+	out["effect"] = readback
+	return out, nil
 }
 
 func decodeMailboxProjectionCursor(raw string) (mailboxProjectionCursor, error) {

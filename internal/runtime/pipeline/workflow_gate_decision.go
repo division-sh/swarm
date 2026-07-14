@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -53,9 +54,153 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 		return pc.handleStageGateDecisionCard(ctx, evt, card)
 	case decisioncard.AnchorKindHumanTask:
 		return pc.handleHumanTaskDecisionCard(ctx, evt, card)
+	case decisioncard.AnchorKindProposedEffect:
+		return pc.handleProposedEffectDecisionCard(ctx, evt, card)
 	default:
 		return nil, fmt.Errorf("decision-card anchor kind %q is not registered", card.Anchor.Kind())
 	}
+}
+
+func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
+	store, ok := pc.decisionCards.(decisioncard.ProposedEffectStore)
+	if !ok || store == nil {
+		return nil, fmt.Errorf("proposed-effect continuation store is not configured")
+	}
+	continuation, err := store.LoadProposedEffectContinuation(ctx, card.CardID)
+	if err != nil {
+		return nil, err
+	}
+	if continuation.DecisionEventID != evt.ID() || continuation.Verdict != card.Verdict {
+		return nil, fmt.Errorf("mailbox.card_decided does not match the authoritative proposed-effect continuation")
+	}
+	var released []runtimeengine.EmitIntent
+	err = pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		continuation, err := store.LoadProposedEffectContinuation(txctx, card.CardID)
+		if err != nil {
+			return err
+		}
+		if continuation.RouteEventID == evt.ID() && (continuation.State == decisioncard.ProposedEffectRequestReleased || continuation.State == decisioncard.ProposedEffectOutcomeDispatched) {
+			return nil
+		}
+		if continuation.State != decisioncard.ProposedEffectDecisionCommitted {
+			return fmt.Errorf("proposed-effect continuation is not ready to route")
+		}
+		if current := workflowGateBundleHash(txctx, pc); current == "" || current != card.BundleHash {
+			return DeferPipelineReceipt(runtimefailures.New(
+				runtimefailures.ClassDependencyUnavailable,
+				"decision_card_bundle_unavailable",
+				runtimeWorkflowID,
+				"route_proposed_effect_decision",
+				map[string]any{"card_id": card.CardID, "required_bundle_hash": card.BundleHash, "current_bundle_hash": current},
+			))
+		}
+		switch card.Verdict {
+		case "approve":
+			request, err := activityRequestEmitIntent(activityIntentFromProposedEffect(continuation))
+			if err != nil {
+				return err
+			}
+			outbox := pc.bus.EngineOutbox()
+			if outbox == nil {
+				return fmt.Errorf("approved activity release requires pipeline outbox")
+			}
+			if err := outbox.WriteOutbox(txctx, []runtimeengine.EmitIntent{request}); err != nil {
+				return err
+			}
+			released = []runtimeengine.EmitIntent{request}
+		case "revise", "reject":
+			product, err := proposedEffectOutcomeEvent(card, evt, continuation)
+			if err != nil {
+				return err
+			}
+			publisher, ok := pc.bus.(workflowGateMutationPublisher)
+			if !ok || publisher == nil {
+				return fmt.Errorf("transactional event publisher is required for proposed-effect outcome")
+			}
+			if continuation.ReplyContextID != "" {
+				delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
+				product = product.WithDeliveryContext(delivery)
+				txctx = events.WithDeliveryContext(txctx, delivery)
+			}
+			if err := publisher.PublishInMutation(txctx, product); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("proposed-effect verdict %q is unsupported", card.Verdict)
+		}
+		_, err = store.CompleteProposedEffectRoute(txctx, card.CardID, evt.ID(), card.DecidedAt)
+		return err
+	})
+	if err != nil || len(released) == 0 {
+		return nil, err
+	}
+	dispatcher := pc.bus.EngineDispatcher()
+	if dispatcher == nil {
+		return nil, fmt.Errorf("approved activity release requires post-commit dispatcher")
+	}
+	if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), released); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation) runtimeengine.ActivityIntent {
+	continuation = continuation.Canonical()
+	intent := runtimeengine.ActivityIntent{
+		Context: events.DeliveryContext{}, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
+		BundleHash: continuation.BundleHash, WorkflowVersion: continuation.WorkflowVersion,
+		Input: continuation.Input, EffectClass: continuation.EffectClass,
+		SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent,
+		RevisionEvent: continuation.RevisionEvent, RejectedEvent: continuation.RejectedEvent,
+		RetryMaxAttempts: continuation.RetryMaxAttempts, RetryBackoff: continuation.RetryBackoff, ForkPolicy: continuation.ForkPolicy,
+		EntityID: identity.NormalizeEntityID(continuation.EntityID), NodeID: identity.NormalizeNodeID(continuation.NodeID),
+		FlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
+		HandlerEventKey: continuation.HandlerEventKey, SourceEventID: continuation.SourceEventID,
+		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
+		ParentEventID: continuation.ParentEventID, ChainDepth: continuation.ChainDepth,
+		Attempt: continuation.Attempt, Generation: continuation.Generation, LoopStage: continuation.LoopStage,
+	}
+	if continuation.ReplyContextID != "" {
+		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
+	}
+	return intent.Normalized()
+}
+
+func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, continuation decisioncard.ProposedEffectContinuation) (events.Event, error) {
+	var noEvent events.Event
+	eventType := continuation.RevisionEvent
+	payloadValues := map[string]any{
+		"card_id": card.CardID, "activity_id": continuation.ActivityID,
+		"tool": continuation.Tool, "effect_class": string(continuation.EffectClass),
+		"effect_content_hash": continuation.EffectContentHash,
+		"decided_by":          card.DecidedBy, "decided_at": card.DecidedAt.UTC().Format(time.RFC3339Nano),
+	}
+	switch card.Verdict {
+	case "revise":
+		feedback, ok := card.Fields.Lookup("feedback")
+		if !ok {
+			return noEvent, fmt.Errorf("revision feedback is required")
+		}
+		payloadValues["feedback"] = feedback.Interface()
+	case "reject":
+		eventType = continuation.RejectedEvent
+		if reason, ok := card.Fields.Lookup("reason"); ok {
+			payloadValues["reason"] = reason.Interface()
+		}
+	default:
+		return noEvent, fmt.Errorf("proposed-effect outcome verdict %q is unsupported", card.Verdict)
+	}
+	raw, err := canonicaljson.Bytes(payloadValues)
+	if err != nil {
+		return noEvent, err
+	}
+	if strings.TrimSpace(eventType) == "" {
+		return noEvent, fmt.Errorf("proposed-effect %s event is missing", card.Verdict)
+	}
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, continuation.EntityID), continuation.FlowInstance)
+	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.proposed-effect.outcome.v1\x00"+card.CardID+"\x00"+parent.ID()+"\x00"+card.Verdict)).String()
+	return events.NewChildEvent(eventID, events.EventType(eventType), runtimeWorkflowID, continuation.SourceTaskID, raw,
+		parent.ChainDepth()+1, parent, envelope, card.DecidedAt.UTC()), nil
 }
 
 func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
@@ -196,10 +341,6 @@ func humanTaskRequesterOutcomeEnvelope(continuation decisioncard.HumanTaskContin
 }
 
 func (pc *PipelineCoordinator) handleStageGateDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
-	outcome, ok := card.Snapshot.Outcomes[card.Verdict]
-	if !ok {
-		return nil, fmt.Errorf("card verdict %s is absent from the frozen outcome plan", card.Verdict)
-	}
 	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
 		return nil, DeferPipelineReceipt(runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
@@ -209,14 +350,44 @@ func (pc *PipelineCoordinator) handleStageGateDecisionCard(ctx context.Context, 
 			map[string]any{"card_id": card.CardID, "required_bundle_hash": card.BundleHash, "current_bundle_hash": current},
 		))
 	}
-	emitted, err := workflowGateOutcomeEvent(card, evt, outcome)
+	route, err := pc.loadStageGateRoute(ctx, card)
 	if err != nil {
 		return nil, err
 	}
-	if err := pc.routeWorkflowGateDecision(ctx, card, evt, outcome, emitted); err != nil {
+	emitted, err := workflowGateOutcomeEvent(card, evt, route)
+	if err != nil {
+		return nil, err
+	}
+	if err := pc.routeWorkflowGateDecision(ctx, card, evt, route, emitted); err != nil {
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card decisioncard.Card) (gateruntime.Route, error) {
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	instance, found, err := pc.workflowStore.Load(ctx, anchor.EntityID)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	if !found {
+		return gateruntime.Route{}, fmt.Errorf("decision card workflow instance is missing")
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
+		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
+	}
+	return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
 }
 
 func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
@@ -267,7 +438,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	})
 }
 
-func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, outcome decisioncard.FrozenOutcome, emitted *events.Event) error {
+func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) error {
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return err
@@ -289,7 +460,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 				return err
 			}
 			if found && activation.ActivationID == anchor.StageActivationID && activation.CardID == card.CardID && activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == evt.ID() {
-				if currentStage != strings.TrimSpace(outcome.AdvancesTo) {
+				if currentStage != strings.TrimSpace(route.AdvancesTo) {
 					return fmt.Errorf("routed decision card state does not match its frozen outcome")
 				}
 				alreadyRouted = true
@@ -307,7 +478,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 				return err
 			}
-			next := strings.TrimSpace(outcome.AdvancesTo)
+			next := strings.TrimSpace(route.AdvancesTo)
 			instance.CurrentState = next
 			instance.EnteredStageAt = time.Now().UTC()
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentStage, next, evt.ID()))
@@ -319,14 +490,14 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		if alreadyRouted {
 			return nil
 		}
-		pc.notifyTestEntityStateUpdated(anchor.EntityID, outcome.AdvancesTo)
-		if err := pc.reconcileWorkflowStageTimers(txctx, anchor.EntityID, currentStage, outcome.AdvancesTo, evt.ID()); err != nil {
+		pc.notifyTestEntityStateUpdated(anchor.EntityID, route.AdvancesTo)
+		if err := pc.reconcileWorkflowStageTimers(txctx, anchor.EntityID, currentStage, route.AdvancesTo, evt.ID()); err != nil {
 			return err
 		}
-		if err := pc.applyWorkflowJoinIntents(txctx, anchor.EntityID, currentStage, outcome.AdvancesTo); err != nil {
+		if err := pc.applyWorkflowJoinIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo); err != nil {
 			return err
 		}
-		if err := pc.applyWorkflowGateIntents(txctx, anchor.EntityID, currentStage, outcome.AdvancesTo, evt.ID()); err != nil {
+		if err := pc.applyWorkflowGateIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo, evt.ID()); err != nil {
 			return err
 		}
 		if emitted != nil {
@@ -342,11 +513,11 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	})
 }
 
-func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outcome decisioncard.FrozenOutcome) (*events.Event, error) {
-	if outcome.Emit.Empty() || strings.TrimSpace(outcome.Emit.Event) == "" {
+func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route gateruntime.Route) (*events.Event, error) {
+	if route.Emit.Empty() || strings.TrimSpace(route.Emit.Event) == "" {
 		return nil, nil
 	}
-	payload, err := decisioncard.BuildOutcomePayload(outcome, card.Fields)
+	payload, err := gateruntime.BuildRoutePayload(route, card.Fields)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +525,7 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, outco
 	if err != nil {
 		return nil, err
 	}
-	eventType := strings.TrimSpace(outcome.Emit.Event)
+	eventType := strings.TrimSpace(route.Emit.Event)
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return nil, err

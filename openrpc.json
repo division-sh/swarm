@@ -10588,6 +10588,9 @@
           "decision_schema_hash": {
             "type": "string"
           },
+          "effect_content_hash": {
+            "type": "string"
+          },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
@@ -10628,13 +10631,17 @@
           },
           {
             "$ref": "#/components/schemas/HumanTaskDecisionCardAnchor"
+          },
+          {
+            "$ref": "#/components/schemas/ProposedEffectDecisionCardAnchor"
           }
         ]
       },
       "DecisionCardAnchorKind": {
         "enum": [
           "stage_gate",
-          "human_task"
+          "human_task",
+          "proposed_effect"
         ],
         "type": "string"
       },
@@ -10660,6 +10667,9 @@
           },
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/ProposedEffectState"
           },
           "payload": {
             "additionalProperties": true,
@@ -10688,6 +10698,9 @@
         "properties": {
           "decision_card": {
             "$ref": "#/components/schemas/DecisionCard"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/ProposedEffectState"
           },
           "kind": {
             "const": "decision_card",
@@ -10784,6 +10797,9 @@
         "properties": {
           "decision_card": {
             "$ref": "#/components/schemas/DecisionCardSummary"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/ProposedEffectState"
           },
           "kind": {
             "const": "decision_card",
@@ -11976,6 +11992,72 @@
           "forked"
         ],
         "type": "string"
+      },
+      "ProposedEffectDecisionCardAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_id": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "request_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/DecisionCardScope"
+          }
+        },
+        "required": [
+          "request_event_id",
+          "activity_id",
+          "decision",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "ProposedEffectState": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_id": {
+            "type": "string"
+          },
+          "continuation_state": {
+            "enum": [
+              "pending",
+              "decision_committed",
+              "request_released",
+              "outcome_dispatched",
+              "superseded"
+            ],
+            "type": "string"
+          },
+          "dispatch_state": {
+            "enum": [
+              "held",
+              "release_pending",
+              "released",
+              "not_dispatched",
+              "superseded",
+              "started",
+              "succeeded",
+              "failed",
+              "uncertain"
+            ],
+            "type": "string"
+          },
+          "request_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "continuation_state",
+          "dispatch_state",
+          "request_event_id",
+          "activity_id"
+        ],
+        "type": "object"
       },
       "RpcSubscriptionNotification": {
         "additionalProperties": false,

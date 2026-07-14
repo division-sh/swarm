@@ -194,7 +194,11 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 		}
 		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, source.NodeEventHandlers(nodeID)) {
 			results := runtimecontracts.ActivityResultEventsForSite(site)
-			for _, eventType := range []string{results.SuccessEvent, results.FailureEvent} {
+			eventTypes := []string{results.SuccessEvent, results.FailureEvent}
+			if site.Spec.Approval != nil {
+				eventTypes = append(eventTypes, results.RevisionRequested, results.Rejected)
+			}
+			for _, eventType := range eventTypes {
 				if normalized := eventidentity.Normalize(eventType); normalized != "" {
 					out[normalized] = struct{}{}
 				}

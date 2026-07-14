@@ -143,12 +143,15 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 			eventType: "platform.activity_requested",
 			payload: map[string]any{
 				"activity_id": "telegram_send_message", "tool": "telegram.send_message",
+				"bundle_hash": "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "workflow_version": "1",
 				"input":        map[string]any{"chat_id": float64(42), "text": "hello"},
 				"effect_class": "non_idempotent_write", "success_event": "telegram-chat.telegram_send_message.succeeded",
-				"failure_event": "telegram-chat.telegram_send_message.failed", "retry_max_attempts": 1,
+				"failure_event":  "telegram-chat.telegram_send_message.failed",
+				"revision_event": "telegram-chat.telegram_send_message.revision_requested",
+				"rejected_event": "telegram-chat.telegram_send_message.rejected", "retry_max_attempts": 1,
 				"retry_backoff": "none", "fork_policy": "reuse_recorded_result",
 				"entity_id": "00000000-0000-0000-0000-000000000127", "node_id": "telegram-responder",
-				"flow_id": "telegram-chat", "handler_event_key": "inbound.telegram",
+				"flow_id": "telegram-chat", "flow_instance": "telegram-chat/instance-1", "handler_event_key": "inbound.telegram",
 				"source_event_id": "00000000-0000-0000-0000-000000000128",
 				"source_run_id":   "00000000-0000-0000-0000-000000000129", "source_task_id": "",
 				"parent_event_id": "00000000-0000-0000-0000-000000000128", "chain_depth": 1,
@@ -221,6 +224,17 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 			}
 			if err := eventschema.ValidatePayloadAgainstSchema(schema.Schema, tc.payload); err != nil {
 				t.Fatalf("generated %s schema rejected producer payload %#v: %v", tc.eventType, tc.payload, err)
+			}
+			if tc.eventType == "platform.activity_requested" {
+				immediate := make(map[string]any, len(tc.payload)-2)
+				for name, value := range tc.payload {
+					if name != "bundle_hash" && name != "workflow_version" {
+						immediate[name] = value
+					}
+				}
+				if err := eventschema.ValidatePayloadAgainstSchema(schema.Schema, immediate); err != nil {
+					t.Fatalf("generated %s schema rejected immediate unpinned producer payload %#v: %v", tc.eventType, immediate, err)
+				}
 			}
 		})
 	}

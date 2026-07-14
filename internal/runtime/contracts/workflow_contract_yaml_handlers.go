@@ -229,9 +229,14 @@ var onSuccessFieldOptions = map[string]struct{}{
 }
 
 var activityFieldOptions = map[string]struct{}{
-	"id":    {},
-	"tool":  {},
-	"input": {},
+	"id":       {},
+	"tool":     {},
+	"input":    {},
+	"approval": {},
+}
+
+var activityApprovalFieldOptions = map[string]struct{}{
+	"decision": {},
 }
 
 var emitTargetFieldOptions = map[string]struct{}{
@@ -376,12 +381,50 @@ func (a *ActivitySpec) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 			out.Input = input
+		case "approval":
+			approval, err := decodeActivityApprovalNode(value)
+			if err != nil {
+				return err
+			}
+			out.Approval = approval
 		}
 	}
 	out.ID = strings.TrimSpace(out.ID)
 	out.Tool = strings.TrimSpace(out.Tool)
 	*a = out
 	return nil
+}
+
+func decodeActivityApprovalNode(node *yaml.Node) (*ActivityApprovalSpec, error) {
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval must be a mapping with decision")
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval must be a mapping with decision")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := activityApprovalFieldOptions[key]; !ok {
+			return nil, NewUndefinedFieldDiagnostic("activity.approval", key, activityApprovalFieldOptions)
+		}
+	}
+	var out ActivityApprovalSpec
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == "decision" {
+			if err := node.Content[i+1].Decode(&out.Decision); err != nil {
+				return nil, err
+			}
+		}
+	}
+	rawDecision := out.Decision
+	out.Decision = strings.TrimSpace(rawDecision)
+	if out.Decision == "" {
+		return nil, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval.decision is required; use the activity id when it is the intended stable approval class")
+	}
+	if rawDecision != out.Decision {
+		return nil, fmt.Errorf("INVALID-ACTIVITY-APPROVAL: activity.approval.decision %q is not canonical; use %q", rawDecision, out.Decision)
+	}
+	return &out, nil
 }
 
 func decodeActivityInputNode(node *yaml.Node) (map[string]ExpressionValue, error) {

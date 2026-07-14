@@ -6186,7 +6186,14 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if bundleHash == "" {
 		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	}
-	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, sourceEventID, now)
+	routes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "done"},
+		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
+	})
+	if err != nil {
+		t.Fatalf("FreezeRoutes: %v", err)
+	}
+	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new gate activation: %v", err)
 	}
@@ -15104,7 +15111,7 @@ func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
 
 const (
 	serveRuntimeReadyTimeout = 30 * time.Second
-	serveRuntimeStopTimeout  = 5 * time.Second
+	serveRuntimeStopTimeout  = runtimepkg.DefaultShutdownGrace + 15*time.Second
 )
 
 type serveRuntimeTestProcess struct {

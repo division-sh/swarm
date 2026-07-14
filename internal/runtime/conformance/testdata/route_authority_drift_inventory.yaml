@@ -526,6 +526,7 @@ seam_families:
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/runtime_support.go
       - internal/runtime/pipeline/workflow_conformance_test.go
+      - internal/runtime/pipeline/workflow_gate_recovery_external_test.go
       - internal/runtime/pipeline/workflow_handler_preview.go
       - internal/store/run_fork_selected_contract_route_recovery_test.go
       - internal/store/sqlite_runtime_test.go

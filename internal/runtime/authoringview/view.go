@@ -20,6 +20,7 @@ type View struct {
 	SourceAuthority string              `json:"source_authority"`
 	Root            RootView            `json:"root"`
 	Flows           []FlowView          `json:"flows"`
+	ApprovalPoints  []ApprovalPointView `json:"approval_points,omitempty"`
 	StageGraphs     []StageGraphView    `json:"stage_graphs,omitempty"`
 	RoutingTopology RoutingTopologyView `json:"routing_topology"`
 	Diagnostics     []DiagnosticView    `json:"diagnostics,omitempty"`
@@ -181,6 +182,17 @@ type StageGraphFanOutView struct {
 	EventType string   `json:"event_type,omitempty"`
 }
 
+type ApprovalPointView struct {
+	FlowID       string `json:"flow_id,omitempty"`
+	NodeID       string `json:"node_id"`
+	HandlerEvent string `json:"handler_event"`
+	Source       string `json:"source"`
+	ActivityID   string `json:"activity_id"`
+	Tool         string `json:"tool"`
+	Decision     string `json:"decision"`
+	EffectClass  string `json:"effect_class"`
+}
+
 type RequiredAgentsView struct {
 	Source     string              `json:"source"`
 	SourceFile string              `json:"source_file,omitempty"`
@@ -303,6 +315,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		SourceAuthority: "projection_only_existing_contract_owners",
 		Root:            buildRoot(bundle),
 		Flows:           buildFlows(source, bundle),
+		ApprovalPoints:  buildApprovalPoints(bundle),
 		RoutingTopology: BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
 		Diagnostics:     buildDiagnostics(bundle, opts.BootReport),
 		Equivalence: EquivalenceView{
@@ -323,6 +336,31 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		view.StageGraphs = buildStageGraphs(source, bundle)
 	}
 	return view, nil
+}
+
+func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []ApprovalPointView {
+	if bundle == nil {
+		return nil
+	}
+	var out []ApprovalPointView
+	for _, site := range bundle.ActivitySites() {
+		if site.Spec.Approval == nil {
+			continue
+		}
+		result := runtimecontracts.ActivityResultEventsForSite(site)
+		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
+		out = append(out, ApprovalPointView{
+			FlowID:       strings.TrimSpace(site.FlowID),
+			NodeID:       strings.TrimSpace(site.NodeID),
+			HandlerEvent: strings.TrimSpace(site.HandlerEventKey),
+			Source:       strings.TrimSpace(site.Source),
+			ActivityID:   result.ActivityID,
+			Tool:         strings.TrimSpace(site.Spec.Tool),
+			Decision:     strings.TrimSpace(site.Spec.Approval.Decision),
+			EffectClass:  strings.TrimSpace(tool.EffectClass),
+		})
+	}
+	return out
 }
 
 func BuildRoutingTopology(source semanticview.Source) RoutingTopologyView {

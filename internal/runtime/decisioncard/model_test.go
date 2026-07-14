@@ -206,7 +206,7 @@ func TestNewAndValidateRejectNonCanonicalTopLevelDecisionID(t *testing.T) {
 	}
 }
 
-func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *testing.T) {
+func TestDecisionSchemaHashTracksVerdictInputsAndIgnoresExecutionRoutes(t *testing.T) {
 	newCard := func(title, outcomeLabel, inputLabel, pattern string) Card {
 		t.Helper()
 		schema := textEventSchema(map[string]map[string]any{
@@ -235,8 +235,8 @@ func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *te
 
 	lowercase := newCard("Launch review", "Approve", "Code", "^[a-z]+$")
 	uppercase := newCard("Launch review", "Approve", "Code", "^[A-Z]+$")
-	if lowercase.DecisionSchemaHash == uppercase.DecisionSchemaHash {
-		t.Fatalf("acceptance-changing patterns share schema hash %q", lowercase.DecisionSchemaHash)
+	if lowercase.DecisionSchemaHash != uppercase.DecisionSchemaHash {
+		t.Fatalf("stage-route schema changed generic verdict schema hash: %q != %q", lowercase.DecisionSchemaHash, uppercase.DecisionSchemaHash)
 	}
 
 	polished := newCard("Production launch review", "Ship it", "Approval code", "^[a-z]+$")
@@ -248,7 +248,7 @@ func TestDecisionSchemaHashTracksEffectiveAcceptanceAndIgnoresPresentation(t *te
 	}
 }
 
-func TestDecisionSchemaHashSplitsSafeNumericBounds(t *testing.T) {
+func TestDecisionSchemaHashIgnoresStageRouteNumericBounds(t *testing.T) {
 	newCard := func(minimum int64) Card {
 		t.Helper()
 		card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -269,8 +269,8 @@ func TestDecisionSchemaHashSplitsSafeNumericBounds(t *testing.T) {
 	}
 	lower := newCard(9007199254740990)
 	upper := newCard(9007199254740991)
-	if lower.DecisionSchemaHash == upper.DecisionSchemaHash {
-		t.Fatalf("distinct safe numeric bounds share schema hash %q", lower.DecisionSchemaHash)
+	if lower.DecisionSchemaHash != upper.DecisionSchemaHash {
+		t.Fatalf("stage-route numeric bounds changed generic verdict schema hash: %q != %q", lower.DecisionSchemaHash, upper.DecisionSchemaHash)
 	}
 }
 
@@ -417,21 +417,6 @@ func assertSafeSnapshotNumbers(t *testing.T, snapshot Snapshot, want float64) {
 		t.Fatal("context.large_integer is absent")
 	}
 	assertNumber("context.large_integer", contextValue.Interface())
-	outcome := snapshot.Outcomes["approve"]
-	assertNumber("outcome literal", outcome.Emit.Fields["large_integer"].Literal.Interface())
-	schema, ok := outcome.EmitSchema.Interface().(map[string]any)
-	if !ok {
-		t.Fatalf("emit schema = %#v", outcome.EmitSchema.Interface())
-	}
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("emit schema properties = %#v", schema["properties"])
-	}
-	property, ok := properties["large_integer"].(map[string]any)
-	if !ok {
-		t.Fatalf("large_integer schema = %#v", properties["large_integer"])
-	}
-	assertNumber("schema minimum", property["minimum"])
 }
 
 func TestNewRejectsUnsupportedSnapshotNumbersBeforeHashing(t *testing.T) {
@@ -442,16 +427,6 @@ func TestNewRejectsUnsupportedSnapshotNumbersBeforeHashing(t *testing.T) {
 		outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan
 	}{
 		{name: "context", context: map[string]any{"unsafe": unsafeInteger}, outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}}},
-		{name: "outcome literal", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Emit:       runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(unsafeInteger)}},
-			EmitSchema: textEventSchema(map[string]map[string]any{"value": {"type": "integer"}}, []string{"value"}),
-		}}},
-		{name: "schema bound", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Emit:       runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.LiteralExpression(1)}},
-			EmitSchema: textEventSchema(map[string]map[string]any{"value": {"type": "integer", "minimum": unsafeInteger}}, []string{"value"}),
-		}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := FreezeSnapshot("launch_review", "", tc.context, tc.outcomes); err == nil {
@@ -470,13 +445,6 @@ func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 		{name: "input", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
 			AdvancesTo: "operating", Input: map[string]runtimecontracts.WorkflowGateInputField{" note ": {Type: "text"}},
 		}}},
-		{name: "emit", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
-			AdvancesTo: "operating",
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				" note ": runtimecontracts.LiteralExpression("ready"),
-			}},
-			EmitSchema: textEventSchema(map[string]map[string]any{"note": {"type": "string"}}, []string{"note"}),
-		}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -488,91 +456,6 @@ func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 				t.Fatalf("noncanonical card was hashed before rejection: %#v", card)
 			}
 		})
-	}
-}
-
-func TestValidateDecisionConsumesFrozenEmitSchemaBeforeSettlement(t *testing.T) {
-	patternSchema := textEventSchema(map[string]map[string]any{
-		"code": {"type": "string", "pattern": "^[a-z]+$"},
-	}, []string{"code"})
-	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"code": {Type: "text", Required: true}},
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"code": runtimecontracts.CELExpression("decision.code"),
-			}},
-			EmitSchema: patternSchema,
-		},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ValidateDecision(card, "approve", semanticObject(map[string]any{"code": "NOT-LOWER"})); err == nil || !strings.Contains(err.Error(), "pattern") {
-		t.Fatalf("ValidateDecision error = %v, want frozen pattern rejection", err)
-	}
-	if err := ValidateDecision(card, "approve", semanticObject(map[string]any{"code": "ready"})); err != nil {
-		t.Fatalf("valid refined decision rejected: %v", err)
-	}
-}
-
-func TestNewRejectsOptionalEmittedDecisionInputBeforeHashing(t *testing.T) {
-	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"note": {Type: "text", Required: false}},
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"note": runtimecontracts.CELExpression("decision.note"),
-			}},
-			EmitSchema: textEventSchema(map[string]map[string]any{"note": {"type": "string"}}, []string{"note"}),
-		},
-	}))
-	if err == nil || !strings.Contains(err.Error(), "reads optional decision.note") {
-		t.Fatalf("New error = %v, want optional emitted input rejection", err)
-	}
-	if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
-		t.Fatalf("invalid optional-input card was hashed: %#v", card)
-	}
-}
-
-func TestNewAndValidateDecisionConsumeRelationalEmitSchema(t *testing.T) {
-	relational := textEventSchema(map[string]map[string]any{
-		"component": {"type": "string"},
-		"owner":     {"type": "string", "x-swarm-equalTo": "component"},
-	}, []string{"component", "owner"})
-	staticCard, staticErr := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"component": runtimecontracts.LiteralExpression("api"),
-				"owner":     runtimecontracts.LiteralExpression("worker"),
-			}},
-			EmitSchema: relational,
-		},
-	}))
-	if staticErr == nil || !strings.Contains(staticErr.Error(), "must equal") || staticCard.CardContentHash != "" {
-		t.Fatalf("static relational card = %#v, error = %v, want pre-hash rejection", staticCard, staticErr)
-	}
-
-	dynamic, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {
-			Verdict: "approve", AdvancesTo: "operating",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{
-				"component": {Type: "text", Required: true},
-				"owner":     {Type: "text", Required: true},
-			},
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"component": runtimecontracts.CELExpression("decision.component"),
-				"owner":     runtimecontracts.CELExpression("decision.owner"),
-			}},
-			EmitSchema: relational,
-		},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ValidateDecision(dynamic, "approve", semanticObject(map[string]any{"component": "api", "owner": "worker"})); err == nil || !strings.Contains(err.Error(), "must equal") {
-		t.Fatalf("dynamic relational decision error = %v, want pre-settlement rejection", err)
 	}
 }
 
@@ -616,6 +499,59 @@ func semanticObject(values map[string]any) semanticvalue.Value {
 	return value
 }
 
+func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
+	stage, err := NewStageGateAnchor(StageGateAnchor{
+		FlowInstance: "root", EntityID: "entity-1", Stage: "review", StageActivationID: "activation-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	human, err := NewHumanTaskAnchor(HumanTaskAnchor{
+		RequesterAgentID: "agent-a", OperationID: "operation-1", Category: "review",
+		Scope: Scope{Kind: ScopeFlow, FlowInstance: "root"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := NewProposedEffectAnchor(ProposedEffectAnchor{
+		RequestEventID: "request-1", ActivityID: "send", Decision: "send_review",
+		Scope: Scope{Kind: ScopeGlobal},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	anchors := map[AnchorKind]Anchor{
+		AnchorKindStageGate: stage, AnchorKindHumanTask: human, AnchorKindProposedEffect: proposed,
+	}
+	if len(anchors) != len(RegisteredAnchorKinds()) {
+		t.Fatalf("constructed anchor kinds = %d, registered = %d", len(anchors), len(RegisteredAnchorKinds()))
+	}
+	for _, kind := range RegisteredAnchorKinds() {
+		anchor, ok := anchors[kind]
+		if !ok {
+			t.Fatalf("registered anchor kind %q has no constructor proof", kind)
+		}
+		if err := anchor.Validate(); err != nil {
+			t.Fatalf("validate %s: %v", kind, err)
+		}
+		if _, err := anchor.Scope(); err != nil {
+			t.Fatalf("scope %s: %v", kind, err)
+		}
+		raw, err := canonicaljson.Encode(anchor.SemanticValue())
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := DecodeAnchor(string(kind), raw)
+		if err != nil || decoded.Kind() != kind {
+			t.Fatalf("decode %s = %s, %v", kind, decoded.Kind(), err)
+		}
+	}
+	if _, err := DecodeAnchor("unknown", []byte(`{}`)); err == nil {
+		t.Fatal("unknown anchor kind was accepted")
+	}
+}
+
 func textEventSchema(properties map[string]map[string]any, required []string) map[string]any {
 	rawProperties := make(map[string]any, len(properties))
 	for name, schema := range properties {
@@ -646,27 +582,6 @@ func decisionSnapshotStructuralDriftCases() []decisionSnapshotStructuralDriftCas
 		}},
 		{name: "input_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
 			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback"), "label")
-		}},
-		{name: "emit_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit")["shadow_semantics"] = true
-		}},
-		{name: "emit_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit"), "Event")
-		}},
-		{name: "expression_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["shadow_semantics"] = true
-		}},
-		{name: "expression_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Ref")
-		}},
-		{name: "missing_emit_schema", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise"), "EmitSchema")
-		}},
-		{name: "missing_literal", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback"), "Literal")
-		}},
-		{name: "ignored_nonliteral_value", want: "does not preserve its exact semantic value", mutate: func(t *testing.T, root map[string]any) {
-			decisionSnapshotNestedObject(t, root, "outcomes", "revise", "Emit", "Fields", "feedback")["Literal"] = "shadow"
 		}},
 	}
 }

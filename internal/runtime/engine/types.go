@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 const DefaultMaxChainDepth = 50
@@ -332,16 +333,22 @@ type ActivityIntent struct {
 	Context          events.DeliveryContext
 	ActivityID       string
 	Tool             string
-	Input            map[string]any
+	BundleHash       string
+	WorkflowVersion  string
+	Input            semanticvalue.Value
+	ApprovalDecision string
 	EffectClass      runtimecontracts.ActivityEffectClass
 	SuccessEvent     string
 	FailureEvent     string
+	RevisionEvent    string
+	RejectedEvent    string
 	RetryMaxAttempts int
 	RetryBackoff     string
 	ForkPolicy       runtimecontracts.ActivityForkPolicy
 	EntityID         identity.EntityID
 	NodeID           identity.NodeID
 	FlowID           identity.FlowID
+	FlowInstance     string
 	HandlerEventKey  string
 	SourceEventID    string
 	SourceRunID      string
@@ -357,19 +364,25 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
+	i.BundleHash = strings.TrimSpace(i.BundleHash)
+	i.WorkflowVersion = strings.TrimSpace(i.WorkflowVersion)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)
 	i.FailureEvent = strings.TrimSpace(i.FailureEvent)
+	i.RevisionEvent = strings.TrimSpace(i.RevisionEvent)
+	i.RejectedEvent = strings.TrimSpace(i.RejectedEvent)
 	i.RetryBackoff = strings.TrimSpace(i.RetryBackoff)
 	i.HandlerEventKey = strings.TrimSpace(i.HandlerEventKey)
+	i.ApprovalDecision = strings.TrimSpace(i.ApprovalDecision)
 	i.SourceEventID = strings.TrimSpace(i.SourceEventID)
 	i.ParentEventID = strings.TrimSpace(i.ParentEventID)
+	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
 	i.Generation = i.Generation.Normalize()
 	i.LoopStage = strings.TrimSpace(i.LoopStage)
 	if i.Attempt <= 0 {
 		i.Attempt = 1
 	}
-	if i.Input == nil {
-		i.Input = map[string]any{}
+	if i.Input.Kind() == semanticvalue.KindNull {
+		i.Input = semanticvalue.EmptyObject()
 	}
 	return i
 }

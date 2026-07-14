@@ -382,20 +382,23 @@ contract_formats:
           the terminal pipeline receipt. Raw events-row append is forbidden.
         snapshot: >
           Card creation evaluates context once and freezes the structured
-          snapshot, authored outcome/input schema, effective cadence,
+          presentation snapshot, authored verdict/input schema, effective cadence,
           provenance, bundle/workflow identity, card_content_hash, and
           decision_schema_hash. The raw top-level decision_id MUST already equal
           its trimmed canonical spelling and MUST equal snapshot.decision before
           either hash or any persistence is acquired; deriving a canonical
           snapshot identity from a different public/persisted spelling is
           forbidden. decision_schema_hash is the versioned canonical semantic
-          verdict/input contract: verdict and input identities, canonical input
-          types and requiredness, semantic outcome field mappings/literals, and
-          the enforcement-only projection of every frozen target-schema
-          constraint consumed by mailbox.decide. Acceptance-changing edits MUST
-          change it. Title, verdict/input labels, descriptions, display hints,
-          and other presentation metadata MUST NOT change it; those remain
-          covered by card_content_hash. Card creation and every persisted-card
+          verdict/input contract: verdict and input identities plus canonical
+          input types and requiredness. Acceptance-changing edits MUST change it.
+          Title, verdict/input labels, descriptions, display hints, and other
+          presentation metadata MUST NOT change it; those remain covered by
+          card_content_hash. The generic card never owns executable route data.
+          The stage-gate activation continuation separately freezes each verdict's
+          advances_to target, emit expressions, and resolved emit schema before
+          persistence; settlement consumes only that durable route and the pinned
+          bundle, never the current authored gate. Proposed-effect and human-task
+          continuations likewise own their kind-specific execution. Card creation and every persisted-card
           create/read validation MUST use the same hash owner: validation
           recomputes both hashes from the decoded snapshot and requires exact
           equality before the card can be persisted, returned, or mutated.
@@ -549,11 +552,16 @@ contract_formats:
         and remint generation-bearing event payloads, timer/join/accumulator
         identities, pending activity requests, journal evidence, and result IDs.
         read_only activity requests use reexecute_read under fork-local identity.
-        non_idempotent_write requests use reuse_recorded_result: terminal source
-        evidence is copied into a fork-local terminal activity_attempt and the
-        existing dispatcher republishes that fork-local result without invoking
-        the connector. Missing, non-terminal, or policy-inconsistent activity
-        evidence fails the fork closed.
+        Unapproved non_idempotent_write requests use reuse_recorded_result: accepted
+        terminal source evidence is copied into a fork-local terminal activity_attempt
+        and the existing dispatcher republishes that fork-local result without invoking
+        the connector. An activity.approval proposal pending at the fork point mints a
+        fork-local card, request identity, effect hash, and continuation, clears source-run
+        reply context authority, and requires a fresh decision. A revised or rejected proposal remains terminal evidence. An
+        approved proposal may copy only an unambiguous succeeded or failed terminal
+        attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
+        fails the fork closed. Source-run approval never authorizes a fork-local provider
+        call. Policy-inconsistent evidence also fails the fork closed.
       expression_context: >
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL
@@ -3337,9 +3345,10 @@ handler_specification:
               shell, product-local git, or HTTP-tool activity. Those paths must fail closed or remain different semantic
               concepts; they do not prove artifact commit support.
             migration_blocker: >
-              Generic durable activities currently execute only read_only authored HTTP tools. idempotent_write
-              and non_idempotent_write activities remain non-executable until a stable activity attempt/result journal and
-              idempotency execution owner are specified and implemented.
+              Generic durable activities execute read_only authored HTTP tools and non_idempotent_write authored HTTP tools
+              through the stable activity attempt/result journal and idempotency execution owner. idempotent_write remains
+              non-executable. artifact_repo_commit remains action-owned because the generic activity surface does not admit
+              that platform_builtin source or preserve its repository-specific request-history and state-repair contract.
             future_migration_condition: >
               A separately gated migration may rebind artifact repository commits to a built-in
               activity only if it preserves the current provider/root/path allowlist, schema/size/ref validation, provider
@@ -3353,13 +3362,17 @@ handler_specification:
       field: activity
       type: object
       purpose: >
-        Declares a durable, node-owned external tool call. The handler transaction persists the activity intent as a
-        platform.activity_requested event before commit; the tool call executes only after the transaction commits and after
-        the entity lock is released. Activity outcome is reported by generated typed result events, not hidden runtime-only
-        state.
+        Declares a durable, node-owned external tool call. An activity without approval persists
+        platform.activity_requested in the handler transaction. An approved non_idempotent_write instead atomically persists
+        the handler mutation, a pending proposed_effect decision card, and its immutable continuation; no request, attempt,
+        credential lookup, or provider call exists while that card is pending. Approval later releases the deterministic
+        request through the same durable activity path. Every tool call executes only after its owning transaction commits
+        and after the entity lock is released. Activity outcome is reported by generated typed result events, not hidden
+        runtime-only state.
       minimal_form:
         tool: string — authored tools.yaml tool id
         input: object — maps tool input field names to the same expression value grammar used by emit.fields
+        approval: 'optional object for non_idempotent_write only; canonical minimal form is `{decision: <stable-decision-id>}`'
       generated_result_events:
         naming: <flow>.<activity_id>.succeeded and <flow>.<activity_id>.failed. If activity.id is omitted, the platform derives
           a stable id from node id, handler event key, selected rule identity when present, and tool id.
@@ -3369,12 +3382,50 @@ handler_specification:
           event-name normalization.
         success_payload: activity_id, tool, effect_class, attempt, result. The result field is shaped by the tool output_schema.
         failure_payload: activity_id, tool, effect_class, attempt, failure (required platform.failure/v1 envelope).
+      generated_approval_events:
+        naming: <flow>.<activity_id>.revision_requested and <flow>.<activity_id>.rejected.
+        materialization: >
+          An activity with approval derives both events into the canonical event catalog, schemas, effective produces,
+          collision checks, and topology. revision_requested carries required feedback and MUST have an authored consumer;
+          rejected carries an optional reason. Neither verdict creates platform.activity_requested or calls the provider.
+      approval:
+        grammar: 'activity.approval has exactly one required field: decision. Aliases, defaults, emit placement, and unknown fields fail closed.'
+        supported_class: >
+          V1 permits approval only for executable non_idempotent_write authored HTTP activities. read_only approval fails
+          with the teaching error that reads do not need approval because approvals guard outward effects. Other effect
+          classes and tool sources remain rejected by their existing admission owners.
+        immutable_effect: >
+          Input expressions evaluate once into the closed semantic value model before hashing or persistence. The proposed
+          effect contains the reserved deterministic request identity, tool, exact bundle_hash and workflow_version contract
+          pin, effect class,
+          admitted input, generated outcome events, source lineage, delivery context, and loop generation. Credentials and
+          transport authentication are excluded and resolve only after approval and attempt admission. effect_content_hash
+          covers this full value; card_content_hash separately covers presentation and verdict-input material.
+        continuation: >
+          decision_cards owns presentation and mutable verdict state. proposed_effect_continuations is the sole execution
+          owner. approve atomically writes one deterministic platform.activity_requested and marks request_released; revise
+          and reject atomically publish their generated typed outcome and mark outcome_dispatched. Duplicate decisions,
+          route replay, and restart converge by card/request identity. A replay recognizes an already-completed
+          request_released or outcome_dispatched route before checking the current bundle because no contract interpretation
+          remains. Revise and reject restore the continuation's opaque delivery context on the typed outcome. A started or
+          uncertain attempt never redispatches.
+        supersession: >
+          Run termination and replacement of the owning loop generation may supersede a pending proposal through one CAS
+          race with decision. Ordinary stage exit does not supersede it.
+        readback: >
+          Mailbox list/get/subscribe and CLI projection expose authorization and dispatch as independent axes. approved never
+          implies sent. The authoring view exposes approval_points with exact flow, node, handler, activity, tool, decision,
+          and effect class for graph/prove consumers.
       durable_request_event:
         event_name: platform.activity_requested
         owner: platform_events.catalog["platform.activity_requested"]
-        behavior: The request event is generated by the handler transaction, persisted through the canonical outbox before
-          commit, and consumed by the workflow runtime after commit. It is the replay/recovery owner for starting the external
-          activity call; diagnostic runtime_log rows are non-authoritative. Generated result event ids are stable for the
+        behavior: The request event is generated by the handler transaction for unapproved activities or by the atomic
+          proposed-effect approval route for approved activities. It is persisted through the canonical outbox before the
+          owning transaction commits and consumed by the workflow runtime after commit. It is the replay/recovery owner for starting the external
+          activity call; diagnostic runtime_log rows are non-authoritative. An approved request carries the exact bundle_hash
+          and workflow_version from its immutable effect. Before current tool lookup, credential resolution, attempt creation,
+          or provider preparation, the consumer MUST match both values to the executable semantic source. Missing, partial,
+          unavailable, or mismatched approved-request identity defers fail-closed and performs no call. Generated result event ids are stable for the
           request identity and generated result event type. Before any external tool call, the workflow runtime MUST check the
           canonical event store for either stable generated result event id for that request identity. If a success or failure
           result event is already recorded, duplicate delivery, replay, and crash recovery MUST reuse the recorded result and
@@ -3421,7 +3472,7 @@ handler_specification:
             duplicate/redelivered request events before deciding whether dispatch is allowed. Any existing started,
             uncertain, succeeded, or failed row blocks automatic provider re-dispatch and managed credential refresh.
           retry_default: max_attempts 1, no retry
-          fork_default: require_manual_confirmation
+          fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
       interactions:
         with_action: PROHIBITED. action and activity are mutually exclusive for the selected handler path.
@@ -3432,7 +3483,8 @@ handler_specification:
           sites are not supported in Stage 1. Retired `handler.branch` syntax is unsupported for all handler semantics,
           including activity placement.
       execution_position: After emit.event/action selection point and before clear. The intent is persisted inside the handler
-        transaction; tool execution and generated result publication occur after commit and outside the entity lock.
+        transaction as either an immediate durable request or a held proposed-effect card plus continuation. Tool execution
+        and generated result publication occur only after request release, commit, and entity-lock exit.
     retired_fields:
       description: Legacy handler fields retired by the structured handler grammar.
       rule: These fields are retired compatibility syntax, not alternate current-contract forms.
@@ -9018,6 +9070,11 @@ flow_model:
           carriers. It must show flow namespace, nodes, initial/terminal markers,
           edges, and edge source. It is projection-only and MUST NOT introduce a
           second transition-authoring owner.
+        approval_point_rule: >
+          The expanded authoring view projects every activity.approval from the canonical lowered activity-site owner as one
+          approval_points row containing flow, node, handler event, source location, activity, tool, decision, and effect
+          class. describe --graph and future describe --prove rendering consume this projection and MUST NOT rediscover
+          approval points from YAML or event names.
         source_location_rule: >
           Diagnostics in the expanded view must carry check_id, message,
           remediation/evidence when available from the verifier finding owner,
@@ -10574,6 +10631,7 @@ platform_tables:
         - decision_card_route_obligations
         - decision_card_changes
         - decision_card_input_drafts
+        - proposed_effect_continuations
         - human_task_continuations
         - decision_cards
         - reply_contexts
@@ -10664,6 +10722,7 @@ platform_tables:
       subject_rules:
         event_emitted: The subject is the exact canonical producer identity and type paired with the exact event type. The event UUID is source evidence and MUST NOT render as the subject.
         effect_lifecycle: The subject is derived from exact adapter, transport, and authority metadata. The effect-attempt UUID is source evidence and MUST NOT render as the subject.
+        card_lifecycle: Every registered decision-card anchor kind MUST have one exact metadata-only adapter. stage_gate uses stage_activation_id, human_task uses operation_id, and proposed_effect uses request_event_id as anchor identity; all lifecycle changes join the decision-card mutation transaction and story.
       failure_rule: Every admitted failure transition renders a stable subject and failed term with an exact diagnostic route even when optional detail is absent.
     rendering:
       shared_owner: internal/runtime/authoractivity typed renderer with CLI-owned palette callbacks
@@ -11294,23 +11353,25 @@ platform_tables:
         \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
         \ scope = 'global'\n);"
     decision_cards:
-      description: 'Sole mutable verdict owner for typed stage-gate and human-task decisions. anchor_kind plus anchor is a
+      description: 'Sole mutable verdict owner for typed stage-gate, human-task, and proposed-effect decisions. anchor_kind plus anchor is a
         closed tagged identity union: stage_gate carries its stage-activation fence; human_task carries requester, logical
-        operation, and entity/flow/global scope. A row freezes the structured card snapshot, authored verdict/input schema,
+        operation, and entity/flow/global scope; proposed_effect carries the reserved activity-request identity, activity,
+        decision class, and scope. A row freezes the structured card snapshot, authored verdict/input schema,
         effective cadence, contract and provenance identity, and presentation hashes. Generic mailbox rows never mirror
         writable card state. Creation and every lifecycle mutation admit authoritative timestamps to UTC microsecond
         precision before validation, card/continuation mutation, change emission, event construction, or readback; this
         includes decisions, defers, expiry, outcome completion, and supersession. Unknown anchor kinds fail closed;
-        proposed_effect remains unimplemented under #1987.'
+        proposed_effect execution is owned separately by proposed_effect_continuations.'
       ddl: |
         CREATE TABLE decision_cards (
             card_id                UUID PRIMARY KEY,
             run_id                 UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-            anchor_kind            TEXT NOT NULL CHECK (anchor_kind IN ('stage_gate', 'human_task')),
+            anchor_kind            TEXT NOT NULL CHECK (anchor_kind IN ('stage_gate', 'human_task', 'proposed_effect')),
             anchor                 JSONB NOT NULL,
             status                 TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'superseded', 'expired')),
             snapshot               JSONB NOT NULL,
             card_content_hash      TEXT NOT NULL,
+            effect_content_hash    TEXT,
             decision_schema_hash   TEXT NOT NULL,
             bundle_hash            TEXT NOT NULL,
             workflow_version       TEXT,
@@ -11331,6 +11392,31 @@ platform_tables:
             INDEX idx_decision_cards_mailbox (status, deferred_until, created_at),
             INDEX idx_decision_cards_run (run_id, created_at),
             INDEX idx_decision_cards_anchor (run_id, anchor_kind, created_at)
+        );
+    proposed_effect_continuations:
+      description: 'Sole executable continuation owner for proposed_effect decision cards. The immutable effect JSON is the
+        closed semantic activity value admitted before persistence, including exact bundle_hash and workflow_version; its
+        digest equals decision_cards.effect_content_hash.
+        pending decisions cannot publish platform.activity_requested. approve atomically releases the reserved request
+        identity once; revise/reject atomically publish their generated typed event instead. A started or uncertain provider
+        attempt never authorizes redispatch. Ordinary stage exit does not supersede a proposal; run termination and owning
+        loop-generation replacement do.'
+      ddl: |
+        CREATE TABLE proposed_effect_continuations (
+            card_id                UUID PRIMARY KEY REFERENCES decision_cards(card_id) ON DELETE CASCADE,
+            run_id                 UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            request_event_id       UUID NOT NULL UNIQUE,
+            effect                 JSONB NOT NULL,
+            effect_content_hash    TEXT NOT NULL,
+            state                  TEXT NOT NULL CHECK (state IN ('pending', 'decision_committed', 'request_released', 'outcome_dispatched', 'superseded')),
+            verdict                TEXT,
+            decision_event_id      UUID,
+            route_event_id         UUID,
+            superseded_reason      TEXT,
+            created_at             TIMESTAMPTZ NOT NULL,
+            updated_at             TIMESTAMPTZ NOT NULL,
+            CHECK ((state = 'pending' AND verdict IS NULL AND decision_event_id IS NULL AND route_event_id IS NULL AND superseded_reason IS NULL) OR (state = 'decision_committed' AND verdict IS NOT NULL AND decision_event_id IS NOT NULL AND route_event_id IS NULL AND superseded_reason IS NULL) OR (state IN ('request_released', 'outcome_dispatched') AND verdict IS NOT NULL AND decision_event_id IS NOT NULL AND route_event_id IS NOT NULL AND superseded_reason IS NULL) OR (state = 'superseded' AND superseded_reason IS NOT NULL)),
+            INDEX idx_proposed_effect_run (run_id, state, created_at)
         );
     human_task_continuations:
       description: 'Operational continuation for the human_task anchor, keyed by the decision card. It owns the opaque
@@ -12450,9 +12536,12 @@ run_model:
       platform.activity_requested event, source preparation MUST bind the request payload source_event_id to the actual
       fork-local frontier event before deriving fork-local request/result identities. read_only with reexecute_read executes
       the connector exactly once under that fork-local generation and does not copy a source attempt;
-      non_idempotent_write with reuse_recorded_result copies only terminal succeeded, failed, or uncertain evidence under
-      fork-local request/result identities and publishes that recorded result without calling the connector. Failed and
-      uncertain evidence MUST preserve its typed failure, including platform.outcome_uncertain. activity_attempts is
+      an unapproved non_idempotent_write with reuse_recorded_result copies accepted terminal evidence under fork-local
+      request/result identities and publishes that recorded result without calling the connector. For activity.approval,
+      a source proposal pending at the fork point creates a fresh fork-local pending card and continuation; revised/rejected
+      evidence remains terminal; approved succeeded/failed terminal attempt evidence may copy without a connector call; and
+      approved started, uncertain, missing, or otherwise non-terminal evidence fails the fork closed. Source approval never
+      authorizes a fork-local connector call. Accepted failed evidence preserves its typed failure. activity_attempts is
       deliberately post-frontier selected-execution evidence rather than historical workset membership: source
       preparation reads the selected immutable request event and current terminal attempt in one serializable transaction,
       copies accepted evidence under fork-local identity, and fails closed on missing/nonterminal evidence without
@@ -13739,7 +13828,7 @@ platform_events:
       routing_class: diagnostic_direct_persisted
       note: Full payload schema defined in platform_tables. Not duplicated here.
     platform.activity_requested:
-      description: Internal durable request to execute a handler activity after the handler transaction commits.
+      description: Internal durable request to execute a handler activity after its immediate handler or proposed-effect approval transaction commits.
       schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.activity_requested"].payload'
       producer_evidence:
         produced_by_type: platform
@@ -13751,16 +13840,21 @@ platform_events:
       payload:
         activity_id: string
         tool: string
+        bundle_hash: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
+        workflow_version: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
         input: object
         effect_class: string
         success_event: string
         failure_event: string
+        revision_event: string (optional; generated typed feedback event for an approved activity)
+        rejected_event: string (optional; generated typed rejection event for an approved activity)
         retry_max_attempts: integer
         retry_backoff: string
         fork_policy: string
         entity_id: string
         node_id: string
         flow_id: string
+        flow_instance: string (optional; exact producing flow instance)
         handler_event_key: string
         source_event_id: string
         source_run_id: string
@@ -23823,6 +23917,7 @@ api_specification:
         properties:
           kind: {type: string, const: decision_card}
           decision_card: {$ref: '#/components/schemas/DecisionCardSummary'}
+          effect: {$ref: '#/components/schemas/ProposedEffectState'}
       DecisionCardDetailProjection:
         type: object
         additionalProperties: false
@@ -23830,6 +23925,7 @@ api_specification:
         properties:
           kind: {type: string, const: decision_card}
           decision_card: {$ref: '#/components/schemas/DecisionCard'}
+          effect: {$ref: '#/components/schemas/ProposedEffectState'}
       DecisionCardSummary:
         type: object
         additionalProperties: false
@@ -23850,7 +23946,7 @@ api_specification:
           updated_at: {$ref: '#/components/schemas/Timestamp'}
       DecisionCardAnchorKind:
         type: string
-        enum: [stage_gate, human_task]
+        enum: [stage_gate, human_task, proposed_effect]
       DecisionCardScope:
         type: object
         additionalProperties: false
@@ -23863,6 +23959,7 @@ api_specification:
         oneOf:
         - $ref: '#/components/schemas/StageGateDecisionCardAnchor'
         - $ref: '#/components/schemas/HumanTaskDecisionCardAnchor'
+        - $ref: '#/components/schemas/ProposedEffectDecisionCardAnchor'
       StageGateDecisionCardAnchor:
         type: object
         additionalProperties: false
@@ -23882,6 +23979,24 @@ api_specification:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
           category: {type: string}
           scope: {$ref: '#/components/schemas/DecisionCardScope'}
+      ProposedEffectDecisionCardAnchor:
+        type: object
+        additionalProperties: false
+        required: [request_event_id, activity_id, decision, scope]
+        properties:
+          request_event_id: {$ref: '#/components/schemas/OpaqueId'}
+          activity_id: {type: string}
+          decision: {type: string}
+          scope: {$ref: '#/components/schemas/DecisionCardScope'}
+      ProposedEffectState:
+        type: object
+        additionalProperties: false
+        required: [continuation_state, dispatch_state, request_event_id, activity_id]
+        properties:
+          continuation_state: {type: string, enum: [pending, decision_committed, request_released, outcome_dispatched, superseded]}
+          dispatch_state: {type: string, enum: [held, release_pending, released, not_dispatched, superseded, started, succeeded, failed, uncertain]}
+          request_event_id: {$ref: '#/components/schemas/OpaqueId'}
+          activity_id: {type: string}
       DecisionCard:
         type: object
         additionalProperties: true
@@ -23897,6 +24012,7 @@ api_specification:
           status: {$ref: '#/components/schemas/MailboxStatus'}
           snapshot: {type: object, additionalProperties: true}
           card_content_hash: {type: string}
+          effect_content_hash: {type: string}
           decision_schema_hash: {type: string}
           bundle_hash: {type: string}
           created_at: {$ref: '#/components/schemas/Timestamp'}
@@ -23936,6 +24052,7 @@ api_specification:
           change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
           payload: {type: object, additionalProperties: true}
           created_at: {$ref: '#/components/schemas/Timestamp'}
+          effect: {$ref: '#/components/schemas/ProposedEffectState'}
       MailboxPriority:
         type: string
         enum:

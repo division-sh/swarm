@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -20,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -42,6 +47,22 @@ func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode        
 func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry            { return nil }
 func (gateRecoveryModule) ActionRegistry() runtimepipeline.ActionRegistry          { return nil }
 
+type proposedEffectProofModule struct {
+	source   semanticview.Source
+	workflow *runtimepipeline.WorkflowDefinition
+	nodes    []runtimepipeline.WorkflowNode
+}
+
+func (m proposedEffectProofModule) SemanticSource() semanticview.Source { return m.source }
+func (m proposedEffectProofModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return m.workflow
+}
+func (m proposedEffectProofModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
+}
+func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
+func (proposedEffectProofModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
+
 type gateRecoveryStoreCase struct {
 	name          string
 	postgres      bool
@@ -49,6 +70,75 @@ type gateRecoveryStoreCase struct {
 	events        runtimebus.EventStore
 	cards         decisioncard.Store
 	workflowStore *runtimepipeline.WorkflowInstanceStore
+}
+
+type proposedEffectProofCredentialStore struct {
+	value string
+	gets  atomic.Int32
+}
+
+type proposedEffectRouteProofBus struct {
+	published       []events.Event
+	publishContexts []events.DeliveryContext
+	outbox          []runtimeengine.EmitIntent
+	dispatched      []runtimeengine.EmitIntent
+}
+
+type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
+type proposedEffectRouteProofDispatcher struct{ bus *proposedEffectRouteProofBus }
+
+func (*proposedEffectRouteProofBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+	return make(chan events.Event)
+}
+func (*proposedEffectRouteProofBus) Publish(context.Context, events.Event) error { return nil }
+func (*proposedEffectRouteProofBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+func (*proposedEffectRouteProofBus) ResolveSubscribedRecipients(string) []string { return nil }
+func (*proposedEffectRouteProofBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
+func (b *proposedEffectRouteProofBus) EngineOutbox() runtimeengine.OutboxWriter {
+	return proposedEffectRouteProofOutbox{bus: b}
+}
+func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return proposedEffectRouteProofDispatcher{bus: b}
+}
+func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
+	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); !ok {
+		return errors.New("proposed-effect proof publication requires pipeline transaction")
+	}
+	b.published = append(b.published, evt)
+	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
+	return nil
+}
+func (o proposedEffectRouteProofOutbox) WriteOutbox(_ context.Context, intents []runtimeengine.EmitIntent) error {
+	o.bus.outbox = append(o.bus.outbox, intents...)
+	return nil
+}
+func (d proposedEffectRouteProofDispatcher) DispatchPostCommit(_ context.Context, intents []runtimeengine.EmitIntent) error {
+	d.bus.dispatched = append(d.bus.dispatched, intents...)
+	return nil
+}
+
+func (s *proposedEffectProofCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	s.gets.Add(1)
+	if key != "provider_token" {
+		return "", false, nil
+	}
+	return s.value, true, nil
+}
+
+func (*proposedEffectProofCredentialStore) Set(context.Context, string, string) error {
+	return errors.New("proof credential store is read-only")
+}
+
+func (*proposedEffectProofCredentialStore) List(context.Context) ([]string, error) {
+	return []string{"provider_token"}, nil
+}
+
+func (*proposedEffectProofCredentialStore) Delete(context.Context, string) error {
+	return errors.New("proof credential store is read-only")
 }
 
 func recoveryStageAnchor(t *testing.T, card decisioncard.Card) decisioncard.StageGateAnchor {
@@ -157,6 +247,513 @@ func TestWorkflowGateUnavailablePinRecoversThroughPersistedEventBusOnBothStores(
 		t.Run(tc.name, func(t *testing.T) {
 			testWorkflowGateUnavailablePinRecovery(t, tc.open(t))
 		})
+	}
+}
+
+func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			const providerSecret = "provider-secret-not-in-effect"
+			credentials := &proposedEffectProofCredentialStore{value: providerSecret}
+			var calls atomic.Int32
+			body := make(chan map[string]any, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if got := r.Header.Get("Authorization"); got != "Bearer "+providerSecret {
+					t.Errorf("provider authorization = %q", got)
+				}
+				var got map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Errorf("decode provider body: %v", err)
+				} else {
+					body <- got
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"message_id": "provider-1"})
+			}))
+			defer server.Close()
+
+			bundle := proposedEffectProofBundle(server.URL)
+			source := semanticview.Wrap(bundle)
+			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			module := proposedEffectProofModule{
+				source:   source,
+				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}}, nil),
+				nodes: []runtimepipeline.WorkflowNode{{
+					ID: "support", Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
+					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+					ExecutionType: runtimecontracts.SystemNodeExecutionType,
+					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
+						"support.reply_drafted":       {Consume: true, RequireEntity: true},
+						"platform.activity_requested": {Consume: true, RequireEntity: true},
+					},
+				}},
+			}
+			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
+				return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+					Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleFingerprint: bundleHash,
+					Credentials:             credentials,
+					EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+				})
+			}
+			coordinator := newCoordinator(gateRecoveryBundle)
+			bus.SetInterceptors(coordinator)
+
+			runID, entityID := uuid.NewString(), uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			const replyContextID = "reply-context-proposed-effect"
+			sourceEvent := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+				[]byte(`{"chat_id":"support-room","text":"Exact frozen reply"}`), 0, runID, "",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()).WithDeliveryContext(
+				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
+			)
+			seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
+			sourceCtx := events.WithDeliveryContext(ctx, sourceEvent.DeliveryContext())
+			forward, _, err := coordinator.Intercept(sourceCtx, sourceEvent)
+			if err != nil {
+				t.Fatalf("execute proposal source: %v", err)
+			}
+			if forward {
+				t.Fatalf("proposal source was not consumed by its workflow node: type=%s entity=%q nodes=%#v target=%#v", sourceEvent.Type(), sourceEvent.EntityID(), coordinator.WorkflowNodes(), sourceEvent.TargetRoute())
+			}
+			waitForGateRecoveryQuiescence(t, bus, ctx)
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("provider calls while proposal pending = %d, want 0", got)
+			}
+			if got := credentials.gets.Load(); got != 0 {
+				t.Fatalf("credential resolutions while proposal pending = %d, want 0", got)
+			}
+			items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, AnchorKind: string(decisioncard.AnchorKindProposedEffect), Limit: 10})
+			if err != nil || len(items) != 1 {
+				t.Fatalf("pending proposed-effect cards = %#v, %v", items, err)
+			}
+			card, err := selected.cards.GetDecisionCard(ctx, items[0].CardID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertProposedEffectProofCounts(t, selected, runID, 0, 0)
+			input, ok := card.Snapshot.Context.Lookup("input")
+			if !ok || input.Kind() == 0 {
+				t.Fatalf("frozen effect input missing from card: %#v", card.Snapshot.Context)
+			}
+			continuation, err := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, card.CardID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if continuation.ReplyContextID != replyContextID {
+				t.Fatalf("proposed-effect reply context = %q, want %q", continuation.ReplyContextID, replyContextID)
+			}
+			effect, err := continuation.EffectValue()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rawEffect, err := canonicaljson.Encode(effect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rawSnapshot, err := decisioncard.SnapshotJSON(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(rawEffect), providerSecret) || strings.Contains(string(rawSnapshot), providerSecret) {
+				t.Fatal("provider credential leaked into the immutable effect or decision snapshot")
+			}
+			decisionEventID := uuid.NewString()
+			if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("approve proposed effect: %v", err)
+			}
+			decisionPayload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
+			decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", decisionPayload, 0, runID, "",
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
+			forward, emitted, err := newCoordinator(otherGateBundle).Intercept(ctx, decisionEvent)
+			if err == nil || !runtimepipeline.IsPipelineReceiptDeferred(err) {
+				t.Fatalf("route approval under changed bundle = forward:%v emitted:%d error:%v, want recoverable deferral", forward, len(emitted), err)
+			}
+			assertProposedEffectProofCounts(t, selected, runID, 0, 0)
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("provider calls under changed bundle = %d, want 0", got)
+			}
+			if got := credentials.gets.Load(); got != 0 {
+				t.Fatalf("credential resolutions under changed bundle = %d, want 0", got)
+			}
+			deferred, err := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, card.CardID)
+			if err != nil || deferred.State != decisioncard.ProposedEffectDecisionCommitted || deferred.RouteEventID != "" {
+				t.Fatalf("bundle-deferred proposed effect = %#v, %v", deferred, err)
+			}
+			bus.SetInterceptors()
+			forward, emitted, err = coordinator.Intercept(ctx, decisionEvent)
+			if err != nil {
+				t.Fatalf("route approval decision: %v", err)
+			}
+			if forward {
+				t.Fatal("approval decision was not consumed by the proposed-effect authority")
+			}
+			releasedRequest := loadProposedEffectProofRequest(t, selected, runID)
+			changedCoordinator := newCoordinator(otherGateBundle)
+			if changedForward, changedEmitted, changedErr := changedCoordinator.Intercept(ctx, releasedRequest); changedErr == nil || !runtimepipeline.IsPipelineReceiptDeferred(changedErr) {
+				t.Fatalf("consume released request under changed bundle = forward:%v emitted:%d error:%v, want recoverable deferral", changedForward, len(changedEmitted), changedErr)
+			}
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("provider calls while released request pin unavailable = %d, want 0", got)
+			}
+			bus.SetInterceptors(coordinator)
+			if consumed, _, consumeErr := coordinator.Intercept(ctx, releasedRequest); consumeErr != nil || consumed {
+				t.Fatalf("consume released activity request under pinned bundle = forward:%v error:%v", consumed, consumeErr)
+			}
+			waitForGateRecoveryQuiescence(t, bus, ctx)
+			assertProposedEffectProofCounts(t, selected, runID, 1, 1)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("provider calls after approval = %d, want 1", got)
+			}
+			if got := credentials.gets.Load(); got != 1 {
+				t.Fatalf("credential resolutions after approval = %d, want 1", got)
+			}
+			select {
+			case got := <-body:
+				if got["chat_id"] != "support-room" || got["text"] != "Exact frozen reply" {
+					t.Fatalf("provider input = %#v", got)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("provider body was not observed")
+			}
+			readback, err := selected.cards.(decisioncard.ProposedEffectStore).ProposedEffectReadback(ctx, card.CardID)
+			if err != nil || readback.DispatchState != "succeeded" {
+				t.Fatalf("proposed-effect readback = %#v, %v", readback, err)
+			}
+			coordinator = newCoordinator(gateRecoveryBundle)
+			bus.SetInterceptors(coordinator)
+			released := loadProposedEffectProofRequest(t, selected, runID)
+			forward, _, err = coordinator.Intercept(ctx, released)
+			if err != nil {
+				t.Fatalf("replay persisted approved request: %v", err)
+			}
+			if forward {
+				t.Fatal("persisted approved request replay was not consumed")
+			}
+			waitForGateRecoveryQuiescence(t, bus, ctx)
+			assertProposedEffectProofCounts(t, selected, runID, 1, 1)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("provider calls after persisted replay = %d, want 1", got)
+			}
+			if _, _, err := changedCoordinator.Intercept(ctx, decisionEvent); err != nil {
+				t.Fatalf("approval route replay after commit acknowledgment loss under changed bundle: %v", err)
+			}
+			waitForGateRecoveryQuiescence(t, bus, ctx)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("provider calls after duplicate approval = %d, want 1", got)
+			}
+
+			routeWithoutDispatch := func(verdict, wantEvent string, fields map[string]any) {
+				t.Helper()
+				proposal := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+					[]byte(`{"chat_id":"support-room","text":"Needs another operator outcome"}`), 0, runID, "",
+					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()).WithDeliveryContext(
+					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
+				)
+				seedProposedEffectProofDelivery(t, selected, proposal, "support")
+				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
+				consumed, _, routeErr := coordinator.Intercept(proposalCtx, proposal)
+				if routeErr != nil || consumed {
+					t.Fatalf("create %s proposal = forward:%v error:%v", verdict, consumed, routeErr)
+				}
+				waitForGateRecoveryQuiescence(t, bus, ctx)
+				pending, _, routeErr := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{
+					RunID: runID, Status: decisioncard.StatusPending, AnchorKind: string(decisioncard.AnchorKindProposedEffect), Limit: 10,
+				})
+				if routeErr != nil || len(pending) != 1 {
+					t.Fatalf("pending %s proposal = %#v, %v", verdict, pending, routeErr)
+				}
+				pendingCard, routeErr := selected.cards.GetDecisionCard(ctx, pending[0].CardID)
+				if routeErr != nil {
+					t.Fatal(routeErr)
+				}
+				pendingContinuation, routeErr := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, pendingCard.CardID)
+				if routeErr != nil || pendingContinuation.ReplyContextID != replyContextID {
+					t.Fatalf("%s proposed-effect reply context = %q, %v; want %q", verdict, pendingContinuation.ReplyContextID, routeErr, replyContextID)
+				}
+				admittedFields, routeErr := canonicaljson.FromGo(fields)
+				if routeErr != nil {
+					t.Fatal(routeErr)
+				}
+				decisionID := uuid.NewString()
+				if _, routeErr = selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+					CardID: pendingCard.CardID, Verdict: verdict, Fields: admittedFields, ActorTokenID: "operator",
+					ObservedContentHash: pendingCard.CardContentHash, DecisionEventID: decisionID, Now: time.Now().UTC(),
+				}); routeErr != nil {
+					t.Fatalf("decide %s: %v", verdict, routeErr)
+				}
+				payload, _ := json.Marshal(map[string]any{"card_id": pendingCard.CardID})
+				decision := eventtest.RuntimeControl(decisionID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
+				consumed, _, routeErr = coordinator.Intercept(ctx, decision)
+				if routeErr != nil || consumed {
+					t.Fatalf("route %s = forward:%v error:%v", verdict, consumed, routeErr)
+				}
+				waitForGateRecoveryQuiescence(t, bus, ctx)
+				assertProposedEffectProofCounts(t, selected, runID, 1, 1)
+				assertProposedEffectOutcomeCount(t, selected, runID, wantEvent, 1)
+				if _, _, routeErr = newCoordinator(otherGateBundle).Intercept(ctx, decision); routeErr != nil {
+					t.Fatalf("%s route replay after commit acknowledgment loss under changed bundle: %v", verdict, routeErr)
+				}
+				if got := calls.Load(); got != 1 {
+					t.Fatalf("provider calls after %s = %d, want 1", verdict, got)
+				}
+				readback, routeErr := selected.cards.(decisioncard.ProposedEffectStore).ProposedEffectReadback(ctx, pendingCard.CardID)
+				if routeErr != nil || readback.DispatchState != "not_dispatched" {
+					t.Fatalf("%s readback = %#v, %v", verdict, readback, routeErr)
+				}
+			}
+			routeWithoutDispatch("revise", "send_support_reply.revision_requested", map[string]any{"feedback": "Please rewrite it."})
+			routeWithoutDispatch("reject", "send_support_reply.rejected", map[string]any{"reason": "Do not send."})
+		})
+	}
+}
+
+func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyContextOnBothStores(t *testing.T) {
+	for _, storeCase := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		for _, verdict := range []string{"approve", "revise", "reject"} {
+			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
+				selected := storeCase.open(t)
+				ctx := context.Background()
+				runID, entityID := uuid.NewString(), uuid.NewString()
+				insertGateRecoveryRun(t, selected, runID)
+				now := time.Date(2026, 7, 14, 22, 0, 0, 0, time.UTC)
+				input, err := canonicaljson.FromGo(map[string]any{"chat_id": "support-room", "text": "Exact approved text"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				requestEventID := uuid.NewString()
+				continuation := decisioncard.ProposedEffectContinuation{
+					CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
+					RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
+					BundleHash: gateRecoveryBundle, WorkflowVersion: "1", Input: input,
+					EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
+					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
+					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+					EntityID: entityID, NodeID: "support", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
+					SourceEventID: uuid.NewString(), SourceRunID: runID, SourceTaskID: "task-1",
+					ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
+					CreatedAt: now, UpdatedAt: now,
+				}.Canonical()
+				effect, err := continuation.EffectValue()
+				if err != nil {
+					t.Fatal(err)
+				}
+				continuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+					RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := decisioncard.FreezeSnapshot("support_reply", "", map[string]any{"input": input.Interface()}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {Verdict: "approve"},
+					"revise":  {Verdict: "revise", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+					"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text"}}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				card, err := decisioncard.New(decisioncard.Card{
+					CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+					EffectContentHash: continuation.EffectContentHash, BundleHash: gateRecoveryBundle,
+					WorkflowVersion: "1", CreatedAt: now,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				proposedStore := selected.cards.(decisioncard.ProposedEffectStore)
+				if err := proposedStore.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+					t.Fatal(err)
+				}
+				fields := semanticvalue.EmptyObject()
+				if verdict == "revise" {
+					fields, _ = canonicaljson.FromGo(map[string]any{"feedback": "Please revise."})
+				} else if verdict == "reject" {
+					fields, _ = canonicaljson.FromGo(map[string]any{"reason": "Do not send."})
+				}
+				decisionEventID := uuid.NewString()
+				if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: verdict, Fields: fields, ActorTokenID: "operator",
+					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				payload, _ := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
+				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now.Add(time.Minute))
+				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
+				bus := &proposedEffectRouteProofBus{}
+				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+					DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+				})
+				forward, emitted, err := coordinator.Intercept(ctx, decisionEvent)
+				if err != nil || forward || len(emitted) != 0 {
+					t.Fatalf("route %s = forward:%v emitted:%d error:%v", verdict, forward, len(emitted), err)
+				}
+				stored, err := proposedStore.LoadProposedEffectContinuation(ctx, card.CardID)
+				if err != nil || stored.RouteEventID != decisionEventID {
+					t.Fatalf("routed continuation = %#v, %v", stored, err)
+				}
+				if verdict == "approve" {
+					if len(bus.outbox) != 1 || len(bus.dispatched) != 1 {
+						t.Fatalf("approve route intents = outbox:%d dispatched:%d, want 1/1", len(bus.outbox), len(bus.dispatched))
+					}
+					request, err := canonicaljson.Decode(bus.outbox[0].Event.Payload())
+					bundleValue, bundlePresent := request.Lookup("bundle_hash")
+					bundleHash, bundleText := bundleValue.String()
+					versionValue, versionPresent := request.Lookup("workflow_version")
+					workflowVersion, versionText := versionValue.String()
+					if err != nil || !bundlePresent || !bundleText || bundleHash != gateRecoveryBundle || !versionPresent || !versionText || workflowVersion != "1" {
+						t.Fatalf("released request contract pin = bundle:%q/%v/%v version:%q/%v/%v error:%v", bundleHash, bundlePresent, bundleText, workflowVersion, versionPresent, versionText, err)
+					}
+				} else {
+					if len(bus.published) != 1 || len(bus.publishContexts) != 1 {
+						t.Fatalf("%s route publications = events:%d contexts:%d, want 1/1", verdict, len(bus.published), len(bus.publishContexts))
+					}
+					if gotEvent, gotContext := bus.published[0].DeliveryContext().ReplyContextID(), bus.publishContexts[0].ReplyContextID(); gotEvent != continuation.ReplyContextID || gotContext != continuation.ReplyContextID {
+						t.Fatalf("%s reply authority = event:%q context:%q, want %q", verdict, gotEvent, gotContext, continuation.ReplyContextID)
+					}
+				}
+				beforeOutbox, beforePublished := len(bus.outbox), len(bus.published)
+				changed := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+					DecisionCards: selected.cards, BundleFingerprint: otherGateBundle,
+				})
+				if _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
+					t.Fatalf("%s terminal route replay under changed bundle: %v", verdict, err)
+				}
+				if len(bus.outbox) != beforeOutbox || len(bus.published) != beforePublished {
+					t.Fatalf("%s terminal route replay duplicated work", verdict)
+				}
+			})
+		}
+	}
+}
+
+func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			bundle := proposedEffectProofBundle("http://127.0.0.1:1")
+			handler := bundle.Nodes["support"].EventHandlers["support.reply_drafted"]
+			handler.AdvancesTo = "queued"
+			node := bundle.Nodes["support"]
+			node.EventHandlers["support.reply_drafted"] = handler
+			bundle.Nodes["support"] = node
+			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
+
+			source := semanticview.Wrap(bundle)
+			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			module := proposedEffectProofModule{
+				source:   source,
+				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}, {Name: "queued"}}, nil),
+				nodes: []runtimepipeline.WorkflowNode{{
+					ID: "support", Subscriptions: []events.EventType{"support.reply_drafted"},
+					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+					ExecutionType: runtimecontracts.SystemNodeExecutionType,
+					Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"support.reply_drafted": {Consume: true, RequireEntity: true}},
+				}},
+			}
+			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+			})
+			bus.SetInterceptors(coordinator)
+
+			runID, entityID := uuid.NewString(), uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			installProposedEffectCreateFailure(t, selected)
+
+			event := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
+				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID, "",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			seedProposedEffectProofDelivery(t, selected, event, "support")
+			forward, _, err := coordinator.Intercept(ctx, event)
+			if err != nil || forward {
+				t.Fatalf("proposal failure interception = forward:%v error:%v", forward, err)
+			}
+
+			instance, ok, err := selected.workflowStore.Load(ctx, entityID)
+			if err != nil || !ok || instance.CurrentState != "drafting" {
+				t.Fatalf("workflow after rollback = %#v, %v, %v", instance, ok, err)
+			}
+			items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
+			if err != nil || len(items) != 0 {
+				t.Fatalf("decision cards after rollback = %#v, %v", items, err)
+			}
+			assertProposedEffectProofCounts(t, selected, runID, 0, 0)
+			var continuations int
+			query := `SELECT COUNT(*) FROM proposed_effect_continuations WHERE run_id = ?`
+			if selected.postgres {
+				query = `SELECT COUNT(*) FROM proposed_effect_continuations WHERE run_id = $1::uuid`
+			}
+			if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&continuations); err != nil || continuations != 0 {
+				t.Fatalf("proposed-effect continuations after rollback = %d, %v", continuations, err)
+			}
+			deliveryQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'support'`
+			if selected.postgres {
+				deliveryQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'support'`
+			}
+			var deliveryStatus string
+			if err := selected.db.QueryRowContext(ctx, deliveryQuery, event.ID()).Scan(&deliveryStatus); err != nil || deliveryStatus != "dead_letter" {
+				t.Fatalf("planted persistence failure delivery status = %q, %v", deliveryStatus, err)
+			}
+		})
+	}
+}
+
+func installProposedEffectCreateFailure(t *testing.T, selected gateRecoveryStoreCase) {
+	t.Helper()
+	statement := `CREATE TRIGGER fail_proposed_effect_create BEFORE INSERT ON proposed_effect_continuations BEGIN SELECT RAISE(ABORT, 'injected proposed-effect persistence failure'); END`
+	if selected.postgres {
+		statement = `
+			CREATE FUNCTION fail_proposed_effect_create_fn() RETURNS trigger AS $$
+			BEGIN RAISE EXCEPTION 'injected proposed-effect persistence failure'; END;
+			$$ LANGUAGE plpgsql;
+			CREATE TRIGGER fail_proposed_effect_create BEFORE INSERT ON proposed_effect_continuations
+			FOR EACH ROW EXECUTE FUNCTION fail_proposed_effect_create_fn()`
+	}
+	if _, err := selected.db.Exec(statement); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -929,6 +1526,146 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
 		workflowStore: runtimepipeline.NewWorkflowInstanceStore(db),
 	}
+}
+
+func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContractBundle {
+	handler := runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
+		ID: "send_support_reply", Tool: "provider_write",
+		Input: map[string]runtimecontracts.ExpressionValue{
+			"chat_id": runtimecontracts.CELExpression("payload.chat_id"),
+			"text":    runtimecontracts.CELExpression("payload.text"),
+		},
+		Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "support_reply"},
+	}}
+	return &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"support": {
+				ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				SubscribesTo: []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"support.reply_drafted":                 handler,
+					"send_support_reply.revision_requested": {},
+					"send_support_reply.rejected":           {},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "support", Version: "1", InitialStage: "drafting",
+			EventOwners: map[string][]string{
+				"support.reply_drafted":                 {"support"},
+				"send_support_reply.revision_requested": {"support"},
+				"send_support_reply.rejected":           {"support"},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"support": {
+					"support.reply_drafted":                 handler,
+					"send_support_reply.revision_requested": {},
+					"send_support_reply.rejected":           {},
+				},
+			},
+			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
+				"support": {
+					ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+					RuntimeSubscriptions: []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+					Produces:             []string{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+				},
+			},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"provider_write": {
+				HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+				Credentials: []string{"provider_token"},
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object", Required: []string{"chat_id", "text"},
+					Properties: map[string]runtimecontracts.ToolInputSchema{"chat_id": {Type: "string"}, "text": {Type: "string"}},
+				},
+				OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "POST", URL: strings.TrimRight(serverURL, "/"),
+					Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
+					Body:    map[string]any{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"},
+				},
+			},
+		},
+	}
+}
+
+func waitForGateRecoveryQuiescence(t *testing.T, bus *runtimebus.EventBus, ctx context.Context) {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("wait for event bus quiescence: %v", err)
+	}
+}
+
+func assertProposedEffectProofCounts(t *testing.T, selected gateRecoveryStoreCase, runID string, requests, attempts int) {
+	t.Helper()
+	requestQuery := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
+	attemptQuery := `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ?`
+	if selected.postgres {
+		requestQuery = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
+		attemptQuery = `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid`
+	}
+	var gotRequests, gotAttempts int
+	if err := selected.db.QueryRowContext(context.Background(), requestQuery, runID).Scan(&gotRequests); err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.db.QueryRowContext(context.Background(), attemptQuery, runID).Scan(&gotAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if gotRequests != requests || gotAttempts != attempts {
+		t.Fatalf("durable activity counts = requests:%d attempts:%d, want %d/%d", gotRequests, gotAttempts, requests, attempts)
+	}
+}
+
+func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCase, runID, eventType string, want int) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
+	if selected.postgres {
+		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
+	}
+	var got int
+	if err := selected.db.QueryRowContext(context.Background(), query, runID, eventType).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("%s event count = %d, want %d", eventType, got, want)
+	}
+}
+
+func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := selected.events.AppendEvent(ctx, evt); err != nil {
+		t.Fatal(err)
+	}
+	query := `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at) VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)`
+	args := []any{uuid.NewString(), evt.RunID(), evt.ID(), nodeID, time.Now().UTC()}
+	if selected.postgres {
+		query = `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at) VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, $4)`
+		args = []any{evt.RunID(), evt.ID(), nodeID, time.Now().UTC()}
+	}
+	if _, err := selected.db.ExecContext(ctx, query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase, runID string) events.Event {
+	t.Helper()
+	query := `SELECT event_id, event_name, payload, chain_depth, COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
+	if selected.postgres {
+		query = `SELECT event_id::text, event_name, payload, chain_depth, COALESCE(source_event_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
+	}
+	var eventID, eventType, parentID, entityID, flowInstance string
+	var payload []byte
+	var depth int
+	if err := selected.db.QueryRowContext(context.Background(), query, runID).Scan(&eventID, &eventType, &payload, &depth, &parentID, &entityID, &flowInstance); err != nil {
+		t.Fatal(err)
+	}
+	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
+	envelope = events.EnvelopeForFlowInstance(envelope, flowInstance)
+	return eventtest.PersistedProjection(eventID, events.EventType(eventType), "workflow-runtime", "", payload, depth, runID, parentID, envelope, time.Now().UTC())
 }
 
 func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {

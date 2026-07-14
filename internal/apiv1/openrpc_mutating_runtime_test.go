@@ -20,6 +20,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -1563,7 +1564,15 @@ func (s *mutatingProbeDecisionCardStore) ListDecisionCards(_ context.Context, op
 	if err != nil {
 		return nil, "", err
 	}
-	return []decisioncard.ListItem{{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, Anchor: s.card.Anchor, Scope: scope, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}}, "", nil
+	item := decisioncard.ListItem{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, Anchor: s.card.Anchor, Scope: scope, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}
+	switch s.card.Anchor.Kind() {
+	case decisioncard.AnchorKindStageGate, decisioncard.AnchorKindProposedEffect:
+		item.Decision = s.card.Snapshot.Decision
+	case decisioncard.AnchorKindHumanTask:
+		anchor, _ := s.card.Anchor.HumanTask()
+		item.Category = anchor.Category
+	}
+	return []decisioncard.ListItem{item}, "", nil
 }
 
 func (s *mutatingProbeDecisionCardStore) GetDecisionCard(_ context.Context, id string) (decisioncard.Card, error) {
@@ -1651,6 +1660,35 @@ func (s *mutatingProbeDecisionCardStore) SupersedeDecisionCardsForStage(context.
 
 func (s *mutatingProbeDecisionCardStore) SupersedeDecisionCardsForRun(context.Context, string, string, time.Time) error {
 	return s.err
+}
+
+func (s *mutatingProbeDecisionCardStore) CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error {
+	return s.err
+}
+
+func (s *mutatingProbeDecisionCardStore) LoadProposedEffectContinuation(context.Context, string) (decisioncard.ProposedEffectContinuation, error) {
+	return decisioncard.ProposedEffectContinuation{}, s.err
+}
+
+func (s *mutatingProbeDecisionCardStore) CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error) {
+	return decisioncard.ProposedEffectContinuation{}, s.err
+}
+
+func (s *mutatingProbeDecisionCardStore) SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error {
+	return s.err
+}
+
+func (s *mutatingProbeDecisionCardStore) ProposedEffectReadback(context.Context, string) (decisioncard.ProposedEffectReadback, error) {
+	anchor, err := s.card.Anchor.ProposedEffect()
+	if err != nil {
+		return decisioncard.ProposedEffectReadback{}, err
+	}
+	return decisioncard.ProposedEffectReadback{
+		ContinuationState: decisioncard.ProposedEffectPending,
+		DispatchState:     "held",
+		RequestEventID:    anchor.RequestEventID,
+		ActivityID:        anchor.ActivityID,
+	}, s.err
 }
 
 func callMutatingProbeRPC(t *testing.T, handler *Handler, methodName string, params map[string]any, authHeader string) (int, rpcResponse, string) {
