@@ -5,10 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
-
-	"github.com/lib/pq"
 )
 
 type runForkTimerReconstructionPlan struct {
@@ -89,15 +88,8 @@ func (s *PostgresStore) planRunForkSelectedContractTimerReconstruction(ctx conte
 	if !catalog.hasColumns("timers", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner") {
 		return runForkTimerReconstructionPlan{}, fmt.Errorf("selected-contract timer reconstruction requires run-scoped timer lineage columns")
 	}
-	facts, err := s.loadRunForkSourceFacts(ctx, plan.SourceRunID, runForkEventCursor{
-		EventID:   plan.ForkPoint.EventID,
-		EventName: plan.ForkPoint.EventName,
-		CreatedAt: plan.ForkPoint.Timestamp,
-	}, plan.Entities)
-	if err != nil {
-		return runForkTimerReconstructionPlan{}, err
-	}
-	rows, err := loadRunForkReconstructableSourceTimers(ctx, s.DB, plan.SourceRunID, plan.ForkPoint.Timestamp, facts)
+	facts := loadRunForkSourceFactsFromRevision(plan.historicalSnapshot, plan.Entities)
+	rows, err := loadRunForkReconstructableSourceTimersFromRevision(plan.historicalSnapshot, facts)
 	if err != nil {
 		return runForkTimerReconstructionPlan{}, err
 	}
@@ -107,65 +99,41 @@ func (s *PostgresStore) planRunForkSelectedContractTimerReconstruction(ctx conte
 	return runForkTimerReconstructionPlan{Required: true, Rows: rows}, nil
 }
 
-func loadRunForkReconstructableSourceTimers(ctx context.Context, q timerReconstructionQueryer, sourceRunID string, at time.Time, facts runForkSourceFacts) ([]runForkTimerReconstructionRow, error) {
+func loadRunForkReconstructableSourceTimersFromRevision(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts) ([]runForkTimerReconstructionRow, error) {
+	if snapshot == nil {
+		return nil, fmt.Errorf("selected-contract timer reconstruction requires a revision snapshot")
+	}
 	if len(facts.EntityIDs) == 0 && len(facts.FlowInstances) == 0 {
 		return nil, nil
 	}
-	rows, err := q.QueryContext(ctx, `
-		SELECT
-			timer_id::text,
-			timer_name,
-			COALESCE(entity_id::text, ''),
-			COALESCE(flow_instance, ''),
-			fire_event,
-			fire_payload,
-			fire_at,
-			recurring,
-			COALESCE(recurrence_cron, ''),
-			COALESCE(recurrence_interval, ''),
-			COALESCE(owner_node, ''),
-			COALESCE(owner_agent, ''),
-			task_type,
-			status,
-			fired_at,
-			created_at
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND created_at <= $2::timestamptz
-		  AND (
-				(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
-				OR
-				(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
-		  )
-		ORDER BY created_at ASC, timer_id ASC
-	`, sourceRunID, at, pq.Array(facts.EntityIDs), pq.Array(facts.FlowInstances))
-	if err != nil {
-		return nil, fmt.Errorf("load source timers for reconstruction: %w", err)
-	}
-	defer rows.Close()
-
+	entityIDs := stringSliceSet(facts.EntityIDs)
+	flowInstances := stringSliceSet(facts.FlowInstances)
 	out := []runForkTimerReconstructionRow{}
-	for rows.Next() {
-		var row runForkTimerReconstructionRow
-		if err := rows.Scan(
-			&row.TimerID,
-			&row.TimerName,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.FireEvent,
-			&row.FirePayload,
-			&row.FireAt,
-			&row.Recurring,
-			&row.RecurrenceCron,
-			&row.RecurrenceInterval,
-			&row.OwnerNode,
-			&row.OwnerAgent,
-			&row.TaskType,
-			&row.Status,
-			&row.FiredAt,
-			&row.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan source timer for reconstruction: %w", err)
+	for _, timer := range snapshot.Timers {
+		_, entityRelevant := entityIDs[strings.TrimSpace(timer.EntityID)]
+		_, flowRelevant := flowInstances[strings.TrimSpace(timer.FlowInstance)]
+		if (!entityRelevant || strings.TrimSpace(timer.EntityID) == "") && (!flowRelevant || strings.TrimSpace(timer.FlowInstance) == "") {
+			continue
+		}
+		row := runForkTimerReconstructionRow{
+			TimerID:            timer.TimerID,
+			TimerName:          timer.TimerName,
+			EntityID:           timer.EntityID,
+			FlowInstance:       timer.FlowInstance,
+			FireEvent:          timer.FireEvent,
+			FirePayload:        append([]byte(nil), timer.FirePayload...),
+			FireAt:             timer.FireAt,
+			Recurring:          timer.Recurring,
+			RecurrenceCron:     timer.RecurrenceCron,
+			RecurrenceInterval: timer.RecurrenceInterval,
+			OwnerNode:          timer.OwnerNode,
+			OwnerAgent:         timer.OwnerAgent,
+			TaskType:           timer.TaskType,
+			Status:             timer.Status,
+			CreatedAt:          timer.CreatedAt,
+		}
+		if timer.FiredAt != nil {
+			row.FiredAt = sql.NullTime{Time: *timer.FiredAt, Valid: true}
 		}
 		normalized, err := validateRunForkReconstructableSourceTimer(row)
 		if err != nil {
@@ -173,9 +141,7 @@ func loadRunForkReconstructableSourceTimers(ctx context.Context, q timerReconstr
 		}
 		out = append(out, normalized)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate source timers for reconstruction: %w", err)
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TimerID < out[j].TimerID })
 	return out, nil
 }
 
@@ -235,35 +201,45 @@ func runForkSelectedContractTimerReconstructionComplete(ctx context.Context, tx 
 	if !runForkPlanHasTimerBlocker(plan) {
 		return false, nil
 	}
-	var sourceCount, forkCount int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND created_at <= $2::timestamptz
-		  AND status = 'active'
-		  AND fired_at IS NULL
-		  AND (
-				(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
-				OR
-				(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
-		  )
-	`, lineage.SourceRunID, lineage.ForkEventTime, pq.Array(lineage.EntityIDs), pq.Array(lineage.FlowInstances)).Scan(&sourceCount); err != nil {
-		return false, fmt.Errorf("count source timers for reconstruction proof: %w", err)
+	facts := loadRunForkSourceFactsFromRevision(plan.historicalSnapshot, plan.Entities)
+	expected, err := loadRunForkReconstructableSourceTimersFromRevision(plan.historicalSnapshot, facts)
+	if err != nil {
+		return false, err
 	}
-	if sourceCount == 0 {
+	if len(expected) == 0 {
 		return false, nil
 	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT source_timer_id)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT source_timer_id::text
 		FROM timers
 		WHERE run_id = $1::uuid
 		  AND forked_from_run_id = $2::uuid
 		  AND forked_from_event_id = $3::uuid
 		  AND reconstruction_owner = $4
 		  AND status = 'active'
-	`, lineage.ForkRunID, lineage.SourceRunID, lineage.ForkEventID, RunForkHistoricalReplayTimerReconstructionOwner).Scan(&forkCount); err != nil {
-		return false, fmt.Errorf("count fork reconstructed timers: %w", err)
+	`, lineage.ForkRunID, lineage.SourceRunID, lineage.ForkEventID, RunForkHistoricalReplayTimerReconstructionOwner)
+	if err != nil {
+		return false, fmt.Errorf("load fork reconstructed timers: %w", err)
 	}
-	return forkCount == sourceCount, nil
+	defer rows.Close()
+	actual := map[string]struct{}{}
+	for rows.Next() {
+		var timerID string
+		if err := rows.Scan(&timerID); err != nil {
+			return false, fmt.Errorf("scan fork reconstructed timer: %w", err)
+		}
+		actual[timerID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate fork reconstructed timers: %w", err)
+	}
+	if len(actual) != len(expected) {
+		return false, nil
+	}
+	for _, timer := range expected {
+		if _, ok := actual[timer.TimerID]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
 }

@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 const (
@@ -47,6 +46,8 @@ type RunForkPlan struct {
 	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
 	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
 	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
+	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
+	historicalSnapshot        *runForkRevisionSnapshot
 }
 
 type RunForkPoint struct {
@@ -57,6 +58,16 @@ type RunForkPoint struct {
 	ProducedBy     string    `json:"produced_by,omitempty"`
 	ProducedByType string    `json:"produced_by_type,omitempty"`
 	Timestamp      time.Time `json:"timestamp"`
+	Revision       int64     `json:"revision"`
+}
+
+const (
+	RunForkRouteHistoryNotApplicable      = "not_applicable"
+	RunForkRouteHistoryUnknownUnversioned = "unknown_unversioned"
+)
+
+type RunForkRouteHistoryProjection struct {
+	State string `json:"state"`
 }
 
 type RunForkEntityState struct {
@@ -100,12 +111,14 @@ type runForkEventCursor struct {
 	ProducedBy     string
 	ProducedByType string
 	CreatedAt      time.Time
+	Revision       int64
 }
 
 type runForkAdmissionEvidence struct {
 	Pending                 []RunForkPendingWork
 	RelevantTimer           bool
 	RelevantRoute           bool
+	RouteHistory            RunForkRouteHistoryProjection
 	ActiveSession           bool
 	ActiveConversationAudit bool
 	ActiveTurn              bool
@@ -167,7 +180,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	if s == nil || s.DB == nil {
 		return RunForkPlan{}, fmt.Errorf("postgres store is required")
 	}
-	catalog, err := s.requireRunForkPlannerCapabilities(ctx)
+	_, err := s.requireRunForkPlannerCapabilities(ctx)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
@@ -180,14 +193,33 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	}
 	at := strings.TrimSpace(req.At)
 
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	plan := RunForkPlan{SourceRunID: runID}
-	if err := s.loadRunForkSourceSummary(ctx, &plan); err != nil {
+	if err := loadRunForkSourceSummary(ctx, tx, &plan); err != nil {
 		return RunForkPlan{}, err
 	}
-	cursor, err := s.resolveRunForkPoint(ctx, runID, at)
+	if err := runforkrevision.ValidateComplete(ctx, tx, runID); err != nil {
+		return RunForkPlan{}, err
+	}
+	if at != "" {
+		if _, err := uuid.Parse(at); err != nil {
+			return RunForkPlan{}, fmt.Errorf("fork point --at must be an event UUID: %w", err)
+		}
+	}
+	cursor, err := resolveRunForkRevisionPoint(ctx, tx, runID, at)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
+	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, runID, cursor.Revision)
+	if err != nil {
+		return RunForkPlan{}, err
+	}
+	plan.historicalSnapshot = snapshot
 	plan.ForkPoint = RunForkPoint{
 		Input:          at,
 		EventID:        cursor.EventID,
@@ -196,38 +228,33 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 		ProducedBy:     cursor.ProducedBy,
 		ProducedByType: cursor.ProducedByType,
 		Timestamp:      cursor.CreatedAt,
+		Revision:       cursor.Revision,
 	}
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND (created_at, event_id) <= ($2::timestamptz, $3::uuid)
-	`, runID, cursor.CreatedAt, cursor.EventID).Scan(&plan.EventCountAtFork); err != nil {
-		return RunForkPlan{}, fmt.Errorf("count fork events: %w", err)
-	}
+	plan.EventCountAtFork = len(snapshot.Events)
 
-	entities, err := s.loadRunForkEntityStates(ctx, runID, cursor)
+	entities, err := loadRunForkEntityStates(snapshot)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
-	entities, entitySnapshotMetadataAdmission, err := s.attachRunForkMaterializedEntitySnapshotMetadata(ctx, runID, cursor, entities)
+	entities, entitySnapshotMetadataAdmission, err := attachRunForkMaterializedEntitySnapshotMetadata(snapshot, entities)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
 
-	pending, err := s.loadRunForkPendingWork(ctx, runID, cursor)
+	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
-	evidence, err := s.loadRunForkAdmissionEvidence(ctx, catalog, runID, cursor, entities, pending)
+	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
+	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)
 	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
@@ -235,9 +262,9 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	return plan, nil
 }
 
-func (s *PostgresStore) loadRunForkSourceSummary(ctx context.Context, plan *RunForkPlan) error {
+func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *RunForkPlan) error {
 	var started, ended sql.NullTime
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := q.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), started_at, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -258,101 +285,7 @@ func (s *PostgresStore) loadRunForkSourceSummary(ctx context.Context, plan *RunF
 	return nil
 }
 
-func (s *PostgresStore) resolveRunForkPoint(ctx context.Context, runID, at string) (runForkEventCursor, error) {
-	if strings.TrimSpace(at) == "" {
-		var cursor runForkEventCursor
-		if err := s.DB.QueryRowContext(ctx, `
-			SELECT
-				event_id::text,
-				event_name,
-				COALESCE(source_event_id::text, ''),
-				COALESCE(produced_by, ''),
-				COALESCE(produced_by_type, ''),
-				created_at
-			FROM events
-			WHERE run_id = $1::uuid
-			ORDER BY created_at DESC, event_id DESC
-			LIMIT 1
-		`, runID).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
-			if err == sql.ErrNoRows {
-				return runForkEventCursor{}, fmt.Errorf("no source-run event exists for fork source run %s", runID)
-			}
-			return runForkEventCursor{}, fmt.Errorf("resolve default fork event: %w", err)
-		}
-		return cursor, nil
-	}
-	if _, err := uuid.Parse(at); err == nil {
-		var cursor runForkEventCursor
-		if err := s.DB.QueryRowContext(ctx, `
-			SELECT
-				event_id::text,
-				event_name,
-				COALESCE(source_event_id::text, ''),
-				COALESCE(produced_by, ''),
-				COALESCE(produced_by_type, ''),
-				created_at
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-		`, runID, at).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
-			if err == sql.ErrNoRows {
-				return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in source run %s", at, runID)
-			}
-			return runForkEventCursor{}, fmt.Errorf("resolve fork event: %w", err)
-		}
-		return cursor, nil
-	}
-	atTime, err := time.Parse(time.RFC3339Nano, at)
-	if err != nil {
-		return runForkEventCursor{}, fmt.Errorf("fork point --at must be an event UUID or RFC3339 timestamp: %w", err)
-	}
-	var cursor runForkEventCursor
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT
-			event_id::text,
-			event_name,
-			COALESCE(source_event_id::text, ''),
-			COALESCE(produced_by, ''),
-			COALESCE(produced_by_type, ''),
-			created_at
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND created_at <= $2::timestamptz
-		ORDER BY created_at DESC, event_id DESC
-		LIMIT 1
-	`, runID, atTime).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return runForkEventCursor{}, fmt.Errorf("no source-run event exists at or before fork timestamp %s", at)
-		}
-		return runForkEventCursor{}, fmt.Errorf("resolve fork timestamp: %w", err)
-	}
-	return cursor, nil
-}
-
-func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID string, cursor runForkEventCursor) ([]RunForkEntityState, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			m.entity_id::text,
-			m.field,
-			COALESCE(m.new_value, 'null'::jsonb),
-			m.created_at
-		FROM entity_mutations m
-		LEFT JOIN events e
-			ON e.event_id = m.caused_by_event
-		   AND e.run_id = m.run_id
-		WHERE m.run_id = $1::uuid
-		  AND (
-				(e.event_id IS NOT NULL AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid))
-				OR
-				(e.event_id IS NULL AND m.created_at <= $2::timestamptz)
-		  )
-		ORDER BY m.entity_id ASC, m.created_at ASC, m.mutation_id ASC
-	`, runID, cursor.CreatedAt, cursor.EventID)
-	if err != nil {
-		return nil, fmt.Errorf("load fork entity mutations: %w", err)
-	}
-	defer rows.Close()
-
+func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntityState, error) {
 	type timedProjectionMutation struct {
 		mutationlog.ProjectionMutation
 		CreatedAt time.Time
@@ -360,18 +293,13 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 	grouped := map[string][]timedProjectionMutation{}
 	entityOrder := []string{}
 	seen := map[string]struct{}{}
-	for rows.Next() {
-		var entityID, field string
-		var raw []byte
-		var createdAt time.Time
-		if err := rows.Scan(&entityID, &field, &raw, &createdAt); err != nil {
-			return nil, fmt.Errorf("scan fork entity mutation: %w", err)
-		}
+	for _, fact := range snapshot.EntityMutations {
+		entityID := strings.TrimSpace(fact.EntityID)
+		field := strings.TrimSpace(fact.Field)
 		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
+		if err := json.Unmarshal(fact.NewValue, &value); err != nil {
 			return nil, fmt.Errorf("decode fork entity mutation %s/%s: %w", entityID, field, err)
 		}
-		entityID = strings.TrimSpace(entityID)
 		if _, ok := seen[entityID]; !ok {
 			seen[entityID] = struct{}{}
 			entityOrder = append(entityOrder, entityID)
@@ -381,11 +309,8 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 				Field:    field,
 				NewValue: value,
 			},
-			CreatedAt: createdAt,
+			CreatedAt: fact.CreatedAt,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read fork entity mutations: %w", err)
 	}
 
 	out := make([]RunForkEntityState, 0, len(entityOrder))
@@ -412,164 +337,6 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 			Gates:          projection.Gates,
 			Accumulator:    projection.Accumulator,
 		})
-	}
-	return out, nil
-}
-
-func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string, cursor runForkEventCursor) ([]RunForkPendingWork, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		WITH delivery_rows AS (
-			SELECT
-				e.event_id::text AS event_id,
-				e.event_name AS event_name,
-				COALESCE(e.flow_instance, '') AS flow_instance,
-				d.delivery_id::text AS delivery_id,
-				COALESCE(d.subscriber_type, '') AS subscriber_type,
-				COALESCE(d.subscriber_id, '') AS subscriber_id,
-				CASE
-					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.status, '')
-					WHEN d.started_at IS NOT NULL AND d.started_at <= $2::timestamptz THEN 'in_progress'
-					ELSE 'pending'
-				END AS status,
-				CASE
-					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.retry_count, 0)
-					ELSE 0
-				END AS retry_count,
-				CASE
-					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.reason_code, '')
-					WHEN COALESCE(d.status, '') = 'pending'
-					 AND d.started_at IS NULL
-					 AND d.delivered_at IS NULL
-					THEN COALESCE(d.reason_code, '')
-					ELSE ''
-				END AS reason_code,
-				CASE
-					WHEN d.started_at IS NOT NULL
-					 AND d.started_at <= $2::timestamptz
-					 AND (d.delivered_at IS NULL OR d.delivered_at > $2::timestamptz)
-					THEN COALESCE(d.active_session_id::text, '')
-					ELSE ''
-				END AS active_session_id,
-				d.created_at AS created_at,
-				CASE WHEN d.started_at <= $2::timestamptz THEN d.started_at ELSE NULL END AS started_at,
-				CASE WHEN d.delivered_at <= $2::timestamptz THEN d.delivered_at ELSE NULL END AS delivered_at,
-				COALESCE(r.outcome, '') AS receipt_outcome,
-				r.processed_at AS receipt_at,
-				EXISTS (
-					SELECT 1
-					FROM dead_letters dl
-					WHERE dl.original_event_id = e.event_id
-					  AND dl.created_at <= $2::timestamptz
-					  AND COALESCE(dl.handler_node, '') <> ''
-					  AND COALESCE(d.subscriber_type, '') = 'node'
-					  AND dl.handler_node = d.subscriber_id
-				) AS dead_letter
-			FROM events e
-			INNER JOIN event_deliveries d ON d.event_id = e.event_id
-			LEFT JOIN event_receipts r
-				ON r.event_id = d.event_id
-			   AND r.subscriber_type = d.subscriber_type
-			   AND r.subscriber_id = d.subscriber_id
-			   AND r.processed_at <= $2::timestamptz
-			WHERE e.run_id = $1::uuid
-			  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
-			  AND d.created_at <= $2::timestamptz
-		),
-		receipt_only_rows AS (
-			SELECT
-				e.event_id::text AS event_id,
-				e.event_name AS event_name,
-				COALESCE(e.flow_instance, '') AS flow_instance,
-				''::text AS delivery_id,
-				COALESCE(r.subscriber_type, '') AS subscriber_type,
-				COALESCE(r.subscriber_id, '') AS subscriber_id,
-				''::text AS status,
-				0 AS retry_count,
-				COALESCE(r.reason_code, '') AS reason_code,
-				''::text AS active_session_id,
-				r.processed_at AS created_at,
-				NULL::timestamptz AS started_at,
-				r.processed_at AS delivered_at,
-				COALESCE(r.outcome, '') AS receipt_outcome,
-				r.processed_at AS receipt_at,
-				FALSE AS dead_letter
-			FROM events e
-			INNER JOIN event_receipts r ON r.event_id = e.event_id
-			WHERE e.run_id = $1::uuid
-			  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
-			  AND r.processed_at <= $2::timestamptz
-			  AND r.subscriber_type IN ('platform', 'node')
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM event_deliveries d
-				WHERE d.event_id = r.event_id
-				  AND d.subscriber_type = r.subscriber_type
-				  AND d.subscriber_id = r.subscriber_id
-				  AND d.created_at <= $2::timestamptz
-			  )
-		)
-		SELECT
-			event_id,
-			event_name,
-			flow_instance,
-			delivery_id,
-			subscriber_type,
-			subscriber_id,
-			status,
-			retry_count,
-			reason_code,
-			active_session_id,
-			created_at,
-			started_at,
-			delivered_at,
-			receipt_outcome,
-			receipt_at,
-			dead_letter
-		FROM (
-			SELECT * FROM delivery_rows
-			UNION ALL
-			SELECT * FROM receipt_only_rows
-		) work
-		ORDER BY created_at ASC, event_id ASC, delivery_id ASC, subscriber_type ASC, subscriber_id ASC
-	`, runID, cursor.CreatedAt, cursor.EventID)
-	if err != nil {
-		return nil, fmt.Errorf("load fork pending work: %w", err)
-	}
-	defer rows.Close()
-
-	out := []RunForkPendingWork{}
-	for rows.Next() {
-		var item RunForkPendingWork
-		var started, delivered, receipt sql.NullTime
-		var deadLetter bool
-		if err := rows.Scan(
-			&item.EventID,
-			&item.EventName,
-			&item.FlowInstance,
-			&item.DeliveryID,
-			&item.SubscriberType,
-			&item.SubscriberID,
-			&item.Status,
-			&item.RetryCount,
-			&item.ReasonCode,
-			&item.ActiveSessionID,
-			&item.CreatedAt,
-			&started,
-			&delivered,
-			&item.ReceiptOutcome,
-			&receipt,
-			&deadLetter,
-		); err != nil {
-			return nil, fmt.Errorf("scan fork pending work: %w", err)
-		}
-		item.StartedAt = nullableTimePtr(started)
-		item.DeliveredAt = nullableTimePtr(delivered)
-		item.ReceiptAt = nullableTimePtr(receipt)
-		item.Classification = classifyRunForkPendingWork(item, deadLetter)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read fork pending work: %w", err)
 	}
 	return out, nil
 }
@@ -601,232 +368,6 @@ func classifyRunForkPendingWork(item RunForkPendingWork, deadLetter bool) string
 		}
 		return RunForkPendingClassificationPending
 	}
-}
-
-func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor, entities []RunForkEntityState, pending []RunForkPendingWork) (runForkAdmissionEvidence, error) {
-	facts, err := s.loadRunForkSourceFacts(ctx, runID, cursor, entities)
-	if err != nil {
-		return runForkAdmissionEvidence{}, err
-	}
-	relevantTimer, err := s.hasRunForkRelevantTimer(ctx, catalog, runID, facts, cursor)
-	if err != nil {
-		return runForkAdmissionEvidence{}, err
-	}
-	relevantRoute, err := s.hasRunForkRelevantRoute(ctx, catalog, facts, cursor)
-	if err != nil {
-		return runForkAdmissionEvidence{}, err
-	}
-	activeSession := runForkPendingReferencesActiveSession(pending)
-	if !activeSession {
-		activeSession, err = s.hasRunForkActiveSession(ctx, catalog, runID, cursor)
-		if err != nil {
-			return runForkAdmissionEvidence{}, err
-		}
-	}
-	activeConversationAudit, err := s.hasRunForkConversationAuditHistory(ctx, catalog, runID, cursor)
-	if err != nil {
-		return runForkAdmissionEvidence{}, err
-	}
-	activeTurn := runForkPendingReferencesActiveSession(pending)
-	if !activeTurn {
-		activeTurn, err = s.hasRunForkActiveTurn(ctx, catalog, runID, cursor)
-		if err != nil {
-			return runForkAdmissionEvidence{}, err
-		}
-	}
-	openReplyContext, err := s.hasRunForkOpenReplyContext(ctx, runID, cursor)
-	if err != nil {
-		return runForkAdmissionEvidence{}, err
-	}
-	return runForkAdmissionEvidence{
-		Pending:                 pending,
-		RelevantTimer:           relevantTimer,
-		RelevantRoute:           relevantRoute,
-		ActiveSession:           activeSession,
-		ActiveConversationAudit: activeConversationAudit,
-		ActiveTurn:              activeTurn,
-		OpenReplyContext:        openReplyContext,
-	}, nil
-}
-
-func (s *PostgresStore) hasRunForkOpenReplyContext(ctx context.Context, runID string, cursor runForkEventCursor) (bool, error) {
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM reply_contexts rc
-			JOIN events request_event ON request_event.event_id = rc.request_event_id
-			WHERE rc.run_id = $1::uuid
-			  AND rc.state = 'open'
-			  AND (request_event.created_at, request_event.event_id) <= ($2::timestamptz, $3::uuid)
-		)
-	`, runID, cursor.CreatedAt, cursor.EventID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork open reply contexts: %w", err)
-	}
-	return exists, nil
-}
-
-func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string, cursor runForkEventCursor, entities []RunForkEntityState) (runForkSourceFacts, error) {
-	entitySet := map[string]struct{}{}
-	flowSet := map[string]struct{}{}
-	sourceFlowSet := map[string]struct{}{}
-	for _, entity := range entities {
-		if entityID := strings.TrimSpace(entity.EntityID); entityID != "" {
-			entitySet[entityID] = struct{}{}
-		}
-	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, '')
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND (created_at, event_id) <= ($2::timestamptz, $3::uuid)
-	`, runID, cursor.CreatedAt, cursor.EventID)
-	if err != nil {
-		return runForkSourceFacts{}, fmt.Errorf("load fork source facts: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var entityID, flowInstance string
-		if err := rows.Scan(&entityID, &flowInstance); err != nil {
-			return runForkSourceFacts{}, fmt.Errorf("scan fork source facts: %w", err)
-		}
-		if entityID = strings.TrimSpace(entityID); entityID != "" {
-			entitySet[entityID] = struct{}{}
-		}
-		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
-			flowSet[flowInstance] = struct{}{}
-			if sourceFlow := runtimeflowidentity.SemanticScope(flowInstance); sourceFlow != "" {
-				sourceFlowSet[sourceFlow] = struct{}{}
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return runForkSourceFacts{}, fmt.Errorf("read fork source facts: %w", err)
-	}
-	return runForkSourceFacts{
-		EntityIDs:     stringSetValues(entitySet),
-		FlowInstances: stringSetValues(flowSet),
-		SourceFlows:   stringSetValues(sourceFlowSet),
-	}, nil
-}
-
-func (s *PostgresStore) hasRunForkRelevantTimer(ctx context.Context, catalog schemaColumnCatalog, runID string, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("timers", "run_id", "entity_id", "flow_instance", "created_at") {
-		return false, nil
-	}
-	if len(facts.EntityIDs) == 0 && len(facts.FlowInstances) == 0 {
-		return false, nil
-	}
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM timers
-			WHERE run_id = $1::uuid
-			  AND created_at <= $2::timestamptz
-			  AND (
-					(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
-					OR
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
-			  )
-		)
-	`, runID, cursor.CreatedAt, pq.Array(facts.EntityIDs), pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork timer blockers: %w", err)
-	}
-	return exists, nil
-}
-
-func (s *PostgresStore) hasRunForkRelevantRoute(ctx context.Context, catalog schemaColumnCatalog, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("routing_rules", "flow_instance", "source_flow", "created_at") {
-		return false, nil
-	}
-	if len(facts.FlowInstances) == 0 && len(facts.SourceFlows) == 0 {
-		return false, nil
-	}
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM routing_rules
-			WHERE created_at <= $1::timestamptz
-			  AND (
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($2::text[]))
-					OR
-					(COALESCE(source_flow, '') <> '' AND source_flow = ANY($3::text[]))
-			  )
-		)
-	`, cursor.CreatedAt, pq.Array(facts.FlowInstances), pq.Array(facts.SourceFlows)).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork route blockers: %w", err)
-	}
-	return exists, nil
-}
-
-func (s *PostgresStore) hasRunForkActiveSession(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("agent_sessions", "run_id", "status", "created_at") {
-		return false, nil
-	}
-	activePredicate := "COALESCE(status, '') IN ('active', 'suspended')"
-	if catalog.hasColumns("agent_sessions", "terminated_at") {
-		activePredicate = "(COALESCE(status, '') IN ('active', 'suspended') OR (COALESCE(status, '') = 'terminated' AND terminated_at > $2::timestamptz))"
-	}
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM agent_sessions
-			WHERE run_id = $1::uuid
-			  AND created_at <= $2::timestamptz
-			  AND %s
-		)
-	`, activePredicate), runID, cursor.CreatedAt).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork session blockers: %w", err)
-	}
-	return exists, nil
-}
-
-func (s *PostgresStore) hasRunForkConversationAuditHistory(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("agent_conversation_audits", "run_id", "created_at") {
-		return false, nil
-	}
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM agent_conversation_audits
-			WHERE run_id = $1::uuid
-			  AND created_at <= $2::timestamptz
-		)
-	`, runID, cursor.CreatedAt).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork conversation audit blockers: %w", err)
-	}
-	return exists, nil
-}
-
-func (s *PostgresStore) hasRunForkActiveTurn(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("agent_turns", "run_id", "session_id", "created_at") ||
-		!catalog.hasColumns("agent_sessions", "session_id", "run_id", "status", "created_at") {
-		return false, nil
-	}
-	activePredicate := "COALESCE(s.status, '') IN ('active', 'suspended')"
-	if catalog.hasColumns("agent_sessions", "terminated_at") {
-		activePredicate = "(COALESCE(s.status, '') IN ('active', 'suspended') OR (COALESCE(s.status, '') = 'terminated' AND s.terminated_at > $2::timestamptz))"
-	}
-	var exists bool
-	if err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM agent_turns t
-			INNER JOIN agent_sessions s ON s.session_id = t.session_id
-			WHERE t.run_id = $1::uuid
-			  AND s.run_id = $1::uuid
-			  AND t.created_at <= $2::timestamptz
-			  AND s.created_at <= $2::timestamptz
-			  AND %s
-		)
-	`, activePredicate), runID, cursor.CreatedAt).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check fork active turn blockers: %w", err)
-	}
-	return exists, nil
 }
 
 func runForkPendingReferencesActiveSession(pending []RunForkPendingWork) bool {

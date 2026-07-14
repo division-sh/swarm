@@ -10,7 +10,7 @@ import (
 var (
 	sqliteCreateTablePattern         = regexp.MustCompile(`(?is)^create\s+table\s+if\s+not\s+exists\s+("?[a-z_][a-z0-9_]*"?)\s*\((.*)\)\s*$`)
 	sqliteCreateIndexPattern         = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+if\s+not\s+exists\s+("?[a-z_][a-z0-9_]*"?)\s+on\s+("?[a-z_][a-z0-9_]*"?)\s*\(`)
-	sqliteForeignKeyPattern          = regexp.MustCompile(`(?is)^foreign\s+key\s*\(([^)]+)\)\s+references\s+("?[a-z_][a-z0-9_]*"?)\s*\(([^)]+)\)\s*$`)
+	sqliteForeignKeyPattern          = regexp.MustCompile(`(?is)^foreign\s+key\s*\(([^)]+)\)\s+references\s+("?[a-z_][a-z0-9_]*"?)\s*\(([^)]+)\)(?:\s+on\s+delete\s+(cascade|restrict|set\s+null|no\s+action))?\s*$`)
 	sqliteUnsupportedConstructChecks = []struct {
 		pattern *regexp.Regexp
 		label   string
@@ -122,7 +122,7 @@ func sqliteRenderTableLine(line string) (string, error) {
 
 func sqliteRenderForeignKeyConstraint(line string) (string, error) {
 	matches := sqliteForeignKeyPattern.FindStringSubmatch(strings.TrimSpace(line))
-	if len(matches) != 4 {
+	if len(matches) != 5 {
 		return "", fmt.Errorf("unsupported SQLite foreign key constraint %q", line)
 	}
 	columns, err := sqliteRenderIdentifierList(matches[1])
@@ -140,7 +140,11 @@ func sqliteRenderForeignKeyConstraint(line string) (string, error) {
 	if len(columns) != len(references) {
 		return "", fmt.Errorf("SQLite foreign key column count does not match referenced column count")
 	}
-	return fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s(%s)", strings.Join(columns, ", "), tableName, strings.Join(references, ", ")), nil
+	rendered := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s(%s)", strings.Join(columns, ", "), tableName, strings.Join(references, ", "))
+	if action := strings.ToUpper(strings.Join(strings.Fields(matches[4]), " ")); action != "" {
+		rendered += " ON DELETE " + action
+	}
+	return rendered, nil
 }
 
 func sqliteRenderIdentifierList(raw string) ([]string, error) {

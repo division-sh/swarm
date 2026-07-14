@@ -109,7 +109,18 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 	if err != nil {
 		return RunForkSelectedContractRouteRecovery{}, err
 	}
-	if _, err := s.DB.ExecContext(ctx, `
+	if err := insertRunForkSelectedContractRouteRecovery(ctx, s.DB, record); err != nil {
+		return RunForkSelectedContractRouteRecovery{}, err
+	}
+	return record, nil
+}
+
+type runForkSelectedContractRouteRecoveryExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runForkSelectedContractRouteRecoveryExecer, record RunForkSelectedContractRouteRecovery) error {
+	if _, err := execer.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
 			fork_run_id, source_run_id, fork_event_id,
 			owner, runtime_recovery_owner,
@@ -155,9 +166,46 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 		record.FrontierEvidenceFingerprint, record.RouteTopologyFingerprint, record.RecipientPlanningFingerprint,
 		record.StaticRouteEventCount, record.DynamicTopologyProofCount, record.RecipientPlanEventCount,
 		string(record.RouteTopology), string(record.RecipientPlanning), record.CreatedAt); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("record selected-contract route recovery: %w", err)
+		return fmt.Errorf("record selected-contract route recovery: %w", err)
 	}
-	return record, nil
+	return nil
+}
+
+func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Context, tx *sql.Tx, expected RunForkSelectedContractRouteRecovery) error {
+	actual, err := loadRunForkSelectedContractRouteRecovery(ctx, tx, `WHERE fork_run_id = $1::uuid`, expected.ForkRunID)
+	if err == sql.ErrNoRows {
+		return runForkReplayResumeError(
+			RunForkBlockerFlowRouteHistoryUnproven,
+			RunForkReplayResumeFactRouteHistory,
+			"selected-contract activation requires persisted route recovery from materialization",
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("load selected-contract route recovery for activation: %w", err)
+	}
+	if actual.Owner != expected.Owner ||
+		actual.RuntimeRecoveryOwner != expected.RuntimeRecoveryOwner ||
+		actual.SourceRunID != expected.SourceRunID ||
+		actual.ForkEventID != expected.ForkEventID ||
+		actual.RouteTopologyOwner != expected.RouteTopologyOwner ||
+		actual.DynamicTopologyOwner != expected.DynamicTopologyOwner ||
+		actual.RecipientPlanningOwner != expected.RecipientPlanningOwner ||
+		actual.FrontierEvidenceFingerprint != expected.FrontierEvidenceFingerprint ||
+		actual.RouteTopologyFingerprint != expected.RouteTopologyFingerprint ||
+		actual.RecipientPlanningFingerprint != expected.RecipientPlanningFingerprint ||
+		actual.StaticRouteEventCount != expected.StaticRouteEventCount ||
+		actual.DynamicTopologyProofCount != expected.DynamicTopologyProofCount ||
+		actual.RecipientPlanEventCount != expected.RecipientPlanEventCount {
+		return runForkReplayResumeError(
+			RunForkBlockerFlowRouteHistoryUnproven,
+			RunForkReplayResumeFactRouteHistory,
+			"selected-contract activation route recovery does not match current canonical topology proof",
+		)
+	}
+	if err := validateRunForkSelectedContractRouteRecoverySelection("route recovery activation", actual.ContractSelection, expected.ContractSelection); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (RunForkSelectedContractRouteRecovery, bool, error) {

@@ -55,6 +55,10 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if db == nil {
 		return ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
+	tx, ok := db.(*sql.Tx)
+	if !ok {
+		return ErrInvalidMutationLogWriter("PostgreSQL mutation log writes require the existing persistence transaction")
+	}
 	entityID := strings.TrimSpace(rec.EntityID)
 	field := strings.TrimSpace(rec.Field)
 	writerType := strings.TrimSpace(rec.WriterType)
@@ -96,7 +100,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 		}
 	}
 
-	_, err = db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value,
 			caused_by_event, writer_type, writer_id, handler_step
@@ -106,7 +110,10 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 			NULLIF($6, '')::uuid, $7, $8, NULLIF($9, '')
 		)
 	`, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep))
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProjection, writer Writer) ([]Record, error) {

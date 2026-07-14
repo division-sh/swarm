@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -386,6 +387,7 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
 		t.Fatalf("mark selected fork materialized for cleanup: %v", err)
 	}
+	assertSelectedCompletionEvidencePresent(t, db, "pre-cleanup fork revision", `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
 		t.Fatalf("discard mutable selected fork: %v", err)
 	}
@@ -401,6 +403,60 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	assertSelectedCompletionEvidenceCount(t, db, "operation and attempt", `SELECT COUNT(*) FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE o.selected_execution_id=$1::uuid AND a.attempt_id=$2::uuid`, authority.ID, handle.Attempt().AttemptID)
 	assertSelectedCompletionEvidenceCount(t, db, "turn and attempt", `SELECT COUNT(*) FROM agent_turns t JOIN runtime_external_effect_attempts a ON a.attempt_id=t.completion_attempt_id WHERE t.turn_id=$1::uuid AND t.run_id=$2::uuid`, authority.Target.ID, fixture.forkRun)
 	assertSelectedCompletionEvidenceCount(t, db, "spend and attempt", `SELECT COUNT(*) FROM spend_ledger s JOIN runtime_external_effect_attempts a ON a.attempt_id=s.external_effect_attempt_id WHERE s.external_effect_attempt_id=$1::uuid`, handle.Attempt().AttemptID)
+	assertSelectedCompletionEvidenceAbsent(t, db, "fork fact revisions", `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
+	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision ledger", `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
+	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision head", `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun)
+}
+
+func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := &PostgresStore{DB: db}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	dependentRunID := uuid.NewString()
+	forkEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id,status,started_at) VALUES
+			($1::uuid,'running',$3),
+			($2::uuid,'paused',$3)
+	`, sourceRunID, forkRunID, now); err != nil {
+		t.Fatalf("seed selected fork lineage: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type,created_at)
+		VALUES ($1::uuid,$2::uuid,'fork.dependency','global','platform',$3)
+	`, forkEventID, forkRunID, now); err != nil {
+		t.Fatalf("seed selected fork event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id)
+		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid)
+	`, dependentRunID, forkRunID, forkEventID, now); err != nil {
+		t.Fatalf("seed dependent fork: %v", err)
+	}
+
+	err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID)
+	if err == nil || !strings.Contains(err.Error(), dependentRunID) {
+		t.Fatalf("discard error = %v, want dependent fork %s", err, dependentRunID)
+	}
+	for label, query := range map[string]string{
+		"source fork":    `SELECT COUNT(*) FROM runs WHERE run_id=$1::uuid`,
+		"source event":   `SELECT COUNT(*) FROM events WHERE event_id=$1::uuid`,
+		"dependent fork": `SELECT COUNT(*) FROM runs WHERE run_id=$1::uuid`,
+	} {
+		id := forkRunID
+		if label == "source event" {
+			id = forkEventID
+		} else if label == "dependent fork" {
+			id = dependentRunID
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, query, id).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s rows=%d err=%v, want 1 after rejected discard", label, count, err)
+		}
+	}
 }
 
 func assertSelectedCompletionEvidenceCount(t *testing.T, db *sql.DB, name, query string, args ...any) {
@@ -408,6 +464,22 @@ func assertSelectedCompletionEvidenceCount(t *testing.T, db *sql.DB, name, query
 	var count int
 	if err := db.QueryRow(query, args...).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("retained %s rows=%d err=%v, want 1", name, count, err)
+	}
+}
+
+func assertSelectedCompletionEvidencePresent(t *testing.T, db *sql.DB, name, query string, args ...any) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(query, args...).Scan(&count); err != nil || count == 0 {
+		t.Fatalf("retained %s rows=%d err=%v, want at least 1", name, count, err)
+	}
+}
+
+func assertSelectedCompletionEvidenceAbsent(t *testing.T, db *sql.DB, name, query string, args ...any) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(query, args...).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("retained %s rows=%d err=%v, want 0", name, count, err)
 	}
 }
 

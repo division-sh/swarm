@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestRunForkPlanner_ResolvesEventAndTimestampForkPoints(t *testing.T) {
+func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSelectors(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -30,12 +31,20 @@ func TestRunForkPlanner_ResolvesEventAndTimestampForkPoints(t *testing.T) {
 		INSERT INTO events (
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES
-			($1::uuid, $2::uuid, 'fork.first', 'global', '{}'::jsonb, 'test', 'platform', $4),
-			($1::uuid, $3::uuid, 'fork.second', 'global', '{}'::jsonb, 'test', 'platform', $4)
-	`, runID, firstEventID, secondEventID, at); err != nil {
-		t.Fatalf("seed events: %v", err)
+		VALUES ($1::uuid, $2::uuid, 'fork.first', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, firstEventID, at); err != nil {
+		t.Fatalf("seed first event: %v", err)
 	}
+	firstRevision := captureRunForkTestRevision(t, db, runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.second', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, secondEventID, at); err != nil {
+		t.Fatalf("seed second event: %v", err)
+	}
+	secondRevision := captureRunForkTestRevision(t, db, runID)
 
 	byEvent, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
 	if err != nil {
@@ -47,16 +56,23 @@ func TestRunForkPlanner_ResolvesEventAndTimestampForkPoints(t *testing.T) {
 	if byEvent.EventCountAtFork != 1 {
 		t.Fatalf("event count at event fork = %d, want 1", byEvent.EventCountAtFork)
 	}
+	if byEvent.ForkPoint.Revision != firstRevision {
+		t.Fatalf("first event revision = %d, want %d", byEvent.ForkPoint.Revision, firstRevision)
+	}
 
-	byTimestamp, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)})
+	bySecondEvent, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: secondEventID})
 	if err != nil {
-		t.Fatalf("PlanRunFork(timestamp): %v", err)
+		t.Fatalf("PlanRunFork(second event): %v", err)
 	}
-	if byTimestamp.ForkPoint.EventID != secondEventID {
-		t.Fatalf("timestamp fork point = %s, want same-timestamp max event %s", byTimestamp.ForkPoint.EventID, secondEventID)
+	if bySecondEvent.ForkPoint.EventID != secondEventID || bySecondEvent.ForkPoint.Revision != secondRevision {
+		t.Fatalf("second fork point = %#v, want event %s revision %d", bySecondEvent.ForkPoint, secondEventID, secondRevision)
 	}
-	if byTimestamp.EventCountAtFork != 2 {
-		t.Fatalf("event count at timestamp fork = %d, want 2", byTimestamp.EventCountAtFork)
+	if bySecondEvent.EventCountAtFork != 2 {
+		t.Fatalf("event count at second event = %d, want 2", bySecondEvent.EventCountAtFork)
+	}
+
+	if _, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)}); err == nil || !strings.Contains(err.Error(), "UUID") {
+		t.Fatalf("timestamp selector error = %v, want UUID-only rejection", err)
 	}
 }
 
@@ -94,7 +110,8 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 		t.Fatalf("seed reply context: %v", err)
 	}
 
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)})
+	captureRunForkTestRevision(t, db, runID)
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: requestEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -126,27 +143,42 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES
-			($1::uuid, $2::uuid, 'fork.before', $4::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.after', $4::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $6)
-	`, runID, firstEventID, secondEventID, entityID, at, at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed events: %v", err)
+		VALUES ($1::uuid, $2::uuid, 'fork.before', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, firstEventID, entityID, at); err != nil {
+		t.Fatalf("seed first event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $5),
-			($1::uuid, $2::uuid, 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $5),
-			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $5),
-			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $5),
-			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $4::uuid, 'platform', 'planner-test', 'after', $6),
-			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $4::uuid, 'platform', 'planner-test', 'after', $6)
-	`, runID, entityID, firstEventID, secondEventID, at, at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed mutations: %v", err)
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4)
+	`, runID, entityID, firstEventID, at); err != nil {
+		t.Fatalf("seed first revision mutations: %v", err)
 	}
-
+	captureRunForkTestRevision(t, db, runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.after', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, secondEventID, entityID, at); err != nil {
+		t.Fatalf("seed second event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4),
+			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4)
+	`, runID, entityID, secondEventID, at); err != nil {
+		t.Fatalf("seed second revision mutations: %v", err)
+	}
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -219,6 +251,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		t.Fatalf("seed receipt: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -263,6 +296,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	for _, code := range []string{
 		"delivery_history_unproven",
 		RunForkBlockerCommittedReplayScopeReplayUnsupported,
+		RunForkBlockerFlowRouteHistoryUnproven,
 		"session_history_unproven",
 		"active_turn_history_unproven",
 	} {
@@ -270,7 +304,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
-	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
+	for _, code := range []string{"timer_history_unproven"} {
 		if blockers[code] {
 			t.Fatalf("unexpected unrelated blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
@@ -320,6 +354,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 		t.Fatalf("seed safe pending delivery: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -332,6 +367,9 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	}
 	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
+	}
+	if plan.RouteHistory.State != RunForkRouteHistoryNotApplicable {
+		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, RunForkRouteHistoryNotApplicable)
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
 		if disposition.Fact == RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == RunForkReplayResumeDispositionForkReplay {
@@ -372,6 +410,7 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 		t.Fatalf("seed node pending delivery: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -473,6 +512,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 				t.Fatalf("seed node delivery: %v", err)
 			}
 
+			captureRunForkTestRevision(t, db, runID)
 			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
@@ -527,6 +567,7 @@ func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testin
 		t.Fatalf("seed replay-scope marker: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -580,7 +621,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	}
 }
 
-func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRouteTables(t *testing.T) {
+func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentRouteRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -642,25 +683,52 @@ func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRou
 		t.Fatalf("seed unrelated route: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if !plan.ExecutionReady {
-		t.Fatalf("ExecutionReady = false, want true for state-only plan; blockers=%#v", plan.UnsupportedBlockers)
+	if plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = true, want route-history blocker; blockers=%#v", plan.UnsupportedBlockers)
 	}
-	if plan.UnsupportedBlockerCount != 0 {
-		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
+	if !runForkTestHasBlocker(plan, RunForkBlockerFlowRouteHistoryUnproven) {
+		t.Fatalf("blockers=%#v, want %s", plan.UnsupportedBlockers, RunForkBlockerFlowRouteHistoryUnproven)
+	}
+	if plan.RouteHistory.State != RunForkRouteHistoryUnknownUnversioned {
+		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, RunForkRouteHistoryUnknownUnversioned)
+	}
+	baseline, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal baseline fixed-revision plan: %v", err)
+	}
+	for _, mutation := range []struct {
+		label string
+		query string
+	}{
+		{label: "update", query: `UPDATE routing_rules SET event_pattern='fork.state', flow_instance='flow-a/1', source_flow='flow-a', status='active'`},
+		{label: "delete", query: `DELETE FROM routing_rules`},
+		{label: "insert", query: `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ('fork.state', 'node', 'late-node', 'flow-a/9', 'flow-a', true, 'active', now())`},
+	} {
+		if _, err := db.ExecContext(ctx, mutation.query); err != nil {
+			t.Fatalf("%s current routing rules: %v", mutation.label, err)
+		}
+		replanned, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+		if err != nil {
+			t.Fatalf("PlanRunFork after current route %s: %v", mutation.label, err)
+		}
+		got, err := json.Marshal(replanned)
+		if err != nil {
+			t.Fatalf("marshal fixed-revision plan after route %s: %v", mutation.label, err)
+		}
+		if string(got) != string(baseline) {
+			t.Fatalf("fixed-revision plan changed after current route %s\nbefore: %s\nafter:  %s", mutation.label, baseline, got)
+		}
 	}
 	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
 	}
-	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
-		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want true/false/false",
-			plan.ReplayResumeAdmission.StateOnlyExecutionReady,
-			plan.ReplayResumeAdmission.ReplayResumeFactsPresent,
-			plan.ReplayResumeAdmission.BoundedReplaySupported,
-		)
+	if plan.ReplayResumeAdmission.StateOnlyExecutionReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want false/true/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
 	}
 	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactEntityStateSnapshot) {
 		t.Fatalf("missing entity-state taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
@@ -721,6 +789,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		t.Fatalf("seed relevant route: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -797,6 +866,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -850,12 +920,21 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'agent', 'completed-after-fork', 'delivered', 0, 'ok', $3, $4, $3),
-			($1::uuid, $2::uuid, 'agent', 'started-after-fork', 'delivered', 0, 'ok', $4, $5, $3)
-	`, runID, eventID, at, at.Add(time.Minute), at.Add(2*time.Minute)); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
+			($1::uuid, $2::uuid, 'agent', 'completed-after-fork', 'in_progress', 0, '', $3, NULL, $3),
+			($1::uuid, $2::uuid, 'agent', 'started-after-fork', 'pending', 0, '', NULL, NULL, $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed selected-revision deliveries: %v", err)
 	}
-
+	captureRunForkTestRevision(t, db, runID)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'delivered', reason_code = 'ok',
+		    started_at = COALESCE(started_at, $3), delivered_at = $3
+		WHERE run_id = $1::uuid AND event_id = $2::uuid
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("complete deliveries after selected revision: %v", err)
+	}
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -913,12 +992,21 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'agent', 'failed-after-fork', 'failed', 2, 'retry_exhausted', $3, $4, $3),
-			($1::uuid, $2::uuid, 'agent', 'pending-then-failed-after-fork', 'failed', 2, 'retry_exhausted', $4, $5, $3)
-	`, runID, eventID, at, at.Add(time.Minute), at.Add(2*time.Minute)); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
+			($1::uuid, $2::uuid, 'agent', 'failed-after-fork', 'in_progress', 0, '', $3, NULL, $3),
+			($1::uuid, $2::uuid, 'agent', 'pending-then-failed-after-fork', 'pending', 0, '', NULL, NULL, $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed selected-revision deliveries: %v", err)
 	}
-
+	captureRunForkTestRevision(t, db, runID)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'failed', retry_count = 2, reason_code = 'retry_exhausted',
+		    started_at = COALESCE(started_at, $3), delivered_at = $3
+		WHERE run_id = $1::uuid AND event_id = $2::uuid
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("fail deliveries after selected revision: %v", err)
+	}
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -992,6 +1080,7 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 		t.Fatalf("seed delivered receipt: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -1079,6 +1168,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		t.Fatalf("seed active turn: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -1130,6 +1220,7 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 		t.Fatalf("seed active task audit: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -1184,6 +1275,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	`, sessionID, runID, at.Add(-time.Second), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed terminated session: %v", err)
 	}
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -1230,6 +1322,7 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 		t.Fatalf("seed terminated audit: %v", err)
 	}
 
+	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)

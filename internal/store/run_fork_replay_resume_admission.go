@@ -127,7 +127,7 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		})
 		hasHistoricalReplayRequirement = true
 	}
-	if evidence.RelevantRoute {
+	if strings.TrimSpace(evidence.RouteHistory.State) == RunForkRouteHistoryUnknownUnversioned {
 		blocker := runForkReplayResumeBlocker(RunForkBlockerFlowRouteHistoryUnproven)
 		blockers = appendRunForkBlocker(blockers, blocker)
 		dispositions = append(dispositions, RunForkReplayResumeDisposition{
@@ -194,6 +194,31 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		Dispositions:             dispositions,
 		UnsupportedBlockers:      blockers,
 	}
+}
+
+// RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the
+// unversioned route-history blocker after the selected route topology and its
+// persisted fork-local recovery have been validated by the caller.
+func RunForkReplayResumeAdmissionWithSelectedRouteResolution(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
+	filtered := make([]RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	for _, blocker := range admission.UnsupportedBlockers {
+		if strings.TrimSpace(blocker.Code) == RunForkBlockerFlowRouteHistoryUnproven {
+			continue
+		}
+		filtered = append(filtered, blocker)
+	}
+	admission.UnsupportedBlockers = filtered
+	for i := range admission.Dispositions {
+		if strings.TrimSpace(admission.Dispositions[i].Fact) != RunForkReplayResumeFactRouteHistory {
+			continue
+		}
+		admission.Dispositions[i].Disposition = RunForkReplayResumeDispositionReconstruct
+		admission.Dispositions[i].BlockerCode = ""
+		admission.Dispositions[i].Owner = RunForkSelectedContractRoutePersistenceOwner
+		admission.Dispositions[i].Classification = RunForkRouteHistoryUnknownUnversioned
+		admission.Dispositions[i].Message = "selected frontier, binding, and static/dynamic topology proof resolve unversioned source routes into persisted fork-local route recovery"
+	}
+	return runForkReplayResumeAdmissionRecalculateReadiness(admission)
 }
 
 func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunForkReplayResumeDisposition {
@@ -378,12 +403,12 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 	case RunForkBlockerNonAgentDeliveryReplayUnsupported:
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerNonAgentDeliveryReplayUnsupported,
-			Message: "non-agent delivery replay requires runtime handler, idempotency, receipt, route, and side-effect semantics and is not supported by the timestamp-fork delivery/event replay primitive",
+			Message: "non-agent delivery replay requires runtime handler, idempotency, receipt, route, and side-effect semantics and is not supported by the fixed-revision delivery/event replay primitive",
 		}
 	case RunForkBlockerCommittedReplayScopeReplayUnsupported:
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerCommittedReplayScopeReplayUnsupported,
-			Message: "committed replay-scope marker rows are same-run replay proof and are not node work to replay into a timestamp fork",
+			Message: "committed replay-scope marker rows are same-run replay proof and are not node work to replay into a fixed-revision fork",
 		}
 	case RunForkBlockerTimerHistoryUnproven:
 		return RunForkUnsupportedBlocker{
@@ -413,12 +438,12 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 	case RunForkBlockerEntitySnapshotMetadataUnproven:
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerEntitySnapshotMetadataUnproven,
-			Message: "fork materialization requires owner-authorized source-at-T entity snapshot metadata for every reconstructed entity",
+			Message: "fork materialization requires owner-authorized entity snapshot metadata at the selected revision for every reconstructed entity",
 		}
 	case RunForkBlockerOpenReplyContextUnsupported:
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerOpenReplyContextUnsupported,
-			Message: "timestamp fork is blocked because the source run has an open reply context at the fork point; complete or cancel the request before forking",
+			Message: "fixed-revision fork is blocked because the source run has an open reply context at the selected revision; complete or cancel the request before forking",
 		}
 	default:
 		code = strings.TrimSpace(code)
@@ -427,7 +452,7 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 		}
 		return RunForkUnsupportedBlocker{
 			Code:    code,
-			Message: fmt.Sprintf("timestamp-fork bounded re-execution is not proven for %s by the canonical admission taxonomy", code),
+			Message: fmt.Sprintf("fixed-revision bounded re-execution is not proven for %s by the canonical admission taxonomy", code),
 		}
 	}
 }

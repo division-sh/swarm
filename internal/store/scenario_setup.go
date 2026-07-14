@@ -107,7 +107,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 			return ScenarioSetupResult{}, fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return ScenarioSetupResult{}, fmt.Errorf("commit postgres scenario setup: %w", err)
 	}
 	committed = true

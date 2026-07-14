@@ -11,6 +11,7 @@ import (
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 )
 
 type replyContextSQL interface {
@@ -25,7 +26,21 @@ func (s *PostgresStore) CreateReplyContext(ctx context.Context, record runtimere
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return createPostgresReplyContext(ctx, tx, record)
 	}
-	return createPostgresReplyContext(ctx, s.DB, record)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reply context create: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createPostgresReplyContext(ctx, tx, record); err != nil {
+		return err
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reply context create: %w", err)
+	}
+	return nil
 }
 
 func createPostgresReplyContext(ctx context.Context, db replyContextSQL, record runtimereplycontext.Record) error {
@@ -170,6 +185,9 @@ func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id, replyEventID 
 	defer func() { _ = tx.Rollback() }()
 	record, outcome, err := claimPostgresReplyContext(ctx, tx, id, replyEventID)
 	if err != nil {
+		return runtimereplycontext.Record{}, "", err
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
 		return runtimereplycontext.Record{}, "", err
 	}
 	if err := tx.Commit(); err != nil {

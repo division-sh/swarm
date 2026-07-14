@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -26,11 +27,17 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	ContractSelection RunForkContractSelection
 	BundleHash        string
 	BundleSource      string
+	FrontierAdmission RunForkContractFrontierAdmission
+	RouteTopology     RunForkSelectedContractRouteTopology
+	RecipientPlanning RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
 	ForkRunID             string
 	AllowedSourceEventIDs []string
+	FrontierAdmission     RunForkContractFrontierAdmission
+	RouteTopology         RunForkSelectedContractRouteTopology
+	RecipientPlanning     RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractSourceEvent struct {
@@ -63,6 +70,80 @@ type RunForkSelectedContractBranchDivergence struct {
 	SourceFrozen                   bool      `json:"source_frozen"`
 	SourceAdvancedFacts            []string  `json:"source_advanced_facts,omitempty"`
 	CreatedAt                      time.Time `json:"created_at"`
+}
+
+func prepareRunForkSelectedContractRouteResolution(
+	plan RunForkPlan,
+	forkRunID string,
+	selection RunForkContractSelection,
+	frontier RunForkContractFrontierAdmission,
+	topology RunForkSelectedContractRouteTopology,
+	planning RunForkSelectedContractRecipientPlanning,
+) (RunForkSelectedContractRouteRecovery, bool, error) {
+	switch strings.TrimSpace(plan.RouteHistory.State) {
+	case RunForkRouteHistoryNotApplicable:
+		return RunForkSelectedContractRouteRecovery{}, false, nil
+	case RunForkRouteHistoryUnknownUnversioned:
+	default:
+		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route resolution received unsupported route history state %q", plan.RouteHistory.State)
+	}
+	if strings.TrimSpace(frontier.Owner) != RunForkContractFrontierAdmissionOwner || !frontier.NonMutating {
+		return RunForkSelectedContractRouteRecovery{}, false, runForkReplayResumeError(
+			RunForkBlockerFlowRouteHistoryUnproven,
+			RunForkReplayResumeFactRouteHistory,
+			"selected-contract route resolution requires canonical frontier admission",
+		)
+	}
+	if !topology.StaticTopologySupported || !topology.DynamicTopologySupported {
+		return RunForkSelectedContractRouteRecovery{}, false, runForkReplayResumeError(
+			RunForkBlockerFlowRouteHistoryUnproven,
+			RunForkReplayResumeFactRouteHistory,
+			"selected-contract route resolution requires complete static and dynamic topology proof",
+		)
+	}
+	if err := validateRunForkSelectedContractRouteRecoverySelection("route resolution frontier", selection, frontier.ContractSelection); err != nil {
+		return RunForkSelectedContractRouteRecovery{}, false, err
+	}
+	count, eventIDs, fingerprint := RunForkContractFrontierEvidenceBinding(frontier)
+	if count != topology.FrontierEventCount || !equalTrimmedStrings(eventIDs, topology.FrontierSourceEventIDs) || fingerprint != strings.TrimSpace(topology.FrontierEvidenceFingerprint) {
+		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route topology does not match the fixed-event frontier")
+	}
+	if plan.historicalSnapshot == nil || plan.historicalSnapshot.Revision != plan.ForkPoint.Revision {
+		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route resolution requires the fixed-event revision snapshot")
+	}
+	historicalEvents := map[string]struct{}{}
+	for _, event := range plan.historicalSnapshot.Events {
+		historicalEvents[strings.TrimSpace(event.EventID)] = struct{}{}
+	}
+	for _, eventID := range eventIDs {
+		if _, ok := historicalEvents[strings.TrimSpace(eventID)]; !ok {
+			return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route frontier event %s is outside fixed revision %d", eventID, plan.ForkPoint.Revision)
+		}
+	}
+	record, err := normalizeRunForkSelectedContractRouteRecovery(RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       plan.SourceRunID,
+		ForkEventID:       plan.ForkPoint.EventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	}, time.Now().UTC())
+	if err != nil {
+		return RunForkSelectedContractRouteRecovery{}, false, err
+	}
+	return record, true, nil
+}
+
+func equalTrimmedStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if strings.TrimSpace(left[i]) != strings.TrimSpace(right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -146,35 +227,13 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	replayAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(replayAdmission, timerReconstruction)
-	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp)
+	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	routeRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
 	if err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
-			return RunForkMaterialization{
-				SourceRunID:           plan.SourceRunID,
-				ForkPoint:             plan.ForkPoint,
-				ExecutionReady:        false,
-				ReplayResumeAdmission: admission,
-				UnsupportedBlockers:   admission.UnsupportedBlockers,
-				DeliveryResumeBlocked: true,
-			}, err
-		}
 		return RunForkMaterialization{}, err
 	}
-	replayAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(replayAdmission, conversationAdvancedFacts)
-	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.EventID, plan.ForkPoint.Timestamp); err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
-			return RunForkMaterialization{
-				SourceRunID:           plan.SourceRunID,
-				ForkPoint:             plan.ForkPoint,
-				ExecutionReady:        false,
-				ReplayResumeAdmission: admission,
-				UnsupportedBlockers:   admission.UnsupportedBlockers,
-				DeliveryResumeBlocked: true,
-			}, err
-		}
-		return RunForkMaterialization{}, err
+	if routeResolved {
+		replayAdmission = RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 	}
 	if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil); len(blockers) > 0 {
 		return RunForkMaterialization{
@@ -187,7 +246,6 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		}, fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
 	}
 
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("begin selected-contract fork materialization: %w", err)
@@ -232,10 +290,15 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
+	if routeResolved {
+		if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, routeRecovery); err != nil {
+			return RunForkMaterialization{}, err
+		}
+	}
 	if err := insertRunForkSelectedContractTimerReconstructions(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, timerReconstruction, now); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
 	}
 	committed = true
@@ -286,12 +349,15 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	if err != nil {
 		return RunForkActivation{}, err
 	}
+	if err := lockRunForkSourceRevisionFrontier(ctx, tx, &lineage); err != nil {
+		return RunForkActivation{}, err
+	}
 	result := RunForkActivation{
 		SourceRunID:             lineage.SourceRunID,
 		ForkRunID:               lineage.ForkRunID,
 		ForkRunStatus:           lineage.ForkStatus,
 		SourceRunStatus:         lineage.SourceRunStatus,
-		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime},
+		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
 		ReplayResumeBlocked:     true,
 		MaterializedEntityCount: len(lineage.EntityIDs),
 	}
@@ -319,6 +385,23 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return result, err
 	}
 	result.ReplayResumeAdmission = RunForkSelectedContractReplayResumeAdmission(plan)
+	expectedRouteRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(
+		plan,
+		lineage.ForkRunID,
+		binding.ContractSelection,
+		req.FrontierAdmission,
+		req.RouteTopology,
+		req.RecipientPlanning,
+	)
+	if err != nil {
+		return result, err
+	}
+	if routeResolved {
+		if err := validateRunForkSelectedContractRouteRecoveryAtActivation(ctx, tx, expectedRouteRecovery); err != nil {
+			return result, err
+		}
+		result.ReplayResumeAdmission = RunForkReplayResumeAdmissionWithSelectedRouteResolution(result.ReplayResumeAdmission)
+	}
 	timerResolved, err := runForkSelectedContractTimerReconstructionComplete(ctx, tx, lineage, plan)
 	if err != nil {
 		return result, err
@@ -328,44 +411,30 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
 	}
-	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime)
+	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, lineage)
 	if err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
-			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
-		}
 		return result, err
 	}
+	conversationAdvancedFacts := runForkSelectedContractConversationAdvancedFacts(sourceAdvancedFacts)
 	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(result.ReplayResumeAdmission, conversationAdvancedFacts)
-	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventID, lineage.ForkEventTime); err != nil {
+	if err := ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx, tx, lineage); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
 		}
 		return result, err
 	}
-	sourceAdvancedAdmissionFacts := append([]string{}, conversationAdvancedFacts...)
-	sourceAdvancedAdmissionFacts = append(sourceAdvancedAdmissionFacts, runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
-	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage, sourceAdvancedAdmissionFacts)
-	if err != nil {
+	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, lineage.SourceRunID, lineage.ForkEventRevision); err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
 		return result, err
 	}
+	sourceAdvancedFacts = append(sourceAdvancedFacts, runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
+	sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 	if len(sourceAdvancedFacts) > 0 {
 		result.SourceAdvancedAfterFork = true
-	}
-	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, catalog, lineage); err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
-			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
-		}
-		return result, err
-	}
-	if err := ensureRunForkNoRelevantPostForkRoutes(ctx, tx, catalog, lineage); err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
-			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
-		}
-		return result, err
 	}
 	if err := ensureRunForkSelectedContractExecutionForkState(ctx, tx, catalog, lineage.ForkRunID, req.AllowedSourceEventIDs); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
@@ -406,7 +475,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		if err := insertRunForkSelectedContractBranchDivergence(ctx, tx, divergence); err != nil {
 			return result, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
 		}
 		committed = true
@@ -446,7 +515,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	} else if affected != 1 {
 		return result, fmt.Errorf("selected-contract fork activation blocked: fork_run_activation_not_applied")
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return result, fmt.Errorf("commit selected-contract fork activation: %w", err)
 	}
 	committed = true
@@ -492,6 +561,9 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	}
 	if status != RunForkMaterializedStatus {
 		return fmt.Errorf("selected-contract fork discard requires materialized fork status %q; got %q", RunForkMaterializedStatus, status)
+	}
+	if err := guardDestructiveResetSourceForkDependencies(ctx, tx, []string{forkRunID}); err != nil {
+		return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
 	}
 	var preserveCompletionEvidence bool
 	if catalog.hasColumns("run_fork_selected_contract_runtime_executions", "fork_run_id") {
@@ -579,6 +651,15 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		return fmt.Errorf("delete selected-contract fork entity state: %w", err)
 	}
 	if preserveCompletionEvidence {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork fact revisions: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_revisions WHERE run_id=$1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork revision ledger: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_revision_heads WHERE run_id=$1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork revision head: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='cancelled', ended_at=NOW() WHERE run_id=$1::uuid AND status=$2`, forkRunID, RunForkMaterializedStatus); err != nil {
 			return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
 		}
@@ -590,7 +671,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			return fmt.Errorf("delete selected-contract fork run: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)
 	}
 	committed = true
@@ -667,7 +748,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		}
 		out[idx] = prepared
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return nil, fmt.Errorf("commit selected-contract source event preparation: %w", err)
 	}
 	committed = true
@@ -707,134 +788,14 @@ func runForkSelectedContractBranchSourceStatusSupported(status string) bool {
 	}
 }
 
-func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage, conversationAdvancedFacts []string) ([]string, error) {
-	checks := []struct {
-		code    string
-		enabled bool
-		query   string
-		args    []any
-	}{
-		{
-			code:    "source_events_advanced_after_fork_point",
-			enabled: true,
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM events
-					WHERE run_id = $1::uuid
-					  AND (created_at, event_id) > ($2::timestamptz, $3::uuid)
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
-		},
-		{
-			code:    "source_mutations_advanced_after_fork_point",
-			enabled: true,
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM entity_mutations
-					WHERE run_id = $1::uuid
-					  AND created_at > $2::timestamptz
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
-		},
-		{
-			code:    "source_current_state_advanced_after_fork_point",
-			enabled: true,
-			query: `
-				SELECT EXISTS (
-					SELECT 1 FROM entity_state
-					WHERE run_id = $1::uuid
-					  AND updated_at > $2::timestamptz
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
-		},
-		{
-			code:    "source_deliveries_advanced_after_fork_point",
-			enabled: true,
-			query: `
-				SELECT EXISTS (
-					SELECT 1
-					FROM event_deliveries d
-					LEFT JOIN events e ON e.event_id = d.event_id
-					   AND e.run_id = d.run_id
-					WHERE d.run_id = $1::uuid
-					  AND (
-							d.created_at > $2::timestamptz
-							OR d.started_at > $2::timestamptz
-							OR d.delivered_at > $2::timestamptz
-					  )
-					  AND NOT (
-							d.subscriber_type = $4
-							AND d.subscriber_id = $5
-							AND d.reason_code = ANY($6::text[])
-							AND e.event_id IS NOT NULL
-							AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
-					  )
-				)
-			`,
-			args: []any{
-				lineage.SourceRunID,
-				lineage.ForkEventTime,
-				lineage.ForkEventID,
-				replayScopeMarkerSubscriberType,
-				replayScopeMarkerSubscriberID,
-				pq.Array(runForkReplayScopeMarkerReasonCodes()),
-			},
-		},
-		{
-			code:    "source_receipts_advanced_after_fork_point",
-			enabled: catalog.hasColumns("event_receipts", "event_id", "processed_at") && catalog.hasColumns("events", "event_id", "run_id", "created_at"),
-			query: `
-				SELECT EXISTS (
-					SELECT 1
-					FROM event_receipts r
-					INNER JOIN events e ON e.event_id = r.event_id
-					WHERE e.run_id = $1::uuid
-					  AND (
-							r.processed_at > $2::timestamptz
-							OR (e.created_at, e.event_id) > ($2::timestamptz, $3::uuid)
-					  )
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
-		},
-		{
-			code:    "source_dead_letters_advanced_after_fork_point",
-			enabled: catalog.hasColumns("dead_letters", "original_event_id", "created_at") && catalog.hasColumns("events", "event_id", "run_id", "created_at"),
-			query: `
-				SELECT EXISTS (
-					SELECT 1
-					FROM dead_letters dl
-					INNER JOIN events e ON e.event_id = dl.original_event_id
-					WHERE e.run_id = $1::uuid
-					  AND (
-							dl.created_at > $2::timestamptz
-							OR (e.created_at, e.event_id) > ($2::timestamptz, $3::uuid)
-					  )
-				)
-			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
-		},
+func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) ([]string, error) {
+	facts, err := collectRunForkSourceAdvancedFacts(ctx, tx, lineage)
+	if err != nil {
+		return nil, err
 	}
-	facts := []string{}
 	switch strings.TrimSpace(lineage.SourceRunStatus) {
 	case "completed", "failed", "cancelled":
 		facts = append(facts, "source_run_terminal_at_activation")
-	}
-	facts = append(facts, conversationAdvancedFacts...)
-	for _, check := range checks {
-		if !check.enabled {
-			continue
-		}
-		var exists bool
-		if err := tx.QueryRowContext(ctx, check.query, check.args...).Scan(&exists); err != nil {
-			return nil, fmt.Errorf("check selected-contract branch %s: %w", check.code, err)
-		}
-		if exists {
-			facts = append(facts, check.code)
-		}
 	}
 	return uniqueNonEmptyStrings(facts), nil
 }
@@ -956,42 +917,57 @@ func runForkSelectedContractAdmissionBlockerForPendingWork(admission RunForkRepl
 	return RunForkUnsupportedBlocker{}, false
 }
 
-func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string, forkTime time.Time) error {
+func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return err
 	}
-	return ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, sourceRunID, forkEventID, forkTime)
+	defer func() { _ = tx.Rollback() }()
+	if err := runforkrevision.ValidateComplete(ctx, tx, sourceRunID); err != nil {
+		return err
+	}
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT MIN(revision)
+		FROM run_fork_fact_revisions
+		WHERE run_id = $1::uuid
+		  AND family = 'events'
+		  AND fact_key = $2
+		  AND present
+	`, sourceRunID, forkEventID).Scan(&revision); err != nil {
+		return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
+	}
+	if revision <= 0 {
+		return fmt.Errorf("committed replay-scope fork event is not revisioned; recreate the store and retry")
+	}
+	return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, sourceRunID, revision)
 }
 
-func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID, forkEventID string, forkTime time.Time) error {
-	if !catalog.hasColumns("event_deliveries", "run_id", "event_id", "subscriber_type", "subscriber_id", "reason_code") {
-		return nil
-	}
-	if !catalog.hasColumns("events", "event_id", "run_id", "created_at") {
-		return nil
-	}
+func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Context, q timerReconstructionQueryer, sourceRunID string, forkRevision int64) error {
 	var exists bool
 	query := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM event_deliveries d
-			LEFT JOIN events e ON e.event_id = d.event_id
-			   AND e.run_id = d.run_id
+			JOIN LATERAL (
+				SELECT MAX(revision) AS revision
+				FROM run_fork_fact_revisions
+				WHERE run_id = d.run_id
+				  AND family = 'event_deliveries'
+				  AND fact_key = d.delivery_id::text
+				  AND present
+			) history ON TRUE
 			WHERE d.run_id = $1::uuid
 			  AND d.subscriber_type = $2
 			  AND d.subscriber_id = $3
 			  AND d.reason_code = ANY($4::text[])
-			  AND (
-					e.event_id IS NULL
-					OR (e.created_at, e.event_id) > ($5::timestamptz, $6::uuid)
-			  )
+			  AND history.revision > $5
 		)
 	`
-	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array(runForkReplayScopeMarkerReasonCodes()), forkTime, forkEventID).Scan(&exists); err != nil {
+	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array(runForkReplayScopeMarkerReasonCodes()), forkRevision).Scan(&exists); err != nil {
 		return fmt.Errorf("check selected-contract source_committed_replay_scope_advanced_after_fork_point: %w", err)
 	}
 	if exists {
@@ -1005,86 +981,41 @@ func runForkReplayScopeMarkerReasonCodes() []string {
 	return []string{replayScopeReasonDirect, replayScopeReasonSubscribed}
 }
 
-func collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) ([]string, error) {
-	if err := ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx, q, catalog, sourceRunID, forkTime); err != nil {
-		return nil, err
-	}
-	checks := []struct {
-		code       string
-		table      string
-		predicates []string
-	}{
-		{
-			code:       "source_sessions_advanced_after_fork_point",
-			table:      "agent_sessions",
-			predicates: runForkPostForkConversationPredicates(catalog, "agent_sessions", "created_at", "updated_at", "terminated_at"),
-		},
-		{
-			code:       "source_conversation_audits_advanced_after_fork_point",
-			table:      "agent_conversation_audits",
-			predicates: runForkPostForkConversationPredicates(catalog, "agent_conversation_audits", "created_at", "updated_at"),
-		},
-		{
-			code:       "source_turns_advanced_after_fork_point",
-			table:      "agent_turns",
-			predicates: runForkPostForkConversationPredicates(catalog, "agent_turns", "created_at"),
-		},
-	}
-	facts := []string{}
-	for _, check := range checks {
-		if len(check.predicates) == 0 || !catalog.hasColumns(check.table, "run_id") {
-			continue
-		}
-		var exists bool
-		query := fmt.Sprintf(`
-			SELECT EXISTS (
-				SELECT 1
-				FROM %s
-				WHERE run_id = $1::uuid
-				  AND (%s)
-			)
-		`, check.table, strings.Join(check.predicates, " OR "))
-		if err := q.QueryRowContext(ctx, query, sourceRunID, forkTime).Scan(&exists); err != nil {
-			return nil, fmt.Errorf("check selected-contract %s: %w", check.code, err)
-		}
-		if exists {
-			facts = append(facts, check.code)
+func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
+	out := []string{}
+	for _, fact := range facts {
+		switch strings.TrimSpace(fact) {
+		case "source_sessions_advanced_after_fork_point", "source_conversation_audits_advanced_after_fork_point", "source_turns_advanced_after_fork_point":
+			out = append(out, fact)
 		}
 	}
-	return uniqueNonEmptyStrings(facts), nil
+	return uniqueNonEmptyStrings(out)
 }
 
-func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
-	if !catalog.hasColumns("event_deliveries", "run_id", "status") {
-		return nil
-	}
-	postForkPredicates := []string{}
-	for _, column := range []string{"created_at", "started_at", "delivered_at"} {
-		if catalog.hasColumns("event_deliveries", column) {
-			postForkPredicates = append(postForkPredicates, fmt.Sprintf("d.%s > $2::timestamptz", column))
-		}
-	}
-	if len(postForkPredicates) == 0 {
-		return nil
-	}
-	couplingPredicates := []string{"d.status = 'in_progress'"}
-	if catalog.hasColumns("event_deliveries", "active_session_id") {
-		couplingPredicates = append(couplingPredicates, "d.active_session_id IS NOT NULL")
-	}
-	if catalog.hasColumns("event_deliveries", "started_at", "delivered_at") {
-		couplingPredicates = append(couplingPredicates, "(d.started_at IS NOT NULL AND d.delivered_at IS NULL)")
-	}
+func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, lineage runForkActivationLineage) error {
 	var exists bool
-	query := fmt.Sprintf(`
+	query := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM event_deliveries d
+			JOIN LATERAL (
+				SELECT MAX(revision) AS revision
+				FROM run_fork_fact_revisions
+				WHERE run_id = d.run_id
+				  AND family = 'event_deliveries'
+				  AND fact_key = d.delivery_id::text
+				  AND present
+			) history ON TRUE
 			WHERE d.run_id = $1::uuid
-			  AND (%s)
-			  AND (%s)
+			  AND history.revision > $2
+			  AND (
+					d.status = 'in_progress'
+					OR d.active_session_id IS NOT NULL
+					OR (d.started_at IS NOT NULL AND d.delivered_at IS NULL)
+			  )
 		)
-	`, strings.Join(postForkPredicates, " OR "), strings.Join(couplingPredicates, " OR "))
-	if err := q.QueryRowContext(ctx, query, sourceRunID, forkTime).Scan(&exists); err != nil {
+	`
+	if err := q.QueryRowContext(ctx, query, lineage.SourceRunID, lineage.ForkEventRevision).Scan(&exists); err != nil {
 		return fmt.Errorf("check selected-contract source_active_conversation_session_coupling_after_fork_point: %w", err)
 	}
 	if exists {
@@ -1123,16 +1054,6 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 		})
 	}
 	return admission
-}
-
-func runForkPostForkConversationPredicates(catalog schemaColumnCatalog, table string, columns ...string) []string {
-	predicates := []string{}
-	for _, column := range columns {
-		if catalog.hasColumns(table, column) {
-			predicates = append(predicates, fmt.Sprintf("%s > $2::timestamptz", column))
-		}
-	}
-	return predicates
 }
 
 func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string, allowedSourceEventIDs []string) error {

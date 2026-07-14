@@ -82,6 +82,11 @@ func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	if tx == nil {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.AppendEventTx(txctx, tx, evt)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -94,9 +99,6 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		}
 		switch caps.Events.Log {
 		case SchemaFlavorCanonical:
-			if tx == nil && persistedBundleRunCreationValidationRequired(ctx, caps) {
-				return s.appendEventSpecWithRunCreationValidationTx(ctx, caps, evt)
-			}
 			return s.appendEventSpec(ctx, caps, tx, evt)
 		default:
 			return unsupportedSchemaCapability("events", caps.Events.Log)
@@ -118,7 +120,7 @@ func (s *PostgresStore) appendEventSpecWithRunCreationValidationTx(ctx context.C
 	if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit event source validation tx: %w", err)
 	}
 	committed = true
@@ -297,6 +299,11 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 	if len(agentIDs) == 0 {
 		return nil
 	}
+	if tx == nil {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.InsertEventDeliveriesTx(txctx, tx, eventID, agentIDs)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -326,6 +333,11 @@ func (s *PostgresStore) UpsertCommittedReplayScopeTx(
 	eventID string,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
+	if tx == nil {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.UpsertCommittedReplayScopeTx(txctx, tx, eventID, scope)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -375,6 +387,11 @@ func (s *PostgresStore) HasProcessedPipelineReceipt(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
+	if tx == nil {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -849,7 +866,7 @@ func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps
 		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID(), agentIDs); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 			return fmt.Errorf("commit event tx: %w", err)
 		}
 		return nil
@@ -878,7 +895,7 @@ func (s *PostgresStore) persistEventWithDeliveriesAndScopeSpec(
 		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 			return fmt.Errorf("commit event tx: %w", err)
 		}
 		return nil
@@ -908,7 +925,7 @@ func (s *PostgresStore) persistEventWithDeliveryRoutesAndScopeSpec(
 		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 			return fmt.Errorf("commit event tx: %w", err)
 		}
 		return nil
@@ -937,7 +954,7 @@ func (s *PostgresStore) persistEventWithDeliveryRouteSetAndScopeSpec(
 		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 			return fmt.Errorf("commit event tx: %w", err)
 		}
 		return nil
@@ -984,19 +1001,15 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, caps Stor
 }
 
 func (s *PostgresStore) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-		return s.insertEventDeliveriesWithTargetsSpec(ctx, caps, nil, eventID, agentIDs, deliveryTargets)
-	default:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
+	return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return s.InsertEventDeliveriesWithTargetsTx(txctx, tx, eventID, agentIDs, deliveryTargets)
+	})
 }
 
 func (s *PostgresStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+	if tx == nil {
+		return s.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -1014,6 +1027,11 @@ func (s *PostgresStore) InsertEventDeliveryRoutes(ctx context.Context, eventID s
 }
 
 func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	if tx == nil {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.InsertEventDeliveryRoutesTx(txctx, tx, eventID, deliveryRoutes)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err

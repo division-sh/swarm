@@ -144,12 +144,18 @@ func platformTableOrder(name string) int {
 		return 5
 	case "events":
 		return 10
-	case "agent_directive_operations":
+	case "run_fork_revision_heads":
 		return 11
-	case "reply_contexts":
+	case "run_fork_revisions":
 		return 12
-	case "activity_attempts":
+	case "run_fork_fact_revisions":
 		return 13
+	case "agent_directive_operations":
+		return 14
+	case "reply_contexts":
+		return 15
+	case "activity_attempts":
+		return 16
 	case "run_fork_selected_contract_bindings":
 		return 15
 	case "run_fork_selected_contract_runtime_executions":

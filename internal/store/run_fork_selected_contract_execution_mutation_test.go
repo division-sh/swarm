@@ -117,7 +117,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002405, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE events
 		SET flow_instance = ''
@@ -134,6 +134,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("update source entity_state metadata: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -186,8 +187,9 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700002410, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -256,8 +258,9 @@ func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersA
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700002415, 0).UTC()
-			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 			seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, tc.reasonCode, at)
+			captureRunForkTestRevision(t, db, sourceRunID)
 
 			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 			if err != nil {
@@ -302,7 +305,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002420, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at
@@ -311,6 +314,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	`, sourceRunID, eventID, at, uuid.NewString()); err != nil {
 		t.Fatalf("seed active delivery coupling: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -365,12 +369,13 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -441,7 +446,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
 		)
 	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
 		t.Fatalf("seed unrelated event: %v", err)
@@ -454,6 +459,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
 		t.Fatalf("seed unrelated in-progress delivery: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
@@ -461,12 +467,13 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -510,7 +517,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
 		)
 	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
 		t.Fatalf("seed unrelated event: %v", err)
@@ -530,12 +537,13 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -570,7 +578,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700002430, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -591,6 +599,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	`, eventID, entityID, at); err != nil {
 		t.Fatalf("seed terminal delivery receipt: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -620,7 +629,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
 }
 
-func TestSelectedContractExecutionActivationKeepsUnrelatedInProgressDeliveryWithoutConversationHistoryFailClosed(t *testing.T) {
+func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -639,12 +648,13 @@ func TestSelectedContractExecutionActivationKeepsUnrelatedInProgressDeliveryWith
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
@@ -679,18 +689,19 @@ func TestSelectedContractExecutionActivationKeepsUnrelatedInProgressDeliveryWith
 	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
 		t.Fatalf("seed unrelated in-progress delivery: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID: materialized.ForkRunID,
 	})
-	if err == nil || !strings.Contains(err.Error(), RunForkBlockerDeliveryHistoryUnproven) {
-		t.Fatalf("activation error = %v, want unrelated active delivery blocker", err)
+	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("activation error = %v, want post-frontier active delivery blocker", err)
 	}
 	if activation.Activated || activation.BranchDivergence != nil {
 		t.Fatalf("activation = %#v, want blocked before branch divergence", activation)
 	}
-	if !runForkTestHasActivationBlocker(activation, RunForkBlockerDeliveryHistoryUnproven) {
-		t.Fatalf("activation blockers = %#v, want delivery history blocker", activation.UnsupportedBlockers)
+	if !runForkTestHasActivationBlocker(activation, "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, want active delivery/session coupling blocker", activation.UnsupportedBlockers)
 	}
 }
 
@@ -819,13 +830,14 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002500, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
 		VALUES ($1::uuid, 'selected-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $3, 'agent-a', 'timer', 'active', $4)
 	`, sourceRunID, entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
@@ -971,8 +983,9 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700003525, 0).UTC()
-			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 			tc.insertTimer(t, db, sourceRunID, entityID, at)
+			captureRunForkTestRevision(t, db, sourceRunID)
 
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 				SourceRunID: sourceRunID,
@@ -1008,7 +1021,7 @@ func TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload(t *test
 	}
 }
 
-func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappearsAfterPlanning(t *testing.T) {
+func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeletedLater(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1016,7 +1029,7 @@ func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappea
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003550, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	timerID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
@@ -1030,6 +1043,7 @@ func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappea
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -1040,17 +1054,32 @@ func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappea
 	if _, err := db.ExecContext(ctx, `DELETE FROM timers WHERE timer_id = $1::uuid`, timerID); err != nil {
 		t.Fatalf("delete timer after planning: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	catalog, err := pg.requireRunForkSelectedContractExecutionCapabilities(ctx)
 	if err != nil {
 		t.Fatalf("require selected contract capabilities: %v", err)
 	}
-	_, err = pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
-	if err == nil || !strings.Contains(err.Error(), "no reconstructable active source timers") {
-		t.Fatalf("timer reconstruction error = %v, want no reconstructable timer blocker", err)
+	reconstruction, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
+	if err != nil {
+		t.Fatalf("reconstruct timer from original fixed snapshot: %v", err)
+	}
+	if !reconstruction.Required || len(reconstruction.Rows) != 1 || reconstruction.Rows[0].TimerID != timerID {
+		t.Fatalf("original reconstruction = %#v, want deleted source timer from fixed snapshot", reconstruction)
+	}
+	repeatedPlan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("repeat PlanRunFork: %v", err)
+	}
+	repeated, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, repeatedPlan)
+	if err != nil {
+		t.Fatalf("reconstruct timer from repeated fixed snapshot: %v", err)
+	}
+	if !repeated.Required || len(repeated.Rows) != 1 || repeated.Rows[0].TimerID != timerID {
+		t.Fatalf("repeated reconstruction = %#v, want identical historical timer", repeated)
 	}
 }
 
-func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) {
+func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1076,6 +1105,7 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	if materialized.ForkRunID == "" {
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 
 	timerID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -1090,22 +1120,23 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T timer: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
 		AllowedSourceEventIDs: []string{eventID},
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_timers_advanced_after_fork_point") {
-		t.Fatalf("activation error = %v, want post-T timer blocker", err)
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
 	}
-	if activation.Activated || activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want blocked before selected branch divergence", activation)
+	if !activation.Activated || !activation.SourceAdvancedAfterFork || activation.BranchDivergence == nil {
+		t.Fatalf("activation = %#v, want selected branch divergence", activation)
 	}
-	if !runForkTestHasActivationBlocker(activation, "source_timers_advanced_after_fork_point") {
-		t.Fatalf("activation blockers = %#v, want source_timers_advanced_after_fork_point", activation.UnsupportedBlockers)
+	if runForkTestHasActivationBlocker(activation, "source_timers_advanced_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, selected source advancement should branch", activation.UnsupportedBlockers)
 	}
-	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_timers_advanced_after_fork_point") {
-		t.Fatalf("activation replay admission = %#v, want source advanced timer blocker", activation.ReplayResumeAdmission)
+	if !containsString(activation.BranchDivergence.SourceAdvancedFacts, "source_timers_advanced_after_fork_point") {
+		t.Fatalf("branch divergence facts = %#v, want source_timers_advanced_after_fork_point", activation.BranchDivergence.SourceAdvancedFacts)
 	}
 
 	var sourceStatus, forkStatus string
@@ -1115,8 +1146,8 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
-		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
+	if sourceStatus != "running" || forkStatus != RunForkActivatedStatus {
+		t.Fatalf("run statuses source=%q fork=%q, want live source branch and activated fork", sourceStatus, forkStatus)
 	}
 
 	var branchRows, forkTimerRows int
@@ -1130,13 +1161,13 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkTimerRows); err != nil {
 		t.Fatalf("count fork timers: %v", err)
 	}
-	if branchRows != 0 || forkTimerRows != 0 {
-		t.Fatalf("branch rows=%d fork timer rows=%d, want no branch divergence and no fork timer copies", branchRows, forkTimerRows)
+	if branchRows != 1 || forkTimerRows != 0 {
+		t.Fatalf("branch rows=%d fork timer rows=%d, want one divergence and no post-frontier timer copies", branchRows, forkTimerRows)
 	}
 	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
 }
 
-func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHistory(t *testing.T) {
+func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1163,6 +1194,7 @@ func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHist
 	`, sessionID, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T source session: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
@@ -1183,8 +1215,8 @@ func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHist
 	if runForkTestHasMaterializationBlocker(materialized, "source_sessions_advanced_after_fork_point") {
 		t.Fatalf("selected-contract materialization kept post-T source session blocker: %#v", materialized.UnsupportedBlockers)
 	}
-	if !runForkTestHasLineageDispositionOwnerClassification(materialized.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, "source_sessions_advanced_after_fork_point") {
-		t.Fatalf("materialization replay admission missing #671 owner: %#v", materialized.ReplayResumeAdmission)
+	if runForkTestHasLineageDispositionOwnerClassification(materialized.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, "source_sessions_advanced_after_fork_point") {
+		t.Fatalf("materialization replay admission consumed a post-frontier source session: %#v", materialized.ReplayResumeAdmission)
 	}
 	var copiedSessions int
 	if err := db.QueryRowContext(ctx, `
@@ -1200,7 +1232,7 @@ func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHist
 	}
 }
 
-func TestPostTSourceConversationHistoryMaterializationKeepsActiveCouplingFailClosed(t *testing.T) {
+func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1222,19 +1254,18 @@ func TestPostTSourceConversationHistoryMaterializationKeepsActiveCouplingFailClo
 			WorkflowVersion: "v1",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
-		t.Fatalf("materialization error = %v, want active post-T conversation coupling blocker", err)
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite active post-T conversation coupling: %#v", materialized)
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialization = %#v, want fixed-event materialization", materialized)
 	}
-	if !runForkTestHasMaterializationBlocker(materialized, "source_active_conversation_session_coupling_after_fork_point") {
-		t.Fatalf("materialization blockers = %#v, want active post-T coupling blocker", materialized.UnsupportedBlockers)
+	if runForkTestHasMaterializationBlocker(materialized, "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("materialization blockers = %#v, post-frontier coupling belongs to fresh activation validation", materialized.UnsupportedBlockers)
 	}
-	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
-func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) {
+func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1260,6 +1291,7 @@ func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) 
 	if materialized.ForkRunID == "" {
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
@@ -1275,17 +1307,17 @@ func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) 
 		ForkRunID:             materialized.ForkRunID,
 		AllowedSourceEventIDs: []string{eventID},
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_routes_advanced_after_fork_point") {
-		t.Fatalf("activation error = %v, want post-T route blocker", err)
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
 	}
-	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want blocked before selected branch divergence", activation)
+	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want current global route to leave fixed source frontier unchanged", activation)
 	}
-	if !runForkTestHasActivationBlocker(activation, "source_routes_advanced_after_fork_point") {
-		t.Fatalf("activation blockers = %#v, want source_routes_advanced_after_fork_point", activation.UnsupportedBlockers)
+	if runForkTestHasActivationBlocker(activation, "source_routes_advanced_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, current global routes are not historical source facts", activation.UnsupportedBlockers)
 	}
-	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_routes_advanced_after_fork_point") {
-		t.Fatalf("activation replay admission = %#v, want source advanced route blocker", activation.ReplayResumeAdmission)
+	if runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_routes_advanced_after_fork_point") {
+		t.Fatalf("activation replay admission = %#v, current global routes must not enter the fixed workset", activation.ReplayResumeAdmission)
 	}
 
 	var sourceStatus, forkStatus string
@@ -1295,8 +1327,8 @@ func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) 
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
-		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
+	if sourceStatus != "forked" || forkStatus != "running" {
+		t.Fatalf("run statuses source=%q fork=%q, want source forked and fork running after activation", sourceStatus, forkStatus)
 	}
 
 	var branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows int
@@ -1328,8 +1360,8 @@ func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) 
 	`, materialized.ForkRunID).Scan(&routeRecoveryRows); err != nil {
 		t.Fatalf("count route recovery rows: %v", err)
 	}
-	if branchRows != 0 || forkDeliveryRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
-		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, no fork deliveries, one source route, no fork route recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
+	if branchRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
+		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, one untouched global route, and no invented recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
 	}
 }
 
@@ -1419,6 +1451,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			if err := tc.seed(ctx, db, sourceRunID, entityID, eventID, at); err != nil {
 				t.Fatalf("seed post-T %s: %v", tc.name, err)
 			}
+			captureRunForkTestRevision(t, db, sourceRunID)
 
 			activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 				ForkRunID:             materialized.ForkRunID,
@@ -1474,12 +1507,13 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
@@ -1560,7 +1594,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	}
 }
 
-func TestSelectedContractActivationTreatsSameEventReplayScopeMarkerWriteSkewAsLineage(t *testing.T) {
+func TestSelectedContractActivationRejectsPostRevisionSameEventReplayScopeMarker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1588,16 +1622,17 @@ func TestSelectedContractActivationTreatsSameEventReplayScopeMarkerWriteSkewAsLi
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, replayScopeReasonDirect, at.Add(time.Minute))
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
 		AllowedSourceEventIDs: []string{eventID},
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("activation error = %v, want post-revision same-event replay-scope blocker", err)
 	}
-	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want activated without marker-driven source advancement", activation)
+	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want blocked before branch divergence", activation)
 	}
 	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
@@ -2039,6 +2074,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	}
 	seedSelectedContractPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at)
 	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, replayScopeReasonDirect, at.Add(-time.Second))
+	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
@@ -2067,7 +2103,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
 
-func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
+func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -2075,16 +2111,15 @@ func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testin
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002525, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
-			is_materialized, status, created_at
-		)
-		VALUES ('item.received', 'node', 'selected-route-node', 'flow-a/2', 'flow-a', true, 'active', $1)
-	`, at); err != nil {
-		t.Fatalf("seed routing rule: %v", err)
+		UPDATE events
+		SET flow_instance = 'flow-a/1'
+		WHERE run_id = $1::uuid AND event_id = $2::uuid
+	`, sourceRunID, eventID); err != nil {
+		t.Fatalf("seed selected event route identity: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
@@ -2095,8 +2130,9 @@ func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testin
 			WorkflowVersion: "v1",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), RunForkBlockerFlowRouteHistoryUnproven) {
-		t.Fatalf("materialization error = %v, want route blocker", err)
+	blocker, fact, ok := runForkReplayResumeBlockerFromError(err)
+	if err == nil || !ok || blocker.Code != RunForkBlockerFlowRouteHistoryUnproven || fact != RunForkReplayResumeFactRouteHistory {
+		t.Fatalf("materialization error = %v blocker=%#v fact=%q, want typed route blocker", err, blocker, fact)
 	}
 	if materialized.ForkRunID != "" {
 		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
@@ -2104,9 +2140,15 @@ func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testin
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
-func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, sourceRunID, entityID, eventID string, at time.Time) {
+func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	captureRunForkTestRevision(t, db, sourceRunID)
+}
+
+func seedSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -2118,7 +2160,13 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, so
 	}
 }
 
-func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db execContextDB, sourceRunID, entityID, eventID string, at time.Time) {
+func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at)
+	captureRunForkTestRevision(t, db, sourceRunID)
+}
+
+func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -2131,7 +2179,7 @@ func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db ex
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -2235,7 +2283,7 @@ func seedSelectedContractPostForkSourceEvent(t *testing.T, db execContextDB, sou
 	}
 }
 
-func seedPostTActiveConversationCoupling(t *testing.T, db execContextDB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
+func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -2265,6 +2313,7 @@ func seedPostTActiveConversationCoupling(t *testing.T, db execContextDB, sourceR
 	`, sourceRunID, eventID, sessionID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T active source delivery: %v", err)
 	}
+	captureRunForkTestRevision(t, db, sourceRunID)
 }
 
 func assertNoCopiedConversationRows(t *testing.T, db *sql.DB, forkRunID, sourceSessionID, sourceAuditID, sourceTurnID string) {

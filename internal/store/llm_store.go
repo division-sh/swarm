@@ -436,7 +436,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if _, err := tx.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
 		return fmt.Errorf("insert agent turn: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("append agent turn commit: %w", err)
 	}
 	committed = true
@@ -636,6 +636,11 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	}
 	sessionID := strings.TrimSpace(rec.SessionID)
 	runID := nullUUIDString(rec.RunID)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("upsert conversation begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	if resolved.Stateless {
 		if sessionID == "" {
@@ -700,7 +705,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			status,
 		}
 		if caps.Conversations.AuditRunID {
-			if err := s.ensureRunRow(ctx, caps, nil, runID, "", "", true); err != nil {
+			if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
 				return err
 			}
 			q = `
@@ -761,8 +766,11 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				status,
 			}
 		}
-		if _, err := s.DB.ExecContext(ctx, q, args...); err != nil {
+		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			return fmt.Errorf("insert stateless conversation: %w", err)
+		}
+		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+			return fmt.Errorf("upsert stateless conversation commit: %w", err)
 		}
 		return nil
 	}
@@ -837,7 +845,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", rec.AgentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
-	return tx.Commit()
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return fmt.Errorf("upsert live conversation commit: %w", err)
+	}
+	return nil
 }
 
 func nullUUIDString(raw string) string {
@@ -1037,5 +1048,8 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", agentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
-	return tx.Commit()
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return fmt.Errorf("update live session watchdog commit: %w", err)
+	}
+	return nil
 }

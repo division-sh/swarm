@@ -11,6 +11,7 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -190,6 +191,18 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
+			return runtimerunquiescence.Result{}, err
+		}
+	}
+	changes := make([]runforkrevision.Change, 0, len(runIDs))
+	for _, runID := range runIDs {
+		changes = append(changes, runforkrevision.Change{RunID: runID, Families: []runforkrevision.Family{
+			runforkrevision.FamilyEventDeliveries,
+			runforkrevision.FamilyEventReceipts,
+		}})
+	}
+	if len(deliveries) > 0 {
+		if _, err := runforkrevision.CaptureChanges(ctx, tx, changes...); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
 	}

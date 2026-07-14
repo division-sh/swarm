@@ -139,6 +139,7 @@ func (s *SQLiteRuntimeStore) PurgeInboundEventsBefore(ctx context.Context, befor
 				FROM events
 				WHERE event_name = 'platform.inbound_recorded'
 				  AND produced_by_type = 'external'
+				  AND run_id IS NULL
 				  AND created_at < ?
 				ORDER BY created_at ASC
 				LIMIT ?

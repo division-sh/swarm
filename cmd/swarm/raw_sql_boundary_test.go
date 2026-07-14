@@ -192,6 +192,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "system node runner delivery receipt/settlement writes are explicit pipeline unit-of-work primitives",
 		},
+		"internal/runtime/pipeline/run_fork_revision_context.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2049,
+			SpecRef:        "platform-spec.yaml#run_model.fork.fixed_event_revision_and_workset",
+			Reason:         "pipeline transactions collect changed fork-reader families and publish them only at the existing unit-of-work commit boundary",
+		},
 		"internal/runtime/pipeline/runtime_interfaces.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
@@ -211,6 +217,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLOptionalProductBoundary,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains a spec-classified optional product split",
+		},
+		"internal/runtime/runforkrevision/revision.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2049,
+			SpecRef:        "platform-spec.yaml#run_model.fork.fixed_event_revision_and_workset",
+			Reason:         "the bounded eleven-family revision registry is the canonical fixed-event persistence owner and runs inside existing PostgreSQL transactions",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

@@ -21,8 +21,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 47 {
-		t.Fatalf("platform table plan count = %d, want 47", len(platformPlans))
+	if len(platformPlans) != 50 {
+		t.Fatalf("platform table plan count = %d, want 50", len(platformPlans))
 	}
 	entityPlans, err := GenerateEntityTableDDLs(runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -507,6 +507,24 @@ func TestSQLiteStatementsForPlanAcceptsMultilineTableConstraint(t *testing.T) {
 	}
 	if len(statements) != 1 || !strings.Contains(statements[0], "OR (status = 'completed'") {
 		t.Fatalf("rendered statements = %#v, want intact multiline check", statements)
+	}
+}
+
+func TestSQLiteStatementsForPlanAcceptsCompositeForeignKeyDeleteCascade(t *testing.T) {
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "child",
+		SchemaKind: "test",
+		Statements: []string{`CREATE TABLE IF NOT EXISTS child (
+    run_id UUID NOT NULL,
+    revision BIGINT NOT NULL,
+    FOREIGN KEY (run_id, revision) REFERENCES parent(run_id, revision) ON DELETE CASCADE
+)`},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], `FOREIGN KEY ("run_id", "revision") REFERENCES "parent"("run_id", "revision") ON DELETE CASCADE`) {
+		t.Fatalf("rendered statements = %#v, want composite cascading foreign key", statements)
 	}
 }
 

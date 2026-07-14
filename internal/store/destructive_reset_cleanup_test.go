@@ -541,7 +541,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 	}
 }
 
-func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesIntoCleanupSet(t *testing.T) {
+func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhenDependentForkIncluded(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
@@ -654,7 +654,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 		Result: destructivereset.Result{
 			OperationName: destructivereset.DefaultOperationName,
 			PlannedAt:     now.Add(-time.Minute),
-			Plan:          cleanupPlanForRunIDs(runID),
+			Plan:          cleanupPlanForRunIDs(runID, lateRunID),
 		},
 		Quiescence: destructivereset.QuiescenceResult{
 			OperationName: destructivereset.DefaultOperationName,
@@ -690,16 +690,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	if predecessorSuccessor.Valid {
 		t.Fatalf("preserved predecessor successor_session_id = %q, want NULL", predecessorSuccessor.String)
 	}
-	var lateForkRun, lateForkEvent sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT forked_from_run_id::text, forked_from_event_id::text
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, lateRunID).Scan(&lateForkRun, &lateForkEvent); err != nil {
-		t.Fatalf("read preserved late run lineage: %v", err)
-	}
-	if lateForkRun.Valid || lateForkEvent.Valid {
-		t.Fatalf("preserved late run lineage = fork_run:%q fork_event:%q, want NULL/NULL", lateForkRun.String, lateForkEvent.String)
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id = $1::uuid`, lateRunID); got != 0 {
+		t.Fatalf("dependent fork rows after cleanup = %d, want deleted with source", got)
 	}
 	var transitionEvent sql.NullString
 	if err := pg.DB.QueryRowContext(ctx, `SELECT transition_event_id::text FROM runtime_ingress_state WHERE id = 1`).Scan(&transitionEvent); err != nil {
@@ -708,16 +700,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	if transitionEvent.Valid {
 		t.Fatalf("runtime ingress transition_event_id = %q, want NULL", transitionEvent.String)
 	}
-	var mutationCause sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT caused_by_event::text
-		FROM entity_mutations
-		WHERE mutation_id = $1::uuid
-	`, lateMutationID).Scan(&mutationCause); err != nil {
-		t.Fatalf("read preserved mutation cause: %v", err)
-	}
-	if mutationCause.Valid {
-		t.Fatalf("preserved mutation caused_by_event = %q, want NULL", mutationCause.String)
+	if got := countRowsWhere(t, ctx, pg, "entity_mutations", `mutation_id = $1::uuid`, lateMutationID); got != 0 {
+		t.Fatalf("dependent fork mutation rows after cleanup = %d, want deleted with fork", got)
 	}
 	var sourceTimer sql.NullString
 	if err := pg.DB.QueryRowContext(ctx, `

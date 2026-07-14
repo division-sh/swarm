@@ -156,6 +156,7 @@ func (s *PostgresStore) purgeInboundEventsSpec(ctx context.Context, before time.
 			FROM events
 			WHERE event_name = 'platform.inbound_recorded'
 			  AND produced_by_type = 'external'
+			  AND run_id IS NULL
 			  AND created_at < $1
 			ORDER BY created_at ASC
 			LIMIT $2

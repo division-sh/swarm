@@ -21,6 +21,9 @@ type CleanupPolicy struct {
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
+		{Table: "run_fork_fact_revisions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_fact_revisions.run_id", DeleteOrderGroup: 1},
+		{Table: "run_fork_revisions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_revisions.run_id", DeleteOrderGroup: 2},
+		{Table: "run_fork_revision_heads", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_revision_heads.run_id", DeleteOrderGroup: 3},
 		{Table: "event_receipts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByEventJoin, PredicateOwner: "events.run_id", DeleteOrderGroup: 1},
 		{Table: "dead_letters", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByEventJoin, PredicateOwner: "dead_letters.original_event_id -> events.run_id", DeleteOrderGroup: 1},
 		{Table: "run_fork_delivery_event_replays", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id|source_event_id|fork_event_id -> events.run_id|source_delivery_id|fork_delivery_id -> event_deliveries/events.run_id", DeleteOrderGroup: 2},

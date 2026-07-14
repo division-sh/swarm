@@ -215,7 +215,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 			return preservationcleanup.Result{}, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return preservationcleanup.Result{}, fmt.Errorf("commit preservation cleanup tx: %w", err)
 	}
 	committed = true

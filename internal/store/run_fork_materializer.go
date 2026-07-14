@@ -162,7 +162,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		}
 		selectedContractBinding = &binding
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
 	}
 	committed = true

@@ -16,9 +16,9 @@ func RunForkSelectedContractReplayResumeAdmission(plan RunForkPlan) RunForkRepla
 	return RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission)
 }
 
-// RunForkSelectedContractCommittedReplayScopeMarkerAdmission treats at/before-T
-// source committed replay-scope marker rows as lineage/no-action evidence for
-// selected-contract timestamp forks. It does not authorize copying source marker
+// RunForkSelectedContractCommittedReplayScopeMarkerAdmission treats source
+// committed replay-scope marker rows present at the selected revision as
+// lineage/no-action evidence for selected-contract forks. It does not authorize copying source marker
 // rows or using them as fork-local recovery proof.
 func RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
 	if strings.TrimSpace(admission.Owner) == "" {
@@ -41,7 +41,7 @@ func RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission RunFor
 		disposition.Owner = RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner
 		disposition.BlockerCode = ""
 		disposition.Classification = ""
-		disposition.Message = fmt.Sprintf("%s classifies at/before-T source committed replay-scope marker rows as selected-contract lineage/no-action evidence only; fork-local recovery proof must be written under the fork run_id by runtime execution or fork-local replay owners", RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner)
+		disposition.Message = fmt.Sprintf("%s classifies source committed replay-scope marker rows present at the selected revision as selected-contract lineage/no-action evidence only; fork-local recovery proof must be written under the fork run_id by runtime execution or fork-local replay owners", RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner)
 		changed = true
 	}
 	if !changed {

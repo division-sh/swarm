@@ -115,8 +115,33 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		DeliveryEventReplayReady: true,
 		ReplayResumeFactsPresent: true,
 		BoundedReplaySupported:   true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:           store.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition:    store.RunForkReplayResumeDispositionForkReplay,
+			Classification: store.RunForkPendingClassificationPending,
+			EventID:        plan.PendingWork[0].EventID,
+			DeliveryID:     plan.PendingWork[0].DeliveryID,
+			SubscriberType: plan.PendingWork[0].SubscriberType,
+			SubscriberID:   plan.PendingWork[0].SubscriberID,
+			Message:        "test pending source delivery is replayable fork-local work",
+		}},
 	}
-	fakeStore := &fakeSelectedContractActivationStore{binding: binding, bindingOK: true, plan: plan}
+	fakeStore := &fakeSelectedContractActivationStore{
+		binding:   binding,
+		bindingOK: true,
+		plan:      plan,
+		routeRecovery: store.RunForkSelectedContractRouteRecovery{
+			Owner:                  store.RunForkSelectedContractRoutePersistenceOwner,
+			RuntimeRecoveryOwner:   store.RunForkSelectedContractRouteRecoveryOwner,
+			ForkRunID:              binding.ForkRunID,
+			SourceRunID:            binding.SourceRunID,
+			ForkEventID:            binding.ForkEventID,
+			ContractSelection:      binding.ContractSelection,
+			RouteTopologyOwner:     store.RunForkSelectedContractRouteTopologyOwner,
+			RecipientPlanningOwner: store.RunForkSelectedContractRecipientPlanningOwner,
+		},
+		routeOK: true,
+	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
 	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{

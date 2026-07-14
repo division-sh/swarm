@@ -92,7 +92,7 @@ rows:
     blocker_codes: [delivery_history_unproven]
     enforcement_point: internal/store/run_fork_replay_resume_admission.go
     proof_refs:
-      - {kind: go_test, name: TestRunForkActivation_FailsClosedForInProgressDeliveryAndMissingLineage}
+      - {kind: go_test, name: TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage}
       - {kind: go_test, name: TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers}
     rationale: "In-progress delivery state is not append-only replay truth and cannot be resumed from current rows."
 
@@ -125,7 +125,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker}
       - {kind: go_test, name: TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersAsLineage}
-    rationale: "Committed same-run replay markers are proof lineage, not timestamp-fork executable work."
+    rationale: "Committed same-run replay markers are proof lineage, not fixed-event fork executable work."
 
   - id: timer_history
     fact: timer_history
@@ -195,7 +195,7 @@ rows:
     enforcement_point: internal/store/run_fork_selected_contract_execution_mutation.go
     proof_refs:
       - {kind: go_test, name: TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint}
-      - {kind: go_test, name: TestPostTSourceTimerFailsClosedForSelectedContractActivation}
+      - {kind: go_test, name: TestPostTSourceTimerActivatesAsSelectedBranchDivergence}
       - {kind: go_test, name: TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation}
     rationale: "Post-T source advancement is branch-divergence lineage only where a selected owner admits it; otherwise it blocks."
 

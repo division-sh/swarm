@@ -1166,7 +1166,7 @@ func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(co
 	if err := fn(txctx, tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return commitPostgresRunForkRevisionTx(txctx, tx)
 }
 
 func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {

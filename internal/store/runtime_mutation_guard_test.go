@@ -1004,6 +1004,13 @@ func runtimeWriterRules() []runtimeWriterRule {
 			reason:         "diagnostic/dead-letter raw SQL helper is adjacent and split from selected SQLite mutation boundary",
 		},
 		{
+			name:           "postgres run-fork revision owner",
+			path:           rx(`^internal/runtime/runforkrevision/.*\.go$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classDifferentConcept,
+			reason:         "Postgres fixed-revision capture is the run-fork history owner; SQLite run-fork mutation remains typed unsupported",
+		},
+		{
 			name:           "workspace and digest stores",
 			path:           rx(`^internal/(runtime/workspace|digest)/.*\.go$`),
 			kinds:          allPrimitiveKinds(),

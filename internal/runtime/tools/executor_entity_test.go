@@ -22,6 +22,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
@@ -1310,8 +1311,8 @@ accounts:
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
 	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1337,6 +1338,7 @@ accounts:
 	`, sourceRunID, entityID, at.Add(time.Minute), at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
+	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	result, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
@@ -1407,8 +1409,8 @@ accounts:
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
 	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1434,6 +1436,7 @@ accounts:
 	`, sourceRunID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
+	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
@@ -1499,6 +1502,21 @@ accounts:
 	}
 	if forkMutationCount != 1 || sourceMutationCount != 0 {
 		t.Fatalf("fork/source save_entity_field mutation count = %d/%d, want 1/0", forkMutationCount, sourceMutationCount)
+	}
+}
+
+func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin entity-tool run-fork revision: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := runforkrevision.Capture(context.Background(), tx, runID, runforkrevision.AllFamilies()...); err != nil {
+		t.Fatalf("capture entity-tool run-fork revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit entity-tool run-fork revision: %v", err)
 	}
 }
 
