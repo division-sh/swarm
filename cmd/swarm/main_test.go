@@ -194,15 +194,12 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context
 	}
 	defer func() { _ = r.store.Release(context.Background(), lease) }()
 	runID := runtimecorrelation.RunIDFromContext(ctx)
-	turn, err := r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+	err = r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID: session.AgentID, RuntimeMode: runtimesessions.RuntimeModeSession.String(), SessionID: lease.SessionID,
 		ScopeKey: "served-cleanup-proof", RunID: runID, ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
 	})
 	if err != nil {
 		return nil, err
-	}
-	if !turn.EvidenceStored || turn.Projection != runtimellm.AgentTurnProjectionApplied {
-		return nil, fmt.Errorf("served session cleanup proof projection = %#v", turn)
 	}
 	select {
 	case r.started <- lease.SessionID:
