@@ -10958,7 +10958,10 @@ platform_tables:
       description: >-
         Canonical per-run counter for the bounded supported-fork historical projection. The existing
         store transaction owner increments this row while holding its row lock; all approved fork-reader
-        facts written by the same PostgreSQL transaction share the resulting revision.
+        facts written by the same PostgreSQL transaction share the resulting revision. Every runtime
+        transaction MUST collect all affected run IDs and lock their parent runs rows in stable run-ID
+        order before owning a corresponding revision head or revision ledger row. The shared allocator
+        uses the minimum foreign-key-compatible parent lock; destructive owners MAY retain a stronger lock.
       ddl: |
         CREATE TABLE run_fork_revision_heads (
             run_id        UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -10969,6 +10972,9 @@ platform_tables:
       description: >-
         Commit-serialized revision ledger for the bounded supported-fork projection. transaction_id is
         used only to reuse one revision inside one SQL transaction; it is not a public historical cursor.
+        Runtime allocation, activation-frontier access, and destructive cleanup MUST consume the parent-run-
+        before-revision-state lock order owned by run_fork_revision_heads; local retries or inverse lock
+        interpretations are forbidden.
       ddl: |
         CREATE TABLE run_fork_revisions (
             run_id        UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,

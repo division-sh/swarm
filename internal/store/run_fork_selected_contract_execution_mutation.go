@@ -571,7 +571,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	}()
 
 	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, forkRunID).Scan(&status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}

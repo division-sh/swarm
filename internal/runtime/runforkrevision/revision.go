@@ -105,7 +105,7 @@ func CaptureChanges(ctx context.Context, tx *sql.Tx, changes ...Change) (map[str
 		runIDs = append(runIDs, runID)
 	}
 	sort.Strings(runIDs)
-	revisions := make(map[string]int64, len(runIDs))
+	normalizedByRun := make(map[string][]Family, len(runIDs))
 	for _, runID := range runIDs {
 		families, err := normalizeFamilies(byRun[runID])
 		if err != nil {
@@ -114,6 +114,14 @@ func CaptureChanges(ctx context.Context, tx *sql.Tx, changes ...Change) (map[str
 		if len(families) == 0 {
 			return nil, fmt.Errorf("run fork revision capture requires at least one fact family")
 		}
+		normalizedByRun[runID] = families
+	}
+	if err := lockParentRuns(ctx, tx, runIDs); err != nil {
+		return nil, err
+	}
+	revisions := make(map[string]int64, len(runIDs))
+	for _, runID := range runIDs {
+		families := normalizedByRun[runID]
 		changedFamilies := make([]Family, 0, len(families))
 		for _, family := range families {
 			changed, err := canonicalProjectionDiffersFromLatest(ctx, tx, runID, family)
@@ -152,6 +160,25 @@ func CaptureChanges(ctx context.Context, tx *sql.Tx, changes ...Change) (map[str
 		revisions[runID] = revision
 	}
 	return revisions, nil
+}
+
+func lockParentRuns(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+	for _, runID := range runIDs {
+		var lockedRunID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT run_id::text
+			FROM runs
+			WHERE run_id = $1::uuid
+			FOR KEY SHARE
+		`, runID).Scan(&lockedRunID)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("lock run fork revision parent run %s: run does not exist", runID)
+		}
+		if err != nil {
+			return fmt.Errorf("lock run fork revision parent run %s: %w", runID, err)
+		}
+	}
+	return nil
 }
 
 // CaptureCurrentTransaction discovers the bounded fact rows changed by the
