@@ -139,6 +139,67 @@ func TestConversationViewLongSessionUsesBoundedCompactListOnly(t *testing.T) {
 	}
 }
 
+func TestConversationViewRequiresActivityCountsPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mutate     func(map[string]any)
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name: "omitted field fails closed",
+			mutate: func(turn map[string]any) {
+				delete(turn, "activity_counts")
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "activity_counts is required",
+		},
+		{
+			name: "present all-zero object succeeds",
+			mutate: func(turn map[string]any) {
+				turn["activity_counts"] = map[string]any{
+					"dispatch": 0, "tool": 0, "tool_result": 0, "publish": 0, "output": 0, "failure": 0,
+				}
+			},
+			wantCode: cliExitOK,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			turn := validConversationTurn(1, "turn-001", "event-001", "task.completed")
+			tc.mutate(turn)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				if request.Method != conversationListTurnsMethod {
+					t.Fatalf("method = %q, want %s", request.Method, conversationListTurnsMethod)
+				}
+				writeJSONRPCResult(t, w, request.ID, map[string]any{
+					"conversation": validConversationSummary("sess-1"),
+					"turns":        []map[string]any{turn},
+				})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+				"conversation", "view", "sess-1",
+			}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+			if tc.wantCode == cliExitOK && !strings.Contains(stdout.String(), "turn-001") {
+				t.Fatalf("stdout = %q, want compact zero-count row", stdout.String())
+			}
+		})
+	}
+}
+
 func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
