@@ -1365,6 +1365,54 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	}
 }
 
+func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	at := time.Unix(1700003615, 0).UTC()
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedRunForkSessionProjection(t, db, sourceRunID, "selected-session-agent", sessionID, "terminated", at)
+	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	mutateRunForkSessionExcludedColumns(t, db, sourceRunID, sessionID, at.Add(time.Minute))
+	var afterExcluded int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, sourceRunID).Scan(&afterExcluded); err != nil {
+		t.Fatalf("load selected source revision after excluded session update: %v", err)
+	}
+	if afterExcluded != selectedRevision {
+		t.Fatalf("selected source revision after excluded session update = %d, want %d", afterExcluded, selectedRevision)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution after excluded session update: %v", err)
+	}
+	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want selected activation without branch divergence", activation)
+	}
+}
+
 func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T) {
 	for _, tc := range []struct {
 		name string

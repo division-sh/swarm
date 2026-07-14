@@ -12059,7 +12059,10 @@ run_model:
       - reply_contexts
       write_contract: >-
         Existing PostgreSQL store transactions allocate one commit-serialized revision per affected run after
-        provider, tool, agent, and network work. Every changed family in one transaction shares that revision;
+        provider, tool, agent, and network work. A family is changed only when its canonical projected fact JSON or
+        fact presence differs from the latest published revision; writes to excluded physical columns do not advance
+        the family. Publication and completeness validation MUST compare that same canonical projection and presence,
+        never row transaction identity. Every changed family in one transaction shares that revision;
         repeated capture in the transaction reuses it; rollback publishes neither facts nor revision. Transactions
         affecting multiple runs lock revision heads in deterministic run-ID order. No revision lock may span external
         work. Deletion emits present=false for the removed fact in the same transaction.

@@ -1365,6 +1365,41 @@ func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *tes
 	}
 }
 
+func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	at := time.Unix(1700000890, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedRunForkSessionProjection(t, db, sourceRunID, "generic-session-agent", sessionID, "terminated", at)
+	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
+
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	mutateRunForkSessionExcludedColumns(t, db, sourceRunID, sessionID, at.Add(time.Minute))
+	var afterExcluded int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, sourceRunID).Scan(&afterExcluded); err != nil {
+		t.Fatalf("load source revision after excluded session update: %v", err)
+	}
+	if afterExcluded != selectedRevision {
+		t.Fatalf("source revision after excluded session update = %d, want %d", afterExcluded, selectedRevision)
+	}
+
+	activation, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork after excluded session update: %v", err)
+	}
+	if !activation.Activated || activation.SourceAdvancedAfterFork || runForkTestHasActivationBlocker(activation, "source_sessions_advanced_after_fork_point") {
+		t.Fatalf("activation = %#v, want activation without session advancement", activation)
+	}
+}
+
 func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
