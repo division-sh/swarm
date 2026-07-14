@@ -677,25 +677,14 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts serveOptions, cont
 			if changed == before {
 				t.Fatal("standing activation block not found")
 			}
-			changed = strings.Replace(changed, `  - id: telegram-chat
-    flow: telegram-chat
-    mode: template
-`, "", 1)
+			chatDeclaration := "  - {id: telegram-chat, flow: telegram-chat, mode: template}\n"
+			withoutChat := strings.Replace(changed, chatDeclaration, "", 1)
+			if withoutChat == changed {
+				t.Fatal("telegram-chat declaration not found")
+			}
+			changed = withoutChat
 			writeStandingCandidateFile(t, packagePath, changed)
-			nonStandingSchema := strings.Replace(string(baseFlowSchema), `pins:
-  inputs:
-    events:
-      - name: telegram_update
-        event: inbound.telegram
-        source: external
-  outputs:
-    events: []
-`, `pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`, 1)
+			nonStandingSchema := canonicalrouting.WithoutStandingIngressPins(t, string(baseFlowSchema))
 			writeStandingCandidateFile(t, flowSchemaPath, nonStandingSchema)
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {

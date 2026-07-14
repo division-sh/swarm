@@ -1734,7 +1734,12 @@ func (m *failCommittedReplayScopeMutation) Context() context.Context {
 }
 
 func (m *failCommittedReplayScopeMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	return m.store.AppendEventTx(ctx, m.tx, evt)
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *failCommittedReplayScopeMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	return m.store.AppendEventTxOutcome(ctx, m.tx, evt)
 }
 
 func (m *failCommittedReplayScopeMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {

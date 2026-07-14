@@ -125,22 +125,18 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
-	lifecycleEvents, err := eb.ReleaseDecisionCardLifecycleEvents(ctx, limit)
-	if err != nil {
-		return lifecycleEvents, err
-	}
 	if lookback <= 0 {
 		lookback = DefaultOutboxSweeperConfig().Lookback
 	}
 	decisionRoutes, err := eb.sweepDecisionRouteObligations(ctx, limit)
 	if err != nil {
-		return lifecycleEvents + decisionRoutes, err
+		return decisionRoutes, err
 	}
 	events, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-lookback), limit)
 	if err != nil {
-		return lifecycleEvents + decisionRoutes, err
+		return decisionRoutes, err
 	}
-	redelivered := lifecycleEvents + decisionRoutes
+	redelivered := decisionRoutes
 	for _, record := range events {
 		evt := record.Event
 		if eb.eventPublishInFlight(evt.ID()) {
@@ -200,32 +196,6 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		redelivered++
 	}
 	return redelivered, nil
-}
-
-func (eb *EventBus) ReleaseDecisionCardLifecycleEvents(ctx context.Context, limit int) (int, error) {
-	outbox, ok := eb.store.(runtimepipeline.DecisionCardLifecycleOutboxStore)
-	if !ok || outbox == nil {
-		return 0, nil
-	}
-	bundleHash := strings.TrimSpace(eb.bundleFingerprint)
-	if bundleHash == "" {
-		return 0, nil
-	}
-	eventsToPublish, err := outbox.ListPendingDecisionCardLifecycleEvents(ctx, bundleHash, limit)
-	if err != nil {
-		return 0, err
-	}
-	released := 0
-	for _, evt := range eventsToPublish {
-		if err := eb.Publish(ctx, evt); err != nil {
-			return released, err
-		}
-		if err := outbox.CompleteDecisionCardLifecycleEvent(ctx, evt.ID(), time.Now().UTC()); err != nil {
-			return released, err
-		}
-		released++
-	}
-	return released, nil
 }
 
 func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, limit int) (int, error) {

@@ -101,7 +101,12 @@ func (m *targetRouteMemoryEventMutation) Context() context.Context {
 }
 
 func (m *targetRouteMemoryEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	return m.store.AppendEvent(ctx, evt)
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *targetRouteMemoryEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error) {
+	return m.store.AppendEventOutcome(ctx, evt)
 }
 
 func (m *targetRouteMemoryEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
@@ -1034,12 +1039,14 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 		t.Fatalf("Publish same event retry: %v", err)
 	}
 	if len(store.activations) != 1 {
-		t.Fatalf("same-event retry activations = %d, want committed replay without a second activation", len(store.activations))
+		t.Fatalf("same-event retry activations = %d, want no second activation", len(store.activations))
 	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("same-event retry descriptor calls = %d, want committed replay without descriptor lookup", got)
+	requireNoConnectRoutePlanBusEvent(t, replayTarget, "create resolution same-event retry")
+
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
-	replayed := requireBusEvent(t, replayTarget, "create resolution same-event committed replay")
+	replayed := requireBusEvent(t, replayTarget, "create resolution explicit committed replay")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("same-event replay target = flow_instance:%q entity:%q, want persisted %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
@@ -1658,7 +1665,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForL
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommittedReplay(t *testing.T) {
+func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExplicitReplayUsesCommittedScope(t *testing.T) {
 	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1692,10 +1699,12 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommitted
 	if len(store.activations) != 1 {
 		t.Fatalf("retry activations = %d, want committed replay without a second activation", len(store.activations))
 	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("retry descriptor calls = %d, want 0 because committed replay is authoritative", got)
+	requireNoConnectRoutePlanBusEvent(t, replayTarget, "same-event retry")
+
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
-	replayed := requireBusEvent(t, replayTarget, "same-event retry committed replay")
+	replayed := requireBusEvent(t, replayTarget, "explicit committed replay")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("retry delivery target = flow_instance:%q entity:%q, want persisted %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)

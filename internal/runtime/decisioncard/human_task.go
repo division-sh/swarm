@@ -103,5 +103,5 @@ type HumanTaskStore interface {
 }
 
 type HumanTaskExpiryStore interface {
-	ExpireHumanTaskCards(context.Context, time.Time, int) (int, error)
+	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
 }

@@ -19,6 +19,18 @@ type EventStore interface {
 	runtimereplayclaim.RecipientReader
 }
 
+type EventAppendOutcome uint8
+
+const (
+	EventAppendOutcomeUnknown EventAppendOutcome = iota
+	EventAppendInserted
+	EventAppendExactDuplicate
+)
+
+type EventAppendOutcomePersistence interface {
+	AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error)
+}
+
 type FlowInstanceRouteRecord struct {
 	Identity       runtimeflowidentity.Route
 	EventPattern   string
@@ -197,16 +209,32 @@ type AtomicEventPersistence interface {
 	PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error
 }
 
+type AtomicEventOutcomePersistence interface {
+	PersistEventWithDeliveriesOutcome(ctx context.Context, evt events.Event, agentIDs []string) (EventAppendOutcome, error)
+}
+
 type AtomicEventReplayScopePersistence interface {
 	PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
+type AtomicEventReplayScopeOutcomePersistence interface {
+	PersistEventWithDeliveriesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
 }
 
 type AtomicEventRoutePersistence interface {
 	PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error
 }
 
+type AtomicEventRouteOutcomePersistence interface {
+	PersistEventWithDeliveryRoutesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
+}
+
 type AtomicEventDeliveryRouteSetPersistence interface {
 	PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
+type AtomicEventDeliveryRouteSetOutcomePersistence interface {
+	PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
 }
 
 type EventDeliveryRoutePersistence interface {
@@ -236,6 +264,7 @@ type eventMutationContextKey struct{}
 type EventMutation interface {
 	Context() context.Context
 	AppendEvent(ctx context.Context, evt events.Event) error
+	AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error)
 	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
 	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
 	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
@@ -292,6 +321,10 @@ type TransactionalEventStore interface {
 	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error
 	InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error
 	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error
+}
+
+type TransactionalEventAppendOutcomeStore interface {
+	AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, evt events.Event) (EventAppendOutcome, error)
 }
 
 type EventTransactionRunner interface {

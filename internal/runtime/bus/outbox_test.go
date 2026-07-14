@@ -110,7 +110,20 @@ func (m *directRecipientEventMutation) Context() context.Context {
 }
 
 func (m *directRecipientEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	return m.store.AppendEventTx(ctx, nil, evt)
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *directRecipientEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	m.store.mu.Lock()
+	defer m.store.mu.Unlock()
+	for _, existing := range m.store.events {
+		if existing.ID() == evt.ID() {
+			return runtimebus.EventAppendExactDuplicate, nil
+		}
+	}
+	m.store.events = append(m.store.events, evt)
+	return runtimebus.EventAppendInserted, nil
 }
 
 func (m *directRecipientEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
@@ -509,6 +522,10 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
+	intent.Recipients = []string{"late-reviewer"}
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("WriteOutbox exact duplicate: %v", err)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
@@ -520,7 +537,84 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 		t.Fatalf("ListEventDeliveryRecipients: %v", err)
 	}
 	if strings.Join(gotPersisted, ",") != "reviewer" {
-		t.Fatalf("persisted recipients = %v, want [reviewer]", gotPersisted)
+		t.Fatalf("persisted recipients after exact duplicate = %v, want original [reviewer]", gotPersisted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "reviewer", EntityID: "ent-1"},
+			{AgentID: "late-reviewer", EntityID: "ent-1"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	reviewer := eb.Subscribe("reviewer")
+	lateReviewer := eb.Subscribe("late-reviewer")
+	intent := runtimeengine.EmitIntent{
+		Event: eventtest.RootIngress(
+			"evt-exact-duplicate-operation",
+			events.EventType("custom.emitted"),
+			"",
+			"",
+			[]byte(`{"entity_id":"ent-1"}`),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			time.Now().UTC(),
+		),
+		Recipients: []string{"reviewer"},
+	}
+
+	persistAndDispatch := func(intent runtimeengine.EmitIntent) {
+		t.Helper()
+		mock.ExpectBegin()
+		mock.ExpectCommit()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("WriteOutbox: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+			t.Fatalf("DispatchPostCommit: %v", err)
+		}
+	}
+
+	persistAndDispatch(intent)
+	_ = requireBusEvent(t, reviewer, "initial inserted outbox operation")
+	requireNoBusEvent(t, lateReviewer, "initial recipient manifest")
+
+	duplicate := intent
+	duplicate.Recipients = []string{"late-reviewer"}
+	persistAndDispatch(duplicate)
+	requireNoBusEvent(t, reviewer, "exact duplicate redelivery")
+	requireNoBusEvent(t, lateReviewer, "exact duplicate recipient expansion")
+	got, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients: %v", err)
+	}
+	if strings.Join(got, ",") != "reviewer" {
+		t.Fatalf("persisted recipients after exact duplicate = %v, want [reviewer]", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

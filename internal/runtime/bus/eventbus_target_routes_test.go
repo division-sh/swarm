@@ -43,10 +43,18 @@ func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 }
 
 func (s *targetRouteMemoryStore) AppendEvent(_ context.Context, evt events.Event) error {
+	_, err := s.AppendEventOutcome(context.Background(), evt)
+	return err
+}
+
+func (s *targetRouteMemoryStore) AppendEventOutcome(_ context.Context, evt events.Event) (EventAppendOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.events[evt.ID()]; exists {
+		return EventAppendExactDuplicate, nil
+	}
 	s.events[evt.ID()] = evt
-	return nil
+	return EventAppendInserted, nil
 }
 
 func (s *targetRouteMemoryStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
@@ -68,12 +76,20 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, 
 func (s *targetRouteMemoryStore) SupportsPersistedReplay() bool { return true }
 
 func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) error {
+	_, err := s.PersistEventWithDeliveryRouteSetAndScopeOutcome(context.Background(), evt, deliveryRoutes, scope)
+	return err
+}
+
+func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScopeOutcome(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) (EventAppendOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.events[evt.ID()]; exists {
+		return EventAppendExactDuplicate, nil
+	}
 	s.events[evt.ID()] = evt
 	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	s.scopes[evt.ID()] = scope
-	return nil
+	return EventAppendInserted, nil
 }
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

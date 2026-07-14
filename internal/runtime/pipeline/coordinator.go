@@ -225,7 +225,7 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 		ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 	})
 	humanTaskExpiry, hasHumanTaskExpiry := pc.decisionCards.(interface {
-		ExpireHumanTaskCards(context.Context, time.Time, int) (int, error)
+		ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
 	})
 	if (!hasDraftExpiry || draftExpiry == nil) && (!hasHumanTaskExpiry || humanTaskExpiry == nil) {
 		return
@@ -238,7 +238,7 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 			}
 		}
 		if hasHumanTaskExpiry && humanTaskExpiry != nil {
-			if _, err := humanTaskExpiry.ExpireHumanTaskCards(ctx, now, 200); err != nil {
+			if err := pc.expireHumanTaskCards(ctx, humanTaskExpiry, now, 200); err != nil {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
 			}
 		}
@@ -254,6 +254,30 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 			run()
 		}
 	}
+}
+
+func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry interface {
+	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
+}, now time.Time, limit int) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return errors.New("human-task expiry requires the selected workflow store")
+	}
+	publisher, ok := pc.bus.(workflowGateMutationPublisher)
+	if !ok || publisher == nil {
+		return errors.New("human-task expiry requires transactional event publication")
+	}
+	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		expiredEvents, err := expiry.ExpireHumanTaskCardsInMutation(txctx, now, limit)
+		if err != nil {
+			return err
+		}
+		for _, evt := range expiredEvents {
+			if err := publisher.PublishInMutation(txctx, evt); err != nil {
+				return fmt.Errorf("publish human-task expiry event: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {

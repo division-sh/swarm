@@ -131,11 +131,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if len(store.activations) != 1 {
 		t.Fatalf("same-event retry activations = %d, want committed replay without second activation", len(store.activations))
 	}
-	replayed := requireBusEvent(t, retryTarget, "same-event committed replay")
-	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
-		t.Fatalf("same-event replay target = flow_instance:%q entity:%q, want persisted %q/%q",
-			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
-	}
+	requireNoBusEvent(t, retryTarget, "same-event publish retry")
 
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
@@ -153,7 +149,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
 		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
-	replayed = requireBusEvent(t, retryTarget, "persisted replay after descriptor drift")
+	replayed := requireBusEvent(t, retryTarget, "persisted replay after descriptor drift")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("drift replay target = flow_instance:%q entity:%q, want persisted %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)

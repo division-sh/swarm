@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,6 +16,109 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
+
+func TestSchemaBootstrapObsoleteDecisionCardLifecycleOutboxCutoff(t *testing.T) {
+	request := canonicalSchemaBootstrapTestRequest(t)
+
+	t.Run("sqlite", func(t *testing.T) {
+		store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "obsolete-cutoff.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		assertObsoleteDecisionCardLifecycleOutboxCutoff(t, SchemaDialectSQLite, store.DB, request, store.BootstrapSchema)
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		store := &PostgresStore{DB: db}
+		assertObsoleteDecisionCardLifecycleOutboxCutoff(t, SchemaDialectPostgres, db, request, store.BootstrapSchema)
+	})
+}
+
+func assertObsoleteDecisionCardLifecycleOutboxCutoff(
+	t *testing.T,
+	backend SchemaDialect,
+	db *sql.DB,
+	request SchemaBootstrapRequest,
+	bootstrap func(context.Context, SchemaBootstrapRequest) error,
+) {
+	t.Helper()
+	ctx := context.Background()
+	if err := bootstrap(ctx, request); err != nil {
+		t.Fatalf("canonical bootstrap: %v", err)
+	}
+	assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, false)
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE decision_card_lifecycle_outbox (status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap(ctx, request); err != nil {
+		t.Fatalf("drop empty obsolete table: %v", err)
+	}
+	assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, false)
+
+	for _, status := range []string{"pending", "completed", "malformed"} {
+		t.Run("nonempty_"+status, func(t *testing.T) {
+			if _, err := db.ExecContext(ctx, `CREATE TABLE decision_card_lifecycle_outbox (status TEXT NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			placeholder := "?"
+			if backend == SchemaDialectPostgres {
+				placeholder = "$1"
+			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO decision_card_lifecycle_outbox (status) VALUES (`+placeholder+`)`, status); err != nil {
+				t.Fatal(err)
+			}
+			blocked := request
+			blocked.StatePlans = generatedProbeStatePlans()
+			err := bootstrap(ctx, blocked)
+			want := "unsupported pre-1.0 PostgreSQL database: obsolete table decision_card_lifecycle_outbox contains legacy rows; provision or select a fresh empty database; existing database state is not migrated"
+			if backend == SchemaDialectSQLite {
+				want = "unsupported pre-1.0 SQLite database: obsolete table decision_card_lifecycle_outbox contains legacy rows; recreate the configured SQLite database file or select a fresh empty database; existing database state is not migrated"
+			}
+			if err == nil || err.Error() != want {
+				t.Fatalf("populated obsolete table bootstrap error = %v, want %q", err, want)
+			}
+			assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, true)
+			assertSchemaTableExists(t, backend, db, "generated_probe_state", false)
+			if _, err := db.ExecContext(ctx, `DROP TABLE decision_card_lifecycle_outbox`); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func assertObsoleteDecisionCardLifecycleOutboxExists(t *testing.T, backend SchemaDialect, db *sql.DB, want bool) {
+	t.Helper()
+	assertSchemaTableExists(t, backend, db, obsoleteDecisionCardLifecycleOutbox, want)
+	if !want {
+		return
+	}
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_card_lifecycle_outbox`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("obsolete table rows = %d, want 1", rows)
+	}
+}
+
+func assertSchemaTableExists(t *testing.T, backend SchemaDialect, db *sql.DB, table string, want bool) {
+	t.Helper()
+	var exists bool
+	if backend == SchemaDialectSQLite {
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := db.QueryRow(`SELECT to_regclass('public.' || $1) IS NOT NULL`, table).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists != want {
+		t.Fatalf("table %s exists = %t, want %t", table, exists, want)
+	}
+}
 
 func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)

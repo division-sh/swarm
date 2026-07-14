@@ -60,13 +60,22 @@ func (m *sqlEventMutation) validatePipelineTransaction(ctx context.Context) erro
 }
 
 func (m *sqlEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *sqlEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
 	if m == nil || m.txStore == nil {
-		return fmt.Errorf("event mutation store is required")
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event mutation store is required")
 	}
 	if err := m.validatePipelineTransaction(ctx); err != nil {
-		return err
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return m.txStore.AppendEventTx(m.operationContext(ctx), m.tx, evt)
+	owner, ok := m.store.(runtimebus.TransactionalEventAppendOutcomeStore)
+	if !ok || owner == nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-store event mutation does not expose append outcome")
+	}
+	return owner.AppendEventTxOutcome(m.operationContext(ctx), m.tx, evt)
 }
 
 func (m *sqlEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {

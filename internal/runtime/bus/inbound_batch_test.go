@@ -24,9 +24,14 @@ func (m *inboundBatchPreflightMutation) Context() context.Context {
 	return WithEventMutationContext(context.Background(), m)
 }
 
-func (m *inboundBatchPreflightMutation) AppendEvent(context.Context, events.Event) error {
+func (m *inboundBatchPreflightMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *inboundBatchPreflightMutation) AppendEventOutcome(context.Context, events.Event) (EventAppendOutcome, error) {
 	m.appendCalls++
-	return errors.New("mutation append sentinel")
+	return EventAppendOutcomeUnknown, errors.New("mutation append sentinel")
 }
 
 type inboundBatchAuthorizationVerifier struct {
@@ -174,9 +179,14 @@ func (m *inboundBatchOverlayMutation) Context() context.Context {
 	return WithEventMutationContext(m.ctx, m)
 }
 
-func (m *inboundBatchOverlayMutation) AppendEvent(ctx context.Context, _ events.Event) error {
+func (m *inboundBatchOverlayMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *inboundBatchOverlayMutation) AppendEventOutcome(ctx context.Context, _ events.Event) (EventAppendOutcome, error) {
 	m.overlays = append(m.overlays, transactionRouteTableFromContext(ctx))
-	return nil
+	return EventAppendInserted, nil
 }
 
 func (m *inboundBatchOverlayMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {

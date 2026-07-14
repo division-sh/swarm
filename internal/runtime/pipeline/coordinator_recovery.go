@@ -44,10 +44,6 @@ type persistedPipelineRecoveryQuarantiner interface {
 	QuarantineRecoveredPipelineEvent(context.Context, events.Event, error) error
 }
 
-type decisionCardLifecycleReleaser interface {
-	ReleaseDecisionCardLifecycleEvents(context.Context, int) (int, error)
-}
-
 type recoveryRuntimeLogger interface {
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
 }
@@ -170,11 +166,6 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	limit := r.limit
 	if limit <= 0 {
 		limit = 500
-	}
-	if releaser, ok := r.bus.(decisionCardLifecycleReleaser); ok && releaser != nil {
-		if _, err := releaser.ReleaseDecisionCardLifecycleEvents(ctx, limit); err != nil {
-			return fmt.Errorf("release decision card lifecycle events: %w", err)
-		}
 	}
 	logger, _ := r.bus.(recoveryRuntimeLogger)
 	now := time.Now().UTC()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -190,20 +191,27 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	_, err := s.PersistEventWithDeliveriesOutcome(ctx, evt, agentIDs)
+	return err
+}
+
+func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesOutcome(ctx context.Context, evt events.Event, agentIDs []string) (runtimebus.EventAppendOutcome, error) {
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return err
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return s.PersistEventWithDeliveriesAndScope(ctx, evt, agentIDs, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	return s.PersistEventWithDeliveriesAndScopeOutcome(ctx, evt, agentIDs, runtimereplayclaim.CommittedReplayScopeSubscribed)
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error {
+	_, err := s.PersistEventWithDeliveriesAndScopeOutcome(ctx, evt, agentIDs, scope)
+	return err
+}
+
+func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return err
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite event/delivery", func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
-			return err
-		}
+	return s.persistEventAtomicOutcome(ctx, "sqlite event/delivery", evt, func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.InsertEventDeliveriesTx(txctx, tx, evt.ID(), agentIDs); err != nil {
 			return err
 		}
@@ -212,13 +220,15 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Cont
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error {
+	_, err := s.PersistEventWithDeliveryRoutesAndScopeOutcome(ctx, evt, agentIDs, deliveryTargets, scope)
+	return err
+}
+
+func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return err
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite event/routes", func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
-			return err
-		}
+	return s.persistEventAtomicOutcome(ctx, "sqlite event/routes", evt, func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.InsertEventDeliveriesWithTargetsTx(txctx, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
 			return err
 		}
@@ -227,18 +237,47 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.
 }
 
 func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
+	_, err := s.PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx, evt, deliveryRoutes, scope)
+	return err
+}
+
+func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return err
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite event/route-set", func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.AppendEventTx(txctx, tx, evt); err != nil {
-			return err
-		}
+	return s.persistEventAtomicOutcome(ctx, "sqlite event/route-set", evt, func(txctx context.Context, tx *sql.Tx) error {
 		if err := s.InsertEventDeliveryRoutesTx(txctx, tx, evt.ID(), deliveryRoutes); err != nil {
 			return err
 		}
 		return s.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), scope)
 	})
+}
+
+func (s *SQLiteRuntimeStore) persistEventAtomicOutcome(
+	ctx context.Context,
+	operation string,
+	evt events.Event,
+	persistSideEffects func(context.Context, *sql.Tx) error,
+) (runtimebus.EventAppendOutcome, error) {
+	outcome := runtimebus.EventAppendOutcomeUnknown
+	err := s.runAuthorActivityMutation(ctx, operation, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		outcome, err = s.AppendEventTxOutcome(txctx, tx, evt)
+		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
+			return err
+		}
+		if persistSideEffects != nil {
+			return persistSideEffects(txctx, tx)
+		}
+		return nil
+	})
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	if outcome == runtimebus.EventAppendOutcomeUnknown {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("sqlite event transaction completed without append outcome")
+	}
+	return outcome, nil
 }
 
 func (s *SQLiteRuntimeStore) UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {

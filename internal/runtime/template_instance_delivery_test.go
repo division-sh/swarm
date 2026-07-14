@@ -1081,13 +1081,18 @@ func (m *providerRollbackMutation) Context() context.Context {
 }
 
 func (m *providerRollbackMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *providerRollbackMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
 	m.proof.appends++
 	if m.proof.appends == 2 {
 		if err := m.proof.fail(providerRollbackBeforeNormalizedAppend); err != nil {
-			return err
+			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	return m.EventMutation.AppendEvent(ctx, evt)
+	return m.EventMutation.AppendEventOutcome(ctx, evt)
 }
 
 func (m *providerRollbackMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {

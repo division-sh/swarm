@@ -248,6 +248,12 @@ func (m *inboundTestMutation) Context() context.Context { return m.ctx }
 func (m *inboundTestMutation) AppendEvent(ctx context.Context, event events.Event) error {
 	return m.append(ctx, event)
 }
+func (m *inboundTestMutation) AppendEventOutcome(ctx context.Context, event events.Event) (runtimebus.EventAppendOutcome, error) {
+	if err := m.append(ctx, event); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	return runtimebus.EventAppendInserted, nil
+}
 func (*inboundTestMutation) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
@@ -447,6 +453,19 @@ func (m *testInboundPublicationMutation) AppendEvent(ctx context.Context, evt ev
 		return nil
 	}
 	return m.store.AppendEvent(ctx, evt)
+}
+
+func (m *testInboundPublicationMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	if m.store == nil {
+		return runtimebus.EventAppendInserted, nil
+	}
+	if owner, ok := m.store.(runtimebus.EventAppendOutcomePersistence); ok {
+		return owner.AppendEventOutcome(ctx, evt)
+	}
+	if err := m.store.AppendEvent(ctx, evt); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	return runtimebus.EventAppendInserted, nil
 }
 
 func (m *testInboundPublicationMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {

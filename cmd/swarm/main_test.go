@@ -5727,7 +5727,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
-	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
+	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
@@ -5735,12 +5735,14 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	})
 	requireServedRunControlState(t, rt.DB, rt.Backend, stopRunID, "stopped", "cancelled")
 	requireServedStoppedPendingDelivery(t, rt.DB, rt.Backend, pendingEventID, "agent-pending")
+	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
 		"idempotency_key": stopKey,
 	})
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
+	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
 	requireServedRunStatus(t, rt.Endpoint, stopRunID, "cancelled")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
 }
@@ -7487,7 +7489,7 @@ func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (run
 	return strings.TrimSpace(runStatus), strings.TrimSpace(controlStatus), strings.TrimSpace(reason), strings.TrimSpace(controlledBy)
 }
 
-func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedControlProofRuntime) (string, string) {
+func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedControlProofRuntime) (string, string, string, string) {
 	t.Helper()
 	db := rt.DB
 	backend := rt.Backend
@@ -7562,7 +7564,164 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	return runID, eventID
+	entityID, cardID := seedServedRunControlDecisionCard(t, rt, runID, now)
+	return runID, eventID, entityID, cardID
+}
+
+func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime, runID string, now time.Time) (string, string) {
+	t.Helper()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	bundleHash := strings.TrimSpace(rt.BundleHash)
+	if bundleHash == "" {
+		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	}
+	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, sourceEventID, now)
+	if err != nil {
+		t.Fatalf("new %s run.stop gate activation: %v", rt.Backend, err)
+	}
+	carrier := runtimeengine.NewStateCarrier(map[string]any{"run_id": runID}, nil, nil)
+	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+		t.Fatalf("store %s run.stop gate activation: %v", rt.Backend, err)
+	}
+
+	var cards decisioncard.Store
+	var workflow *runtimepipeline.WorkflowInstanceStore
+	switch rt.Backend {
+	case "postgres":
+		cards = &store.PostgresStore{DB: rt.DB}
+		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
+	case "sqlite":
+		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		cards = sqlite
+		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
+	default:
+		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
+	}
+	if err := workflow.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+	}); err != nil {
+		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
+	}
+	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "done"},
+		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
+	})
+	if err != nil {
+		t.Fatalf("freeze %s run.stop decision-card snapshot: %v", rt.Backend, err)
+	}
+	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": sourceEventID})
+	if err != nil {
+		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
+	}
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		StageActivationID: activation.ActivationID,
+	})
+	if err != nil {
+		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
+	}
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: activation.CardID, RunID: runID, Anchor: anchor,
+		Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0",
+		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
+		Provenance:       provenance, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("new %s run.stop decision card: %v", rt.Backend, err)
+	}
+	if err := cards.CreateDecisionCard(ctx, card); err != nil {
+		t.Fatalf("seed %s run.stop decision card: %v", rt.Backend, err)
+	}
+	return entityID, card.CardID
+}
+
+func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedControlProofRuntime, runID, entityID, cardID string) {
+	t.Helper()
+	var detail map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	card := servedAnyMap(t, detail["decision_card"])
+	if detail["kind"] != decisioncard.KindDecisionCard || card["card_id"] != cardID || card["status"] != decisioncard.StatusSuperseded {
+		t.Fatalf("%s terminal mailbox.get = %#v, want superseded decision card %s", rt.Backend, detail, cardID)
+	}
+	var listed map[string]any
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.list", map[string]any{"run_id": runID, "status": decisioncard.StatusSuperseded}, &listed)
+	found := false
+	items, ok := listed["items"].([]any)
+	if !ok {
+		t.Fatalf("%s terminal mailbox.list items = %#v, want array", rt.Backend, listed["items"])
+	}
+	for _, raw := range items {
+		entry := servedAnyMap(t, raw)
+		if entry["kind"] != decisioncard.KindDecisionCard {
+			continue
+		}
+		listedCard := servedAnyMap(t, entry["decision_card"])
+		if listedCard["card_id"] == cardID && listedCard["status"] == decisioncard.StatusSuperseded {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%s terminal mailbox.list = %#v, want superseded card %s", rt.Backend, listed, cardID)
+	}
+
+	var cards decisioncard.Store
+	var workflow *runtimepipeline.WorkflowInstanceStore
+	switch rt.Backend {
+	case "postgres":
+		cards = &store.PostgresStore{DB: rt.DB}
+		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
+	case "sqlite":
+		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		cards = sqlite
+		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
+	default:
+		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
+	}
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), entityID)
+	if err != nil || !ok {
+		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		t.Fatalf("restore %s terminal gate carrier: %v", rt.Backend, err)
+	}
+	activation, ok, err := gateruntime.Load(carrier.StateBuckets, "", "launch_review")
+	if err != nil || !ok || activation.Status != gateruntime.StatusSuperseded {
+		t.Fatalf("%s terminal gate activation = %#v, found=%v err=%v", rt.Backend, activation, ok, err)
+	}
+	changes, err := cards.ListDecisionCardChanges(context.Background(), decisioncard.SubscriptionOptions{Limit: 50})
+	if err != nil {
+		t.Fatalf("list %s terminal decision-card changes: %v", rt.Backend, err)
+	}
+	changeCount := 0
+	for _, change := range changes {
+		if change.CardID == cardID && change.ChangeType == decisioncard.ChangeSuperseded {
+			changeCount++
+		}
+	}
+	if changeCount != 1 {
+		t.Fatalf("%s terminal superseded changes for %s = %d, want 1", rt.Backend, cardID, changeCount)
+	}
+	if got := servedEventNameCountForRun(t, rt.DB, rt.Backend, runID, "mailbox.card_superseded"); got != 0 {
+		t.Fatalf("%s terminal mailbox.card_superseded events for %s = %d, want 0", rt.Backend, runID, got)
+	}
+}
+
+func servedEventNameCountForRun(t *testing.T, db *sql.DB, backend, runID, eventName string) int {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
+	args := []any{runID, eventName}
+	if backend == "postgres" {
+		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s count run %s event name %s: %v", backend, runID, eventName, err)
+	}
+	return count
 }
 
 func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, backend, eventID, subscriberID string) {

@@ -22,6 +22,11 @@ type engineDispatcher struct {
 	bus *EventBus
 }
 
+type pendingOutboxOperation struct {
+	intent  runtimeengine.EmitIntent
+	outcome EventAppendOutcome
+}
+
 func (eb *EventBus) EngineOutbox() runtimeengine.OutboxWriter {
 	if eb == nil {
 		return nil
@@ -56,8 +61,13 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		if err := mutation.AppendEvent(ctx, intent.Event); err != nil {
+		appendOutcome, err := appendEventMutationOutcome(ctx, mutation, intent.Event)
+		if err != nil {
 			return fmt.Errorf("persist event: %w", err)
+		}
+		if appendOutcome == EventAppendExactDuplicate {
+			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome)
+			continue
 		}
 		plan, err := o.deliveryPlanForIntent(intentCtx, *intent)
 		if err != nil {
@@ -85,6 +95,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			})
 		}
 		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID(), plan.InternalDeliveryRoutes())
+		o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome)
 	}
 	return nil
 }
@@ -138,16 +149,46 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	for _, intent := range intents {
-		queued, err := d.dispatchIntent(ctx, intent)
+		handled, err := d.dispatchPendingOutboxOperation(ctx, intent)
 		if err != nil {
-			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "error", eventBusFailure(err, "dispatch_outbox"))
-			}
 			return err
 		}
-		if queued {
+		if handled {
 			continue
 		}
+		if err := d.dispatchAndRecord(ctx, intent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (bool, error) {
+	operation, ok := d.bus.takePendingOutboxOperation(fallback.Event.ID())
+	if !ok {
+		return false, nil
+	}
+	if operation.intent.Event.Type() != fallback.Event.Type() {
+		return true, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
+	}
+	if operation.outcome == EventAppendExactDuplicate {
+		return true, nil
+	}
+	if operation.outcome != EventAppendInserted {
+		return true, errors.New("pending outbox operation has invalid append outcome")
+	}
+	return true, d.dispatchAndRecord(ctx, operation.intent)
+}
+
+func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent) error {
+	queued, err := d.dispatchIntent(ctx, intent)
+	if err != nil {
+		if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+			d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "error", eventBusFailure(err, "dispatch_outbox"))
+		}
+		return err
+	}
+	if !queued {
 		d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "processed", nil)
 	}
 	return nil
@@ -338,4 +379,49 @@ func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	delete(eb.pendingInternalByID, eventID)
+}
+
+func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runtimeengine.EmitIntent, outcome EventAppendOutcome) {
+	if eb == nil {
+		return
+	}
+	intent.Event = clonePostCommitEvent(intent.Event)
+	if intent.Recipients != nil {
+		intent.Recipients = append([]string(nil), intent.Recipients...)
+	}
+	eventID := strings.TrimSpace(intent.Event.ID())
+	if eventID == "" {
+		return
+	}
+	eb.mu.Lock()
+	if existing, ok := eb.pendingOutboxByID[eventID]; !ok || existing.outcome != EventAppendInserted {
+		eb.pendingOutboxByID[eventID] = pendingOutboxOperation{intent: intent, outcome: outcome}
+	}
+	eb.mu.Unlock()
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+		eb.clearPendingOutboxOperation(eventID)
+	})
+}
+
+func (eb *EventBus) takePendingOutboxOperation(eventID string) (pendingOutboxOperation, bool) {
+	if eb == nil {
+		return pendingOutboxOperation{}, false
+	}
+	eventID = strings.TrimSpace(eventID)
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	operation, ok := eb.pendingOutboxByID[eventID]
+	if ok {
+		delete(eb.pendingOutboxByID, eventID)
+	}
+	return operation, ok
+}
+
+func (eb *EventBus) clearPendingOutboxOperation(eventID string) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	delete(eb.pendingOutboxByID, strings.TrimSpace(eventID))
+	eb.mu.Unlock()
 }

@@ -12,14 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -625,45 +624,29 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			if stored.Status != gateruntime.StatusSuperseded {
 				t.Fatalf("terminal activation = %#v", stored)
 			}
-			eventStore, ok := cardStore.(runtimebus.EventStore)
-			if !ok {
-				t.Fatalf("decision card store %T is not an EventBus store", cardStore)
-			}
-			bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{BundleFingerprint: card.BundleHash})
+			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 50})
 			if err != nil {
 				t.Fatal(err)
 			}
-			const subscriber = "decision-card-lifecycle-recorder"
-			bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: subscriber})
-			deliveries := bus.Subscribe(subscriber, events.EventType("mailbox.card_superseded"))
-			t.Cleanup(func() { bus.Unsubscribe(subscriber) })
-			if released, err := bus.ReleaseDecisionCardLifecycleEvents(ctx, 10); err != nil || released != 1 {
-				t.Fatalf("release lifecycle outbox = %d, %v", released, err)
+			superseded := 0
+			for _, change := range changes {
+				if change.CardID == card.CardID && change.ChangeType == decisioncard.ChangeSuperseded {
+					superseded++
+				}
 			}
-			waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
-			if err := bus.WaitForQuiescence(waitCtx); err != nil {
+			if superseded != 1 {
+				t.Fatalf("terminal superseded changes = %d, want 1", superseded)
+			}
+			query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'mailbox.card_superseded'`
+			if postgres {
+				query = `SELECT COUNT(*) FROM events WHERE run_id = $1 AND event_name = 'mailbox.card_superseded'`
+			}
+			var eventCount int
+			if err := db.QueryRowContext(ctx, query, runID).Scan(&eventCount); err != nil {
 				t.Fatal(err)
 			}
-			var lifecycle events.Event
-			select {
-			case lifecycle = <-deliveries:
-			case <-waitCtx.Done():
-				t.Fatal("timed out waiting for run supersession lifecycle event")
-			}
-			if lifecycle.RunID() != runID || lifecycle.EntityID() != entityID || lifecycle.FlowInstance() != mustDecisionCardTestStageAnchor(t, card).FlowInstance {
-				t.Fatalf("lifecycle identity = run:%q entity:%q flow:%q", lifecycle.RunID(), lifecycle.EntityID(), lifecycle.FlowInstance())
-			}
-			recipients, err := eventStore.ListEventDeliveryRecipients(ctx, lifecycle.ID())
-			if err != nil || len(recipients) != 1 || recipients[0] != subscriber {
-				t.Fatalf("lifecycle recipients = %#v, %v", recipients, err)
-			}
-			scopeReader, ok := cardStore.(runtimereplayclaim.ScopeReader)
-			if !ok {
-				t.Fatalf("decision card store %T lacks replay scope reader", cardStore)
-			}
-			if scope, err := scopeReader.LoadCommittedReplayScope(ctx, lifecycle.ID()); err != nil || scope != runtimereplayclaim.CommittedReplayScopeSubscribed {
-				t.Fatalf("lifecycle replay scope = %q, %v", scope, err)
+			if eventCount != 0 {
+				t.Fatalf("terminal mailbox.card_superseded events = %d, want 0", eventCount)
 			}
 		})
 
@@ -712,6 +695,149 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 				t.Fatalf("blocked terminal run status = %q, %v", status, err)
 			}
 		})
+	}
+}
+
+func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testing.T) {
+	producers := []struct {
+		name   string
+		invoke func(context.Context, decisioncard.Store, string, time.Time) error
+		retry  func(context.Context, decisioncard.Store, string, time.Time) error
+	}{
+		{name: "mark_failed", invoke: markDecisionCardRunTerminalStatus("failed"), retry: markDecisionCardRunTerminalStatus("failed")},
+		{name: "mark_cancelled", invoke: markDecisionCardRunTerminalStatus("cancelled"), retry: markDecisionCardRunTerminalStatus("cancelled")},
+		{name: "mark_forked", invoke: markDecisionCardRunTerminalStatus("forked"), retry: markDecisionCardRunTerminalStatus("forked")},
+		{name: "run_stop", invoke: stopDecisionCardRun, retry: func(ctx context.Context, cards decisioncard.Store, runID string, now time.Time) error {
+			err := stopDecisionCardRun(ctx, cards, runID, now)
+			if !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
+				return fmt.Errorf("second run.stop error = %v, want ErrAlreadyTerminal", err)
+			}
+			return nil
+		}},
+		{name: "active_run_quiescence", invoke: quiesceDecisionCardRun, retry: quiesceDecisionCardRun},
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, producer := range producers {
+			backend, producer := backend, producer
+			t.Run(backend+"/"+producer.name, func(t *testing.T) {
+				ctx := context.Background()
+				cardStore, runID := decisionCardTestStore(t, backend)
+				db, postgres := decisionCardStoreDB(t, cardStore)
+				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
+				entityID := uuid.NewString()
+				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				card := newDecisionCardTestCard(t, runID, now)
+				card.CardID = activation.CardID
+				card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
+				card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
+				card, err = decisioncard.New(card)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+					t.Fatal(err)
+				}
+				seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
+
+				if err := producer.invoke(ctx, cardStore, runID, now.Add(time.Minute)); err != nil {
+					t.Fatalf("first terminal producer: %v", err)
+				}
+				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
+				if err := producer.retry(ctx, cardStore, runID, now.Add(2*time.Minute)); err != nil {
+					t.Fatalf("terminal producer retry: %v", err)
+				}
+				assertTerminalDecisionCardStateChangeOnly(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID)
+			})
+		}
+	}
+}
+
+func markDecisionCardRunTerminalStatus(status string) func(context.Context, decisioncard.Store, string, time.Time) error {
+	return func(ctx context.Context, cards decisioncard.Store, runID string, now time.Time) error {
+		failure := terminalEventAdmissionFailure(status)
+		switch selected := cards.(type) {
+		case *PostgresStore:
+			_, err := selected.MarkRunTerminal(ctx, runID, status, failure, now)
+			return err
+		case *SQLiteRuntimeStore:
+			_, err := selected.MarkRunTerminal(ctx, runID, status, failure, now)
+			return err
+		default:
+			return fmt.Errorf("unexpected decision card store %T", cards)
+		}
+	}
+}
+
+func stopDecisionCardRun(ctx context.Context, cards decisioncard.Store, runID string, now time.Time) error {
+	req := runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test_stop", ControlledBy: "test", Now: now}
+	switch selected := cards.(type) {
+	case *PostgresStore:
+		_, err := selected.StopRunControl(ctx, req)
+		return err
+	case *SQLiteRuntimeStore:
+		_, err := selected.StopRunControl(ctx, req)
+		return err
+	default:
+		return fmt.Errorf("unexpected decision card store %T", cards)
+	}
+}
+
+func quiesceDecisionCardRun(ctx context.Context, cards decisioncard.Store, _ string, now time.Time) error {
+	req := runtimerunquiescence.Request{
+		OperationName: "test_terminal_card_quiescence",
+		RequestedAt:   now,
+		AllActiveRuns: true,
+		ReasonCode:    "test_quiescence",
+		ControlledBy:  "test",
+		DeliveryNote:  "test quiescence",
+	}
+	switch selected := cards.(type) {
+	case *PostgresStore:
+		_, err := selected.ApplyActiveRunQuiescence(ctx, req)
+		return err
+	case *SQLiteRuntimeStore:
+		_, err := selected.ApplyActiveRunQuiescence(ctx, req)
+		return err
+	default:
+		return fmt.Errorf("unexpected decision card store %T", cards)
+	}
+}
+
+func assertTerminalDecisionCardStateChangeOnly(t *testing.T, ctx context.Context, cards decisioncard.Store, db *sql.DB, postgres bool, runID, entityID, cardID string) {
+	t.Helper()
+	card, err := cards.GetDecisionCard(ctx, cardID)
+	if err != nil || card.Status != decisioncard.StatusSuperseded {
+		t.Fatalf("terminal card = %#v, %v", card, err)
+	}
+	if activation := loadDecisionCardGateActivation(t, db, postgres, runID, entityID); activation.Status != gateruntime.StatusSuperseded {
+		t.Fatalf("terminal gate activation = %#v", activation)
+	}
+	changes, err := cards.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	superseded := 0
+	for _, change := range changes {
+		if change.CardID == cardID && change.ChangeType == decisioncard.ChangeSuperseded {
+			superseded++
+		}
+	}
+	if superseded != 1 {
+		t.Fatalf("terminal superseded changes = %d, want 1", superseded)
+	}
+	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'mailbox.card_superseded'`
+	if postgres {
+		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'mailbox.card_superseded'`
+	}
+	var eventCount int
+	if err := db.QueryRowContext(ctx, query, runID).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if eventCount != 0 {
+		t.Fatalf("terminal mailbox.card_superseded events = %d, want 0", eventCount)
 	}
 }
 

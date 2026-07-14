@@ -105,6 +105,158 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	})
 }
 
+type eventBusExactDuplicateState struct {
+	Status        string
+	RunEventCount int
+	EventRows     int
+	DeliveryRows  int
+	ReceiptRows   int
+}
+
+func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	evt := exactDuplicateEventBusEvent(runID)
+	if err := pg.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-original"}, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+		t.Fatalf("seed event with committed side effects: %v", err)
+	}
+	assertEventBusExactDuplicateIsOperationNoOp(t, pg, pg.RunEventMutation, evt, func() (eventBusExactDuplicateState, error) {
+		var state eventBusExactDuplicateState
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
+			return state, err
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.EventRows); err != nil {
+			return state, err
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
+			return state, err
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.ReceiptRows); err != nil {
+			return state, err
+		}
+		return state, nil
+	}, func() error {
+		if _, err := db.ExecContext(ctx, `
+			UPDATE event_deliveries
+			SET status = 'delivered', delivered_at = now()
+			WHERE event_id = $1::uuid
+		`, evt.ID()); err != nil {
+			return err
+		}
+		_, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC())
+		return err
+	})
+}
+
+func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	evt := exactDuplicateEventBusEvent(runID)
+	if err := sqliteStore.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-original"}, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+		t.Fatalf("seed event with committed side effects: %v", err)
+	}
+	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, sqliteStore.RunEventMutation, evt, func() (eventBusExactDuplicateState, error) {
+		var state eventBusExactDuplicateState
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
+			return state, err
+		}
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
+			return state, err
+		}
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
+			return state, err
+		}
+		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, evt.ID()).Scan(&state.ReceiptRows); err != nil {
+			return state, err
+		}
+		return state, nil
+	}, func() error {
+		if _, err := sqliteStore.DB.ExecContext(ctx, `
+			UPDATE event_deliveries
+			SET status = 'delivered', delivered_at = ?
+			WHERE event_id = ?
+		`, time.Now().UTC(), evt.ID()); err != nil {
+			return err
+		}
+		_, err := sqliteStore.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC())
+		return err
+	})
+}
+
+func assertEventBusExactDuplicateIsOperationNoOp(
+	t *testing.T,
+	eventStore runtimebus.EventStore,
+	runMutation func(context.Context, func(runtimebus.EventMutation) error) error,
+	evt events.Event,
+	loadState func() (eventBusExactDuplicateState, error),
+	markTerminal func() error,
+) {
+	t.Helper()
+	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	original := eb.Subscribe("agent-original", evt.Type())
+	ch := eb.Subscribe("agent-expansion", evt.Type())
+	writers := map[string]func(context.Context, events.Event) error{
+		"publish":              eb.Publish,
+		"publish_acknowledged": eb.PublishAcknowledged,
+		"publish_direct": func(ctx context.Context, event events.Event) error {
+			return eb.PublishDirect(ctx, event, []string{"agent-expansion"})
+		},
+		"publish_in_mutation": func(ctx context.Context, event events.Event) error {
+			return runMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				return eb.PublishInMutation(mutation.Context(), event)
+			})
+		},
+	}
+	assertPhase := func(t *testing.T) {
+		t.Helper()
+		for name, publish := range writers {
+			name, publish := name, publish
+			t.Run(name, func(t *testing.T) {
+				before, err := loadState()
+				if err != nil {
+					t.Fatalf("load state before duplicate: %v", err)
+				}
+				if err := publish(context.Background(), evt); err != nil {
+					t.Fatalf("publish exact duplicate: %v", err)
+				}
+				after, err := loadState()
+				if err != nil {
+					t.Fatalf("load state after duplicate: %v", err)
+				}
+				if after != before {
+					t.Fatalf("exact duplicate mutated operation state: before=%+v after=%+v", before, after)
+				}
+				requireNoBusEvent(t, original, "exact duplicate committed-recipient dispatch")
+				requireNoBusEvent(t, ch, "exact duplicate process-local dispatch")
+			})
+		}
+	}
+	t.Run("active_run", assertPhase)
+	if err := markTerminal(); err != nil {
+		t.Fatalf("mark terminal: %v", err)
+	}
+	t.Run("terminal_run", assertPhase)
+}
+
+func exactDuplicateEventBusEvent(runID string) events.Event {
+	return eventtest.RootIngress(
+		uuid.NewString(), events.EventType("custom.exact_duplicate_noop"), "api.v1", "", []byte(`{"attempt":"duplicate"}`),
+		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond),
+	)
+}
+
 func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -2589,11 +2741,16 @@ func (m *failingInboundBatchMutation) Context() context.Context {
 }
 
 func (m *failingInboundBatchMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	_, err := m.AppendEventOutcome(ctx, evt)
+	return err
+}
+
+func (m *failingInboundBatchMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
 	m.appendCount++
 	if m.appendCount == m.failAppend {
-		return errors.New("injected normalized append failure")
+		return runtimebus.EventAppendOutcomeUnknown, errors.New("injected normalized append failure")
 	}
-	return m.EventMutation.AppendEvent(ctx, evt)
+	return m.EventMutation.AppendEventOutcome(ctx, evt)
 }
 
 func countPostgresInboundBatchRows(t *testing.T, ctx context.Context, db *sql.DB, rawID, normalizedID string) (int, int) {
