@@ -28,6 +28,7 @@ type temporalFrontierDesignRecord struct {
 	Grants              temporalFrontierGrants          `yaml:"grants"`
 	FactFamilies        []temporalFrontierFactFamily    `yaml:"fact_families"`
 	Operations          map[string]string               `yaml:"operations"`
+	OperationMatrix     []temporalFrontierOperationRow  `yaml:"operation_matrix"`
 	Migration           temporalFrontierMigration       `yaml:"migration"`
 	Prototype           temporalFrontierPrototype       `yaml:"prototype"`
 	Manifestations      []temporalFrontierManifestation `yaml:"manifestations"`
@@ -84,6 +85,7 @@ type temporalFrontierGrants struct {
 	RuntimeExecute                []string `yaml:"runtime_execute"`
 	RuntimeDeniedExecute          []string `yaml:"runtime_denied_execute"`
 	CleanupAuthorizerExecute      []string `yaml:"cleanup_authorizer_execute"`
+	CleanupAuthorizerRead         []string `yaml:"cleanup_authorizer_read"`
 	RuntimeInsertOnly             []string `yaml:"runtime_insert_only"`
 	RuntimeGuardedUpdate          []string `yaml:"runtime_guarded_update"`
 	RuntimeGuardedDML             []string `yaml:"runtime_guarded_dml"`
@@ -94,6 +96,14 @@ type temporalFrontierGrants struct {
 type temporalFrontierFactFamily struct {
 	Name        string `yaml:"name"`
 	Disposition string `yaml:"disposition"`
+}
+
+type temporalFrontierOperationRow struct {
+	Family string `yaml:"family"`
+	Insert string `yaml:"insert"`
+	Update string `yaml:"update"`
+	Delete string `yaml:"delete"`
+	Proof  string `yaml:"proof"`
 }
 
 type temporalFrontierMigration struct {
@@ -203,6 +213,9 @@ func TestTemporalFrontierDesignRecordRejectsClosureAndGuardDrift(t *testing.T) {
 		{name: "missing proof", mutate: func(r *temporalFrontierDesignRecord) {
 			r.Prototype.Assertions = stringsExcept(r.Prototype.Assertions, "update_move_requires_old_and_new_runs")
 		}, want: "prototype assertions missing update_move_requires_old_and_new_runs"},
+		{name: "missing operation row", mutate: func(r *temporalFrontierDesignRecord) {
+			r.OperationMatrix = r.OperationMatrix[1:]
+		}, want: "operation matrix missing runs"},
 		{name: "heuristic backfill", mutate: func(r *temporalFrontierDesignRecord) { r.Migration.HeuristicBackfill = "allowed" }, want: "heuristic backfill"},
 	}
 	for _, tc := range tests {
@@ -330,6 +343,7 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	problems = append(problems, requireExactSet("runtime execute", record.Grants.RuntimeExecute, []string{"swarm_create_run", "swarm_claim_temporal_runs", "swarm_claim_authorized_run_cleanup", "swarm_delete_authorized_runs"})...)
 	problems = append(problems, requireSet("runtime denied execute", record.Grants.RuntimeDeniedExecute, []string{"swarm_declare_temporal_runs", "swarm_authorize_run_cleanup", "swarm_next_temporal_ordinal", "swarm_resolve_temporal_run", "swarm_guard_append_fact", "swarm_guard_mutable_fact"})...)
 	problems = append(problems, requireExactSet("cleanup authorizer execute", record.Grants.CleanupAuthorizerExecute, []string{"swarm_authorize_run_cleanup"})...)
+	problems = append(problems, requireExactSet("cleanup authorizer read", record.Grants.CleanupAuthorizerRead, []string{"runtime_store_metadata", "runtime_store_migrations"})...)
 
 	requiredFacts := []string{"runs", "events", "event_deliveries", "event_receipts", "dead_letters", "entity_mutations", "entity_state", "timers", "agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "activity_attempts", "selected_fork_lineage", "routing_rules", "runless_events"}
 	facts := make([]string, 0, len(record.FactFamilies))
@@ -348,6 +362,42 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	if record.Operations["mutable_update"] != "every_distinct_old_and_new_nonnull_run_declared" {
 		problems = append(problems, "mutable_update does not require OLD and NEW non-null runs")
 	}
+	expectedOperationMatrix := map[string][3]string{
+		"runs":                      {"owner_function", "typed_history", "authorized_wrapper_cascade"},
+		"events":                    {"revisioned_insert", "rejected_immutable", "authorized_wrapper_cascade"},
+		"event_deliveries":          {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"event_receipts":            {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"dead_letters":              {"revisioned_insert", "rejected_immutable", "authorized_wrapper_cascade"},
+		"entity_mutations":          {"revisioned_insert", "rejected_immutable", "authorized_wrapper_cascade"},
+		"entity_state":              {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"timers":                    {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"agent_sessions":            {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"agent_turns":               {"revisioned_insert", "rejected_immutable", "authorized_wrapper_cascade"},
+		"agent_conversation_audits": {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"reply_contexts":            {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"activity_attempts":         {"typed_history", "typed_history", "typed_history_or_authorized_wrapper_cascade"},
+		"selected_fork_lineage":     {"revisioned_insert", "rejected_immutable", "authorized_wrapper_cascade"},
+	}
+	seenOperationRows := make(map[string]bool, len(record.OperationMatrix))
+	for _, row := range record.OperationMatrix {
+		expected, ok := expectedOperationMatrix[row.Family]
+		if !ok {
+			problems = append(problems, "operation matrix has unexpected family "+row.Family)
+			continue
+		}
+		if seenOperationRows[row.Family] {
+			problems = append(problems, "operation matrix duplicates "+row.Family)
+		}
+		seenOperationRows[row.Family] = true
+		if row.Insert != expected[0] || row.Update != expected[1] || row.Delete != expected[2] || strings.TrimSpace(row.Proof) == "" {
+			problems = append(problems, "operation matrix row drifted for "+row.Family)
+		}
+	}
+	for family := range expectedOperationMatrix {
+		if !seenOperationRows[family] {
+			problems = append(problems, "operation matrix missing "+family)
+		}
+	}
 
 	if record.Migration.Generation != "temporal-frontier-v1" || record.Migration.MigrationID != "temporal-frontier-v1" || record.Migration.RecognizedLegacyPlatformVersion != "0.7.0" {
 		problems = append(problems, "migration generation/edge drifted")
@@ -355,7 +405,7 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	if record.Migration.HeuristicBackfill != "forbidden" {
 		problems = append(problems, "migration heuristic backfill is not forbidden")
 	}
-	if record.Migration.LegacyAdmission != "complete_registered_catalog_checksum" || record.Migration.Reapply != "full_catalog_revalidation_then_exact_checksum_noop_else_fail_closed" {
+	if record.Migration.LegacyAdmission != "complete_registered_catalog_checksum_and_delivery_event_lineage" || record.Migration.Reapply != "full_catalog_revalidation_then_exact_checksum_noop_else_fail_closed" {
 		problems = append(problems, "migration catalog admission/reapply contract drifted")
 	}
 	if record.Migration.Isolation != "SERIALIZABLE" || !record.Migration.MetadataUpdatedLast || !record.Migration.RollbackIsAtomic || record.Migration.ServeSchemaMutation != "forbidden" {
@@ -364,7 +414,7 @@ func validateTemporalFrontierDesignRecord(root string, record temporalFrontierDe
 	problems = append(problems, requireExactSet("active statuses", record.Migration.ActiveStatuses, []string{"running", "paused"})...)
 	problems = append(problems, requireExactSet("deployment locks", record.Migration.DeploymentLocks, []string{"runtime_shared_session_advisory", "migration_exclusive_advisory", "first_upgrade_access_exclusive_tables"})...)
 
-	requiredAssertions := []string{"fresh_schema_creation", "restricted_runtime_atomic_run_creation", "active_legacy_run_rejected_without_ddl", "complete_legacy_catalog_drift_rejected", "failed_migration_rolls_back_schema_and_metadata", "exact_reapply_is_idempotent", "drifted_target_reapply_rejected", "runtime_shared_lock_excludes_migration", "runtime_cannot_assume_owner_or_disable_trigger", "runtime_cannot_mutate_authority_or_history_tables", "undeclared_insert_update_delete_rejected", "every_guarded_fact_family_insert_update_delete_proven", "derived_lineage_mismatch_rejected", "destructive_declaration_not_runtime_callable", "event_delivery_receipt_share_revision_and_ordinals", "rollback_publishes_no_revision", "update_move_requires_old_and_new_runs", "runless_lineage_remains_unversioned", "authorized_unversioned_destructive_cleanup_creates_no_revision", "arbitrary_run_deletion_rejected", "cleanup_authorization_is_not_runtime_mintable", "cleanup_authorizer_has_no_fact_or_schema_privileges", "mixed_cleanup_revisions_survivors_and_tombstones_deleted_runs", "reverse_order_claims_serialize_frontier_first", "trigger_functions_are_not_runtime_bypass_surfaces", "second_runtime_boot_is_read_only"}
+	requiredAssertions := []string{"fresh_schema_creation", "restricted_runtime_atomic_run_creation", "active_legacy_run_rejected_without_ddl", "complete_legacy_catalog_drift_rejected", "legacy_delivery_lineage_mismatch_rejected_without_ddl", "failed_migration_rolls_back_schema_and_metadata", "exact_reapply_is_idempotent", "drifted_target_reapply_rejected", "exact_runtime_and_cleanup_admission", "post_migration_admission_drift_rejected", "runtime_shared_lock_excludes_migration", "runtime_cannot_assume_owner_or_disable_trigger", "runtime_cannot_mutate_authority_or_history_tables", "undeclared_insert_update_delete_rejected", "explicit_fact_family_operation_matrix_executed", "append_family_update_delete_rejected", "every_fact_family_authorized_destructive_cascade", "delivery_update_and_delete_history_proven", "receipt_update_and_delete_history_proven", "derived_lineage_mismatch_rejected", "destructive_declaration_not_runtime_callable", "partial_destructive_fact_delete_cannot_commit", "event_delivery_receipt_share_revision_and_ordinals", "rollback_publishes_no_revision", "update_move_requires_old_and_new_runs", "runless_lineage_remains_unversioned", "authorized_unversioned_destructive_cleanup_creates_no_revision", "arbitrary_run_deletion_rejected", "cleanup_authorization_is_not_runtime_mintable", "cleanup_authorizer_has_no_fact_or_schema_privileges", "mixed_cleanup_revisions_survivors_and_tombstones_deleted_runs", "reverse_order_claims_serialize_frontier_first", "trigger_functions_are_not_runtime_bypass_surfaces", "second_runtime_boot_is_read_only"}
 	if record.Prototype.Test != "TestTemporalFrontierPostgresDesignConformance" || record.Prototype.RunnerOwner != "platform-spec.yaml#run_model.fork.temporal_frontier.required_conformance.runner" || record.Prototype.ProofProjection != "required-full" {
 		problems = append(problems, "prototype test/runner owner/proof projection does not match the dedicated supported command")
 	}

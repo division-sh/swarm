@@ -12034,6 +12034,21 @@ run_model:
             deterministically projects that existing FK lineage; this is identity normalization, not historical backfill.
           dead_letters: original event lineage
           runless_events: explicit NULL revision and ordinal
+        operation_matrix:
+          runs: {insert: owner function, update: typed history, delete: authorized wrapper cascade}
+          events: {insert: revisioned insert, update: rejected immutable, delete: authorized wrapper cascade}
+          event_deliveries: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          event_receipts: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          dead_letters: {insert: revisioned insert, update: rejected immutable, delete: authorized wrapper cascade}
+          entity_mutations: {insert: revisioned insert, update: rejected immutable, delete: authorized wrapper cascade}
+          entity_state: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          timers: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          agent_sessions: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          agent_turns: {insert: revisioned insert, update: rejected immutable, delete: authorized wrapper cascade}
+          agent_conversation_audits: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          reply_contexts: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          activity_attempts: {insert: typed history, update: typed history, delete: typed history or authorized wrapper cascade}
+          selected_fork_lineage: {insert: revisioned insert, update: rejected immutable, delete: authorized wrapper cascade}
       trigger_contract:
         functions: [swarm_declare_temporal_runs, swarm_create_run, swarm_claim_temporal_runs, swarm_authorize_run_cleanup, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs, swarm_next_temporal_ordinal, swarm_resolve_temporal_run, swarm_guard_append_fact, swarm_guard_mutable_fact]
         exact_trigger_families:
@@ -12057,7 +12072,11 @@ run_model:
         - Mutable UPDATE and DELETE guard OLD run identity before mutation; ownership moves independently guard every
           distinct OLD and NEW non-NULL run and write typed evidence for each. Event-derived and asserted-event families
           derive through events.run_id and reject missing or disagreeing lineage before allocating an ordinal.
-        - Cascade-triggered fact deletion accepts only the same sealed destructive transaction that owns the run tombstone.
+        - History-free fact deletion accepts only a destructive declaration paired with a matching run_deletion_tombstones
+          row for the current xid. Only swarm_delete_authorized_runs writes that tombstone before deleting the run; a cleanup
+          claim followed by direct or partial fact deletion aborts and cannot commit. The wrapper deletes event receipts,
+          dead letters, and deliveries while their immutable event lineage remains resolvable, then deletes the run so
+          direct-run foreign-key cascades complete without introducing a second deletion authority.
       privilege_contract:
         schema_owner_migration_login:
           attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS]
@@ -12066,7 +12085,9 @@ run_model:
         cleanup_authorizer_login:
           attributes: [LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS, not_member_of_schema_owner, distinct_from_runtime]
           schema: USAGE only; no CREATE
-          tables: no direct privileges
+          tables:
+            read: [runtime_store_metadata, runtime_store_migrations]
+            mutate: none
           functions:
             execute: [swarm_authorize_run_cleanup]
             denied: [all other temporal functions]
@@ -12085,9 +12106,11 @@ run_model:
             execute: [swarm_create_run, swarm_claim_temporal_runs, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs]
             denied: [swarm_declare_temporal_runs, swarm_authorize_run_cleanup, swarm_resolve_temporal_run, all trigger functions, swarm_next_temporal_ordinal]
         admission: >
-          Serve verifies current_user equals metadata.runtime_role, differs from metadata.schema_owner_role, is not a
-          member of that role, and lacks SUPERUSER, BYPASSRLS, CREATEROLE, schema CREATE, table ownership, trigger/history/
-          metadata DML, and forbidden function EXECUTE. Any missing required grant or extra forbidden grant fails boot.
+          One exact read-only checker is used by runtime boot and cleanup-authorizer admission. It verifies the caller's
+          identity-specific grant matrix plus metadata, migration ledger, complete installed-catalog checksum, all three
+          role attributes and pairwise lack of membership, schema owner and privileges, table grants, function signatures,
+          owners, SECURITY DEFINER/search_path configuration and grants, and the exact table/trigger/function ENABLE ALWAYS
+          mapping. Any missing required grant, extra grant, metadata mismatch, or post-migration catalog drift fails closed.
       schema_apply:
         command: swarm schema apply --runtime-role <postgres-role> --cleanup-authorizer-role <postgres-role> --config <explicit-migration-config>
         authority: >
@@ -12098,8 +12121,9 @@ run_model:
         migration_id: temporal-frontier-v1
         recognized_legacy: >
           Only a runtime_store_metadata platform_version=0.7.0 store whose complete catalog checksum matches the registered
-          pre-temporal shape is eligible. Missing/unknown metadata, partial temporal objects, checksum drift, or an
-          unregistered shape fails closed; there is no heuristic repair or timestamp-derived backfill.
+          pre-temporal shape and whose stored event_deliveries.run_id agrees with the referenced events.run_id is eligible.
+          Missing/unknown metadata, partial temporal objects, checksum drift, missing event lineage, stored/derived run
+          disagreement, or an unregistered shape fails closed before DDL; there is no heuristic repair or timestamp-derived backfill.
         active_run_gate: >
           Before DDL, report every runs row in running or paused status and abort with no mutation. Operators must drain or
           terminate those runs explicitly. Terminal legacy runs are retained as model_version=0/history_complete=false.
@@ -12108,7 +12132,8 @@ run_model:
           order:
           - Acquire the temporal-schema exclusive advisory lock.
           - Lock recognized legacy tables ACCESS EXCLUSIVE in deterministic name order so first upgrade excludes old binaries.
-          - Re-read metadata, the registered complete catalog checksum, active runs, owner identity, and migration edge.
+          - Re-read metadata, the registered complete catalog checksum, every delivery/event run-lineage invariant, active runs,
+            owner identity, and migration edge.
           - Normalize only the registered legacy shape; create the temporal model and guarded functions/triggers.
           - Insert model_version=0 frontiers for retained legacy runs without synthesizing revisions or histories.
           - Apply exact ownership, revocations, grants, ENABLE ALWAYS triggers, and catalog validation.
@@ -12125,13 +12150,14 @@ run_model:
         first_upgrade: ACCESS EXCLUSIVE legacy table locks cover old binaries that do not yet hold the shared advisory lock.
       runtime_admission:
         schema_mutation: forbidden
-        checks: [platform version, schema generation, canonical DDL checksum, installed catalog checksum, migration ledger, schema owner, runtime role, role attributes and membership, exact grants, temporal columns and constraints, trigger/function OIDs and checksums, ENABLE ALWAYS state]
-        second_boot: Two independent runtime-login boots must pass the same read-only admission without executing DDL, DML, GRANT, REVOKE, ALTER, or role changes.
+        checker: one exact read-only checker shared by runtime and cleanup-authorizer identities
+        checks: [platform version, schema generation, canonical DDL checksum, installed catalog checksum, migration ledger, schema owner, owner/runtime/cleanup-authorizer role attributes and memberships, identity-specific exact table/function/schema grants, exact function signatures/owners/configuration/checksums, exact table/trigger/function mapping, ENABLE ALWAYS state]
+        second_boot: Two independent runtime-login boots and cleanup-authorizer admission must pass the same read-only checker without executing DDL, DML, GRANT, REVOKE, ALTER, or role changes; committed catalog drift must reject both identities.
       required_conformance:
         committed_record: internal/runtime/conformance/testdata/temporal_frontier_design_record.yaml
         postgres_test: TestTemporalFrontierPostgresDesignConformance
         runner: go run ./cmd/swarm-test-postgres -- go test ./internal/runtime/conformance -run '^TestTemporalFrontierPostgresDesignConformance$' -count=1
-        compact_path: restricted runtime creates a run, mutates every guarded fact family, rejects lineage mismatch, consumes authorized mixed cleanup, and passes read-only second boot after complete migration/reapply validation
+        compact_path: restricted runtime creates a run; executes the explicit insert/update/delete disposition for every guarded fact family; rejects append mutation, lineage mismatch, and claim-plus-partial destructive deletion; proves authorized mixed and every-family destructive cascades; admits complete legacy lineage; rejects drifted reapply and post-migration drift; and passes runtime second boot plus cleanup-authorizer admission through one exact read-only checker
         scope: Design/schema/privilege feasibility only; passing does not prove production writer or reader migration.
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
       point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts

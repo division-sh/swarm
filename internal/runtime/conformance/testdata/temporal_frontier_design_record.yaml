@@ -90,6 +90,7 @@ grants:
   runtime_execute: [swarm_create_run, swarm_claim_temporal_runs, swarm_claim_authorized_run_cleanup, swarm_delete_authorized_runs]
   runtime_denied_execute: [swarm_declare_temporal_runs, swarm_authorize_run_cleanup, swarm_next_temporal_ordinal, swarm_resolve_temporal_run, swarm_guard_append_fact, swarm_guard_mutable_fact]
   cleanup_authorizer_execute: [swarm_authorize_run_cleanup]
+  cleanup_authorizer_read: [runtime_store_metadata, runtime_store_migrations]
   runtime_insert_only: [events, entity_mutations, dead_letters, agent_turns, selected_fork_lineage]
   runtime_guarded_update: [runs]
   runtime_guarded_dml: [event_deliveries, event_receipts, timers, entity_state, agent_sessions, agent_conversation_audits, reply_contexts, activity_attempts]
@@ -123,6 +124,21 @@ operations:
   whole_run_delete: sealed_authorization_claim_then_owner_delete_wrapper
   mixed_cleanup: normal_survivors_revisioned_and_destructive_runs_tombstoned_in_one_transaction
   derived_lineage: persisted_and_derived_run_identity_must_agree
+operation_matrix:
+  - {family: runs, insert: owner_function, update: typed_history, delete: authorized_wrapper_cascade, proof: restricted runtime creation + guarded update + every-family cascade}
+  - {family: events, insert: revisioned_insert, update: rejected_immutable, delete: authorized_wrapper_cascade, proof: shared revision + append immutability + every-family cascade}
+  - {family: event_deliveries, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: delivery operation matrix + declared delete + every-family cascade}
+  - {family: event_receipts, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: receipt operation matrix + every-family cascade}
+  - {family: dead_letters, insert: revisioned_insert, update: rejected_immutable, delete: authorized_wrapper_cascade, proof: all-family insert + append immutability + every-family cascade}
+  - {family: entity_mutations, insert: revisioned_insert, update: rejected_immutable, delete: authorized_wrapper_cascade, proof: all-family insert + append immutability + every-family cascade}
+  - {family: entity_state, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + ownership move + every-family cascade}
+  - {family: timers, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + partial-delete refusal + every-family cascade}
+  - {family: agent_sessions, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + every-family cascade}
+  - {family: agent_turns, insert: revisioned_insert, update: rejected_immutable, delete: authorized_wrapper_cascade, proof: all-family insert + append immutability + every-family cascade}
+  - {family: agent_conversation_audits, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + every-family cascade}
+  - {family: reply_contexts, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + every-family cascade}
+  - {family: activity_attempts, insert: typed_history, update: typed_history, delete: typed_history_or_authorized_wrapper_cascade, proof: all-family typed history + every-family cascade}
+  - {family: selected_fork_lineage, insert: revisioned_insert, update: rejected_immutable, delete: authorized_wrapper_cascade, proof: all-family insert + append immutability + every-family cascade}
 migration:
   generation: temporal-frontier-v1
   migration_id: temporal-frontier-v1
@@ -136,7 +152,7 @@ migration:
   metadata_updated_last: true
   rollback_is_atomic: true
   reapply: full_catalog_revalidation_then_exact_checksum_noop_else_fail_closed
-  legacy_admission: complete_registered_catalog_checksum
+  legacy_admission: complete_registered_catalog_checksum_and_delivery_event_lineage
   serve_schema_mutation: forbidden
 prototype:
   test: TestTemporalFrontierPostgresDesignConformance
@@ -147,16 +163,24 @@ prototype:
     - restricted_runtime_atomic_run_creation
     - active_legacy_run_rejected_without_ddl
     - complete_legacy_catalog_drift_rejected
+    - legacy_delivery_lineage_mismatch_rejected_without_ddl
     - failed_migration_rolls_back_schema_and_metadata
     - exact_reapply_is_idempotent
     - drifted_target_reapply_rejected
+    - exact_runtime_and_cleanup_admission
+    - post_migration_admission_drift_rejected
     - runtime_shared_lock_excludes_migration
     - runtime_cannot_assume_owner_or_disable_trigger
     - runtime_cannot_mutate_authority_or_history_tables
     - undeclared_insert_update_delete_rejected
-    - every_guarded_fact_family_insert_update_delete_proven
+    - explicit_fact_family_operation_matrix_executed
+    - append_family_update_delete_rejected
+    - every_fact_family_authorized_destructive_cascade
+    - delivery_update_and_delete_history_proven
+    - receipt_update_and_delete_history_proven
     - derived_lineage_mismatch_rejected
     - destructive_declaration_not_runtime_callable
+    - partial_destructive_fact_delete_cannot_commit
     - event_delivery_receipt_share_revision_and_ordinals
     - rollback_publishes_no_revision
     - update_move_requires_old_and_new_runs
@@ -184,3 +208,7 @@ manifestations:
   - {id: delivery_event_lineage_mismatch, issue: 2050, status: design_locked_and_prototyped_here}
   - {id: drifted_target_reapply_accepted, issue: 2050, status: design_locked_and_prototyped_here}
   - {id: incomplete_legacy_catalog_admitted, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: partial_history_free_fact_deletion, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: incomplete_runtime_admission, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: legacy_delivery_event_data_mismatch, issue: 2050, status: design_locked_and_prototyped_here}
+  - {id: generic_fact_family_coverage_overclaim, issue: 2050, status: design_locked_and_prototyped_here}
