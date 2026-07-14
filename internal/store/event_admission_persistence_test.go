@@ -137,15 +137,9 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	harness := terminalEventAdmissionHarness{
 		append: pg.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			tx, err := pg.BeginEventTx(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if err := pg.AppendEventTx(ctx, tx, evt); err != nil {
-				return err
-			}
-			return tx.Commit()
+			return pg.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return pg.AppendEventTx(txctx, tx, evt)
+			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "completed" {
@@ -186,15 +180,9 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	harness := terminalEventAdmissionHarness{
 		append: sqliteStore.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			tx, err := sqliteStore.BeginEventTx(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if err := sqliteStore.AppendEventTx(ctx, tx, evt); err != nil {
-				return err
-			}
-			return tx.Commit()
+			return sqliteStore.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return sqliteStore.AppendEventTx(txctx, tx, evt)
+			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "completed" {
@@ -881,15 +869,9 @@ func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) 
 	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
 		append: store.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			tx, err := store.BeginEventTx(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if err := store.AppendEventTx(ctx, tx, evt); err != nil {
-				return err
-			}
-			return tx.Commit()
+			return store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return store.AppendEventTx(txctx, tx, evt)
+			})
 		},
 		loadState: func(ctx context.Context, eventID string) (globalRuntimeLogIdentityState, error) {
 			var state globalRuntimeLogIdentityState
@@ -919,15 +901,9 @@ func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
 		append: store.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			tx, err := store.BeginEventTx(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if err := store.AppendEventTx(ctx, tx, evt); err != nil {
-				return err
-			}
-			return tx.Commit()
+			return store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return store.AppendEventTx(txctx, tx, evt)
+			})
 		},
 		loadState: func(ctx context.Context, eventID string) (globalRuntimeLogIdentityState, error) {
 			var state globalRuntimeLogIdentityState

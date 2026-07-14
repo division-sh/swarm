@@ -249,25 +249,19 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, expiryStore decisioncard.HumanTaskExpiryStore, at time.Time, limit int) []events.Event {
 	t.Helper()
-	db, _ := decisionCardStoreDB(t, cardStore)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin human-task expiry transaction: %v", err)
+	db, postgres := decisionCardStoreDB(t, cardStore)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if !postgres {
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, cardStore.(*SQLiteRuntimeStore))
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	eventsOut, err := expiryStore.ExpireHumanTaskCardsInMutation(runtimepipeline.WithPipelineSQLTxContext(ctx, tx), at, limit)
-	if err != nil {
+	var eventsOut []events.Event
+	if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		var err error
+		eventsOut, err = expiryStore.ExpireHumanTaskCardsInMutation(txctx, at, limit)
+		return err
+	}); err != nil {
 		t.Fatalf("ExpireHumanTaskCardsInMutation: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit human-task expiry transaction: %v", err)
-	}
-	committed = true
 	return eventsOut
 }
 
