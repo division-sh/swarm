@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +39,7 @@ type runForkReplaySourceEvent struct {
 	HandlerNode    sql.NullString
 }
 
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier authoredEventClassifier, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
 	result := RunForkDeliveryEventReplayResult{
 		Owner:       RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -49,6 +51,9 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, lineage ru
 		execution.EventDeliveriesAdmission.Fact != RunForkHistoricalReplayFactEventDeliveries ||
 		execution.EventDeliveriesAdmission.Admission != RunForkHistoricalReplayAdmissionExecutableForkWork {
 		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires %s owner-authorized executable event_deliveries", RunForkHistoricalReplayExecutionOwner)
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return result, err
 	}
 	replayable := execution.DeliveryEventReplayWork
 	if len(replayable) == 0 {
@@ -83,6 +88,11 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, lineage ru
 				return result, err
 			}
 			if inserted {
+				envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, nullStringText(sourceEvent.EntityID)), nullStringText(sourceEvent.FlowInstance))
+				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID}, envelope, now)
+				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, nullStringText(sourceEvent.ProducedBy), nullStringText(sourceEvent.ProducedByType)); err != nil {
+					return result, err
+				}
 				result.ReplayedEventCount++
 			}
 			insertedEvents[sourceEventID] = forkEventID

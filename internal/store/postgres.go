@@ -20,8 +20,10 @@ type PostgresStore struct {
 	schemaCaps      StoreSchemaCapabilities
 	schemaCapsBound bool
 
-	eventPayloadValidator EventPayloadValidator
-	sessionLockTTL        time.Duration
+	eventPayloadValidator   EventPayloadValidator
+	authorActivityCatalogMu sync.RWMutex
+	authorActivityCatalog   map[string]struct{}
+	sessionLockTTL          time.Duration
 
 	scheduleClaimMu   sync.Mutex
 	scheduleClaimConn *sql.Conn

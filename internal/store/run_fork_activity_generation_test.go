@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -255,7 +256,21 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload)); err != nil {
 		t.Fatal(err)
 	}
-	failure := `{"class":"dependency_unavailable","code":"provider_unavailable","owner":"activity-runtime","operation":"execute","details":{"provider":"provider.write"}}`
+	failureEnvelope, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
+		runtimefailures.ClassDependencyUnavailable,
+		"dependency_unavailable",
+		"activity-runtime",
+		"execute",
+		map[string]any{"provider": "provider.write"},
+	))
+	if !ok {
+		t.Fatal("construct typed activity failure")
+	}
+	failureJSON, err := json.Marshal(failureEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := string(failureJSON)
 	resultPayload, _ := json.Marshal(map[string]any{
 		"activity_id": "commit", "tool": "provider.write", "effect_class": "non_idempotent_write", "attempt": 1,
 		"failure": map[string]any{"code": "provider_unavailable"}, "revision_id": generation.RevisionID,
@@ -304,7 +319,8 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	if err := json.Unmarshal(rawFailure, &typed); err != nil {
 		t.Fatalf("fork failure is not a typed JSON object: %v (%s)", err, rawFailure)
 	}
-	if typed["code"] != "provider_unavailable" || typed["class"] != "dependency_unavailable" {
+	detail, _ := typed["detail"].(map[string]any)
+	if detail["code"] != "dependency_unavailable" || typed["class"] != "platform.dependency_unavailable" {
 		t.Fatalf("fork failure = %#v", typed)
 	}
 }

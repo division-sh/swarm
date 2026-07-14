@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -65,6 +67,10 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 			_ = tx.Rollback()
 		}
 	}()
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return ScenarioSetupResult{}, err
+	}
 	if err := s.ensureRunRow(ctx, caps, tx, req.RunID, "", "test.setup_entities", false); err != nil {
 		return ScenarioSetupResult{}, err
 	}
@@ -107,7 +113,13 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 			return ScenarioSetupResult{}, fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 		}
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+		return ScenarioSetupResult{}, fmt.Errorf("capture postgres scenario setup revisions: %w", err)
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		return ScenarioSetupResult{}, fmt.Errorf("finalize postgres scenario setup story: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return ScenarioSetupResult{}, fmt.Errorf("commit postgres scenario setup: %w", err)
 	}
 	committed = true
@@ -123,7 +135,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runRuntimeMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx) error {
 		if err := sqliteEnsureRunRow(txctx, tx, req.RunID, "", "test.setup_entities", req.CreatedAt); err != nil {
 			return err
 		}

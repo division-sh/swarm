@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -111,6 +113,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 			_ = tx.Rollback()
 		}
 	}()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return RunForkActivation{}, err
+	}
+	ctx = storyctx
 
 	lineage, err := loadRunForkActivationLineage(ctx, tx, forkRunID)
 	if err != nil {
@@ -203,7 +210,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, s, lineage, historicalReplayExecution, now)
 		if err != nil {
 			return result, err
 		}
@@ -222,7 +229,10 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	} else if affected != 1 {
 		return result, fmt.Errorf("fork activation blocked: fork_run_activation_not_applied")
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := recordRunForkActivationAuthorActivity(ctx, lineage, now, true); err != nil {
+		return result, err
+	}
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
@@ -236,6 +246,42 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		result.DeliveryEventReplay = &replayResult
 	}
 	return result, nil
+}
+
+func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkActivationLineage, now time.Time, sourceFrozen bool) error {
+	occurrences := []struct {
+		runID, transition, parentRunID, forkRunID string
+	}{{runID: lineage.ForkRunID, transition: "fork_started", parentRunID: lineage.SourceRunID}}
+	if sourceFrozen {
+		occurrences = append(occurrences, struct {
+			runID, transition, parentRunID, forkRunID string
+		}{runID: lineage.SourceRunID, transition: "forked", forkRunID: lineage.ForkRunID})
+	}
+	for _, occurrence := range occurrences {
+		transitionID := uuid.NewString()
+		if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: occurrence.transition,
+			SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
+			OccurredAt: now.UTC(), RunID: occurrence.runID,
+			Projection: runtimeauthoractivity.Projection{
+				SubjectType: "run", SubjectID: occurrence.runID, ParentRunID: occurrence.parentRunID,
+				ForkRunID: occurrence.forkRunID, TriggerEventType: lineage.ForkEventName,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx) error {
+	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func requireRunForkHistoricalReplayExecution(

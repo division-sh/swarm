@@ -292,7 +292,7 @@ func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstrac
 			Tier:                   "required_smoke",
 			RequiresGuardProofRefs: true,
 		},
-		"postgres_not_forced_through_sqlite_serialization_guard": {
+		"postgres_story_order_serialization_guard": {
 			Classification:         "guard",
 			Tier:                   "required_smoke",
 			RequiresGuardProofRefs: true,
@@ -489,7 +489,7 @@ func requiredSelectedStoreAbstractionRows() map[string]struct{} {
 		"producer_backend_branching_guard",
 		"raw_selected_runtime_writer_boundary_guard",
 		"sqlite_runtime_sqldb_omission_guard",
-		"postgres_not_forced_through_sqlite_serialization_guard",
+		"postgres_story_order_serialization_guard",
 		"default_sqlite_required_smoke",
 		"explicit_postgres_required_smoke",
 		"api_idempotency_public_surface_accounting",

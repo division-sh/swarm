@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -42,12 +43,15 @@ func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisi
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return insertDecisionCard(ctx, tx, card, false)
 	}
-	return s.runRuntimeMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runDecisionCardMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx) error {
 		return insertDecisionCard(txctx, tx, card, false)
 	})
 }
 
 func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
 	card.CreatedAt = decisioncard.CanonicalTimestamp(card.CreatedAt)
 	card.UpdatedAt = decisioncard.CanonicalTimestamp(card.UpdatedAt)
 	if err := card.Validate(); err != nil {
@@ -375,6 +379,9 @@ func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisio
 }
 
 func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
@@ -507,6 +514,9 @@ func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decision
 }
 
 func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
@@ -823,6 +833,9 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context,
 }
 
 func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
@@ -864,6 +877,9 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForRun(ctx context.Context, r
 }
 
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
 	now = decisioncard.CanonicalTimestamp(now)
@@ -1121,6 +1137,11 @@ func appendDecisionCardChangeDTO(ctx context.Context, db decisionCardSQL, runID,
 }
 
 func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
+	if cardChangeRegistered(changeType) {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return 0, err
+		}
+	}
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
 		return 0, fmt.Errorf("decision card change requires an authoritative timestamp")
@@ -1140,11 +1161,73 @@ func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, ca
 	if err := db.QueryRowContext(ctx, query, runID, cardID, changeType, string(raw), now).Scan(&id); err != nil {
 		return 0, fmt.Errorf("append decision card change: %w", err)
 	}
+	if cardChangeRegistered(changeType) {
+		if err := recordDecisionCardChangeAuthorActivity(ctx, db, id, runID, cardID, changeType, now, postgres); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
+}
+
+func cardChangeRegistered(changeType string) bool {
+	switch strings.TrimSpace(changeType) {
+	case decisioncard.ChangeCreated, decisioncard.ChangeDecided, decisioncard.ChangeDeferred, decisioncard.ChangeExpired, decisioncard.ChangeSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCardSQL, changeID int64, runID, cardID, changeType string, now time.Time, postgres bool) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
+	card, err := loadDecisionCard(ctx, db, cardID, postgres, false)
+	if err != nil {
+		return err
+	}
+	anchorID := ""
+	entityID := ""
+	flowID := ""
+	switch card.Anchor.Kind() {
+	case decisioncard.AnchorKindStageGate:
+		anchor, err := card.Anchor.StageGate()
+		if err != nil {
+			return err
+		}
+		anchorID, entityID, flowID = anchor.StageActivationID, anchor.EntityID, anchor.FlowInstance
+	case decisioncard.AnchorKindHumanTask:
+		anchor, err := card.Anchor.HumanTask()
+		if err != nil {
+			return err
+		}
+		anchorID, entityID, flowID = anchor.OperationID, anchor.Scope.EntityID, anchor.Scope.FlowInstance
+	default:
+		return fmt.Errorf("decision card anchor kind %q has no author activity adapter", card.Anchor.Kind())
+	}
+	identity := strconv.FormatInt(changeID, 10)
+	projection := runtimeauthoractivity.Projection{
+		SubjectType: "card", SubjectID: card.CardID, CardID: card.CardID,
+		AnchorKind: string(card.Anchor.Kind()), AnchorID: anchorID, DecisionID: card.DecisionEventID,
+		Verdict: card.Verdict, SupersedeReason: card.SupersededReason,
+	}
+	if !card.DeferredUntil.IsZero() {
+		deferred := card.DeferredUntil.UTC()
+		projection.DeferUntil = &deferred
+	}
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindCardLifecycle, Transition: strings.TrimSpace(changeType),
+		SourceOwner: "decision_card_changes", SourceIdentity: identity, DedupKey: "card-change:" + identity,
+		OccurredAt: now.UTC(), RunID: strings.TrimSpace(runID), EntityID: entityID, FlowID: flowID,
+		Projection: projection,
+	})
 }
 
 func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if !runtimeauthoractivity.InMutation(ctx, tx) {
+			return fmt.Errorf("decision card mutation entered from a raw transaction without author activity ownership")
+		}
 		return fn(ctx, tx)
 	}
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
@@ -1163,17 +1246,30 @@ func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(co
 	defer func() { _ = tx.Rollback() }()
 	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
 	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
-	if err := fn(txctx, tx); err != nil {
+	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
 		return err
 	}
-	return commitPostgresRunForkRevisionTx(txctx, tx)
+	if err := fn(storyctx, tx); err != nil {
+		return err
+	}
+	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if !runtimeauthoractivity.InMutation(ctx, tx) {
+			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
+		}
 		return fn(ctx, tx)
 	}
-	return s.runRuntimeMutation(ctx, label, fn)
+	return s.runAuthorActivityMutation(ctx, label, fn)
 }
 
 func numberPostgresPlaceholders(query string) string {

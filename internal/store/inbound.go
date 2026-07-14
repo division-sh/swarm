@@ -146,6 +146,9 @@ func (s *PostgresStore) ClaimInboundEventTx(ctx context.Context, tx *sql.Tx, pro
 	if _, err := tx.ExecContext(ctx, insertQ, args...); err != nil {
 		return false, fmt.Errorf("record inbound event in events: %w", err)
 	}
+	if err := recordInboundAuthorActivity(ctx, evt, provider); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 

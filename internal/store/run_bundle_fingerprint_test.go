@@ -134,6 +134,7 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleH
 
 func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -143,12 +144,14 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 		t.Fatalf("seed canonical bundle row: %v", err)
 	}
 
-	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{
-		HasStartedAtCol:    true,
-		HasBundleHashCol:   true,
-		HasBundleSourceCol: true,
-		BundleHash:         testCanonicalBundleHash,
-		BundleSource:       storerunlifecycle.BundleSourcePersisted,
+	if err := pg.runAuthorActivityMutation(ctx, "test ensure active run", func(txctx context.Context, tx *sql.Tx) error {
+		return storerunlifecycle.EnsureActive(txctx, tx, runID, "", "", storerunlifecycle.EnsureActiveOptions{
+			HasStartedAtCol:    true,
+			HasBundleHashCol:   true,
+			HasBundleSourceCol: true,
+			BundleHash:         testCanonicalBundleHash,
+			BundleSource:       storerunlifecycle.BundleSourcePersisted,
+		})
 	}); err != nil {
 		t.Fatalf("EnsureActive: %v", err)
 	}
@@ -157,10 +160,13 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 
 func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	err := storerunlifecycle.EnsureActive(context.Background(), db, uuid.NewString(), "", "", storerunlifecycle.EnsureActiveOptions{
-		HasBundleHashCol:   true,
-		HasBundleSourceCol: true,
-		BundleSource:       storerunlifecycle.BundleSourcePersisted,
+	pg := &PostgresStore{DB: db}
+	err := pg.runAuthorActivityMutation(context.Background(), "test ensure invalid active run", func(txctx context.Context, tx *sql.Tx) error {
+		return storerunlifecycle.EnsureActive(txctx, tx, uuid.NewString(), "", "", storerunlifecycle.EnsureActiveOptions{
+			HasBundleHashCol:   true,
+			HasBundleSourceCol: true,
+			BundleSource:       storerunlifecycle.BundleSourcePersisted,
+		})
 	})
 	if err == nil {
 		t.Fatal("EnsureActive error = nil, want missing bundle_hash rejection")
@@ -169,14 +175,17 @@ func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) 
 
 func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	runID := uuid.NewString()
 
-	err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{
-		HasBundleHashCol:   true,
-		HasBundleSourceCol: true,
-		BundleHash:         testCanonicalBundleHash,
-		BundleSource:       storerunlifecycle.BundleSourcePersisted,
+	err := pg.runAuthorActivityMutation(ctx, "test ensure missing persisted run bundle", func(txctx context.Context, tx *sql.Tx) error {
+		return storerunlifecycle.EnsureActive(txctx, tx, runID, "", "", storerunlifecycle.EnsureActiveOptions{
+			HasBundleHashCol:   true,
+			HasBundleSourceCol: true,
+			BundleHash:         testCanonicalBundleHash,
+			BundleSource:       storerunlifecycle.BundleSourcePersisted,
+		})
 	})
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		t.Fatalf("EnsureActive error = %v, want ErrPersistedBundleUnavailable", err)

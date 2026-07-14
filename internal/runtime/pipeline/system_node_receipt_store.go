@@ -229,10 +229,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeProcessedAndSettleDelivery(ctx con
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeProcessedAndSettleDelivery(ctx, nodeID, eventID, sideEffects)
-	}
-	return persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, s.db, nodeID, eventID, sideEffects)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, "{}", !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeProcessedAndSettleDelivery(txctx, nodeID, eventID, sideEffects)
+		} else {
+			err = persistSystemNodeProcessedReceiptAndSettleDeliveryTx(txctx, tx, nodeID, eventID, sideEffects)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "delivered", "node_processed", source.RetryCount, nil, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, sideEffects string) error {
@@ -245,10 +256,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeProcessedAndSettleDeliveryForTarge
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeProcessedAndSettleDeliveryForTarget(ctx, nodeID, eventID, target, sideEffects)
-	}
-	return persistSystemNodeProcessedReceiptAndSettleDeliveryForTarget(ctx, s.db, nodeID, eventID, target, sideEffects)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, systemNodeRouteIdentityJSON(target), !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeProcessedAndSettleDeliveryForTarget(txctx, nodeID, eventID, target, sideEffects)
+		} else {
+			err = persistSystemNodeProcessedReceiptAndSettleDeliveryForTargetTx(txctx, tx, nodeID, eventID, target, sideEffects)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "delivered", "node_processed", source.RetryCount, nil, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error {
@@ -258,10 +280,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgress(ctx context.Con
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryInProgress(ctx, nodeID, eventID, retryLimit)
-	}
-	return markPostgresSystemNodeDeliveryInProgress(ctx, s.db, nodeID, eventID, retryLimit)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, "{}", !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryInProgress(txctx, nodeID, eventID, retryLimit)
+		} else {
+			err = markPostgresSystemNodeDeliveryInProgressTx(txctx, tx, nodeID, eventID, retryLimit)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "in_progress", "node_processing", source.RetryCount, nil, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgressForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, retryLimit int) error {
@@ -275,10 +308,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgressForTarget(ctx co
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryInProgressForTarget(ctx, nodeID, eventID, target, retryLimit)
-	}
-	return markPostgresSystemNodeDeliveryInProgressForTarget(ctx, s.db, nodeID, eventID, target, retryLimit)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, systemNodeRouteIdentityJSON(target), !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryInProgressForTarget(txctx, nodeID, eventID, target, retryLimit)
+		} else {
+			err = markPostgresSystemNodeDeliveryInProgressForTargetTx(txctx, tx, nodeID, eventID, target, retryLimit)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "in_progress", "node_processing", source.RetryCount, nil, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
@@ -288,10 +332,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
-	}
-	return markPostgresSystemNodeDeliveryFailed(ctx, s.db, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, "{}", !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryFailed(txctx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
+		} else {
+			err = markPostgresSystemNodeDeliveryFailedTx(txctx, tx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "failed", sanitizeSystemNodeReasonCode(reasonCode, "handler_failure"), sanitizedSystemNodeRetryCount(retryCount), failure, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
@@ -305,10 +360,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailedForTarget(ctx contex
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryFailedForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
-	}
-	return markPostgresSystemNodeDeliveryFailedForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, systemNodeRouteIdentityJSON(target), !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryFailedForTarget(txctx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
+		} else {
+			err = markPostgresSystemNodeDeliveryFailedForTargetTx(txctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "failed", sanitizeSystemNodeReasonCode(reasonCode, "handler_failure"), sanitizedSystemNodeRetryCount(retryCount), failure, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
@@ -317,10 +383,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Con
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
-	}
-	return markPostgresSystemNodeDeliveryDeadLetter(ctx, s.db, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, "{}", !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryDeadLetter(txctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
+		} else {
+			err = markPostgresSystemNodeDeliveryDeadLetterTx(txctx, tx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "dead_letter", sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted"), sanitizedSystemNodeRetryCount(retryCount), failure, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
@@ -333,10 +410,21 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetterForTarget(ctx co
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
-	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
-	}
-	return markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		source, err := loadSystemNodeDeliveryStorySource(txctx, tx, nodeID, eventID, systemNodeRouteIdentityJSON(target), !s.isSQLite())
+		if err != nil {
+			return err
+		}
+		if s.isSQLite() {
+			err = s.markSQLiteSystemNodeDeliveryDeadLetterForTarget(txctx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
+		} else {
+			err = markPostgresSystemNodeDeliveryDeadLetterForTargetTx(txctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
+		}
+		if err != nil {
+			return err
+		}
+		return recordSystemNodeDeliveryStory(txctx, source, nodeID, "dead_letter", sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted"), sanitizedSystemNodeRetryCount(retryCount), failure, time.Now().UTC())
+	})
 }
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error {

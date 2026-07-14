@@ -402,7 +402,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "failed")
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
-			_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
+			_ = recordPipelineDeadLetter(ctx, pc.db, runtimedeadletters.Record{
 				OriginalEventID: strings.TrimSpace(evt.ID()),
 				Failure:         failure.Failure,
 				ChainDepth:      evt.ChainDepth(),
@@ -446,7 +446,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 		})
 	}
 	if pc.db != nil {
-		_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
+		_ = recordPipelineDeadLetter(ctx, pc.db, runtimedeadletters.Record{
 			OriginalEventID: strings.TrimSpace(evt.ID()),
 			OriginalEvent:   strings.TrimSpace(string(evt.Type())),
 			OriginalPayload: evt.Payload(),
@@ -484,19 +484,13 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			ChainDepth:      intercepted.ChainDepth,
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
 		}
-		recordDeadLetter := func() {
-			if pc.db == nil {
-				return
-			}
-			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
+		if pc.db != nil {
+			if err := recordPipelineDeadLetter(ctx, pc.db, rec); err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,
 				}, err)
 			}
-		}
-		if !queuePipelinePostCommitAction(ctx, recordDeadLetter) {
-			recordDeadLetter()
 		}
 		deadLetterPayload := map[string]any{
 			"original_event":   eventType,

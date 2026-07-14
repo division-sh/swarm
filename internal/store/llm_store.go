@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -39,38 +41,30 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 		}
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("append agent turn begin tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
+		ctx = txctx
+
+		reqPayload := normalizeJSONPayload(rec.RequestPayload)
+		respPayload := normalizeJSONPayload(rec.ResponseRaw)
+		toolCallsPayload := normalizeJSONArray(rec.ToolCalls)
+		availableToolsPayload := normalizeJSONArray(rec.AvailableTools)
+		emittedEventsPayload := normalizeJSONArray(rec.EmittedEvents)
+		mcpServersPayload := normalizeJSONObject(rec.MCPServers)
+		mcpToolsListedPayload := normalizeJSONArray(rec.MCPToolsListed)
+		mcpToolsVisiblePayload := normalizeJSONArray(rec.MCPToolsVisible)
+		failurePayload := ""
+		if encodedFailure, err := encodeStoredFailure(rec.Failure); err != nil {
+			return fmt.Errorf("encode agent turn failure: %w", err)
+		} else if encodedFailure != nil {
+			failurePayload = encodedFailure.(string)
 		}
-	}()
+		latencyMS := int(rec.Latency / time.Millisecond)
+		if latencyMS < 0 {
+			latencyMS = 0
+		}
+		runID := strings.TrimSpace(rec.RunID)
 
-	reqPayload := normalizeJSONPayload(rec.RequestPayload)
-	respPayload := normalizeJSONPayload(rec.ResponseRaw)
-	toolCallsPayload := normalizeJSONArray(rec.ToolCalls)
-	availableToolsPayload := normalizeJSONArray(rec.AvailableTools)
-	emittedEventsPayload := normalizeJSONArray(rec.EmittedEvents)
-	mcpServersPayload := normalizeJSONObject(rec.MCPServers)
-	mcpToolsListedPayload := normalizeJSONArray(rec.MCPToolsListed)
-	mcpToolsVisiblePayload := normalizeJSONArray(rec.MCPToolsVisible)
-	failurePayload := ""
-	if encodedFailure, err := encodeStoredFailure(rec.Failure); err != nil {
-		return fmt.Errorf("encode agent turn failure: %w", err)
-	} else if encodedFailure != nil {
-		failurePayload = encodedFailure.(string)
-	}
-	latencyMS := int(rec.Latency / time.Millisecond)
-	if latencyMS < 0 {
-		latencyMS = 0
-	}
-	runID := strings.TrimSpace(rec.RunID)
-
-	updateQ := fmt.Sprintf(`
+		updateQ := fmt.Sprintf(`
 		UPDATE %s
 		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
 				'last_turn',
@@ -91,23 +85,23 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		  AND session_id = $3::uuid
 		  AND status = 'active'
 	`, targetTable)
-	updateArgs := []any{
-		rec.AgentID,
-		runtimeMode,
-		rec.SessionID,
-		rec.TaskID,
-		reqPayload,
-		respPayload,
-		rec.ParseOK,
-		latencyMS,
-		rec.RetryCount,
-		failurePayload,
-	}
-	if hasConversationRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
-			return err
+		updateArgs := []any{
+			rec.AgentID,
+			runtimeMode,
+			rec.SessionID,
+			rec.TaskID,
+			reqPayload,
+			respPayload,
+			rec.ParseOK,
+			latencyMS,
+			rec.RetryCount,
+			failurePayload,
 		}
-		updateQ = fmt.Sprintf(`
+		if hasConversationRunID {
+			if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
+				return err
+			}
+			updateQ = fmt.Sprintf(`
 			UPDATE %s
 			SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
 					'last_turn',
@@ -129,22 +123,22 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			  AND session_id = $3::uuid
 			  AND status = 'active'
 		`, targetTable)
-		updateArgs = []any{
-			rec.AgentID,
-			runtimeMode,
-			rec.SessionID,
-			nullUUIDString(runID),
-			rec.TaskID,
-			reqPayload,
-			respPayload,
-			rec.ParseOK,
-			latencyMS,
-			rec.RetryCount,
-			failurePayload,
+			updateArgs = []any{
+				rec.AgentID,
+				runtimeMode,
+				rec.SessionID,
+				nullUUIDString(runID),
+				rec.TaskID,
+				reqPayload,
+				respPayload,
+				rec.ParseOK,
+				latencyMS,
+				rec.RetryCount,
+				failurePayload,
+			}
 		}
-	}
-	if !runtimeMode.IsStateless() {
-		updateQ = `
+		if !runtimeMode.IsStateless() {
+			updateQ = `
 			UPDATE agent_sessions
 			SET updated_at = now()
 			WHERE agent_id = $1
@@ -152,16 +146,16 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			  AND session_id = $3::uuid
 			  AND status = 'active'
 		`
-		updateArgs = []any{
-			rec.AgentID,
-			runtimeMode,
-			rec.SessionID,
-		}
-		if hasConversationRunID {
-			if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
-				return err
+			updateArgs = []any{
+				rec.AgentID,
+				runtimeMode,
+				rec.SessionID,
 			}
-			updateQ = `
+			if hasConversationRunID {
+				if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
+					return err
+				}
+				updateQ = `
 				UPDATE agent_sessions
 				SET run_id = COALESCE(NULLIF($4,'')::uuid, run_id),
 				    updated_at = now()
@@ -170,49 +164,49 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				  AND session_id = $3::uuid
 				  AND status = 'active'
 			`
-			updateArgs = []any{
-				rec.AgentID,
-				runtimeMode,
-				rec.SessionID,
-				nullUUIDString(runID),
+				updateArgs = []any{
+					rec.AgentID,
+					runtimeMode,
+					rec.SessionID,
+					nullUUIDString(runID),
+				}
 			}
 		}
-	}
-	res, err := tx.ExecContext(ctx, updateQ,
-		updateArgs...,
-	)
-	if err != nil {
-		return fmt.Errorf("append agent turn: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		if runtimeMode == runtimesessions.RuntimeModeTask {
-			if err := s.ensureTaskConversationAuditRowTx(ctx, tx, caps, rec); err != nil {
-				return err
-			}
-			res, err = tx.ExecContext(ctx, updateQ, updateArgs...)
-			if err != nil {
-				return fmt.Errorf("append agent turn: %w", err)
-			}
-			n, _ = res.RowsAffected()
+		res, err := tx.ExecContext(ctx, updateQ,
+			updateArgs...,
+		)
+		if err != nil {
+			return fmt.Errorf("append agent turn: %w", err)
 		}
+		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, rec.RuntimeMode, rec.SessionID)
+			if runtimeMode == runtimesessions.RuntimeModeTask {
+				if err := s.ensureTaskConversationAuditRowTx(ctx, tx, caps, rec); err != nil {
+					return err
+				}
+				res, err = tx.ExecContext(ctx, updateQ, updateArgs...)
+				if err != nil {
+					return fmt.Errorf("append agent turn: %w", err)
+				}
+				n, _ = res.RowsAffected()
+			}
+			if n == 0 {
+				return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, rec.RuntimeMode, rec.SessionID)
+			}
 		}
-	}
 
-	hasRunID := caps.Conversations.TurnRunID
-	hasTurnBlocks := caps.Conversations.TurnBlocks
-	turnBlocksPayload := ""
-	if hasTurnBlocks {
-		rec = runtimellm.CanonicalizeTurnForPersistence(rec)
-		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
-			return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
+		hasRunID := caps.Conversations.TurnRunID
+		hasTurnBlocks := caps.Conversations.TurnBlocks
+		turnBlocksPayload := ""
+		if hasTurnBlocks {
+			rec = runtimellm.CanonicalizeTurnForPersistence(rec)
+			if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
+				return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
+			}
+			turnBlocksPayload = normalizeJSONArray(rec.TurnBlocks)
 		}
-		turnBlocksPayload = normalizeJSONArray(rec.TurnBlocks)
-	}
 
-	insertTurn := `
+		insertTurn := `
 		INSERT INTO agent_turns (
 			agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
@@ -241,30 +235,30 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			CASE WHEN $20 = '' THEN NULL ELSE $20::jsonb END
 		)
 	`
-	insertArgs := []any{
-		rec.AgentID,
-		rec.SessionID,
-		runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
-		rec.ScopeKey,
-		rec.EntityID,
-		rec.TriggerEventID,
-		rec.TriggerEventType,
-		rec.TaskID,
-		availableToolsPayload,
-		toolCallsPayload,
-		emittedEventsPayload,
-		mcpServersPayload,
-		mcpToolsListedPayload,
-		mcpToolsVisiblePayload,
-		reqPayload,
-		respPayload,
-		rec.ParseOK,
-		latencyMS,
-		rec.RetryCount,
-		failurePayload,
-	}
-	if hasTurnBlocks {
-		insertTurn = `
+		insertArgs := []any{
+			rec.AgentID,
+			rec.SessionID,
+			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
+			rec.ScopeKey,
+			rec.EntityID,
+			rec.TriggerEventID,
+			rec.TriggerEventType,
+			rec.TaskID,
+			availableToolsPayload,
+			toolCallsPayload,
+			emittedEventsPayload,
+			mcpServersPayload,
+			mcpToolsListedPayload,
+			mcpToolsVisiblePayload,
+			reqPayload,
+			respPayload,
+			rec.ParseOK,
+			latencyMS,
+			rec.RetryCount,
+			failurePayload,
+		}
+		if hasTurnBlocks {
+			insertTurn = `
 			INSERT INTO agent_turns (
 				agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
@@ -294,35 +288,35 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				CASE WHEN $21 = '' THEN NULL ELSE $21::jsonb END
 			)
 		`
-		insertArgs = []any{
-			rec.AgentID,
-			rec.SessionID,
-			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
-			rec.ScopeKey,
-			rec.EntityID,
-			rec.TriggerEventID,
-			rec.TriggerEventType,
-			rec.TaskID,
-			availableToolsPayload,
-			toolCallsPayload,
-			emittedEventsPayload,
-			mcpServersPayload,
-			mcpToolsListedPayload,
-			mcpToolsVisiblePayload,
-			reqPayload,
-			respPayload,
-			turnBlocksPayload,
-			rec.ParseOK,
-			latencyMS,
-			rec.RetryCount,
-			failurePayload,
+			insertArgs = []any{
+				rec.AgentID,
+				rec.SessionID,
+				runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
+				rec.ScopeKey,
+				rec.EntityID,
+				rec.TriggerEventID,
+				rec.TriggerEventType,
+				rec.TaskID,
+				availableToolsPayload,
+				toolCallsPayload,
+				emittedEventsPayload,
+				mcpServersPayload,
+				mcpToolsListedPayload,
+				mcpToolsVisiblePayload,
+				reqPayload,
+				respPayload,
+				turnBlocksPayload,
+				rec.ParseOK,
+				latencyMS,
+				rec.RetryCount,
+				failurePayload,
+			}
 		}
-	}
-	if hasRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
-			return err
-		}
-		insertTurn = `
+		if hasRunID {
+			if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
+				return err
+			}
+			insertTurn = `
 			INSERT INTO agent_turns (
 				run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
@@ -352,31 +346,31 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				CASE WHEN $21 = '' THEN NULL ELSE $21::jsonb END
 			)
 		`
-		insertArgs = []any{
-			nullUUIDString(runID),
-			rec.AgentID,
-			rec.SessionID,
-			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
-			rec.ScopeKey,
-			rec.EntityID,
-			rec.TriggerEventID,
-			rec.TriggerEventType,
-			rec.TaskID,
-			availableToolsPayload,
-			toolCallsPayload,
-			emittedEventsPayload,
-			mcpServersPayload,
-			mcpToolsListedPayload,
-			mcpToolsVisiblePayload,
-			reqPayload,
-			respPayload,
-			rec.ParseOK,
-			latencyMS,
-			rec.RetryCount,
-			failurePayload,
-		}
-		if hasTurnBlocks {
-			insertTurn = `
+			insertArgs = []any{
+				nullUUIDString(runID),
+				rec.AgentID,
+				rec.SessionID,
+				runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
+				rec.ScopeKey,
+				rec.EntityID,
+				rec.TriggerEventID,
+				rec.TriggerEventType,
+				rec.TaskID,
+				availableToolsPayload,
+				toolCallsPayload,
+				emittedEventsPayload,
+				mcpServersPayload,
+				mcpToolsListedPayload,
+				mcpToolsVisiblePayload,
+				reqPayload,
+				respPayload,
+				rec.ParseOK,
+				latencyMS,
+				rec.RetryCount,
+				failurePayload,
+			}
+			if hasTurnBlocks {
+				insertTurn = `
 				INSERT INTO agent_turns (
 					run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 					trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
@@ -407,40 +401,43 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 					CASE WHEN $22 = '' THEN NULL ELSE $22::jsonb END
 				)
 			`
-			insertArgs = []any{
-				nullUUIDString(runID),
-				rec.AgentID,
-				rec.SessionID,
-				runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
-				rec.ScopeKey,
-				rec.EntityID,
-				rec.TriggerEventID,
-				rec.TriggerEventType,
-				rec.TaskID,
-				availableToolsPayload,
-				toolCallsPayload,
-				emittedEventsPayload,
-				mcpServersPayload,
-				mcpToolsListedPayload,
-				mcpToolsVisiblePayload,
-				reqPayload,
-				respPayload,
-				turnBlocksPayload,
-				rec.ParseOK,
-				latencyMS,
-				rec.RetryCount,
-				failurePayload,
+				insertArgs = []any{
+					nullUUIDString(runID),
+					rec.AgentID,
+					rec.SessionID,
+					runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
+					rec.ScopeKey,
+					rec.EntityID,
+					rec.TriggerEventID,
+					rec.TriggerEventType,
+					rec.TaskID,
+					availableToolsPayload,
+					toolCallsPayload,
+					emittedEventsPayload,
+					mcpServersPayload,
+					mcpToolsListedPayload,
+					mcpToolsVisiblePayload,
+					reqPayload,
+					respPayload,
+					turnBlocksPayload,
+					rec.ParseOK,
+					latencyMS,
+					rec.RetryCount,
+					failurePayload,
+				}
 			}
 		}
-	}
-	if _, err := tx.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
-		return fmt.Errorf("insert agent turn: %w", err)
-	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("append agent turn commit: %w", err)
-	}
-	committed = true
-	return nil
+		var turnID string
+		if err := tx.QueryRowContext(ctx, insertTurn+` RETURNING turn_id::text`, insertArgs...).Scan(&turnID); err != nil {
+			return fmt.Errorf("insert agent turn: %w", err)
+		}
+		return recordAuthorActivityTurn(ctx, authorActivityTurn{
+			TurnID: turnID, RunID: runID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
+			FlowID: rec.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
+			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
+			Failure: rec.Failure, OccurredAt: time.Now().UTC(),
+		})
+	})
 }
 
 func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, rec runtimellm.AgentTurnRecord) error {
@@ -636,6 +633,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		return fmt.Errorf("upsert conversation begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return err
+	}
 
 	if resolved.Stateless {
 		if sessionID == "" {
@@ -764,7 +765,13 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			return fmt.Errorf("insert stateless conversation: %w", err)
 		}
-		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+			return fmt.Errorf("capture stateless conversation revisions: %w", err)
+		}
+		if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+			return fmt.Errorf("finalize stateless conversation story: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("upsert stateless conversation commit: %w", err)
 		}
 		return nil
@@ -835,7 +842,13 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", rec.AgentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+		return fmt.Errorf("capture live conversation revisions: %w", err)
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		return fmt.Errorf("finalize live conversation story: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("upsert live conversation commit: %w", err)
 	}
 	return nil

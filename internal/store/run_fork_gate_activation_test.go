@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -45,16 +46,10 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := materializeRunForkDecisionCards(ctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute)); err != nil {
-		_ = tx.Rollback()
+	if err := cardStore.runAuthorActivityMutation(ctx, "test materialize fork decision cards", func(txctx context.Context, tx *sql.Tx) error {
+		return materializeRunForkDecisionCards(txctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
+	}); err != nil {
 		t.Fatalf("materialize fork cards: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
 	}
 	forkCard, err := cardStore.GetDecisionCard(ctx, forkActivation.CardID)
 	if err != nil {
@@ -128,16 +123,10 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	if err := forkActivation.CommitDecision(decisionEventID, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := materializeRunForkDecisionCards(ctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute)); err != nil {
-		_ = tx.Rollback()
+	if err := cardStore.runAuthorActivityMutation(ctx, "test materialize committed fork decision card", func(txctx context.Context, tx *sql.Tx) error {
+		return materializeRunForkDecisionCards(txctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
+	}); err != nil {
 		t.Fatalf("materialize committed fork card: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
 	}
 	forkCard, err := cardStore.GetDecisionCard(ctx, forkActivation.CardID)
 	if err != nil {

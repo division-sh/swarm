@@ -284,7 +284,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if n.db != nil {
-		if err := runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
+		if err := recordPipelineDeadLetter(ctx, n.db, runtimedeadletters.Record{
 			OriginalEventID: strings.TrimSpace(evt.ID()),
 			OriginalEvent:   strings.TrimSpace(string(evt.Type())),
 			OriginalPayload: evt.Payload(),
@@ -677,27 +677,9 @@ func persistSystemNodeProcessedReceiptAndSettleDelivery(ctx context.Context, db 
 	if nodeID == "" || eventID == "" {
 		return nil
 	}
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx, tx, nodeID, eventID, sideEffects)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin system node processed receipt tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx, tx, nodeID, eventID, sideEffects); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit system node processed receipt tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "system node processed receipt", func(txctx context.Context, tx *sql.Tx) error {
+		return persistSystemNodeProcessedReceiptAndSettleDeliveryTx(txctx, tx, nodeID, eventID, sideEffects)
+	})
 }
 
 func persistSystemNodeProcessedReceiptAndSettleDeliveryForTarget(ctx context.Context, db *sql.DB, nodeID, eventID string, target events.RouteIdentity, sideEffects string) error {
@@ -713,27 +695,9 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryForTarget(ctx context.Con
 	if nodeID == "" || eventID == "" {
 		return nil
 	}
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return persistSystemNodeProcessedReceiptAndSettleDeliveryForTargetTx(ctx, tx, nodeID, eventID, target, sideEffects)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin targeted system node processed receipt tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := persistSystemNodeProcessedReceiptAndSettleDeliveryForTargetTx(ctx, tx, nodeID, eventID, target, sideEffects); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit targeted system node processed receipt tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "targeted system node processed receipt", func(txctx context.Context, tx *sql.Tx) error {
+		return persistSystemNodeProcessedReceiptAndSettleDeliveryForTargetTx(txctx, tx, nodeID, eventID, target, sideEffects)
+	})
 }
 
 func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, sideEffects string) error {
@@ -870,27 +834,9 @@ func markPostgresSystemNodeDeliveryInProgress(ctx context.Context, db *sql.DB, n
 		return nil
 	}
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryInProgressTx(ctx, tx, nodeID, eventID, retryLimit)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin system node delivery start tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryInProgressTx(ctx, tx, nodeID, eventID, retryLimit); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit system node delivery start tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "system node delivery start", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryInProgressTx(txctx, tx, nodeID, eventID, retryLimit)
+	})
 }
 
 func markPostgresSystemNodeDeliveryInProgressForTarget(ctx context.Context, db *sql.DB, nodeID, eventID string, target events.RouteIdentity, retryLimit int) error {
@@ -907,27 +853,9 @@ func markPostgresSystemNodeDeliveryInProgressForTarget(ctx context.Context, db *
 		return nil
 	}
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryInProgressForTargetTx(ctx, tx, nodeID, eventID, target, retryLimit)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin targeted system node delivery start tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryInProgressForTargetTx(ctx, tx, nodeID, eventID, target, retryLimit); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit targeted system node delivery start tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "targeted system node delivery start", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryInProgressForTargetTx(txctx, tx, nodeID, eventID, target, retryLimit)
+	})
 }
 
 func markPostgresSystemNodeDeliveryInProgressTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string, retryLimit int) error {
@@ -1020,27 +948,9 @@ func markPostgresSystemNodeDeliveryFailed(ctx context.Context, db *sql.DB, nodeI
 		return nil
 	}
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryFailedTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin system node delivery failure tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryFailedTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit system node delivery failure tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "system node delivery failure", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryFailedTx(txctx, tx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
+	})
 }
 
 func markPostgresSystemNodeDeliveryFailedForTarget(ctx context.Context, db *sql.DB, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
@@ -1057,27 +967,9 @@ func markPostgresSystemNodeDeliveryFailedForTarget(ctx context.Context, db *sql.
 		return nil
 	}
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryFailedForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin targeted system node delivery failure tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryFailedForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit targeted system node delivery failure tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "targeted system node delivery failure", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryFailedForTargetTx(txctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
+	})
 }
 
 func markPostgresSystemNodeDeliveryFailedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
@@ -1175,27 +1067,9 @@ func markPostgresSystemNodeDeliveryDeadLetter(ctx context.Context, db *sql.DB, n
 	if nodeID == "" || eventID == "" {
 		return nil
 	}
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryDeadLetterTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin system node delivery dead-letter tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryDeadLetterTx(ctx, tx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit system node delivery dead-letter tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "system node delivery dead-letter", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryDeadLetterTx(txctx, tx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
+	})
 }
 
 func markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, db *sql.DB, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
@@ -1211,27 +1085,9 @@ func markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, db *
 	if nodeID == "" || eventID == "" {
 		return nil
 	}
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		return markPostgresSystemNodeDeliveryDeadLetterForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin targeted system node delivery dead-letter tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := markPostgresSystemNodeDeliveryDeadLetterForTargetTx(ctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects); err != nil {
-		return err
-	}
-	if err := commitSystemNodeRevisionTx(ctx, tx); err != nil {
-		return fmt.Errorf("commit targeted system node delivery dead-letter tx: %w", err)
-	}
-	committed = true
-	return nil
+	return runPostgresAuthorActivityMutation(ctx, db, "targeted system node delivery dead-letter", func(txctx context.Context, tx *sql.Tx) error {
+		return markPostgresSystemNodeDeliveryDeadLetterForTargetTx(txctx, tx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
+	})
 }
 
 func commitSystemNodeRevisionTx(ctx context.Context, tx *sql.Tx) error {

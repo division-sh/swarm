@@ -186,6 +186,7 @@ type Runtime struct {
 	shutdownGate            shutdownAdmission
 	backgroundActive        atomic.Int64
 	payloadValidator        runtimebus.PayloadValidator
+	authorActivityEvents    []string
 
 	Config             *config.Config
 	Stores             Stores
@@ -583,6 +584,31 @@ func bindRuntimeStorePayloadValidator(stores Stores, payloadValidator runtimebus
 	}
 }
 
+func bindRuntimeStoreAuthorActivityCatalog(stores Stores, names []string) {
+	type binder interface{ SetAuthorActivityEventCatalog([]string) }
+	if target, ok := stores.EventStore.(binder); ok && target != nil {
+		target.SetAuthorActivityEventCatalog(names)
+	}
+	if target, ok := stores.InboundStore.(binder); ok && target != nil {
+		target.SetAuthorActivityEventCatalog(names)
+	}
+}
+
+func authoredEventNames(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	catalog := source.AuthoredResolvedEventCatalog()
+	names := make([]string, 0, len(catalog))
+	for name := range catalog {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	boot, err := deps.validated()
 	if err != nil {
@@ -594,17 +620,18 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	source := boot.Source
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	rt := &Runtime{
-		ownerID:            newRuntimeOwnerID(),
-		Config:             cfg,
-		Stores:             stores,
-		Options:            opts,
-		Workspace:          opts.WorkspaceLifecycle,
-		MCPTurns:           mcpTurns,
-		Authority:          boot.Authority,
-		EmitRegistry:       boot.EmitRegistry,
-		PromptResolver:     boot.PromptResolver,
-		Credentials:        boot.Credentials,
-		ManagedCredentials: boot.ManagedCredentials,
+		ownerID:              newRuntimeOwnerID(),
+		Config:               cfg,
+		Stores:               stores,
+		Options:              opts,
+		Workspace:            opts.WorkspaceLifecycle,
+		MCPTurns:             mcpTurns,
+		Authority:            boot.Authority,
+		EmitRegistry:         boot.EmitRegistry,
+		authorActivityEvents: authoredEventNames(source),
+		PromptResolver:       boot.PromptResolver,
+		Credentials:          boot.Credentials,
+		ManagedCredentials:   boot.ManagedCredentials,
 	}
 
 	if stores.RuntimeLogStore != nil {
@@ -1009,6 +1036,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 	bindRuntimeStorePayloadValidator(rt.Stores, rt.payloadValidator)
+	bindRuntimeStoreAuthorActivityCatalog(rt.Stores, rt.authorActivityEvents)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
 			return fmt.Errorf("sync runtime ingress state: %w", err)

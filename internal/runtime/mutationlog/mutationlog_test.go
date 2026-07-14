@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -163,10 +164,17 @@ func insertMutationLogRecord(t *testing.T, ctx context.Context, db *sql.DB, reco
 		t.Fatalf("begin mutation log transaction: %v", err)
 	}
 	defer tx.Rollback()
-	if err := Insert(ctx, tx, record); err != nil {
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
 		return err
 	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+	if err := Insert(storyctx, tx, record); err != nil {
+		return err
+	}
+	if _, err := runforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
 		return err
 	}
 	return tx.Commit()

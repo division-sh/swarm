@@ -394,7 +394,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				return true
 			}
 			switch primitive {
-			case "RunRuntimeMutation", "RunRuntimeMutationContext":
+			case "RunRuntimeMutation", "RunRuntimeMutationContext", "runAuthorActivityMutation", "runDecisionCardMutation":
 				info.callsRuntimeMutation = true
 			case "runRuntimeMutation":
 				info.callsRuntimeMutation = true
@@ -489,7 +489,7 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
-	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "RunEventTransaction", "RunEventMutation", "PipelineSQLTxFromContext", "sqlTxFromContext":
+	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "RunEventTransaction", "RunEventMutation", "PipelineSQLTxFromContext", "sqlTxFromContext":
 		return name, primitiveBoundary, true
 	default:
 		return "", "", false
@@ -509,7 +509,7 @@ func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBo
 		}
 		scope := runtimeWriterBoundaryCallbackScope{}
 		switch primitive {
-		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation":
 			scope.runtime = true
 		case "RunEventTransaction", "RunEventMutation":
 			scope.event = true
@@ -683,9 +683,12 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 	if site.Path == "internal/store/failure_schema_migration.go" {
 		return classDifferentConcept, "boot-time canonical failure schema migration owns its isolated transaction", true
 	}
+	if strings.HasPrefix(site.Path, "internal/runtime/authoractivity/") {
+		return classConsumesCanonical, "canonical author activity transaction, persistence, and read owner", true
+	}
 	if site.Kind == primitiveBoundary {
 		switch site.Primitive {
-		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "RunEventTransaction", "RunEventMutation":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "RunEventTransaction", "RunEventMutation":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
 		case "RunPipelineMutation", "runInPipelineTransaction":
 			return classConsumesCanonical, "pipeline mutation owner delegates production SQLite writes to RunRuntimeMutationContext", true
@@ -804,7 +807,7 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		}
 	}
 	switch site.Function {
-	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
+	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
 	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation", "CompleteDecisionCardLifecycleEvent":
 		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true

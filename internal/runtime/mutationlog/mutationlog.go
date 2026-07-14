@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -55,6 +57,9 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if db == nil {
 		return ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return ErrInvalidMutationLogWriter(err.Error())
+	}
 	tx, ok := db.(*sql.Tx)
 	if !ok {
 		return ErrInvalidMutationLogWriter("PostgreSQL mutation log writes require the existing persistence transaction")
@@ -100,20 +105,73 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 		}
 	}
 
+	mutationID := uuid.NewString()
+	occurredAt := time.Now().UTC()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value,
-			caused_by_event, writer_type, writer_id, handler_step
+			mutation_id, run_id, entity_id, field, old_value, new_value,
+			caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4::jsonb, $5::jsonb,
-			NULLIF($6, '')::uuid, $7, $8, NULLIF($9, '')
+			$1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6::jsonb,
+			NULLIF($7, '')::uuid, $8, $9, NULLIF($10, ''), $11
 		)
-	`, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep))
+	`, mutationID, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt)
 	if err != nil {
 		return err
 	}
-	return nil
+	if field != "current_state" {
+		return nil
+	}
+	draft, admitted, err := AuthorActivityDraft(runID, mutationID, rec, occurredAt)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return nil
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
+}
+
+func AuthorActivityDraft(runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
+	if strings.TrimSpace(rec.Field) != "current_state" {
+		return runtimeauthoractivity.Draft{}, false, nil
+	}
+	runID = strings.TrimSpace(runID)
+	mutationID = strings.TrimSpace(mutationID)
+	entityID := strings.TrimSpace(rec.EntityID)
+	writerType := strings.TrimSpace(rec.WriterType)
+	writerID := strings.TrimSpace(rec.WriterID)
+	if runID == "" || mutationID == "" || entityID == "" || writerType == "" || writerID == "" || occurredAt.IsZero() {
+		return runtimeauthoractivity.Draft{}, false, ErrInvalidMutationLogWriter("author activity requires run_id, mutation_id, entity_id, writer, and occurred_at")
+	}
+	oldState := authorActivityStateString(rec.OldValue)
+	newState := authorActivityStateString(rec.NewValue)
+	transition := "stage_changed"
+	if oldState == "" {
+		transition = "created"
+	}
+	return runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindEntityLifecycle, Transition: transition,
+		SourceOwner: "entity_mutations", SourceIdentity: mutationID, DedupKey: "entity-mutation:" + mutationID,
+		OccurredAt: occurredAt.UTC(), RunID: runID, EntityID: entityID,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "entity", SubjectID: entityID, OldState: oldState, NewState: newState,
+			WriterType: writerType, WriterID: writerID,
+		},
+	}, true, nil
+}
+
+func authorActivityStateString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case *string:
+		if typed != nil {
+			return strings.TrimSpace(*typed)
+		}
+	}
+	return ""
 }
 
 func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProjection, writer Writer) ([]Record, error) {

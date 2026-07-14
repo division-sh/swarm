@@ -10590,6 +10590,7 @@ platform_tables:
         - run_fork_selected_contract_route_recoveries
         - run_fork_selected_contract_bindings
       delete_by_run_id:
+        - author_activity_occurrences
         - run_fork_fact_revisions
         - run_fork_revisions
         - run_fork_revision_heads
@@ -10621,6 +10622,7 @@ platform_tables:
         - runs
       preserve:
         - runtime_store_metadata
+        - author_activity_order
         - api_idempotency
         - runtime_ingress_state
         - agents
@@ -10641,6 +10643,61 @@ platform_tables:
         - spend_ledger
         - generated node-state tables from GenerateNodeStateTableDDLs
         - legacy/future contract-driven product optimization tables
+  author_activity_story:
+    owner: author_activity_order and author_activity_occurrences in the selected store, consumed through the typed AuthorActivity registry
+    purpose: >-
+      Own immutable author-facing occurrence identity, commit-visible cross-source order, and metadata-only safe projections.
+      Runtime source tables remain authoritative for execution outcomes. This journal MUST NOT reinterpret those outcomes.
+    transaction_contract:
+      - A story-bearing outer transaction MUST lock author_activity_order singleton_id=1 before any domain lock or domain database action.
+      - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
+      - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
+      - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
+      - Replayed source identities MUST return the existing identical occurrence or fail on conflict. ON CONFLICT DO NOTHING MUST NOT hide a conflicting story registration.
+      - Mutable source helpers MUST report whether the authoritative source transition changed. A semantic no-op or duplicate receipt MUST NOT draft, append, or rewrite author activity; only a real source transition may produce an occurrence.
+      - No domain mutation may occur after story finalization.
+    read_contract:
+      cursor: author_activity_occurrences.sequence
+      ordering: strictly ascending sequence after an exclusive cursor
+      filters: [run_id, entity_id, agent_id, flow_id]
+      parity: SQLite and PostgreSQL MUST return the same typed rows and cursor behavior.
+    privacy_contract:
+      allowed: Exact registry-owned metadata fields and a validated platform.failure/v1 envelope.
+      forbidden: Raw payloads, prompts, transcripts, provider responses, credentials, arbitrary tool results, stacks, hidden reasoning, and generic evidence maps.
+      rule: Allowlisting and redaction happen before persistence. Rendering may truncate only after that boundary.
+    registry:
+      closed_kinds:
+        - inbound.received/v1
+        - event.emitted/v1
+        - entity.lifecycle/v1
+        - delivery.lifecycle/v1
+        - dead_letter.recorded/v1
+        - activity.lifecycle/v1
+        - effect.lifecycle/v1
+        - turn.lifecycle/v1
+        - turn.tool_completed/v1
+        - card.lifecycle/v1
+        - agent.lifecycle/v1
+        - directive.lifecycle/v1
+        - run.lifecycle/v1
+        - platform.signal/v1
+      extension_rule: New platform-event and effect registrations require an explicit admitted, handled-by-other-owner, or different-concept disposition.
+      kind_contract: >-
+        One closed per-kind registry row MUST own the admitted transitions, exact source owner and required source identity,
+        allowed and required projection fields, failure-bearing transitions, author-facing subject strategy, and any typed
+        subject vocabulary. Producers and renderers MUST consume that same row; parallel source, field, or subject registries are forbidden.
+      subject_rules:
+        event_emitted: The subject is the exact canonical producer identity and type paired with the exact event type. The event UUID is source evidence and MUST NOT render as the subject.
+        effect_lifecycle: The subject is derived from exact adapter, transport, and authority metadata. The effect-attempt UUID is source evidence and MUST NOT render as the subject.
+      failure_rule: Every admitted failure transition renders a stable subject and failed term with an exact diagnostic route even when optional detail is absent.
+    rendering:
+      shared_owner: internal/runtime/authoractivity typed renderer with CLI-owned palette callbacks
+      human: One metadata-only line capped at min(terminal width, 120); a failure diagnostic route is the only continuation line.
+      plain: Append-only text with no ANSI, emoji, footer, or cursor rewrite.
+      ndjson: One complete typed AuthorActivity occurrence per line; machine output MUST NOT scrape human prose.
+      vocabulary: [received, in flight, emitted, sent, completed, failed, outcome uncertain]
+      missing_facts: Omit unavailable phases, summaries, and content. Never render placeholders or infer them from elapsed time or logs.
+    legacy_policy: Fresh authoritative schema only. Old selected stores are unsupported; no migration, adoption, backfill, dual reader, log fallback, or compatibility cursor is allowed.
   tables:
     bundles:
       description: 'Content-addressed bundle catalog. The primary key is the canonical bundle_hash
@@ -10668,6 +10725,38 @@ platform_tables:
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+    author_activity_order:
+      description: Singleton commit-order owner for author activity. It is locked before every admitted source mutation and never exposed as runtime outcome truth.
+      ddl: |
+        CREATE TABLE author_activity_order (
+            singleton_id  INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
+        );
+    author_activity_occurrences:
+      description: Append-only metadata-only author activity journal ordered by the transactionally locked singleton counter.
+      ddl: |
+        CREATE TABLE author_activity_occurrences (
+            occurrence_id   UUID PRIMARY KEY,
+            sequence        BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
+            kind            TEXT NOT NULL,
+            version         INTEGER NOT NULL CHECK (version = 1),
+            transition      TEXT NOT NULL,
+            source_owner    TEXT NOT NULL,
+            source_identity TEXT NOT NULL,
+            dedup_key       TEXT NOT NULL UNIQUE,
+            run_id          UUID REFERENCES runs(run_id),
+            entity_id       UUID,
+            agent_id        TEXT,
+            flow_id         TEXT,
+            projection      JSONB NOT NULL DEFAULT '{}',
+            failure         JSONB,
+            occurred_at     TIMESTAMPTZ NOT NULL,
+            INDEX idx_author_activity_run (run_id, sequence) WHERE run_id IS NOT NULL,
+            INDEX idx_author_activity_entity (entity_id, sequence) WHERE entity_id IS NOT NULL,
+            INDEX idx_author_activity_agent (agent_id, sequence) WHERE agent_id IS NOT NULL,
+            INDEX idx_author_activity_flow (flow_id, sequence) WHERE flow_id IS NOT NULL,
+            INDEX idx_author_activity_kind (kind, sequence)
+        );
     run_fork_revision_heads:
       description: >-
         Canonical per-run counter for the bounded supported-fork historical projection. The existing

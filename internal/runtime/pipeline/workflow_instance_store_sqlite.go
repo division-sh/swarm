@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
@@ -616,6 +617,11 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	if entityID == "" || field == "" || writerType == "" || writerID == "" {
 		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
 	}
+	if field == "current_state" {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return runtimemutationlog.ErrInvalidMutationLogWriter(err.Error())
+		}
+	}
 	oldValue, err := json.Marshal(rec.OldValue)
 	if err != nil {
 		return err
@@ -630,16 +636,28 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 			causedByEvent = parsed
 		}
 	}
+	mutationID := uuid.NewString()
+	occurredAt := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_mutations (
 				mutation_id, run_id, entity_id, field, old_value, new_value,
 				caused_by_event, writer_type, writer_id, handler_step, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
-	`, uuid.NewString(), runID, entityID, field, string(oldValue), string(newValue), causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), time.Now().UTC()); err != nil {
+	`, mutationID, runID, entityID, field, string(oldValue), string(newValue), causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
-	return nil
+	if field != "current_state" {
+		return nil
+	}
+	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(runID, mutationID, rec, occurredAt)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return nil
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
 }
 
 func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context, tx *sql.Tx, runID, entityID, storageRef string, timers []WorkflowTimerState) error {

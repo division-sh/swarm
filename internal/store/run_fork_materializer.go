@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -127,6 +128,11 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 			_ = tx.Rollback()
 		}
 	}()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return RunForkMaterialization{}, err
+	}
+	ctx = storyctx
 
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err
@@ -162,7 +168,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		}
 		selectedContractBinding = &binding
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
 	}
 	committed = true

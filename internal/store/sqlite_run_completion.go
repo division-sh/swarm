@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -52,7 +53,7 @@ func (s *SQLiteRuntimeStore) MarkRunTerminal(ctx context.Context, runID, status 
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence requires canonical runs.failure and ended_at")
 	}
 	var snap storerunlifecycle.Snapshot
-	err = s.runRuntimeMutation(ctx, "sqlite mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runAuthorActivityMutation(ctx, "sqlite mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		snap, err = s.sqliteMarkRunTerminalTx(txctx, tx, runID, status, failure, endedAt)
 		return err
@@ -79,7 +80,7 @@ func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Co
 	if eventID == "" {
 		return nil
 	}
-	return s.runRuntimeMutation(ctx, "sqlite standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
 		rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(txctx, tx, eventID)
 		if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
 			return err
@@ -119,7 +120,7 @@ func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, ev
 	if !normalRunCompletionSupported(caps) {
 		return nil
 	}
-	return s.runRuntimeMutation(ctx, "sqlite normal run completion", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite normal run completion", func(txctx context.Context, tx *sql.Tx) error {
 		candidate, found, err := sqliteNormalRunCompletionCandidateTx(txctx, tx, eventID)
 		if err != nil || !found {
 			return err
@@ -215,6 +216,9 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	if runID == "" {
 		return storerunlifecycle.Snapshot{}, fmt.Errorf("run_id is required")
 	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("mark sqlite run terminal: %w", err)
+	}
 	var err error
 	status, err = canonicalRunTerminalStatus(status)
 	if err != nil {
@@ -276,7 +280,23 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
-	return s.sqliteLoadRunLifecycleSnapshot(ctx, tx, runID)
+	snapshot, err := s.sqliteLoadRunLifecycleSnapshot(ctx, tx, runID)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	occurredAt := endedAt.UTC()
+	if snapshot.EndedAt != nil {
+		occurredAt = snapshot.EndedAt.UTC()
+	}
+	if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: status,
+		SourceOwner: "runs", SourceIdentity: runID + ":" + status, DedupKey: "run-terminal:" + runID + ":" + status,
+		OccurredAt: occurredAt, RunID: runID, Failure: failure,
+		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID},
+	}); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func sameSQLiteRunFailure(left, right *runtimefailures.Envelope) bool {

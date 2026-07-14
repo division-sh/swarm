@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1005,7 +1006,14 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	}()
 	postCommit := make([]func(), 0, 2)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	if err := fn(txctx); err != nil {
+	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		return err
+	}
+	if err := fn(storyctx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1466,6 +1474,27 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at TEXT,
 			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE author_activity_order (
+			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
+		)`,
+		`CREATE TABLE author_activity_occurrences (
+			occurrence_id TEXT PRIMARY KEY,
+			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
+			kind TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version = 1),
+			transition TEXT NOT NULL,
+			source_owner TEXT NOT NULL,
+			source_identity TEXT NOT NULL,
+			dedup_key TEXT NOT NULL UNIQUE,
+			run_id TEXT,
+			entity_id TEXT,
+			agent_id TEXT,
+			flow_id TEXT,
+			projection TEXT NOT NULL DEFAULT '{}',
+			failure TEXT,
+			occurred_at TIMESTAMP NOT NULL
 		)`,
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

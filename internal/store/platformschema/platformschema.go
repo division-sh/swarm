@@ -142,6 +142,10 @@ func platformTableOrder(name string) int {
 		return 3
 	case "runs":
 		return 5
+	case "author_activity_order":
+		return 6
+	case "author_activity_occurrences":
+		return 7
 	case "events":
 		return 10
 	case "run_fork_revision_heads":

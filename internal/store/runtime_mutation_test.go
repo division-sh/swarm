@@ -237,46 +237,58 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 	}
 }
 
-func TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks(t *testing.T) {
+func TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	started := make(chan struct{}, 2)
-	release := make(chan struct{})
-	done := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			done <- store.RunEventTransaction(ctx, func(context.Context, *sql.Tx) error {
-				started <- struct{}{}
-				select {
-				case <-release:
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			})
-		}()
-	}
-	for i := 0; i < 2; i++ {
-		select {
-		case <-started:
-		case <-ctx.Done():
-			t.Fatalf("postgres event transaction callback %d did not enter concurrently: %v", i+1, ctx.Err())
-		}
-	}
-	close(release)
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("RunEventTransaction %d: %v", i+1, err)
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- store.RunEventTransaction(ctx, func(context.Context, *sql.Tx) error {
+			close(firstStarted)
+			select {
+			case <-firstRelease:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-		case <-ctx.Done():
-			t.Fatalf("wait for postgres event transaction %d: %v", i+1, ctx.Err())
-		}
+		})
+	}()
+	select {
+	case <-firstStarted:
+	case <-ctx.Done():
+		t.Fatalf("first postgres story transaction did not start: %v", ctx.Err())
+	}
+
+	secondStarted := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- store.RunEventTransaction(ctx, func(context.Context, *sql.Tx) error {
+			close(secondStarted)
+			return nil
+		})
+	}()
+	select {
+	case <-secondStarted:
+		t.Fatal("second postgres story callback entered before the first committed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(firstRelease)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first RunEventTransaction: %v", err)
+	}
+	select {
+	case <-secondStarted:
+	case <-ctx.Done():
+		t.Fatalf("second postgres story callback did not start after first commit: %v", ctx.Err())
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second RunEventTransaction: %v", err)
 	}
 }
 

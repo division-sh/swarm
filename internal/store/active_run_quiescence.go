@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
@@ -113,6 +114,11 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 			_ = tx.Rollback()
 		}
 	}()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return runtimerunquiescence.Result{}, err
+	}
+	ctx = storyctx
 
 	var runs []runtimerunquiescence.QuiescedRun
 	if req.AllActiveRuns {
@@ -206,6 +212,9 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 			return runtimerunquiescence.Result{}, err
 		}
 	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		return runtimerunquiescence.Result{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("commit active run quiescence tx: %w", err)
 	}
@@ -264,7 +273,7 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 	}
 
 	baseOut := out
-	if err := s.runRuntimeMutation(ctx, "sqlite active run quiescence", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runAuthorActivityMutation(ctx, "sqlite active run quiescence", func(txctx context.Context, tx *sql.Tx) error {
 		attemptOut := baseOut
 		var runs []runtimerunquiescence.QuiescedRun
 		var err error
@@ -339,10 +348,7 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
 			}
-			if err := supersedeDecisionCardsForRun(txctx, tx, run.RunID, "run_quiesced", now, false); err != nil {
-				return err
-			}
-			if err := sqliteMarkActiveRunQuiescenceRunTerminalTx(txctx, tx, run.RunID, now); err != nil {
+			if _, err := s.sqliteMarkRunTerminalTx(txctx, tx, run.RunID, "cancelled", nil, now); err != nil {
 				return err
 			}
 			if err := sqliteUpsertActiveRunQuiescenceRunControlTx(txctx, tx, run.RunID, attemptOut.ReasonCode, attemptOut.ControlledBy, now); err != nil {

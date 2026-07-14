@@ -156,6 +156,18 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "mutation log persistence is an explicit runtime SQL owner used from mutation transaction boundaries",
 		},
+		"internal/runtime/authoractivity/mutation.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2010,
+			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
+			Reason:         "author activity mutation is the canonical ordered story transaction owner for registered runtime producers",
+		},
+		"internal/runtime/authoractivity/read.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2010,
+			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
+			Reason:         "author activity read is the canonical backend-neutral story occurrence reader",
+		},
 		"internal/runtime/manager/flow_activation.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1962,
@@ -171,6 +183,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "pipeline activity journal writes through the existing pipeline transaction owner",
+		},
+		"internal/runtime/pipeline/author_activity.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2010,
+			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
+			Reason:         "pipeline author activity bridges registered pipeline producers into the canonical ordered story owner",
 		},
 		"internal/runtime/pipeline/coordinator.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

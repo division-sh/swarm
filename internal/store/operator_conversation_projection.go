@@ -39,13 +39,14 @@ type OperatorConversationTokenUsage struct {
 }
 
 type OperatorConversationActivity struct {
-	Kind      string `json:"kind"`
-	ToolName  string `json:"tool_name,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	EventID   string `json:"event_id,omitempty"`
-	EventType string `json:"event_type,omitempty"`
-	Text      string `json:"text,omitempty"`
-	OK        *bool  `json:"ok,omitempty"`
+	Kind         string `json:"kind"`
+	ToolName     string `json:"tool_name,omitempty"`
+	ToolUseID    string `json:"tool_use_id,omitempty"`
+	EventID      string `json:"event_id,omitempty"`
+	EventType    string `json:"event_type,omitempty"`
+	Text         string `json:"text,omitempty"`
+	OK           *bool  `json:"ok,omitempty"`
+	BlockOrdinal int    `json:"-"`
 }
 
 type OperatorConversationActivityCounts struct {
@@ -757,14 +758,14 @@ func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) 
 	activity := make([]OperatorConversationActivity, 0, len(blocks))
 	assistantOutput := ""
 	outcome := ""
-	for _, block := range blocks {
+	for ordinal, block := range blocks {
 		switch strings.TrimSpace(block.Kind) {
 		case "dispatch":
 			data, ok, err := block.DispatchData()
 			if err != nil || !ok {
 				return nil, "", "", fmt.Errorf("decode public dispatch activity: %w", firstNonNilError(err, errors.New("dispatch data is required")))
 			}
-			activity = append(activity, OperatorConversationActivity{Kind: "dispatch", EventID: strings.TrimSpace(data.TriggerEventID), EventType: strings.TrimSpace(data.TriggerEventType)})
+			activity = append(activity, OperatorConversationActivity{Kind: "dispatch", EventID: strings.TrimSpace(data.TriggerEventID), EventType: strings.TrimSpace(data.TriggerEventType), BlockOrdinal: ordinal})
 		case "tool_use":
 			name := strings.TrimSpace(block.ToolName)
 			if name == "" {
@@ -774,7 +775,7 @@ func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) 
 			if err != nil {
 				return nil, "", "", fmt.Errorf("decode public tool activity: %w", err)
 			}
-			activity = append(activity, OperatorConversationActivity{Kind: "tool", ToolName: name, ToolUseID: strings.TrimSpace(link.ToolUseID)})
+			activity = append(activity, OperatorConversationActivity{Kind: "tool", ToolName: name, ToolUseID: strings.TrimSpace(link.ToolUseID), BlockOrdinal: ordinal})
 		case "tool_result":
 			name := strings.TrimSpace(block.ToolName)
 			if name == "" {
@@ -785,17 +786,17 @@ func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) 
 				return nil, "", "", fmt.Errorf("decode public tool result activity: %w", err)
 			}
 			ok := parseOK
-			activity = append(activity, OperatorConversationActivity{Kind: "tool_result", ToolName: name, ToolUseID: strings.TrimSpace(link.ToolUseID), OK: &ok})
+			activity = append(activity, OperatorConversationActivity{Kind: "tool_result", ToolName: name, ToolUseID: strings.TrimSpace(link.ToolUseID), OK: &ok, BlockOrdinal: ordinal})
 		case "publish":
 			data, ok, err := block.PublishData()
 			if err != nil || !ok {
 				return nil, "", "", fmt.Errorf("decode public publish activity: %w", firstNonNilError(err, errors.New("publish data is required")))
 			}
-			activity = append(activity, OperatorConversationActivity{Kind: "publish", EventID: strings.TrimSpace(data.EventID), EventType: strings.TrimSpace(block.Title)})
+			activity = append(activity, OperatorConversationActivity{Kind: "publish", EventID: strings.TrimSpace(data.EventID), EventType: strings.TrimSpace(block.Title), BlockOrdinal: ordinal})
 		case "assistant_text":
 			if text := strings.TrimSpace(block.Text); text != "" {
 				assistantOutput = text
-				activity = append(activity, OperatorConversationActivity{Kind: "output", Text: text})
+				activity = append(activity, OperatorConversationActivity{Kind: "output", Text: text, BlockOrdinal: ordinal})
 			}
 		case "outcome":
 			if text := strings.TrimSpace(block.Text); text != "" {

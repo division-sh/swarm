@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -97,36 +98,37 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	var result runtimemanager.AgentLifecycleTransitionResult
+	err = s.runAuthorActivityMutation(ctx, "postgres commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+req.AgentID); err != nil {
+			return err
+		}
+		var ok bool
+		var err error
+		if result, ok, err = loadPostgresLifecycleOperationResult(txctx, tx, req); err != nil || ok {
+			return err
+		}
+		previous, exists, err := loadPostgresLifecycleCell(txctx, tx, req.AgentID)
+		if err != nil {
+			return err
+		}
+		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
+			return err
+		}
+		result = lifecycleResult(req, previous, exists)
+		result.Subordinate, err = applyPostgresLifecycleSubordinate(txctx, tx, req)
+		if err != nil {
+			return err
+		}
+		if err := applyPostgresLifecycleCell(txctx, tx, req, result); err != nil {
+			return err
+		}
+		if err := insertPostgresLifecycleEvidence(txctx, tx, req, result); err != nil {
+			return err
+		}
+		return recordAgentLifecycleAuthorActivity(txctx, req, result)
+	})
 	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+req.AgentID); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if result, ok, err := loadPostgresLifecycleOperationResult(ctx, tx, req); err != nil || ok {
-		return result, err
-	}
-	previous, exists, err := loadPostgresLifecycleCell(ctx, tx, req.AgentID)
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if err := validateLifecycleExpectation(req, previous, exists); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	result := lifecycleResult(req, previous, exists)
-	result.Subordinate, err = applyPostgresLifecycleSubordinate(ctx, tx, req)
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if err := applyPostgresLifecycleCell(ctx, tx, req, result); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if err := insertPostgresLifecycleEvidence(ctx, tx, req, result); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	return result, nil
@@ -139,7 +141,7 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err = s.runRuntimeMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runAuthorActivityMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
 		var ok bool
 		var err error
 		result, ok, err = loadSQLiteLifecycleOperationResult(txctx, tx, req)
@@ -161,9 +163,27 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		if err := applySQLiteLifecycleCellTx(txctx, tx, req, result); err != nil {
 			return err
 		}
-		return insertSQLiteLifecycleEvidenceTx(txctx, tx, req, result)
+		if err := insertSQLiteLifecycleEvidenceTx(txctx, tx, req, result); err != nil {
+			return err
+		}
+		return recordAgentLifecycleAuthorActivity(txctx, req, result)
 	})
 	return result, err
+}
+
+func recordAgentLifecycleAuthorActivity(ctx context.Context, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	previousGeneration := result.PreviousGeneration
+	nextGeneration := result.Generation
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindAgentLifecycle, Transition: string(result.Phase),
+		SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: result.TransitionID,
+		DedupKey: "agent-transition:" + result.TransitionID, OccurredAt: req.Now.UTC(), AgentID: result.AgentID,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "agent", SubjectID: result.AgentID, PreviousPhase: string(result.PreviousPhase),
+			NextPhase: string(result.Phase), PreviousGeneration: &previousGeneration, NextGeneration: &nextGeneration,
+			RunMode: string(result.RunMode),
+		},
+	})
 }
 
 type lifecycleCell struct {

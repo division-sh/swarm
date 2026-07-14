@@ -51,7 +51,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	runID := nullUUIDString(rec.RunID)
 	now := s.now()
 
-	return s.runRuntimeMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
 		if err := sqliteEnsureRunRow(txctx, tx, runID, rec.TriggerEventID, rec.TriggerEventType, now); err != nil {
 			return err
 		}
@@ -76,6 +76,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 				return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, mode.String(), rec.SessionID)
 			}
 		}
+		turnID := uuid.NewString()
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO agent_turns (
 				turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
@@ -88,7 +89,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 				?, ?, ?, ?,
 				?, ?, ?, ?, ?, ?, ?, ?
 			)
-		`, uuid.NewString(), sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), strings.TrimSpace(rec.SessionID),
+		`, turnID, sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), strings.TrimSpace(rec.SessionID),
 			mode.String(), sqliteNullString(rec.ScopeKey), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID),
 			sqliteNullString(rec.TriggerEventType), sqliteNullString(rec.TaskID), availableToolsPayload, toolCallsPayload,
 			emittedEventsPayload, mcpServersPayload, mcpToolsListedPayload, mcpToolsVisiblePayload,
@@ -97,7 +98,12 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		if err != nil {
 			return fmt.Errorf("insert sqlite agent turn: %w", err)
 		}
-		return nil
+		return recordAuthorActivityTurn(txctx, authorActivityTurn{
+			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
+			FlowID: rec.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
+			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
+			Failure: rec.Failure, OccurredAt: now,
+		})
 	})
 }
 
@@ -129,7 +135,7 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 	runID := nullUUIDString(rec.RunID)
 	now := s.now()
 
-	return s.runRuntimeMutation(ctx, "sqlite conversation upsert", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite conversation upsert", func(txctx context.Context, tx *sql.Tx) error {
 		if resolved.Stateless {
 			if err := sqliteEnsureRunRow(txctx, tx, runID, "", "", now); err != nil {
 				return err

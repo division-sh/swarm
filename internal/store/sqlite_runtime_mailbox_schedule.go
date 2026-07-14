@@ -517,11 +517,8 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), false); err != nil {
+	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC()); err != nil {
 		return runtimeruncontrol.State{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', failure = NULL, ended_at = COALESCE(ended_at, ?) WHERE run_id = ?`, req.Now.UTC(), state.RunID); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("stop sqlite run: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at)

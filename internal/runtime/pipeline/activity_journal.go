@@ -104,7 +104,7 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 		if err := validateActivityAttemptClaimIdentity(out, rec); err != nil {
 			return err
 		}
-		return nil
+		return recordActivityAttemptStory(txctx, out, ActivityAttemptStatusStarted)
 	})
 	if err != nil {
 		return ActivityAttemptRecord{}, false, err
@@ -230,7 +230,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 			return fmt.Errorf("activity attempt %s remained started after terminal update", rec.RequestEventID)
 		}
 		out = loaded
-		return nil
+		return recordActivityAttemptStory(txctx, out, out.Status)
 	})
 	if err != nil {
 		return ActivityAttemptRecord{}, err
@@ -291,7 +291,7 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 			return fmt.Errorf("activity attempt %s was not found for uncertain transition", rec.RequestEventID)
 		}
 		out = loaded
-		return nil
+		return recordActivityAttemptStory(txctx, out, ActivityAttemptStatusUncertain)
 	})
 	if err != nil {
 		return ActivityAttemptRecord{}, err
