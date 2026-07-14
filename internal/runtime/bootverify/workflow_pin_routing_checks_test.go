@@ -264,16 +264,7 @@ func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherRecei
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
-	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
-      emit:
-        event: shared.ready
-        fields:
-          entity_id: payload.entity_id
-        target:
-          flow: consumer
-          match:
-            entity_id: payload.entity_id
-`, pinRoutingProducerRouteAdaptedConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingTargetAdapted)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
@@ -283,13 +274,7 @@ func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPat
 
 func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
 
-	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
-      emit:
-        event: shared.ready
-        fields:
-          entity_id: payload.entity_id
-        broadcast: true
-`, pinRoutingProducerRouteAdaptedConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingBroadcastAdapted)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "producer_broadcast_common_path_forbidden") {
@@ -298,16 +283,7 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommon
 }
 
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect(t *testing.T) {
-	bundle := loadPinRoutingProducerRouteBundle(t, `
-      emit:
-        event: shared.ready
-        fields:
-          entity_id: payload.entity_id
-        target:
-          flow: consumer
-          match:
-            entity_id: payload.entity_id
-`, true, pinRoutingProducerRouteConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingTargetDirect)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
@@ -316,16 +292,7 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParen
 }
 
 func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
-	bundle := loadPinRoutingProducerRouteBundle(t, `
-      emit:
-        event: shared.ready
-        fields:
-          entity_id: payload.entity_id
-        target:
-          flow: missing-consumer
-          match:
-            entity_id: payload.entity_id
-`, true, pinRoutingProducerRouteConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingUnknownTargetDirect)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "target_unknown_flow") {
@@ -334,7 +301,7 @@ func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithPare
 }
 
 func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect(t *testing.T) {
-	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready", pinRoutingProducerRouteConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingAgentDirect)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "pin_target_resolution", "producer-agent") {
@@ -343,7 +310,7 @@ func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect
 }
 
 func TestPinTargetResolution_DoesNotTreatMergedFlowAgentAsRootEmitSite(t *testing.T) {
-	bundle := loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t, "shared.ready", "shared.ready", []string{"shared.ready"}, pinRoutingProducerRouteConnect())
+	bundle := loadCanonicalPinRoutingProducerRouteBundle(t, canonicalrouting.PinRoutingAgentDirectWithRootOutput)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "pin_target_resolution", "root agent emit_events on agent producer-agent") {
@@ -655,15 +622,15 @@ worker-node:
 	return bundle
 }
 
-func loadPinRoutingProducerRouteBundle(t *testing.T, producerHandlerBody string, consumerConsumesSharedReady bool, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+func loadPinRoutingProducerRouteBundle(t *testing.T, producerHandlerBody string, consumerConsumesSharedReady bool) *runtimecontracts.WorkflowContractBundle {
 	consumerInputEvent := "consumer.start"
 	if consumerConsumesSharedReady {
 		consumerInputEvent = "shared.ready"
 	}
-	return loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", consumerInputEvent, producerHandlerBody, connectBlocks...)
+	return loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", consumerInputEvent, producerHandlerBody)
 }
 
-func loadPinRoutingProducerRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent, producerHandlerBody string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+func loadPinRoutingProducerRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent, producerHandlerBody string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
@@ -677,7 +644,7 @@ flows:
   - id: consumer
     flow: consumer
     mode: static
-`+strings.Join(connectBlocks, ""))
+`)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: pin-routing-producer-route\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
@@ -750,11 +717,11 @@ consumer:
 	return bundle
 }
 
-func loadPinRoutingProducerAgentRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
-	return loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t, producerOutputEvent, consumerInputEvent, nil, connectBlocks...)
+func loadPinRoutingProducerAgentRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent string) *runtimecontracts.WorkflowContractBundle {
+	return loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t, producerOutputEvent, consumerInputEvent, nil)
 }
 
-func loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t *testing.T, producerOutputEvent, consumerInputEvent string, rootOutputEvents []string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+func loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t *testing.T, producerOutputEvent, consumerInputEvent string, rootOutputEvents []string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
@@ -768,7 +735,7 @@ flows:
   - id: consumer
     flow: consumer
     mode: static
-`+strings.Join(connectBlocks, ""))
+`)
 	rootSchema := "name: pin-routing-producer-agent-route\n"
 	if len(rootOutputEvents) > 0 {
 		rootSchema = `
@@ -851,21 +818,18 @@ consumer:
 	return bundle
 }
 
-func pinRoutingProducerRouteConnect() string {
-	return `
-connect:
-  - from: producer.shared.ready
-    to: consumer.shared.ready
-`
-}
-
-func pinRoutingProducerRouteAdaptedConnect() string {
-	return `
-connect:
-  - from: producer.shared.ready
-    to: consumer.consumer.ready
-    adapter: producer-shared-to-consumer-ready
-`
+func loadCanonicalPinRoutingProducerRouteBundle(t *testing.T, variant canonicalrouting.PinRoutingProducerRouteVariant) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.CopyPinRoutingProducerRoute(t, variant),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
 }
 
 func loadSelectEntityDemotionBundle(t *testing.T, opts canonicalrouting.SelectEntityDemotionOptions) *runtimecontracts.WorkflowContractBundle {

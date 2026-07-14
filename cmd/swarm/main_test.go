@@ -12709,8 +12709,7 @@ func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *t
 }
 
 func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
-	root := t.TempDir()
-	writeVerifyModelAliasFixture(t, root, "not_configured")
+	root := canonicalrouting.CopyVerifyModelAlias(t, canonicalrouting.VerifyModelAliasUndefined)
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
@@ -12726,8 +12725,7 @@ func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.
 }
 
 func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
-	root := t.TempDir()
-	writeVerifyModelAliasFixture(t, root, "audit.custom")
+	root := canonicalrouting.CopyVerifyModelAlias(t, canonicalrouting.VerifyModelAliasConfigured)
 
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, strings.Join([]string{
@@ -12867,50 +12865,7 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
-
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-state-schema-float
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-float`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
-case: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned:
-  swarm:
-    source: external (state schema float verify test)
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-accumulator:
-  id: accumulator
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      advances_to: done
-  state_schema:
-    fields:
-      composite: float
-`)
+	root := canonicalrouting.CopyVerifyStateSchemaFloat(t)
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
@@ -12926,77 +12881,7 @@ func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-accumulator-entity-projection
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: verify-accumulator-entity-projection
-initial_state: collecting
-terminal_states: [complete]
-states: [collecting, complete]
-pins:
-  inputs:
-    events: [score.dimension_complete]
-  outputs:
-    events: [score.completed]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), `
-types:
-  DimensionScore:
-    dimension: text
-    tier: integer
-    score: integer
-    evidence: text
-    confidence: text
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-vertical:
-  scores:
-    type: list<DimensionScore>
-    materialize_from: scorer.dimensions_received
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-score.dimension_complete:
-  swarm:
-    source: external (verify accumulator projection fixture)
-  expected_dimensions: integer
-  vertical_id: string
-  dimension: text
-  tier: integer
-  score: integer
-  evidence: text
-  confidence: text
-score.completed: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-scorer:
-  id: scorer
-  execution_type: system_node
-  subscribes_to: [score.dimension_complete]
-  produces: [score.completed]
-  event_handlers:
-    score.dimension_complete:
-      accumulate:
-        into: dimensions_received
-        expected_from: payload.expected_dimensions
-        completion: all
-      on_complete:
-        - condition: "true"
-          emit:
-            event: score.completed
-            broadcast: true
-      advances_to: complete
-  state_schema:
-    fields:
-      dimensions_received: list<DimensionScore>
-`)
+	root := canonicalrouting.CopyVerifyAccumulatorEntityProjection(t)
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), repoRoot(), root, &buf)
@@ -13257,60 +13142,6 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyArtifactRepoCommitAdmission(t)
-}
-
-func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
-	t.Helper()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-model-alias
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-model-alias`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
-case: {}
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), fmt.Sprintf(`
-worker:
-  id: worker
-  type: factory
-  role: worker
-  prompt_ref: worker
-  model: %s
-  mode: task
-  subscriptions: [task.assigned]
-`, model))
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned:
-  swarm:
-    source: external (verify model alias test)
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-closer:
-  id: closer
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      advances_to: done
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "worker.md"), `Handle the task.`)
 }
 
 func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {

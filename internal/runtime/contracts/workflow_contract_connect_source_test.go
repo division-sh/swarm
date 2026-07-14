@@ -4,13 +4,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
 func TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields(t *testing.T) {
 
 	var document ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte("name: test\nversion: 1.0.0\nconnect:\n  - from: producer.done\n    to: consumer.done\n"), &document); err != nil {
+	snippet := canonicalrouting.NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - from: producer.done\n    to: consumer.done\n")
+	if err := snippet.Decode(&document); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if len(document.Connect) != 1 || document.Connect[0].SourceLine != 4 {

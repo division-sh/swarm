@@ -480,6 +480,38 @@ var files = map[string]string{
   "schema.yaml": "pins: {inputs: {events: [{source: '  ExTeRnAl webhook  '}]}}",
 }
 `},
+		"byte-map-helper-returns": {"fixture_test.go": `package fixture
+func packageFiles() map[string][]byte {
+  return map[string][]byte{"package.yaml": []byte("name: fixture")}
+}
+func routingFiles() map[string][]byte {
+  return map[string][]byte{"schema.yaml": []byte("pins: {inputs: {events: [{source: external}]}}")}
+}
+func build() { saveArtifacts(mergeFiles(packageFiles(), routingFiles())) }
+`},
+		"typed-artifact-slice": {"fixture_test.go": `package fixture
+type artifact struct {
+  name string
+  contents []byte
+}
+func files() []artifact {
+  return []artifact{
+    {name: "package.yaml", contents: []byte("name: fixture")},
+    {name: "schema.yaml", contents: []byte("pins: {inputs: {events: [{source: external}]}}")},
+  }
+}
+func build() { saveArtifacts(files()) }
+`},
+		"string-helper-documents": {"fixture_test.go": `package fixture
+func packageDocument() string { return "name: fixture" }
+func routingDocument() string {
+  return "pins: {inputs: {events: [{source: external}]}}"
+}
+func build() {
+  writeFile("package.yaml", packageDocument())
+  writeFile("schema.yaml", routingDocument())
+}
+`},
 	}
 	for name, files := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1033,37 +1065,18 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 	config := types.Config{Importer: importer.Default(), Error: func(error) {}}
 	_, _ = config.Check("canonicalrouting/sourcecensus", fset, parsedFiles, info)
 
-	// Aggregate evidence from structural bundle capabilities across the whole
-	// package. Parser-only strings and ordinary production text are not bundle
-	// capabilities and therefore cannot combine into a false positive.
+	// Aggregate every compiler-resolved string across the package. Storage types,
+	// helper boundaries, and writer calls are not semantic boundaries for a
+	// complete positive routing bundle.
 	values := map[string]struct{}{}
 	routingEvidenceFiles := map[string]struct{}{}
 	for _, file := range parsedFiles {
-		ast.Inspect(file, func(candidate ast.Node) bool {
-			var evidence map[string]struct{}
-			switch expression := candidate.(type) {
-			case *ast.FuncDecl:
-				if compilerResolvedFunctionReturnsStringMap(expression, info) {
-					evidence = compilerResolvedStrings(expression.Body, info)
-				}
-			case *ast.CompositeLit:
-				if compilerResolvedStringMap(info.Types[expression].Type) {
-					evidence = compilerResolvedStrings(expression, info)
-				}
-			case *ast.CallExpr:
-				candidateValues := compilerResolvedStrings(expression, info)
-				if stringEvidenceNamesBundleFile(candidateValues) {
-					evidence = candidateValues
-				}
+		for value := range compilerResolvedStrings(file, info) {
+			values[value] = struct{}{}
+			if yamlTextContainsCanonicalRoutingAuthority(value) {
+				routingEvidenceFiles[filepath.ToSlash(fset.Position(file.Pos()).Filename)] = struct{}{}
 			}
-			for value := range evidence {
-				values[value] = struct{}{}
-				if yamlTextContainsCanonicalRoutingAuthority(value) {
-					routingEvidenceFiles[filepath.ToSlash(fset.Position(candidate.Pos()).Filename)] = struct{}{}
-				}
-			}
-			return true
-		})
+		}
 	}
 
 	hasPackageFile := false
@@ -1089,34 +1102,12 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 	return result
 }
 
-func compilerResolvedFunctionReturnsStringMap(function *ast.FuncDecl, info *types.Info) bool {
-	if function.Type.Results == nil {
-		return false
-	}
-	for _, result := range function.Type.Results.List {
-		if compilerResolvedStringMap(info.Types[result.Type].Type) {
-			return true
-		}
-	}
-	return false
-}
-
-func compilerResolvedStringMap(value types.Type) bool {
-	if value == nil {
-		return false
-	}
-	mapping, ok := value.Underlying().(*types.Map)
-	return ok && compilerResolvedStringType(mapping.Key()) && compilerResolvedStringType(mapping.Elem())
-}
-
-func compilerResolvedStringType(value types.Type) bool {
-	basic, ok := value.Underlying().(*types.Basic)
-	return ok && basic.Kind() == types.String
-}
-
 func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{} {
 	values := map[string]struct{}{}
 	ast.Inspect(node, func(candidate ast.Node) bool {
+		if call, ok := candidate.(*ast.CallExpr); ok && boundedParserSnippetCall(call.Fun) {
+			return false
+		}
 		expression, ok := candidate.(ast.Expr)
 		if !ok {
 			return true
@@ -1130,13 +1121,13 @@ func compilerResolvedStrings(node ast.Node, info *types.Info) map[string]struct{
 	return values
 }
 
-func stringEvidenceNamesBundleFile(values map[string]struct{}) bool {
-	for value := range values {
-		if strings.Contains(value, "package.yaml") || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml") {
-			return true
-		}
+func boundedParserSnippetCall(function ast.Expr) bool {
+	selector, ok := function.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "NewParserSnippet" {
+		return false
 	}
-	return false
+	pkg, ok := selector.X.(*ast.Ident)
+	return ok && pkg.Name == "canonicalrouting"
 }
 
 func yamlTextContainsCanonicalRoutingAuthority(text string) bool {
@@ -1155,6 +1146,10 @@ func yamlTextContainsCanonicalRoutingAuthority(text string) bool {
 }
 
 func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
+	return yamlNodeContainsCanonicalRoutingAuthorityAt(node, nil)
+}
+
+func yamlNodeContainsCanonicalRoutingAuthorityAt(node *yaml.Node, path []string) bool {
 	if node == nil {
 		return false
 	}
@@ -1163,21 +1158,41 @@ func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
 			key := strings.TrimSpace(node.Content[index].Value)
 			value := node.Content[index+1]
 			switch key {
-			case "connect", "resolution", "replies_to":
-				return true
+			case "connect":
+				if value.Kind == yaml.SequenceNode {
+					return true
+				}
+			case "resolution":
+				if value.Kind == yaml.MappingNode {
+					return true
+				}
 			case "source":
-				if value.Kind == yaml.ScalarNode && canonicalRoutingExternalSource(value.Value) {
+				if value.Kind == yaml.ScalarNode && canonicalRoutingExternalSource(value.Value) && canonicalRoutingSourcePath(path) {
 					return true
 				}
 			}
-			if yamlNodeContainsCanonicalRoutingAuthority(value) {
+			if yamlNodeContainsCanonicalRoutingAuthorityAt(value, append(path, key)) {
 				return true
 			}
 		}
 		return false
 	}
 	for _, child := range node.Content {
-		if yamlNodeContainsCanonicalRoutingAuthority(child) {
+		if yamlNodeContainsCanonicalRoutingAuthorityAt(child, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalRoutingSourcePath(path []string) bool {
+	for _, part := range path {
+		if part == "swarm" {
+			return true
+		}
+	}
+	for index := 0; index+2 < len(path); index++ {
+		if path[index] == "pins" && path[index+1] == "inputs" && path[index+2] == "events" {
 			return true
 		}
 	}

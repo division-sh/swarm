@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -817,7 +818,7 @@ gate_state:
 
 func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
 	var entry EventCatalogEntry
-	if err := loadYAMLBytes([]byte(`
+	snippet := canonicalrouting.NewParserSnippet(t, `
 swarm:
   source: external (human board interface)
   producer: mailbox_human
@@ -826,7 +827,8 @@ swarm:
   note: Human board handoff
 consumer_type: external_ui
 entity_id: string
-`), &entry); err != nil {
+`)
+	if err := snippet.Decode(&entry); err != nil {
 		t.Fatalf("load event catalog entry: %v", err)
 	}
 	if got := entry.SwarmSource(); got != "external (human board interface)" {
@@ -854,7 +856,7 @@ entity_id: string
 
 func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
 	var entry EventCatalogEntry
-	if err := loadYAMLBytes([]byte(`
+	snippet := canonicalrouting.NewParserSnippet(t, `
 _source: external (human board interface)
 _producer: mailbox_human
 _consumer: mailbox_system (external UI, not agent-subscribed)
@@ -862,7 +864,8 @@ _consumer_type: external_ui
 _status: planned
 _note: Human board handoff
 source: text
-`), &entry); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "_source") || !strings.Contains(err.Error(), "swarm.source") {
+`)
+	if err := snippet.Decode(&entry); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "_source") || !strings.Contains(err.Error(), "swarm.source") {
 		t.Fatalf("load event catalog entry error = %v, want retired _source failure", err)
 	}
 }
@@ -902,12 +905,13 @@ entity_id: string
 
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
 	var entry EventCatalogEntry
-	err := loadYAMLBytes([]byte(`
+	snippet := canonicalrouting.NewParserSnippet(t, `
 swarm:
   source: external (operator)
 _source: platform (timer)
 entity_id: string
-`), &entry)
+`)
+	err := snippet.Decode(&entry)
 	if err == nil || !strings.Contains(err.Error(), "swarm.source") || !strings.Contains(err.Error(), "_source") {
 		t.Fatalf("load event catalog entry error = %v, want swarm/_source conflict", err)
 	}
