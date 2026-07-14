@@ -46,7 +46,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	_ = h.rt.Bus.Subscribe("test-agent", events.EventType("task.ready"))
 	h.seedInitialState(runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	pauseCatalogRun(t, h)
-	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], 10*time.Second)
+	sourceEventID := publishCatalogTrigger(t, h, expected.triggerSequence()[0], 10*time.Second)
 	sourceRunID := catalogRuntimeRunID
 	assertSourcePendingAgentDelivery(t, h.db, sourceRunID, sourceEventID, "test-agent")
 	forkAt := sourceEventID
@@ -54,11 +54,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
 	loader, selection := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
-	materialized, err := h.pg.MaterializeRunForkForSelectedContractExecution(h.ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:       sourceRunID,
-		At:                forkAt,
-		ContractSelection: selection,
-	})
+	materialized, err := materializeSelectedContractForkCleanupProbe(t, h.ctx, h.pg, loader, selection, sourceRunID, forkAt)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution cleanup probe: %v", err)
 	}
@@ -128,7 +124,11 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSelectedContractForkSourceIsolation(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after selected execution")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
-	assertSourceRunLifecycle(t, h.db, sourceRunID, "forked", true)
+	if result.Activation.SourceFrozen || !result.Activation.SourceAdvancedAfterFork || result.Activation.BranchDivergence == nil ||
+		!containsTier12String(result.Activation.BranchDivergence.SourceAdvancedFacts, "source_events_advanced_after_fork_point") {
+		t.Fatalf("selected-contract source-advanced branch activation = %#v", result.Activation)
+	}
+	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
@@ -171,6 +171,77 @@ func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, rep
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
 	return loader, runforkadmission.SelectedContractSelection(loaded.Source, fixtureRoot)
+}
+
+func materializeSelectedContractForkCleanupProbe(
+	t testing.TB,
+	ctx context.Context,
+	pg *store.PostgresStore,
+	loader runtimerunforkexecution.SelectedContractSourceLoader,
+	selection store.RunForkContractSelection,
+	sourceRunID,
+	forkAt string,
+) (store.RunForkMaterialization, error) {
+	t.Helper()
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
+	if err != nil {
+		t.Fatalf("load cleanup-probe selected source: %v", err)
+	}
+	if loaded.Cleanup != nil {
+		defer func() {
+			if err := loaded.Cleanup(); err != nil {
+				t.Errorf("cleanup cleanup-probe selected source: %v", err)
+			}
+		}()
+	}
+	selection = loaded.Selection
+	plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkAt})
+	if err != nil {
+		t.Fatalf("plan cleanup-probe fork: %v", err)
+	}
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
+		Plan:              plan,
+		Source:            loaded.Source,
+		ContractSelection: selection,
+	})
+	if err != nil {
+		t.Fatalf("admit cleanup-probe frontier: %v", err)
+	}
+	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            loaded.Source,
+		ContractSelection: selection,
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("admit cleanup-probe route history: %v", err)
+	}
+	topology, err := runtimerunforkexecution.BuildSelectedContractRouteTopology(runtimerunforkexecution.SelectedContractRouteTopologyRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		t.Fatalf("build cleanup-probe route topology: %v", err)
+	}
+	model, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  topology,
+	})
+	if err != nil {
+		t.Fatalf("build cleanup-probe execution model: %v", err)
+	}
+	if model.RecipientPlanning == nil {
+		t.Fatal("cleanup-probe execution model has no recipient planning")
+	}
+	return pg.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                forkAt,
+		ContractSelection: selection,
+		FrontierAdmission: frontier,
+		RouteTopology:     topology,
+		RecipientPlanning: *model.RecipientPlanning,
+	})
 }
 
 func assertSourcePendingAgentDelivery(t testing.TB, db *sql.DB, runID, eventID, agentID string) {
@@ -401,7 +472,7 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)
-	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)
+	sourceEventID := publishCatalogTrigger(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)
 	plan, err := h.pg.PlanRunFork(h.ctx, store.RunForkPlanRequest{
 		SourceRunID: catalogRuntimeRunID,
 		At:          sourceEventID,
@@ -425,7 +496,7 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	}
 }
 
-func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalogTriggerStep, timeout time.Duration) string {
+func publishCatalogTrigger(t testing.TB, h *runtimeHarness, step catalogTriggerStep, timeout time.Duration) string {
 	t.Helper()
 	payload := cloneStringAnyMap(step.Payload)
 	raw, err := json.Marshal(payload)
@@ -433,19 +504,27 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 		t.Fatalf("marshal trigger payload: %v", err)
 	}
 	eventID := uuid.NewString()
-	future := timeout + time.Second
-	if future <= time.Second {
-		future = time.Second
-	}
 	eventEnvelope := events.EventEnvelope{}
-	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
-	} else {
-		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
+	entityID := triggerPayloadEntityID(payload)
+	if entityID == "" {
+		entityID = runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID)
+	}
+	eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
+	var flowInstance string
+	err = h.db.QueryRowContext(h.ctx, `
+		SELECT COALESCE(flow_instance, '')
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, catalogRuntimeRunID, entityID).Scan(&flowInstance)
+	if err != nil && err != sql.ErrNoRows {
+		t.Fatalf("load catalog trigger flow instance: %v", err)
+	}
+	if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
+		eventEnvelope = events.EnvelopeForFlowInstance(eventEnvelope, flowInstance)
 	}
 	evt := eventtest.RootIngress(eventID,
 		events.EventType(strings.TrimSpace(step.Event)),
-		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC().Add(future))
+		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
 	if err := h.publishBusEvent(ctx, evt); err != nil {
