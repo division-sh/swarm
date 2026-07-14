@@ -1,6 +1,5 @@
 promptless-agent:
   model: regular
-  mode: task
   subscriptions:
     - task.requested
   emit_events:

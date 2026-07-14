@@ -10,7 +10,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -34,9 +33,9 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
 		"agent_id":               strings.TrimSpace(session.AgentID),
-		"flow_instance":          nil,
-		"mode":                   strings.TrimSpace(session.ConversationMode),
-		"session_scope":          strings.TrimSpace(session.SessionScope),
+		"flow_instance":          strings.TrimSpace(session.MemoryIdentity.FlowInstance),
+		"memory_enabled":         session.Memory.Enabled,
+		"memory_source":          strings.TrimSpace(string(session.Memory.Source)),
 		"model":                  strings.TrimSpace(actor.Model),
 		"llm_backend":            strings.TrimSpace(actor.LLMBackend),
 		"resolved_llm_provider":  strings.TrimSpace(actor.ResolvedLLMProvider),
@@ -44,10 +43,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		"resolved_model":         strings.TrimSpace(actor.ResolvedModel),
 		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeEntity.String() {
-		payload["flow_instance"] = flowInstance
-	}
-	if flowInstance := strings.TrimSpace(session.ScopeKey); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeFlow.String() {
+	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); strings.TrimSpace(asString(payload["flow_instance"])) == "" {
 		payload["flow_instance"] = flowInstance
 	}
 	raw, err := json.Marshal(payload)

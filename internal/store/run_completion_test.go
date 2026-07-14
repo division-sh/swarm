@@ -266,11 +266,11 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	sessionID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
 			config, subscriptions, emit_events, tools, permissions, runtime_descriptor,
 			status, turn_count, last_active_at, created_at
 		) VALUES (
-			'agent-1', 'worker', 'standard', 'mock', 'session_per_entity',
+			'agent-1', 'completion', 'worker', 'regular', 'mock', TRUE, 'authored',
 			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb,
 			'active', 0, now(), now()
 		)
@@ -279,15 +279,15 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'agent-1', $3::uuid, '', $3::text, 'entity',
-			'[]'::jsonb, 0, 'session_per_entity', '{}'::jsonb,
+			$1::uuid, $2::uuid, 'agent-1', 'completion', TRUE, 'authored',
+			'[]'::jsonb, 0, '{}'::jsonb,
 			'worker-1', now() + interval '1 minute', 'active', now(), now()
 		)
-	`, sessionID, fixture.RunID, fixture.EntityID); err != nil {
+	`, sessionID, fixture.RunID); err != nil {
 		t.Fatalf("seed active session lease: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {

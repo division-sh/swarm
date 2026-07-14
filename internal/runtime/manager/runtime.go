@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -1012,17 +1013,13 @@ func (am *AgentManager) restoredFlowInstanceRouteMaterializationRequest(ctx cont
 	if am.workflowInstances == nil {
 		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("workflow instance store is required to restore flow instance route %s", route.InstancePath)
 	}
-	instance, ok, err := am.workflowInstances.Load(ctx, route.InstancePath)
+	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, route)
 	if err != nil {
-		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("load flow instance for route recovery %s: %w", route.InstancePath, err)
+		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("load flow instance route recovery projection %s: %w", route.InstancePath, err)
 	}
-	if !ok {
-		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("flow instance not found for route recovery: %s", route.InstancePath)
-	}
-	activationInstance := runtimepipeline.StoredFlowInstance(am.semanticSource, instance)
 	vars := flowActivationVars(runtimepipeline.FlowInstanceActivationRequest{
-		Instance: activationInstance,
-		Config:   instance.Config,
+		Instance: projection.Identity,
+		Config:   projection.Config,
 	})
 	return runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity:            route,
@@ -1300,7 +1297,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		}
 	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
-		summary, err := resetter.ResetAll(sessions.NormalizeConversationRuntimeMode(am.runtimeMode), sessions.ResetMetadata{
+		summary, err := resetter.ResetAll(sessions.ResetMetadata{
 			Source: source,
 		})
 		if err != nil {
@@ -1318,7 +1315,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 				Component: "runtime",
 				Action:    "reset_orphaned_sessions",
 				Message:   "Runtime reset orphaned live sessions",
-				Detail:    resetOrphanedSessionsDetail(summary, source, sessions.NormalizeConversationRuntimeMode(am.runtimeMode)),
+				Detail:    resetOrphanedSessionsDetail(summary, source),
 			})
 		}
 	}
@@ -1374,13 +1371,10 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	return nil
 }
 
-func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, runtimeMode sessions.RuntimeMode) map[string]any {
+func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string) map[string]any {
 	detail := map[string]any{
 		"orphaned_session_count": summary.OrphanedCount(),
 		"orphaned_sessions":      make([]map[string]any, 0, len(summary.OrphanedSessions)),
-	}
-	if runtimeMode != "" {
-		detail["runtime_mode"] = runtimeMode.String()
 	}
 	if source = strings.TrimSpace(source); source != "" {
 		detail["source"] = source
@@ -1390,8 +1384,8 @@ func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, r
 		record := map[string]any{
 			"session_id":         strings.TrimSpace(item.SessionID),
 			"agent_id":           strings.TrimSpace(item.AgentID),
-			"scope_key":          strings.TrimSpace(item.ScopeKey),
-			"runtime_mode":       item.RuntimeMode.String(),
+			"run_id":             strings.TrimSpace(item.RunID),
+			"flow_instance":      strings.TrimSpace(item.FlowInstance),
 			"previous_status":    strings.TrimSpace(item.PreviousStatus),
 			"termination_reason": strings.TrimSpace(item.TerminationReason),
 		}
@@ -1448,8 +1442,8 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 		if err := am.validateNativeToolAdmission(am.runtimeContext(), updated); err != nil {
 			return replaceExecutionResult{}, err
 		}
-		if _, err := sessions.ValidateAgentSessionScopeConfig(updated); err != nil {
-			return replaceExecutionResult{}, fmt.Errorf("invalid agent session scope: %w", err)
+		if err := agentmemory.ValidateFlowOwnership(updated.Memory, updated.CanonicalFlowPath()); err != nil {
+			return replaceExecutionResult{}, fmt.Errorf("invalid agent memory plan: %w", err)
 		}
 		candidateRecord := PersistedAgent{Config: updated, Status: "active", HiredBy: "reconfigure"}
 		revision, err := lifecycleConfigRevision(candidateRecord)

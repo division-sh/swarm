@@ -545,7 +545,6 @@ producer-agent:
   id: producer-agent
   type: claude
   role: producer
-  mode: task
   emit_events: [deploy.done]
 `
 	}

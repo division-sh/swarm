@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -81,7 +82,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID == "concurrent-partial-reconfigure-agent" {
 			switch {
-			case cfg.ConversationMode == runtimesessions.RuntimeModeTask.String() && len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-a":
+			case cfg.Memory == agentmemory.Authored(false) && len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-a":
 				firstBuildEntered <- struct{}{}
 				<-releaseFirstBuild
 			case len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-b":
@@ -92,15 +93,14 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
 	cfg := runtimeactors.AgentConfig{
-		ID:               "concurrent-partial-reconfigure-agent",
-		Role:             "worker",
-		Type:             "sonnet",
-		Model:            "regular",
-		Mode:             "global",
-		ConversationMode: runtimesessions.RuntimeModeSession.String(),
-		SessionScope:     runtimesessions.SessionScopeFlow.String(),
-		FlowPath:         "support/serialized",
-		Tools:            []string{"tool-a"},
+		ID:       "concurrent-partial-reconfigure-agent",
+		Role:     "worker",
+		Type:     "sonnet",
+		Model:    "regular",
+		FlowID:   "global",
+		Memory:   agentmemory.Authored(true),
+		FlowPath: "support/serialized",
+		Tools:    []string{"tool-a"},
 	}
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
@@ -111,11 +111,13 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 	}
 	initialGeneration := agents[0].LifecycleGeneration
 	sessionID := uuid.NewString()
-	seedLifecycleSessionForPartialReconfigure(t, db, sqlite, sessionID, cfg.ID, cfg.CanonicalFlowPath())
+	runID := uuid.NewString()
+	seedLifecycleRun(t, db, sqlite, runID)
+	seedLifecycleSessionForPartialReconfigure(t, db, sqlite, sessionID, runID, cfg.ID, cfg.CanonicalFlowPath())
 
 	firstErr := make(chan error, 1)
 	go func() {
-		firstErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ConversationMode: runtimesessions.RuntimeModeTask.String()})
+		firstErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Memory: agentmemory.Authored(false)})
 	}()
 	<-firstBuildEntered
 	secondStarted := make(chan struct{})
@@ -133,7 +135,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 	}
 	close(releaseFirstBuild)
 	if err := <-firstErr; err != nil {
-		t.Fatalf("task reconfigure: %v", err)
+		t.Fatalf("disable-memory reconfigure: %v", err)
 	}
 	if !secondBuiltBeforeFirstCommit {
 		<-secondBuildEntered
@@ -151,8 +153,8 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		t.Fatalf("load reconfigured agent: agents=%#v err=%v", agents, err)
 	}
 	got := agents[0]
-	if got.Config.ConversationMode != runtimesessions.RuntimeModeTask.String() || len(got.Config.Tools) != 1 || got.Config.Tools[0] != "tool-b" {
-		t.Fatalf("final durable config = mode:%q tools:%v, want task + tool-b", got.Config.ConversationMode, got.Config.Tools)
+	if got.Config.Memory != agentmemory.Authored(false) || len(got.Config.Tools) != 1 || got.Config.Tools[0] != "tool-b" {
+		t.Fatalf("final durable config = memory:%+v tools:%v, want authored false + tool-b", got.Config.Memory, got.Config.Tools)
 	}
 	if got.LifecycleGeneration != initialGeneration+2 {
 		t.Fatalf("final durable generation = %d, want %d", got.LifecycleGeneration, initialGeneration+2)
@@ -161,14 +163,25 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 	assertLifecyclePartialReconfigureOutcomes(t, db, sqlite, cfg.ID, sessionID)
 }
 
-func seedLifecycleSessionForPartialReconfigure(t *testing.T, db *sql.DB, sqlite bool, sessionID, agentID, scopeKey string) {
+func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
+	t.Helper()
+	query := `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+	if !sqlite {
+		query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+	}
+	if _, err := db.ExecContext(context.Background(), query, runID); err != nil {
+		t.Fatalf("seed lifecycle run: %v", err)
+	}
+}
+
+func seedLifecycleSessionForPartialReconfigure(t *testing.T, db *sql.DB, sqlite bool, sessionID, runID, agentID, flowInstance string) {
 	t.Helper()
 	now := time.Now().UTC()
-	query := `INSERT INTO agent_sessions (session_id, agent_id, scope_key, scope, conversation, runtime_mode, runtime_state, status, created_at, updated_at) VALUES (?, ?, ?, 'flow', '[]', 'session', '{}', 'active', ?, ?)`
-	args := []any{sessionID, agentID, scopeKey, now, now}
+	query := `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'authored', '[]', '{}', 'active', ?, ?)`
+	args := []any{sessionID, runID, agentID, flowInstance, now, now}
 	if !sqlite {
-		query = `INSERT INTO agent_sessions (session_id, agent_id, scope_key, scope, conversation, runtime_mode, runtime_state, status, created_at, updated_at) VALUES ($1::uuid, $2, $3, 'flow', '[]'::jsonb, 'session', '{}'::jsonb, 'active', $4, $4)`
-		args = []any{sessionID, agentID, scopeKey, now}
+		query = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active', $5, $5)`
+		args = []any{sessionID, runID, agentID, flowInstance, now}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed lifecycle session: %v", err)
@@ -224,7 +237,7 @@ func assertLifecyclePartialReconfigureOutcomes(t *testing.T, db *sql.DB, sqlite 
 		t.Fatalf("first subordinate outcome = %#v, want exact predecessor termination", first)
 	}
 	if second.Action != runtimesessions.LifecycleMutationNone || len(second.Sessions) != 0 {
-		t.Fatalf("second subordinate outcome = %#v, want task-mode no-op", second)
+		t.Fatalf("second subordinate outcome = %#v, want memory-disabled no-op", second)
 	}
 }
 
@@ -234,14 +247,13 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
 	cfg := runtimeactors.AgentConfig{
-		ID:               "reconfigure-occurrence-agent",
-		Role:             "worker",
-		Type:             "sonnet",
-		Model:            "regular",
-		Mode:             "global",
-		ConversationMode: runtimesessions.RuntimeModeSession.String(),
-		SessionScope:     runtimesessions.SessionScopeFlow.String(),
-		FlowPath:         "support/occurrence",
+		ID:       "reconfigure-occurrence-agent",
+		Role:     "worker",
+		Type:     "sonnet",
+		Model:    "regular",
+		FlowID:   "global",
+		Memory:   agentmemory.Authored(true),
+		FlowPath: "support/occurrence",
 	}
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
@@ -300,7 +312,8 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	agentID := "subordinate-transaction-agent"
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: agentID, Role: "worker", Type: "sonnet", Model: "regular", Mode: "global",
+			ID: agentID, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
+			Memory: agentmemory.Authored(true), FlowPath: "global",
 			Config: []byte(`{"system_prompt":"test"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,
@@ -327,7 +340,12 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	}
 	staleToken := runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, AgentID: agentID, Generation: started.Generation}
 	staleCtx := runtimeeffects.WithLifecycleToken(ctx, staleToken)
-	active, err := store.Acquire(staleCtx, agentID, runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global")
+	activeRunID := uuid.NewString()
+	suspendedRunID := uuid.NewString()
+	seedLifecycleRun(t, db, sqlite, activeRunID)
+	seedLifecycleRun(t, db, sqlite, suspendedRunID)
+	activeIdentity := agentmemory.Identity{RunID: activeRunID, AgentID: agentID, FlowInstance: "global"}
+	active, err := store.Acquire(staleCtx, activeIdentity, "worker-1")
 	if err != nil {
 		t.Fatalf("acquire active session: %v", err)
 	}
@@ -338,18 +356,18 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if sqlite {
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
-				session_id, agent_id, scope_key, scope, conversation, turn_count,
-				runtime_mode, runtime_state, status, created_at, updated_at
-			) VALUES (?, ?, 'flow/suspended', 'flow', ?, 7, 'session', ?, 'suspended', ?, ?)
-		`, suspendedID, agentID, `[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now, now)
+				session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+				conversation, turn_count, runtime_state, status, created_at, updated_at
+			) VALUES (?, ?, ?, 'flow/suspended', 1, 'authored', ?, 7, ?, 'suspended', ?, ?)
+		`, suspendedID, suspendedRunID, agentID, `[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now, now)
 		_, _ = db.ExecContext(ctx, `UPDATE agent_sessions SET conversation=?, turn_count=5, runtime_state=? WHERE session_id=?`, `[{"role":"user","content":"old active"}]`, `{"provider_session_id":"old-active"}`, active.SessionID)
 	} else {
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
-				session_id, agent_id, scope_key, scope, conversation, turn_count,
-				runtime_mode, runtime_state, status, created_at, updated_at
-			) VALUES ($1::uuid, $2, 'flow/suspended', 'flow', $3::jsonb, 7, 'session', $4::jsonb, 'suspended', $5, $5)
-		`, suspendedID, agentID, `[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now)
+				session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+				conversation, turn_count, runtime_state, status, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, 'flow/suspended', TRUE, 'authored', $4::jsonb, 7, $5::jsonb, 'suspended', $6, $6)
+		`, suspendedID, suspendedRunID, agentID, `[{"role":"user","content":"old suspended"}]`, `{"provider_session_id":"old-suspended"}`, now)
 		_, _ = db.ExecContext(ctx, `UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=5, runtime_state=$2::jsonb WHERE session_id=$3::uuid`, `[{"role":"user","content":"old active"}]`, `{"provider_session_id":"old-active"}`, active.SessionID)
 	}
 	if err != nil {

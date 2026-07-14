@@ -201,7 +201,7 @@ func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testi
 	actor := models.AgentConfig{
 		ID:         "dual-scope-agent",
 		Role:       "reviewer",
-		Mode:       "review",
+		FlowID:     "review",
 		FlowPath:   "review",
 		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
 	}
@@ -255,7 +255,7 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
 		ID:         "review-coordinator-inst-1",
 		Role:       "review_coordinator",
-		Mode:       "review",
+		FlowID:     "review",
 		FlowPath:   "review/inst-1",
 		EmitEvents: []string{"review/inst-1/scan.requested"},
 	}, nil)
@@ -509,7 +509,6 @@ local.done:
 flow-agent:
   id: flow-agent
   role: flow_agent
-  mode: task
   emit_events:
     - local.done
 `)

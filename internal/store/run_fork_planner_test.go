@@ -1145,25 +1145,25 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model, llm_backend, conversation_mode, created_at
+			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, created_at
 		)
-		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+		VALUES ('agent-a', 'fork-planner', 'worker', 'regular', 'mock', TRUE, 'authored', $1)
 	`, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'active', $3, $3)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'fork-planner', TRUE, 'authored', 'active', $3, $3)
 	`, sessionID, runID, at.Add(-time.Second)); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, trigger_event_id, trigger_event_type, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session', $4::uuid, 'fork.session', $5)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-planner', TRUE, 'authored', $4::uuid, 'fork.session', $5)
 	`, turnID, runID, sessionID, eventID, at); err != nil {
 		t.Fatalf("seed active turn: %v", err)
 	}
@@ -1213,9 +1213,9 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'active', $3, $3)
+		VALUES ($1::uuid, $2::uuid, 'agent-task', 'fork-planner', FALSE, 'authored', '{}'::jsonb, 'active', $3, $3)
 	`, auditSessionID, runID, at.Add(-time.Second)); err != nil {
 		t.Fatalf("seed active task audit: %v", err)
 	}
@@ -1261,17 +1261,17 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model, llm_backend, conversation_mode, created_at
+			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, created_at
 		)
-		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+		VALUES ('agent-a', 'fork-planner', 'worker', 'regular', 'mock', TRUE, 'authored', $1)
 	`, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, termination_reason, terminated_at, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, termination_reason, terminated_at, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'terminated', 'normal', $3, $4, $3)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'fork-planner', TRUE, 'authored', 'terminated', 'normal', $3, $4, $3)
 	`, sessionID, runID, at.Add(-time.Second), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed terminated session: %v", err)
 	}
@@ -1315,9 +1315,9 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'terminated', $3, $4)
+		VALUES ($1::uuid, $2::uuid, 'agent-task', 'fork-planner', FALSE, 'authored', '{}'::jsonb, 'terminated', $3, $4)
 	`, auditSessionID, runID, at.Add(-time.Second), at.Add(time.Second)); err != nil {
 		t.Fatalf("seed terminated audit: %v", err)
 	}

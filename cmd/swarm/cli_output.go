@@ -87,8 +87,7 @@ const (
 	cliHumanCodeRunBlockingLayer            = userfacing.HumanCodeRunBlockingLayer
 	cliHumanCodeRunBlockingReason           = userfacing.HumanCodeRunBlockingReason
 	cliHumanCodeAgentStatus                 = userfacing.HumanCodeAgentStatus
-	cliHumanCodeConversationMode            = userfacing.HumanCodeConversationMode
-	cliHumanCodeSessionScope                = userfacing.HumanCodeSessionScope
+	cliHumanCodeMemorySource                = userfacing.HumanCodeMemorySource
 	cliHumanCodeDeliveryStatus              = userfacing.HumanCodeDeliveryStatus
 	cliHumanCodeAgentLifecycleState         = userfacing.HumanCodeAgentLifecycleState
 	cliHumanCodeAgentLifecycleBlockingLayer = userfacing.HumanCodeAgentLifecycleBlockingLayer

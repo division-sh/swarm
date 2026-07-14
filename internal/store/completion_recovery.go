@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -30,15 +31,16 @@ type completionRecoveryAttempt struct {
 type completionRecoveryAuthorityEvidence struct {
 	ActorTokenID string `json:"actor_token_id"`
 	UsageTarget  struct {
-		Kind        string `json:"kind"`
-		ID          string `json:"id"`
-		Ordinal     int    `json:"ordinal"`
-		RunID       string `json:"run_id"`
-		AgentID     string `json:"agent_id"`
-		SessionID   string `json:"session_id"`
-		RuntimeMode string `json:"runtime_mode"`
-		ScopeKey    string `json:"scope_key"`
-		EntityID    string `json:"entity_id"`
+		Kind          string `json:"kind"`
+		ID            string `json:"id"`
+		Ordinal       int    `json:"ordinal"`
+		RunID         string `json:"run_id"`
+		AgentID       string `json:"agent_id"`
+		SessionID     string `json:"session_id"`
+		MemoryEnabled bool   `json:"memory_enabled"`
+		MemorySource  string `json:"memory_source"`
+		FlowInstance  string `json:"flow_instance"`
+		EntityID      string `json:"entity_id"`
 	} `json:"usage_target"`
 }
 
@@ -188,7 +190,8 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetKind(recovered.TargetKind), ID: recovered.TargetID, Ordinal: recovered.TargetOrdinal,
 		RunID: evidence.UsageTarget.RunID, AgentID: evidence.UsageTarget.AgentID, SessionID: evidence.UsageTarget.SessionID,
-		RuntimeMode: evidence.UsageTarget.RuntimeMode, ScopeKey: evidence.UsageTarget.ScopeKey, EntityID: evidence.UsageTarget.EntityID,
+		Memory:       agentmemory.Plan{Enabled: evidence.UsageTarget.MemoryEnabled, Source: agentmemory.Source(evidence.UsageTarget.MemorySource)},
+		FlowInstance: evidence.UsageTarget.FlowInstance, EntityID: evidence.UsageTarget.EntityID,
 	}
 	if !target.Valid() {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery target for attempt %s is invalid", recovered.AttemptID)
@@ -208,11 +211,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if agentID == "" {
 		agentID = strings.TrimSpace(recovered.AuthorityID)
 	}
-	runtimeMode := strings.TrimSpace(target.RuntimeMode)
-	if runtimeMode == "" {
-		runtimeMode = "completion_recovery"
-	}
-	flowInstance := strings.TrimSpace(target.ScopeKey)
+	flowInstance := strings.TrimSpace(target.FlowInstance)
 	if flowInstance == "" {
 		flowInstance = strings.TrimSpace(target.RunID)
 	}
@@ -228,7 +227,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Spend: runtimeeffects.CompletionSpend{
 			EntityID: target.EntityID, FlowInstance: flowInstance, AgentID: agentID, Model: "unknown", ModelAlias: "unknown",
 			BackendProfile: "unknown", Provider: recovered.Adapter, Transport: recovered.Transport,
-			ResolvedModel: "unknown", InvocationType: runtimeMode,
+			ResolvedModel: "unknown", InvocationType: coalesce(recovered.Adapter, "completion_recovery"),
 		},
 		Now: now,
 	}
@@ -238,7 +237,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			RuntimeMode: runtimeMode, ScopeKey: target.ScopeKey, EntityID: target.EntityID, Failure: failure,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID, Failure: failure,
 		}
 	}
 	return attempt, settlement, nil

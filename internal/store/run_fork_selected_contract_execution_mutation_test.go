@@ -1178,20 +1178,20 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	at := time.Unix(1700003605, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
-		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
+		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			runtime_mode, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
-			'session_per_entity', 'active', $4, $4)
-	`, sessionID, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
+			'active', $3, $3)
+	`, sessionID, sourceRunID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T source session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1425,12 +1425,12 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
-						session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-						runtime_mode, status, created_at, updated_at
+						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+						status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
-						'session_per_entity', 'active', $4, $4)
-				`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute))
+					VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
+						'active', $3, $3)
+				`, uuid.NewString(), sourceRunID, at.Add(time.Minute))
 				return err
 			},
 		},
@@ -1440,11 +1440,11 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
-						session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-						runtime_mode, runtime_state, status, created_at, updated_at
+						session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+						runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
-						'task', '{}'::jsonb, 'active', $4, $4)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
+						'{}'::jsonb, 'active', $4, $4)
 				`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute))
 				return err
 			},
@@ -1455,10 +1455,10 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 						trigger_event_id, trigger_event_type, task_id, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'task', $4::text, $4::uuid,
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored', $4::uuid,
 						$5::uuid, 'item.received', 'task-a', $6)
 				`, uuid.NewString(), sourceRunID, uuid.NewString(), entityID, eventID, at.Add(time.Minute))
 				return err
@@ -1475,8 +1475,8 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			at := time.Unix(1700003620, 0).UTC()
 			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
-				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+				INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
+				VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
 				ON CONFLICT (agent_id) DO NOTHING
 			`, at); err != nil {
 				t.Fatalf("seed agent: %v", err)
@@ -1711,8 +1711,8 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	sessionID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
-		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
+		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -1739,36 +1739,36 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', 'agent-a:entity', 'entity',
-			'[]'::jsonb, 1, 'session_per_entity', '{}'::jsonb, 'active', $4, $4
+			$1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb, 'active', $3, $3
 		)
-	`, sessionID, materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
+	`, sessionID, materialized.ForkRunID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed fork session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', 'agent-a:entity', 'entity',
-			'[]'::jsonb, 1, 'task', '{}'::jsonb, 'active', $4, $4
+			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb, 'active', $4, $4
 		)
 	`, uuid.NewString(), materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed fork conversation audit: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, available_tools, tool_calls, emitted_events,
 			mcp_servers, mcp_tools_listed, mcp_tools_visible, parse_ok, latency_ms, retry_count, created_at
 		)
 		VALUES (
-			$1::uuid, 'agent-a', $2::uuid, 'task', 'agent-a:entity', $3::uuid,
+			$1::uuid, 'agent-a', $2::uuid, 'flow-a/1', TRUE, 'authored', $3::uuid,
 			$4::uuid, 'item.received', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 1, 0, $5
 		)
@@ -2261,38 +2261,38 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextD
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
-		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
+		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
 		t.Fatalf("seed conversation agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			runtime_mode, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
-			'session_per_entity', 'active', $4, $4)
-	`, sessionID, sourceRunID, entityID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
+			'active', $3, $3)
+	`, sessionID, sourceRunID, at); err != nil {
 		t.Fatalf("seed source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
-			'task', '{}'::jsonb, 'active', $4, $4)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
+			'{}'::jsonb, 'active', $4, $4)
 	`, auditID, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session_per_entity', $4::text, $4::uuid,
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
 			$5::uuid, 'item.received', 'task-a', $6)
 	`, turnID, sourceRunID, sessionID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
@@ -2335,20 +2335,20 @@ func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, 
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
-		VALUES ('active-agent', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
+		VALUES ('active-agent', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
 		t.Fatalf("seed active coupling agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			runtime_mode, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'active-agent', $3::uuid, 'flow-a/1', $3::text, 'entity',
-			'session_per_entity', 'active', $4, $4)
-	`, sessionID, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, 'active-agent', 'flow-a/1', TRUE, 'authored',
+			'active', $3, $3)
+	`, sessionID, sourceRunID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T active source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

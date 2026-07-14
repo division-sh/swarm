@@ -53,7 +53,7 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 `)
@@ -128,7 +128,7 @@ flows: []
 flow-agent:
   id: flow-agent
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 `)
@@ -156,7 +156,7 @@ flow-agent:
 	}
 }
 
-func TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath(t *testing.T) {
+func TestResolveAgentMemoryProof_PackageBackedAgentCarriesFlowPath(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -200,7 +200,7 @@ states:
 backend:
   id: backend-{vertical_id}
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 `)
@@ -211,7 +211,7 @@ backend:
 	}
 	source := Wrap(bundle)
 
-	proof := ResolveAgentSessionScopeProof(source, AgentSessionScopeLocator{
+	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
 		AgentID:         "backend",
 		ProjectScopeKey: "flows/support",
 	})
@@ -223,7 +223,7 @@ backend:
 	}
 }
 
-func TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
+func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -262,7 +262,7 @@ states:
 backend:
   id: backend-{flow_id}
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - item.created
 `)
@@ -273,7 +273,7 @@ backend:
 	}
 	source := Wrap(bundle)
 
-	proof := ResolveAgentSessionScopeProof(source, AgentSessionScopeLocator{
+	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
 		AgentID: "backend",
 		FlowID:  "support",
 	})

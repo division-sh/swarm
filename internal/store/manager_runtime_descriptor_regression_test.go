@@ -23,18 +23,13 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 		},
 		{
 			name:               "unsupported runtime descriptor keys",
-			runtimeDescriptor:  `{"type":"review-worker","mode":"review","legacy_scope":"global"}`,
+			runtimeDescriptor:  `{"type":"review-worker","legacy_scope":"global"}`,
 			wantErrorSubstring: `invalid runtime_descriptor: runtime_descriptor contains unsupported keys: legacy_scope`,
 		},
 		{
 			name:               "wrong runtime descriptor field types",
-			runtimeDescriptor:  `{"type":1,"mode":"review"}`,
+			runtimeDescriptor:  `{"type":1}`,
 			wantErrorSubstring: `invalid runtime_descriptor: decode runtime_descriptor: json: cannot unmarshal number into Go struct field persistedAgentRuntimeDescriptor.type of type string`,
-		},
-		{
-			name:               "unsupported session scope authority",
-			runtimeDescriptor:  `{"type":"review-worker","session_scope_authority":"authored"}`,
-			wantErrorSubstring: `invalid runtime_descriptor: unsupported session_scope_authority "authored"`,
 		},
 	}
 
@@ -46,16 +41,13 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 			pg := &PostgresStore{DB: db}
 			ctx := context.Background()
 
-			if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
-				t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
-			}
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO agents (
-					agent_id, flow_instance, role, model, llm_backend, conversation_mode,
+					agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
 					parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 					runtime_descriptor, status
 				) VALUES (
-					$1, '', 'reviewer', 'sonnet', 'anthropic', 'task',
+					$1, NULL, 'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
 					NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 					$2::jsonb, 'active'
 				)

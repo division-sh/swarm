@@ -45,7 +45,7 @@ memory-agent:
   id: memory-agent
   role: analyst
   model: regular
-  mode: session
+  memory: true
   subscriptions: [job.received]
 `, "{}\n")
 

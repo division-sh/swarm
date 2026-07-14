@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -33,21 +34,18 @@ import (
 
 const (
 	claudeAttemptProofEventType events.EventType = "claude.attempt.proof.requested"
-	claudeAttemptProofEntityID                   = "11111111-1111-4111-8111-111111111111"
 )
 
 type claudeAttemptProofSurface struct {
 	name         string
-	runtimeMode  runtimesessions.RuntimeMode
-	sessionScope runtimesessions.SessionScope
+	memory       bool
 	outputFormat string
 }
 
 func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
 	return claudeAttemptProofSurface{
-		name:         "session_json",
-		runtimeMode:  runtimesessions.RuntimeModeSession,
-		sessionScope: runtimesessions.SessionScopeFlow,
+		name:         "memory_json",
+		memory:       true,
 		outputFormat: "json",
 	}
 }
@@ -85,14 +83,14 @@ func (*claudeAttemptProofAgent) Subscriptions() []events.EventType {
 	return []events.EventType{claudeAttemptProofEventType}
 }
 
-func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
+func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
 	a.calls.Add(1)
 	ctx = runtimeactors.WithActor(ctx, a.config)
-	scopeKey, err := runtimesessions.DeclaredScopeKey(a.config)
-	if err != nil {
-		return nil, err
-	}
-	ctx = runtimesessions.WithScope(ctx, a.config.ConversationMode, a.config.SessionScope, scopeKey)
+	ctx = agentmemory.WithExecution(ctx, a.config.Memory, agentmemory.Identity{
+		RunID:        evt.RunID(),
+		AgentID:      a.config.ID,
+		FlowInstance: a.config.CanonicalFlowPath(),
+	})
 	if a.session == nil {
 		session, err := a.runtime.StartSession(ctx, a.config.ID, "Reply exactly ok.", nil)
 		if err != nil {
@@ -100,7 +98,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, _ events.Event) (
 		}
 		a.session = session
 	}
-	_, err = a.runtime.ContinueSession(ctx, a.session, runtimellm.Message{Role: "user", Content: "Reply exactly ok."})
+	_, err := a.runtime.ContinueSession(ctx, a.session, runtimellm.Message{Role: "user", Content: "Reply exactly ok."})
 	return nil, err
 }
 
@@ -317,23 +315,17 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 	}
 }
 
-func TestClaudeAttemptIdentitySelectedStoreModeAndProcessParity(t *testing.T) {
-	for _, runtimeMode := range []runtimesessions.RuntimeMode{
-		runtimesessions.RuntimeModeTask,
-		runtimesessions.RuntimeModeSession,
-		runtimesessions.RuntimeModeSessionPerEntity,
-	} {
+func TestClaudeAttemptIdentitySelectedStoreMemoryAndProcessParity(t *testing.T) {
+	for _, memory := range []bool{false, true} {
 		for _, outputFormat := range []string{"json", "stream-json"} {
-			surface := claudeAttemptProofSurface{
-				name:         runtimeMode.String() + "_" + outputFormat,
-				runtimeMode:  runtimeMode,
-				outputFormat: outputFormat,
+			memoryLabel := "stateless"
+			if memory {
+				memoryLabel = "memory"
 			}
-			switch runtimeMode {
-			case runtimesessions.RuntimeModeSession:
-				surface.sessionScope = runtimesessions.SessionScopeFlow
-			case runtimesessions.RuntimeModeSessionPerEntity:
-				surface.sessionScope = runtimesessions.SessionScopeEntity
+			surface := claudeAttemptProofSurface{
+				name:         memoryLabel + "_" + outputFormat,
+				memory:       memory,
+				outputFormat: outputFormat,
 			}
 			for _, backendName := range []string{"sqlite", "postgres"} {
 				t.Run(surface.name+"/"+backendName, func(t *testing.T) {
@@ -485,11 +477,8 @@ func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtim
 		surface = surfaces[0]
 	}
 	cfg := runtimeactors.AgentConfig{
-		ID: "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", Mode: "global", Model: "regular",
-		LLMBackend: "claude_cli", ConversationMode: surface.runtimeMode.String(), SessionScope: surface.sessionScope.String(), FlowPath: "proof/inst-1",
-	}
-	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
-		cfg.EntityID = claudeAttemptProofEntityID
+		ID: "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
+		LLMBackend: "claude_cli", Memory: agentmemory.Authored(surface.memory), FlowPath: "proof/inst-1",
 	}
 	return cfg
 }
@@ -501,11 +490,7 @@ func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus,
 		surface = surfaces[0]
 	}
 	eventID := uuid.NewString()
-	envelope := events.EventEnvelope{}
-	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
-		envelope = events.EnvelopeForEntityID(envelope, claudeAttemptProofEntityID)
-	}
-	evt := eventtest.RootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", envelope, time.Now().UTC())
+	evt := eventtest.RootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eventBus.PublishDirect(context.Background(), evt, []string{claudeAttemptProofAgentConfig(surface).ID}); err != nil {
 		t.Fatalf("publish Claude proof event: %v", err)
 	}
@@ -610,35 +595,32 @@ func loadClaudeAttemptProofDeliveryReason(t *testing.T, backend claudeAttemptPro
 
 func requireClaudeAttemptProofSessionSurface(t *testing.T, backend claudeAttemptProofBackend, surface claudeAttemptProofSurface, attemptID string) {
 	t.Helper()
-	if surface.runtimeMode == runtimesessions.RuntimeModeTask {
+	if !surface.memory {
 		query := `SELECT COUNT(*) FROM agent_sessions WHERE agent_id=?`
 		if backend.name == "postgres" {
 			query = `SELECT COUNT(*) FROM agent_sessions WHERE agent_id=$1`
 		}
 		var count int
 		if err := backend.db.QueryRowContext(context.Background(), query, claudeAttemptProofAgentConfig().ID).Scan(&count); err != nil {
-			t.Fatalf("load task-mode session count: %v", err)
+			t.Fatalf("load stateless live-memory row count: %v", err)
 		}
 		if count != 0 {
-			t.Fatalf("task mode session rows=%d, want zero", count)
+			t.Fatalf("stateless live-memory rows=%d, want zero", count)
 		}
 		return
 	}
 
-	query := `SELECT runtime_mode, scope, scope_key, COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE agent_id=? AND status='active'`
+	query := `SELECT flow_instance, memory_enabled, memory_source, COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') FROM agent_sessions WHERE agent_id=? AND status='active'`
 	if backend.name == "postgres" {
-		query = `SELECT runtime_mode, scope, scope_key, COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE agent_id=$1 AND status='active'`
+		query = `SELECT flow_instance, memory_enabled, memory_source, COALESCE(runtime_state->>'provider_session_id', '') FROM agent_sessions WHERE agent_id=$1 AND status='active'`
 	}
-	var runtimeMode, scope, scopeKey, providerHead string
-	if err := backend.db.QueryRowContext(context.Background(), query, claudeAttemptProofAgentConfig().ID).Scan(&runtimeMode, &scope, &scopeKey, &providerHead); err != nil {
+	var flowInstance, memorySource, providerHead string
+	var memoryEnabled bool
+	if err := backend.db.QueryRowContext(context.Background(), query, claudeAttemptProofAgentConfig().ID).Scan(&flowInstance, &memoryEnabled, &memorySource, &providerHead); err != nil {
 		t.Fatalf("load %s session surface: %v", surface.name, err)
 	}
-	wantScopeKey := "proof/inst-1"
-	if surface.runtimeMode == runtimesessions.RuntimeModeSessionPerEntity {
-		wantScopeKey = claudeAttemptProofEntityID
-	}
-	if runtimeMode != surface.runtimeMode.String() || scope != surface.sessionScope.String() || scopeKey != wantScopeKey || providerHead != attemptID {
-		t.Fatalf("%s session=(mode=%q scope=%q key=%q head=%q), want (%q %q %q %q)", surface.name, runtimeMode, scope, scopeKey, providerHead, surface.runtimeMode, surface.sessionScope, wantScopeKey, attemptID)
+	if flowInstance != "proof/inst-1" || !memoryEnabled || memorySource != string(agentmemory.SourceAuthored) || providerHead != attemptID {
+		t.Fatalf("%s memory=(flow=%q enabled=%v source=%q head=%q), want (proof/inst-1 true authored %q)", surface.name, flowInstance, memoryEnabled, memorySource, providerHead, attemptID)
 	}
 }
 

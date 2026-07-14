@@ -139,8 +139,8 @@ type bundleAgentDefinition struct {
 	Type          string   `json:"type,omitempty"`
 	Model         string   `json:"model,omitempty"`
 	LLMBackend    string   `json:"llm_backend,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
-	SessionScope  string   `json:"session_scope,omitempty"`
+	Memory        bool     `json:"memory"`
+	MemorySource  string   `json:"memory_source"`
 	PromptPath    string   `json:"prompt_path,omitempty"`
 	Subscriptions []string `json:"subscriptions,omitempty"`
 	Tools         []string `json:"tools,omitempty"`
@@ -939,8 +939,8 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 			agent.Type,
 			agent.Model,
 			agent.LLMBackend,
-			formatCLIHumanCode(cliHumanCodeConversationMode, agent.Mode),
-			formatCLIHumanCode(cliHumanCodeSessionScope, agent.SessionScope),
+			fmt.Sprintf("%t", agent.Memory),
+			formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource),
 			agent.PromptPath,
 			strings.Join(agent.Subscriptions, ","),
 			strings.Join(agent.Tools, ","),
@@ -954,8 +954,8 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 			{Header: "TYPE"},
 			{Header: "MODEL"},
 			{Header: "LLM_BACKEND"},
-			{Header: "MODE"},
-			{Header: "SESSION_SCOPE"},
+			{Header: "MEMORY"},
+			{Header: "MEMORY_SOURCE"},
 			{Header: "PROMPT_PATH"},
 			{Header: "SUBSCRIPTIONS", Truncatable: true},
 			{Header: "TOOLS", Truncatable: true},

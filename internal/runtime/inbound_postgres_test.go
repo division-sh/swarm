@@ -1020,7 +1020,7 @@ func seedPostgresInboundGatewayRuntime(
 		Config: runtimeactors.AgentConfig{
 			ID:     agentID,
 			Role:   "observer",
-			Mode:   "global",
+			FlowID: "global",
 			Type:   "stub",
 			Model:  "regular",
 			Config: []byte(`{}`),
@@ -1082,7 +1082,7 @@ func seedSQLiteInboundGatewayRuntime(
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
 			Role:          "observer",
-			Mode:          "global",
+			FlowID:        "global",
 			Type:          "stub",
 			Model:         "regular",
 			Config:        []byte(`{}`),

@@ -10,8 +10,7 @@ const (
 	HumanCodeRunBlockingLayer            HumanCodeFamily = "run_blocking_layer"
 	HumanCodeRunBlockingReason           HumanCodeFamily = "run_blocking_reason"
 	HumanCodeAgentStatus                 HumanCodeFamily = "agent_status"
-	HumanCodeConversationMode            HumanCodeFamily = "conversation_mode"
-	HumanCodeSessionScope                HumanCodeFamily = "session_scope"
+	HumanCodeMemorySource                HumanCodeFamily = "memory_source"
 	HumanCodeDeliveryStatus              HumanCodeFamily = "delivery_status"
 	HumanCodeAgentLifecycleState         HumanCodeFamily = "agent_lifecycle_state"
 	HumanCodeAgentLifecycleBlockingLayer HumanCodeFamily = "agent_lifecycle_blocking_layer"
@@ -48,11 +47,8 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"idle": "idle", "running": "running", "paused": "paused",
 		"failed": "failed", "terminated": "terminated",
 	},
-	HumanCodeConversationMode: {
-		"task": "task", "session": "session", "session_per_entity": "session per entity",
-	},
-	HumanCodeSessionScope: {
-		"global": "global", "flow": "flow", "entity": "entity",
+	HumanCodeMemorySource: {
+		"authored": "authored", "platform_default": "platform default",
 	},
 	HumanCodeDeliveryStatus: {
 		"pending": "pending", "in_progress": "in progress", "delivered": "delivered",

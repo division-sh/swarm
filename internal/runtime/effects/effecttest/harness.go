@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -41,7 +42,9 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	ctx := h.Context(identity)
 	return runtimeeffects.WithUsageTarget(ctx, runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: "11111111-1111-4111-8111-111111111111",
-		AgentID: h.Token.AgentID, SessionID: "22222222-2222-4222-8222-222222222222", RuntimeMode: "task",
+		RunID: "33333333-3333-4333-8333-333333333333", AgentID: h.Token.AgentID,
+		SessionID: "22222222-2222-4222-8222-222222222222", FlowInstance: "effect-test",
+		Memory: agentmemory.PlatformDefault(),
 	})
 }
 

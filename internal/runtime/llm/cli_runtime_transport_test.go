@@ -316,9 +316,9 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 		},
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:   "market-research-agent",
-		Role: "market_research",
-		Mode: "discovery",
+		ID:     "market-research-agent",
+		Role:   "market_research",
+		FlowID: "discovery",
 	})
 	s := &Session{
 		AgentID: "market-research-agent",
@@ -489,9 +489,9 @@ func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t
 		},
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:   "market-research-agent",
-		Role: "market_research",
-		Mode: "discovery",
+		ID:     "market-research-agent",
+		Role:   "market_research",
+		FlowID: "discovery",
 	})
 	s := &Session{
 		AgentID: "market-research-agent",

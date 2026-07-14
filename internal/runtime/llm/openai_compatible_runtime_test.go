@@ -90,8 +90,9 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 		Model:    "cheap",
 		EntityID: "entity-1",
 		FlowPath: "support/inst-1",
+		Memory:   testMemory(),
 	})
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1")
+	ctx = withTestMemory(ctx, "agent-1", "support/inst-1")
 	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
 		Name:        "lookup",
 		Description: "Lookup status",
@@ -102,7 +103,7 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 			},
 			"required": []any{"query"},
 		},
-	}}, SessionScoped, 5, runtime)
+	}}, testMemory(), 5, runtime)
 	conv.SetToolExecutor(openAIToolExecutor{})
 
 	resp, err := conv.Step(ctx, "check status")
@@ -119,11 +120,11 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	if len(settlements) != 2 {
 		t.Fatalf("completion settlements = %d, want 2", len(settlements))
 	}
-	if settlements[0].AgentTurn == nil || settlements[0].AgentTurn.RuntimeMode != sessions.RuntimeModeSession.String() || !settlements[0].AgentTurn.ParseOK || !strings.Contains(string(settlements[0].AgentTurn.ToolCalls), `"call_1"`) {
-		t.Fatalf("first completion turn = %#v, want session-mode call_1", settlements[0].AgentTurn)
+	if settlements[0].AgentTurn == nil || !settlements[0].AgentTurn.Memory.Enabled || !settlements[0].AgentTurn.ParseOK || !strings.Contains(string(settlements[0].AgentTurn.ToolCalls), `"call_1"`) {
+		t.Fatalf("first completion turn = %#v, want memory-enabled call_1", settlements[0].AgentTurn)
 	}
-	if conversations.record.SessionID == "" || conversations.record.Mode != sessions.RuntimeModeSession.String() {
-		t.Fatalf("conversation record = %#v, want session snapshot", conversations.record)
+	if conversations.record.SessionID == "" || conversations.record.Identity != testMemoryIdentity("agent-1", "support/inst-1") {
+		t.Fatalf("conversation record = %#v, want exact reusable-memory snapshot", conversations.record)
 	}
 	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-compatible-mini" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
@@ -143,8 +144,8 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(harness.Context("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := runtimeactors.WithActor(harness.CompletionContext("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
+	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -175,8 +176,8 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(harness.Context("anthropic-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
+	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -222,7 +223,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	defer server.Close()
 
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
-	ctx := sessions.WithScope(unmanagedLLMTestContext(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := withTestStatelessMemory(unmanagedLLMTestContext())
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

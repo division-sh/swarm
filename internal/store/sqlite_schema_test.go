@@ -150,7 +150,8 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			role TEXT NOT NULL,
 			model TEXT NOT NULL,
 			llm_backend TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
-			conversation_mode TEXT NOT NULL,
+			memory_enabled INTEGER NOT NULL DEFAULT 0,
+			memory_source TEXT NOT NULL DEFAULT 'platform_default',
 			parent_agent_id TEXT,
 			entity_id TEXT,
 			config TEXT NOT NULL DEFAULT '{}',
@@ -165,11 +166,11 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 		t.Fatalf("create legacy sqlite agents: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode)
+			INSERT INTO agents (agent_id, role, model, llm_backend)
 			VALUES
-				('agent-api', 'worker', 'sonnet', 'api', 'task'),
-				('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
-				('agent-openai', 'worker', 'sonnet', 'openai_compatible', 'task')
+				('agent-api', 'worker', 'sonnet', 'api'),
+				('agent-cli', 'worker', 'sonnet', 'cli_test'),
+				('agent-openai', 'worker', 'sonnet', 'openai_compatible')
 		`); err != nil {
 		t.Fatalf("seed legacy sqlite agents: %v", err)
 	}
@@ -177,17 +178,17 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			CREATE TABLE agent_sessions (
 				session_id TEXT PRIMARY KEY,
 				agent_id TEXT NOT NULL REFERENCES agents(agent_id),
-				scope_key TEXT NOT NULL,
-				scope TEXT NOT NULL DEFAULT 'entity',
-				runtime_mode TEXT NOT NULL DEFAULT 'task',
+				flow_instance TEXT NOT NULL,
+				memory_enabled INTEGER NOT NULL DEFAULT 1,
+				memory_source TEXT NOT NULL DEFAULT 'authored',
 				status TEXT NOT NULL DEFAULT 'active'
 			)
 		`); err != nil {
 		t.Fatalf("create legacy sqlite agent_sessions child: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO agent_sessions (session_id, agent_id, scope_key)
-			VALUES ('session-api', 'agent-api', 'scope-api')
+			INSERT INTO agent_sessions (session_id, agent_id, flow_instance)
+			VALUES ('session-api', 'agent-api', 'test-flow')
 		`); err != nil {
 		t.Fatalf("seed legacy sqlite agent_sessions child: %v", err)
 	}
@@ -219,13 +220,13 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			t.Fatalf("%s llm_backend = %q, want %q (all rows %#v)", id, got[id], want, got)
 		}
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend) VALUES ('agent-legacy', 'worker', 'sonnet', 'api')`); err == nil {
 		t.Fatal("insert legacy sqlite llm_backend api succeeded after migration")
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-openai-responses', 'worker', 'regular', 'openai_responses', 'task')`); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend) VALUES ('agent-openai-responses', 'worker', 'regular', 'openai_responses')`); err != nil {
 		t.Fatalf("insert openai_responses sqlite llm_backend after migration: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model) VALUES ('agent-default', 'worker', 'sonnet')`); err != nil {
 		t.Fatalf("insert default sqlite llm_backend after migration: %v", err)
 	}
 	var defaultBackend string
@@ -284,8 +285,8 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 		t.Fatalf("read sqlite foreign_key_check: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
-			INSERT INTO agent_sessions (session_id, agent_id, scope_key)
-			VALUES ('session-missing', 'missing-agent', 'scope-missing')
+			INSERT INTO agent_sessions (session_id, agent_id, flow_instance)
+			VALUES ('session-missing', 'missing-agent', 'test-flow')
 		`); err == nil {
 		t.Fatal("insert sqlite child session with missing agent succeeded after migration")
 	}
@@ -390,19 +391,20 @@ func TestSQLiteSchemaStoreEnsureAgentModelAliasesMigratesLegacyModelTier(t *test
 			agent_id TEXT PRIMARY KEY,
 			role TEXT NOT NULL,
 			model_tier TEXT,
-			conversation_mode TEXT NOT NULL
+			memory_enabled INTEGER NOT NULL DEFAULT 0,
+			memory_source TEXT NOT NULL DEFAULT 'platform_default'
 		)
 	`); err != nil {
 		t.Fatalf("create legacy sqlite agents: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		INSERT INTO agents (agent_id, role, model_tier)
 		VALUES
-			('agent-haiku', 'worker', 'haiku', 'task'),
-			('agent-low-cost', 'worker', 'low_cost', 'task'),
-			('agent-sonnet', 'worker', 'sonnet', 'task'),
-			('agent-general', 'worker', 'general', 'task'),
-			('agent-generic', 'worker', 'generic', 'task')
+			('agent-haiku', 'worker', 'haiku'),
+			('agent-low-cost', 'worker', 'low_cost'),
+			('agent-sonnet', 'worker', 'sonnet'),
+			('agent-general', 'worker', 'general'),
+			('agent-generic', 'worker', 'generic')
 	`); err != nil {
 		t.Fatalf("seed legacy sqlite agents: %v", err)
 	}
@@ -454,14 +456,15 @@ func TestSQLiteSchemaStoreEnsureAgentModelAliasesRejectsUnmappableLegacyModelTie
 			agent_id TEXT PRIMARY KEY,
 			role TEXT NOT NULL,
 			model_tier TEXT,
-			conversation_mode TEXT NOT NULL
+			memory_enabled INTEGER NOT NULL DEFAULT 0,
+			memory_source TEXT NOT NULL DEFAULT 'platform_default'
 		)
 	`); err != nil {
 		t.Fatalf("create legacy sqlite agents: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
-		VALUES ('agent-unknown', 'worker', 'opus', 'task')
+		INSERT INTO agents (agent_id, role, model_tier)
+		VALUES ('agent-unknown', 'worker', 'opus')
 	`); err != nil {
 		t.Fatalf("seed legacy sqlite agent: %v", err)
 	}

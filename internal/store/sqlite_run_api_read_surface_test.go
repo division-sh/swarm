@@ -268,11 +268,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
 			config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, created_at
 		)
 		VALUES (
-			'quiescence-agent', 'worker', 'regular', 'mock', 'session',
+			'quiescence-agent', 'quiescence', 'worker', 'regular', 'mock', 1, 'authored',
 			'{}', '[]', '[]', '[]', '{}', '{}', 'active', ?
 		)
 	`, now); err != nil {
@@ -280,13 +280,13 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
-			(?, ?, 'quiescence-agent', 'global', 'global', 'session', '{}',
+			(?, ?, 'quiescence-agent', 'quiescence', 1, 'authored', '{}',
 				'worker-1', ?, 'active', ?, ?),
-			(?, ?, 'quiescence-agent', 'global-ready', 'global', 'session', '{}',
+			(?, ?, 'quiescence-agent', 'quiescence', 1, 'authored', '{}',
 				'worker-1', ?, 'active', ?, ?)
 	`, uuid.NewString(), blockedRunID, now.Add(time.Minute), now, now,
 		uuid.NewString(), readyRunID, now.Add(-time.Minute), now, now); err != nil {

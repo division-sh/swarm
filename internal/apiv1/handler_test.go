@@ -750,8 +750,9 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 					Type:          "managed",
 					Model:         "cheap",
 					LLMBackend:    "claude",
-					Mode:          "session",
-					SessionScope:  "flow",
+					Memory:        true,
+					MemorySource:  "authored",
+					FlowInstance:  "research/inst-1",
 					PromptPath:    "prompts/researcher.md",
 					Subscriptions: []string{"scan.requested"},
 					Tools:         []string{"web_search"},
@@ -904,7 +905,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
 	researcher := asMap(t, agents["researcher"])
-	if researcher["model"] != "regular" || researcher["mode"] != "task" {
+	if researcher["model"] != "regular" || researcher["memory"] != false || researcher["memory_source"] != "platform_default" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 
@@ -1088,7 +1089,6 @@ files:
         id: researcher
         role: research
         model: regular
-        mode: task
         subscriptions:
           - scan.requested
 `

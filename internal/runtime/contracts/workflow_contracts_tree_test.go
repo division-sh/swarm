@@ -539,7 +539,6 @@ pins:
 control-plane:
   id: control-plane
   role: control-plane
-  mode: task
   subscriptions:
     - evidence.recorded
 `)
@@ -608,7 +607,6 @@ parent.started:
 parent-agent:
   id: parent-agent
   role: parent-agent
-  mode: task
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "package.yaml"), `
 name: parent
@@ -641,7 +639,6 @@ child.completed:
 child-agent:
   id: child-agent
   role: child-agent
-  mode: task
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "policy.yaml"), `
 shared:

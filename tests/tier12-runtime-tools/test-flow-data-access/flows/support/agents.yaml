@@ -2,7 +2,6 @@ reference-agent:
   id: reference-agent
   role: reference_reader
   model: regular
-  mode: task
   subscriptions:
     - support.requested
   emit_events: []

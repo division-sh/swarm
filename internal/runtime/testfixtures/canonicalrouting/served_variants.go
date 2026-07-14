@@ -89,33 +89,39 @@ func CopyRootIngressServedActiveLoad(t testing.TB) string {
 func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
-  item_id: text
-`, `item.processed:
-  item_id: text
-item.agent_hold:
-  note: text
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
+  - id: hold
+    flow: hold
+    mode: static
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `      - name: item_received
-        event: item.received
-        source: external
-`, `      - name: item_received
-        event: item.received
-        source: external
+	writeClosedVariantFile(t, root, "flows/hold/schema.yaml", `name: hold
+mode: static
+pins:
+  inputs:
+    events:
       - name: item_agent_hold
         event: item.agent_hold
         source: external
+  outputs:
+    events: []
 `)
-	writeClosedVariantFile(t, root, "agents.yaml", `load-agent:
+	writeClosedVariantFile(t, root, "flows/hold/events.yaml", `item.agent_hold:
+  note: text
+`)
+	writeClosedVariantFile(t, root, "flows/hold/nodes.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/hold/entities.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/hold/policy.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/hold/tools.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/hold/agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
   prompt_ref: load-agent
   model: regular
-  mode: task
+  memory: true
   subscriptions:
     - item.agent_hold
 `)
-	writeClosedVariantFile(t, root, "prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
+	writeClosedVariantFile(t, root, "flows/hold/prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
 	return root
 }
 
@@ -135,7 +141,6 @@ func addServedItemProcessedAgent(t testing.TB, root, prompt string) {
   role: load_agent
   prompt_ref: load-agent
   model: regular
-  mode: task
   subscriptions:
     - item.processed
 `)

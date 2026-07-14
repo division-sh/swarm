@@ -337,7 +337,6 @@ func TestPinTargetResolution_ChecksProjectScopeAgentUnderOwningFlow(t *testing.T
 extras-agent:
   id: extras-agent
   role: producer
-  mode: task
   emit_events:
     - support.ready
 `,
@@ -776,7 +775,6 @@ producer:
 producer-agent:
   id: producer-agent
   role: producer
-  mode: task
   emit_events:
     - `+producerOutputEvent+`
 `)

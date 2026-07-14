@@ -217,22 +217,20 @@ func validateWebSearchCredential(ctx context.Context, source semanticview.Source
 
 func nativeToolAgentConfig(agentID string, entry runtimecontracts.AgentRegistryEntry) models.AgentConfig {
 	cfg := models.AgentConfig{
-		ID:               coalesce(strings.TrimSpace(entry.ID), strings.TrimSpace(agentID)),
-		Type:             strings.TrimSpace(entry.Type),
-		Role:             strings.TrimSpace(entry.Role),
-		Mode:             strings.TrimSpace(entry.Mode),
-		Model:            strings.TrimSpace(entry.Model),
-		ConversationMode: strings.TrimSpace(entry.ConversationMode),
-		SessionScope:     strings.TrimSpace(entry.SessionScope),
-		MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-		Subscriptions:    append([]string{}, entry.Subscriptions...),
-		EmitEvents:       append([]string{}, entry.EmitEvents...),
-		Tools:            entry.ConfiguredTools(),
-		Permissions:      append([]string{}, entry.Permissions...),
-		FlowDataAccess:   append([]string{}, entry.FlowDataAccess...),
-		Criteria:         append([]string{}, entry.Criteria...),
-		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
-		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
+		ID:              coalesce(strings.TrimSpace(entry.ID), strings.TrimSpace(agentID)),
+		Type:            strings.TrimSpace(entry.Type),
+		Role:            strings.TrimSpace(entry.Role),
+		Model:           strings.TrimSpace(entry.Model),
+		Memory:          entry.MemoryPlan,
+		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		Subscriptions:   append([]string{}, entry.Subscriptions...),
+		EmitEvents:      append([]string{}, entry.EmitEvents...),
+		Tools:           entry.ConfiguredTools(),
+		Permissions:     append([]string{}, entry.Permissions...),
+		FlowDataAccess:  append([]string{}, entry.FlowDataAccess...),
+		Criteria:        append([]string{}, entry.Criteria...),
+		WorkspaceClass:  strings.TrimSpace(entry.WorkspaceClass),
+		ManagerFallback: strings.TrimSpace(entry.ManagerFallback),
 	}
 	cfg.NativeTools = nativeToolConfigFromContract(entry.NativeTools)
 	cfg.NormalizeRuntimeDescriptor()

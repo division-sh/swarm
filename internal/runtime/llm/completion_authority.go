@@ -162,8 +162,12 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		target = runtimeeffects.UsageTarget{
 			Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(),
 			RunID: strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)), AgentID: strings.TrimSpace(session.AgentID),
-			SessionID: strings.TrimSpace(session.ID), RuntimeMode: strings.TrimSpace(coalesce(session.ConversationMode, session.RuntimeMode)),
-			ScopeKey: strings.TrimSpace(session.ScopeKey), EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
+			SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
+			FlowInstance: strings.TrimSpace(actor.CanonicalFlowPath()), EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
+		}
+		if session.Memory.Enabled {
+			target.RunID = session.MemoryIdentity.RunID
+			target.FlowInstance = session.MemoryIdentity.FlowInstance
 		}
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
@@ -247,8 +251,8 @@ func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.
 		RunID:            strings.TrimSpace(turn.RunID),
 		AgentID:          strings.TrimSpace(turn.AgentID),
 		SessionID:        strings.TrimSpace(turn.SessionID),
-		RuntimeMode:      strings.TrimSpace(turn.RuntimeMode),
-		ScopeKey:         strings.TrimSpace(turn.ScopeKey),
+		Memory:           turn.Memory,
+		FlowInstance:     strings.TrimSpace(turn.FlowInstance),
 		EntityID:         strings.TrimSpace(turn.EntityID),
 		TriggerEventID:   strings.TrimSpace(turn.TriggerEventID),
 		TriggerEventType: strings.TrimSpace(turn.TriggerEventType),
@@ -301,7 +305,7 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 		Transport:      coalesce(mapString(meta, "transport"), profile.Transport),
 		ResolvedModel:  coalesce(mapString(meta, "resolved_model"), usage.ResolvedModel),
 		CostUSD:        cost,
-		InvocationType: coalesce(strings.TrimSpace(turn.RuntimeMode), profile.ID),
+		InvocationType: profile.ID,
 	}
 }
 
@@ -418,11 +422,10 @@ func estimateCompletionCostUSD(model string, input, output int64) float64 {
 	return float64(input)/1_000_000*inRate + float64(output)/1_000_000*outRate
 }
 
-func completionTurnBase(ctx context.Context, session *Session, runtimeMode string, request, response []byte, parseOK bool, latency time.Duration, failure *runtimefailures.Envelope) AgentTurnRecord {
+func completionTurnBase(ctx context.Context, session *Session, request, response []byte, parseOK bool, latency time.Duration, failure *runtimefailures.Envelope) AgentTurnRecord {
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	return AgentTurnRecord{
 		AgentID:        session.AgentID,
-		RuntimeMode:    runtimeMode,
 		SessionID:      session.ID,
 		RunID:          strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		EntityID:       actor.EffectiveEntityID(),

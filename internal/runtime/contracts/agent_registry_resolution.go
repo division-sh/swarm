@@ -31,7 +31,7 @@ func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentC
 	if role == "" {
 		return "", AgentRegistryEntry{}, false
 	}
-	mode := canonicalPromptLookupValue(cfg.Mode)
+	mode := canonicalPromptLookupValue(cfg.FlowID)
 	for _, record := range bundleAgentRecords(bundle) {
 		if canonicalPromptLookupValue(record.Entry.Role) != role {
 			continue

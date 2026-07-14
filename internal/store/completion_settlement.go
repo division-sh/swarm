@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -132,10 +133,8 @@ func completionProviderHeadUncertainty(settlement runtimeeffects.CompletionSettl
 type completionProviderHeadRequest struct {
 	runtimeeffects.Settlement
 	Token                runtimeeffects.LifecycleToken
-	AgentID              string
-	RuntimeMode          string
+	Identity             agentmemory.Identity
 	SessionID            string
-	ScopeKey             string
 	LockOwner            string
 	ExpectedProviderHead string
 	NewProviderHead      string
@@ -146,10 +145,8 @@ func completionProviderHeadSettlement(attempt runtimeeffects.Attempt, settlement
 	return completionProviderHeadRequest{
 		Settlement:           settlement.Settlement,
 		Token:                attempt.Authority.Normal,
-		AgentID:              head.AgentID,
-		RuntimeMode:          head.RuntimeMode,
+		Identity:             head.Identity,
 		SessionID:            head.SessionID,
-		ScopeKey:             head.ScopeKey,
 		LockOwner:            head.LockOwner,
 		ExpectedProviderHead: head.ExpectedProviderHead,
 		NewProviderHead:      head.NewProviderHead,
@@ -211,7 +208,7 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 	u := settlement.Usage
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
@@ -219,11 +216,11 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
 		) VALUES (
-			$1::uuid,NULLIF($2,'')::uuid,$3,$4::uuid,$5,NULLIF($6,''),NULLIF($7,'')::uuid,
-			NULLIF($8,'')::uuid,NULLIF($9,''),NULLIF($10,''),$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,
-			$17::jsonb,$18::jsonb,$19::jsonb,$20,$21,$22,$23::uuid,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34
+			$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
+			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,
+			$18::jsonb,$19::jsonb,$20::jsonb,$21,$22,$23,$24::uuid,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,$35
 		)
-	`, t.TurnID, t.RunID, t.AgentID, t.SessionID, t.RuntimeMode, t.ScopeKey, t.EntityID,
+	`, t.TurnID, t.RunID, t.AgentID, t.SessionID, t.FlowInstance, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
 		t.TriggerEventID, t.TriggerEventType, t.TaskID, completionJSON(t.AvailableTools, `[]`), completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`), completionJSON(t.MCPServers, `{}`), completionJSON(t.MCPToolsListed, `[]`), completionJSON(t.MCPToolsVisible, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
@@ -247,15 +244,15 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 	u := settlement.Usage
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			completion_attempt_id, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-	`, t.TurnID, sqliteNullString(t.RunID), t.AgentID, t.SessionID, t.RuntimeMode, sqliteNullString(t.ScopeKey), sqliteNullString(t.EntityID),
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, t.TurnID, sqliteNullString(t.RunID), t.AgentID, t.SessionID, sqliteNullString(t.FlowInstance), t.Memory.Enabled, string(t.Memory.Source), sqliteNullString(t.EntityID),
 		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), completionJSON(t.AvailableTools, `[]`), completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`), completionJSON(t.MCPServers, `{}`), completionJSON(t.MCPToolsListed, `[]`), completionJSON(t.MCPToolsVisible, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,

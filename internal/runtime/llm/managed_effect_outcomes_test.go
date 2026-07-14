@@ -179,13 +179,13 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 		Settlement: runtimeeffects.Settlement{State: state, Failure: &failure.Failure},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
-			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RuntimeMode: target.RuntimeMode, Failure: &failure.Failure,
+			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, Failure: &failure.Failure,
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: "global", AgentID: target.AgentID, Model: "test-model",
 			BackendProfile: "test", Provider: "test", Transport: "test",
-			ResolvedModel: "test-model", InvocationType: target.RuntimeMode,
+			ResolvedModel: "test-model", InvocationType: "test",
 		},
 		Now: time.Now().UTC(),
 	})

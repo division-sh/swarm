@@ -373,7 +373,6 @@ provider-agent:
   role: provider
   prompt_ref: provider-agent
   model: regular
-  mode: task
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "provider-agent.md"), "Handle provider-backed work.\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")

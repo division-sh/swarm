@@ -145,7 +145,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "market-research-agent",
 		Role:       "market_research",
-		Mode:       "discovery",
+		FlowID:     "discovery",
 		FlowPath:   "discovery",
 		EmitEvents: []string{"category.assessed"},
 	}
@@ -257,7 +257,6 @@ func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.A
 	return criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
 		Role:       "cto",
-		Mode:       "task",
 		EmitEvents: []string{"cto.spec_vetoed"},
 		Criteria:   []string{"feasibility_exclusions"},
 	})
@@ -328,7 +327,7 @@ func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegis
 	actor := models.AgentConfig{
 		ID:         "cto-agent",
 		Role:       "cto",
-		Mode:       "validation",
+		FlowID:     "validation",
 		FlowPath:   "validation",
 		EmitEvents: []string{"cto.spec_vetoed"},
 		Criteria:   []string{"feasibility_exclusions"},
@@ -340,7 +339,6 @@ func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
 	exec, bus, actor := criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
 		Role:       "cto",
-		Mode:       "task",
 		EmitEvents: []string{"cto.spec_vetoed"},
 	})
 	actor.Criteria = []string{"feasibility_exclusions"}
@@ -402,7 +400,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 	actor := models.AgentConfig{
 		ID:         "business-research-agent",
 		Role:       "business_research",
-		Mode:       "validation",
+		FlowID:     "validation",
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
@@ -470,7 +468,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "business-research-agent",
 		Role:       "business_research",
-		Mode:       "validation",
+		FlowID:     "validation",
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
@@ -542,7 +540,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "discovery-coordinator",
 		Role:       "discovery_coordinator",
-		Mode:       "discovery",
+		FlowID:     "discovery",
 		FlowPath:   "discovery",
 		EmitEvents: []string{"vertical.discovered"},
 	}
@@ -620,7 +618,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "analyzer",
 		Role:       "analyzer",
-		Mode:       "analyzer-flow",
+		FlowID:     "analyzer-flow",
 		FlowPath:   "analyzer-flow/inst-1",
 		EntityID:   "22222222-2222-2222-2222-222222222222",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
@@ -713,7 +711,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "analyzer",
 		Role:       "analyzer",
-		Mode:       "analyzer-flow",
+		FlowID:     "analyzer-flow",
 		FlowPath:   "analyzer-flow/inst-1",
 		EntityID:   "22222222-2222-2222-2222-222222222222",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
@@ -773,7 +771,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	actor := models.AgentConfig{
 		ID:         "analyzer",
 		Role:       "analyzer",
-		Mode:       "analyzer-flow",
+		FlowID:     "analyzer-flow",
 		FlowPath:   "root/analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
@@ -847,7 +845,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:         "analyzer",
 		Role:       "analyzer",
-		Mode:       "analyzer-flow",
+		FlowID:     "analyzer-flow",
 		FlowPath:   "analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
@@ -930,7 +928,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	actor := models.AgentConfig{
 		ID:         "producer-agent",
 		Role:       "producer",
-		Mode:       "producer",
+		FlowID:     "producer",
 		FlowPath:   "producer",
 		EntityID:   "producer-entity",
 		EmitEvents: []string{"deploy.done"},
@@ -995,7 +993,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	actor := models.AgentConfig{
 		ID:         "producer-agent",
 		Role:       "producer",
-		Mode:       "producer",
+		FlowID:     "producer",
 		FlowPath:   "producer",
 		EntityID:   "producer-entity",
 		EmitEvents: []string{"deploy.done"},
@@ -1244,7 +1242,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	reviewActor := models.AgentConfig{
 		ID:         "review-agent",
 		Role:       "reviewer",
-		Mode:       "review",
+		FlowID:     "review",
 		FlowPath:   "review",
 		EmitEvents: []string{"review/task.requested"},
 	}
@@ -1263,7 +1261,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	validationActor := models.AgentConfig{
 		ID:         "validation-agent",
 		Role:       "validator",
-		Mode:       "validation",
+		FlowID:     "validation",
 		FlowPath:   "validation",
 		EmitEvents: []string{"validation/task.requested"},
 	}
@@ -1336,7 +1334,7 @@ func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *test
 	actor := models.AgentConfig{
 		ID:         "dual-scope-agent",
 		Role:       "reviewer",
-		Mode:       "review",
+		FlowID:     "review",
 		FlowPath:   "review",
 		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
 	}

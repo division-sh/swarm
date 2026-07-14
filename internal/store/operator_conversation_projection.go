@@ -245,7 +245,7 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	}
 	row := s.queryRow(ctx, s.db, fmt.Sprintf(`
 		SELECT CAST(session_id AS TEXT), agent_id, COALESCE(CAST(run_id AS TEXT), ''), kind,
-			COALESCE(scope_key, ''), COALESCE(scope, ''), COALESCE(runtime_mode, ''),
+			COALESCE(flow_instance, ''), memory_enabled, memory_source,
 			COALESCE(status, ''), COALESCE(turn_count, 0), COALESCE(message_count, 0),
 			COALESCE(CAST(runtime_state AS TEXT), '{}'), started_at, ended_at, updated_at
 		FROM (
@@ -262,8 +262,8 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 		updatedAtRaw    any
 	)
 	if err := row.Scan(
-		&item.SessionID, &item.AgentID, &item.RunID, &item.Kind, &item.ScopeKey,
-		&item.Scope, &item.RuntimeMode, &item.Status, &item.TurnCount, &item.MessageCount,
+		&item.SessionID, &item.AgentID, &item.RunID, &item.Kind, &item.FlowInstance,
+		&item.Memory, &item.MemorySource, &item.Status, &item.TurnCount, &item.MessageCount,
 		&runtimeStateRaw, &startedAtRaw, &endedAtRaw, &updatedAtRaw,
 	); errors.Is(err, sql.ErrNoRows) {
 		return OperatorConversationSummary{}, ErrSessionNotFound

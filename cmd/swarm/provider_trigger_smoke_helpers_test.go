@@ -219,7 +219,7 @@ func seedProviderTriggerSmokeRuntime(
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
 			Role:          "observer",
-			Mode:          "global",
+			FlowID:        "global",
 			Type:          "stub",
 			Model:         "regular",
 			Config:        []byte(`{}`),

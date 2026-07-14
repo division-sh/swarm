@@ -17,7 +17,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -684,22 +683,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				continue
 			}
 			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
-			if strings.TrimSpace(agent.ConversationMode) == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field mode", agentLabel),
-					Location: agentLabel,
-				})
-			} else if _, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s has invalid mode: %v", agentLabel, err),
-					Location: agentLabel,
-				})
-			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, semanticview.ResolveAgentSessionScopeProof(c.source, semanticview.AgentSessionScopeLocator{
+			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
 				AgentID:         agentID,
 				ProjectScopeKey: scope.Key,
 			}), agentID, agent)
@@ -794,22 +778,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				continue
 			}
 			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
-			if strings.TrimSpace(agent.ConversationMode) == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field mode", agentLabel),
-					Location: agentLabel,
-				})
-			} else if _, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s has invalid mode: %v", agentLabel, err),
-					Location: agentLabel,
-				})
-			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, semanticview.ResolveAgentSessionScopeProof(c.source, semanticview.AgentSessionScopeLocator{
+			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
 				AgentID: agentID,
 				FlowID:  scope.ID,
 			}), agentID, agent)
@@ -826,48 +795,23 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 	return c.invalidFindings
 }
 
-func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Source, scopeLabel string, proof semanticview.AgentSessionScopeProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
+func appendAgentMemoryFindings(findings []Finding, scopeLabel string, proof semanticview.AgentMemoryProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
 	agentLabel := scopedObjectLabel(scopeLabel, agentID)
-	mode, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode)
-	if err != nil {
-		return findings
-	}
-	sessionScope, err := sessions.ValidateAuthoredSessionScopeIntent(mode, agent.SessionScope)
-	if err != nil {
+	if _, err := agent.MemoryPlan.Normalize(); err != nil {
 		return append(findings, Finding{
 			CheckID:  "invalid_field_detection",
 			Severity: "error",
-			Message:  fmt.Sprintf("agent %s has invalid session_scope: %v", agentLabel, err),
+			Message:  fmt.Sprintf("agent %s has invalid memory plan: %v", agentLabel, err),
 			Location: agentLabel,
 		})
 	}
-	switch sessionScope {
-	case sessions.SessionScopeFlow:
-		if strings.TrimSpace(proof.OwningFlowID) == "" {
-			return append(findings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("agent %s session_scope flow requires flow-scoped declaration", agentLabel),
-				Location: agentLabel,
-			})
-		}
-	case sessions.SessionScopeEntity:
-		if strings.TrimSpace(proof.OwningFlowID) == "" {
-			return append(findings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("agent %s session_scope entity requires flow-scoped declaration", agentLabel),
-				Location: agentLabel,
-			})
-		}
-		if flowIsStateless(source, proof.OwningFlowID) {
-			return append(findings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("agent %s session_scope entity requires stateful flow %s", agentLabel, validationFlowLabel(proof.OwningFlowID)),
-				Location: agentLabel,
-			})
-		}
+	if agent.MemoryPlan.Enabled && strings.TrimSpace(proof.OwningFlowID) == "" {
+		return append(findings, Finding{
+			CheckID:  "invalid_field_detection",
+			Severity: "error",
+			Message:  fmt.Sprintf("agent %s memory true requires a flow-scoped declaration", agentLabel),
+			Location: agentLabel,
+		})
 	}
 	return findings
 }

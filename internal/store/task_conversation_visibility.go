@@ -1,9 +1,9 @@
 package store
 
-// CanonicalTaskConversationVisibilitySourceSQL returns the canonical task
-// conversation visibility contract: task conversations are visible only from
+// CanonicalStatelessConversationVisibilitySourceSQL returns the canonical
+// stateless conversation visibility contract: audits are visible only from
 // agent_conversation_audits.
-func CanonicalTaskConversationVisibilitySourceSQL(caps ConversationSchemaCapabilities) string {
+func CanonicalStatelessConversationVisibilitySourceSQL(caps ConversationSchemaCapabilities) string {
 	if caps.Audits != SchemaFlavorCanonical {
 		return ""
 	}
@@ -18,9 +18,9 @@ func CanonicalTaskConversationVisibilitySourceSQL(caps ConversationSchemaCapabil
 			session_id::text AS session_id,
 			agent_id,
 			` + runID + ` AS run_id,
-			COALESCE(scope_key, '') AS scope_key,
-			COALESCE(scope, '') AS scope,
-			COALESCE(runtime_mode, '') AS runtime_mode,
+			COALESCE(flow_instance, '') AS flow_instance,
+			memory_enabled,
+			memory_source,
 			COALESCE(status, '') AS status,
 			COALESCE(turn_count, 0) AS turn_count,
 			COALESCE(runtime_state, '{}'::jsonb) AS runtime_state,

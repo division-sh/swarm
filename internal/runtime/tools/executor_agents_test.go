@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -277,9 +277,7 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
-			"mode":             "task",
 			"manager_fallback": "manager",
-			"flow_path":        "review/inst-1",
 			"permissions":      []any{"agent_fire"},
 		},
 	})
@@ -312,15 +310,13 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 		ID:          "manager-1",
 		Role:        "manager",
 		Permissions: []string{"agent_hire"},
-		Tools:       []string{"lookup_data"},
 		FlowPath:    "review/inst-1",
+		Tools:       []string{"lookup_data"},
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
-			"mode":             "task",
 			"manager_fallback": "manager",
-			"flow_path":        "review/inst-1",
 			"tools":            []any{"deploy_prod"},
 		},
 	})
@@ -359,9 +355,7 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "escalated",
-			"mode":             "task",
 			"manager_fallback": "manager",
-			"flow_path":        "review/inst-1",
 		},
 	})
 	emitFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "delegated_emit_forbidden")
@@ -405,9 +399,7 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
-			"mode":             "task",
 			"manager_fallback": "manager",
-			"flow_path":        "review/inst-1",
 			"permissions":      []any{"schedule"},
 			"tools":            []any{"lookup_data"},
 			"native_tools": map[string]any{
@@ -465,9 +457,7 @@ func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
-			"mode":             "task",
 			"manager_fallback": "manager",
-			"flow_path":        "review/inst-1",
 			"native_tools": map[string]any{
 				"file_io": true,
 			},
@@ -481,18 +471,17 @@ func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing
 	}
 }
 
-func TestExecAgentHire_DerivesSessionScopeFromAuthoredMode(t *testing.T) {
+func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name      string
-		mode      string
-		entityID  string
-		wantScope string
+		name       string
+		memory     any
+		wantMemory agentmemory.Plan
 	}{
-		{name: "task", mode: "task"},
-		{name: "session", mode: "session", wantScope: runtimesessions.SessionScopeFlow.String()},
-		{name: "session_per_entity", mode: "session_per_entity", entityID: "entity-1", wantScope: runtimesessions.SessionScopeEntity.String()},
+		{name: "omitted", wantMemory: agentmemory.PlatformDefault()},
+		{name: "authored false", memory: false, wantMemory: agentmemory.Authored(false)},
+		{name: "authored true", memory: true, wantMemory: agentmemory.Authored(true)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -512,13 +501,11 @@ func TestExecAgentHire_DerivesSessionScopeFromAuthoredMode(t *testing.T) {
 				"config": map[string]any{
 					"id":               "worker-1",
 					"role":             "worker",
-					"mode":             tc.mode,
 					"manager_fallback": "manager",
-					"flow_path":        "review/inst-1",
 				},
 			}
-			if tc.entityID != "" {
-				input["entity_id"] = tc.entityID
+			if tc.memory != nil {
+				input["memory"] = tc.memory
 			}
 			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
 				ID:          "manager-1",
@@ -529,14 +516,17 @@ func TestExecAgentHire_DerivesSessionScopeFromAuthoredMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ExecAgentHireDirect: %v", err)
 			}
-			if manager.spawnedConfig.ConversationMode != tc.mode || manager.spawnedConfig.SessionScope != tc.wantScope {
-				t.Fatalf("spawned mode/scope = (%q, %q), want (%q, %q)", manager.spawnedConfig.ConversationMode, manager.spawnedConfig.SessionScope, tc.mode, tc.wantScope)
+			if manager.spawnedConfig.Memory != tc.wantMemory {
+				t.Fatalf("spawned memory = %+v, want %+v", manager.spawnedConfig.Memory, tc.wantMemory)
+			}
+			if manager.spawnedConfig.FlowPath != "review/inst-1" {
+				t.Fatalf("spawned flow path = %q, want inherited review/inst-1", manager.spawnedConfig.FlowPath)
 			}
 		})
 	}
 }
 
-func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+func TestExecAgentHire_RejectsMemoryWithoutFlowInstanceOwner(t *testing.T) {
 	t.Parallel()
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -556,21 +546,19 @@ func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 		ID:          "manager-1",
 		Role:        "manager",
 		Permissions: []string{"agent_hire"},
-		FlowPath:    "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
 			"manager_fallback": "manager",
-			"mode":             runtimesessions.RuntimeModeSession.String(),
-			"session_scope":    runtimesessions.SessionScopeGlobal.String(),
 		},
+		"memory": true,
 	})
 	if err == nil {
-		t.Fatal("expected authored global session scope hire to be denied")
+		t.Fatal("expected root memory hire to be denied")
 	}
-	if !strings.Contains(err.Error(), "input.config.session_scope is runtime-derived from mode") {
-		t.Fatalf("error = %q, want retired session_scope denial", err.Error())
+	if !strings.Contains(err.Error(), "memory: true requires a flow-instance owner") {
+		t.Fatalf("error = %q, want flow-instance ownership denial", err.Error())
 	}
 	if manager.spawnCalled {
 		t.Fatal("expected denied hire to fail closed before spawning")
@@ -585,15 +573,13 @@ func TestExecAgentHireRejectsRetiredAndInvalidMemoryModeInputs(t *testing.T) {
 		input    map[string]any
 		contains string
 	}{
-		{name: "top_level_conversation_mode", input: map[string]any{"conversation_mode": "task", "config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task"}}, contains: "input.conversation_mode is retired"},
-		{name: "top_level_session_scope", input: map[string]any{"session_scope": "flow", "config": map[string]any{"id": "worker-1", "role": "worker", "mode": "session"}}, contains: "input.session_scope is runtime-derived"},
-		{name: "config_conversation_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "conversation_mode": "task"}}, contains: "input.config.conversation_mode is retired"},
-		{name: "config_session_scope_authority", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "session", "session_scope_authority": "platform_internal"}}, contains: "input.config.session_scope_authority is platform-internal"},
-		{name: "opaque_config_session_scope", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task", "config": map[string]any{"session_scope": "global"}}}, contains: "input.config.config.session_scope is runtime-derived"},
-		{name: "opaque_config_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task", "config": map[string]any{"mode": "entity"}}}, contains: "input.config.config.mode is only supported"},
-		{name: "mode_global", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "global"}}, contains: "reserved"},
-		{name: "mode_unknown", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "forever"}}, contains: "invalid mode"},
-		{name: "mode_stateless", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "stateless"}}, contains: "retired"},
+		{name: "top_level_conversation_mode", input: map[string]any{"conversation_mode": "task", "config": map[string]any{"id": "worker-1", "role": "worker"}}, contains: "input.conversation_mode is retired; use memory"},
+		{name: "top_level_session_scope", input: map[string]any{"session_scope": "flow", "config": map[string]any{"id": "worker-1", "role": "worker"}}, contains: "input.session_scope is retired; use memory"},
+		{name: "config_conversation_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "conversation_mode": "task"}}, contains: "input.config.conversation_mode is retired; use memory"},
+		{name: "config_session_scope_authority", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "session_scope_authority": "platform_internal"}}, contains: "input.config.session_scope_authority is retired; use memory"},
+		{name: "opaque_config_session_scope", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "config": map[string]any{"session_scope": "global"}}}, contains: "input.config.config.session_scope is retired; use memory"},
+		{name: "opaque_config_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "config": map[string]any{"mode": "entity"}}}, contains: "input.config.config.mode is retired; use memory"},
+		{name: "config_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "session"}}, contains: "input.config.mode is retired; use memory"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -715,51 +701,52 @@ func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *
 	}
 }
 
-func TestExecAgentReconfigure_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+func TestExecAgentReconfigure_PreservesMemoryPresence(t *testing.T) {
 	t.Parallel()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"manager": {ID: "manager", Role: "manager"},
-			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
-		},
-	})
-	manager := &captureManagerStub{
-		agents: map[string]models.AgentConfig{
-			"worker-1": {
-				ID:               "worker-1",
-				Role:             "worker",
-				ManagerFallback:  "manager",
-				ConversationMode: runtimesessions.RuntimeModeSession.String(),
-				SessionScope:     runtimesessions.SessionScopeFlow.String(),
-				FlowPath:         "review/inst-1",
-			},
-		},
+	for _, tc := range []struct {
+		name       string
+		input      map[string]any
+		wantMemory agentmemory.Plan
+	}{
+		{name: "omitted retains through empty patch", input: map[string]any{"agent_id": "worker-1", "config": map[string]any{"tools": []any{"agent_message"}}}},
+		{name: "explicit false", input: map[string]any{"agent_id": "worker-1", "memory": false}, wantMemory: agentmemory.Authored(false)},
+		{name: "explicit true", input: map[string]any{"agent_id": "worker-1", "config": map[string]any{"memory": true}}, wantMemory: agentmemory.Authored(true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"manager": {ID: "manager", Role: "manager"},
+					"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+				},
+			})
+			manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+				"worker-1": {
+					ID: "worker-1", Role: "worker", ManagerFallback: "manager",
+					Memory: agentmemory.Authored(true), FlowPath: "review/inst-1",
+				},
+			}}
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+				Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
+			})
+			_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
+				ID: "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+			}, tc.input)
+			if err != nil {
+				t.Fatalf("ExecAgentReconfigureDirect: %v", err)
+			}
+			if manager.reconfiguredPatch.Memory != tc.wantMemory {
+				t.Fatalf("memory patch = %+v, want %+v", manager.reconfiguredPatch.Memory, tc.wantMemory)
+			}
+		})
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		Manager:           manager,
-		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
-		WorkflowSource:    source,
-	})
+}
 
-	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_reconfigure"},
-		FlowPath:    "review/inst-1",
-	}, map[string]any{
-		"agent_id": "worker-1",
-		"config": map[string]any{
-			"session_scope": runtimesessions.SessionScopeGlobal.String(),
-		},
+func TestExecAgentReconfigure_RejectsRetiredMemoryInterpreters(t *testing.T) {
+	_, err := decodeAgentMutationInput("agent_reconfigure", map[string]any{
+		"agent_id": "worker-1", "config": map[string]any{"session_scope": "global"},
 	})
-	if err == nil {
-		t.Fatal("expected authored global session scope reconfigure to be denied")
-	}
-	if !strings.Contains(err.Error(), "input.config.session_scope is runtime-derived from mode") {
-		t.Fatalf("error = %q, want retired session_scope denial", err.Error())
-	}
-	if manager.reconfigureCalled {
-		t.Fatal("expected denied reconfigure to fail closed before persistence")
+	if err == nil || !strings.Contains(err.Error(), "input.config.session_scope is retired; use memory") {
+		t.Fatalf("decode error = %v, want retired session_scope denial", err)
 	}
 }

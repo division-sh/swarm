@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -53,6 +55,7 @@ type flowActivationTestInstanceStore struct {
 	terminatedPaths  []string
 	terminatedAtSeen []time.Time
 	byStorageRef     map[string]runtimepipeline.WorkflowInstance
+	routeLoads       []runtimeflowidentity.Route
 }
 
 type flowActivationTestStore struct {
@@ -139,6 +142,20 @@ func (s *flowActivationTestInstanceStore) Load(_ context.Context, instanceID str
 	}
 	instance, ok := s.byStorageRef[strings.TrimSpace(instanceID)]
 	return instance, ok, nil
+}
+
+func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	s.routeLoads = append(s.routeLoads, route)
+	instance, ok := s.byStorageRef[route.InstancePath]
+	if !ok {
+		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("active flow instance not found for route recovery: %s", route.InstancePath)
+	}
+	identity := runtimepipeline.StoredFlowInstance(nil, instance)
+	if identity.Route() != route {
+		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery identity mismatch")
+	}
+	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{Identity: identity, Config: instance.Config}, nil
 }
 
 func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
@@ -1567,8 +1584,8 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	if !ok {
 		t.Fatal("expected static flow required agent config")
 	}
-	if got := cfg.Mode; got != "analyzer-flow" {
-		t.Fatalf("mode = %q, want analyzer-flow", got)
+	if got := cfg.FlowID; got != "analyzer-flow" {
+		t.Fatalf("flow_id = %q, want analyzer-flow", got)
 	}
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
@@ -1578,6 +1595,33 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	}
 	if len(store.upserts) != 1 || store.upserts[0].Config.ID != "analyzer" {
 		t.Fatalf("persisted agents = %#v, want analyzer", store.upserts)
+	}
+}
+
+func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
+	bundle := testStaticFlowBundle()
+	bundle.PackageTree = []runtimecontracts.LoadedProjectPackage{{
+		Key: "root",
+		Manifest: runtimecontracts.ProjectPackageDocument{Flows: []runtimecontracts.ProjectFlowRef{{
+			ID: "analyzer-flow", Flow: "analyzer-flow", Mode: runtimecontracts.FlowModeSingleton,
+			Activation: runtimecontracts.ProjectFlowActivationStanding,
+		}}},
+	}}
+	source := semanticview.Wrap(bundle)
+
+	staticRecords, err := StaticAgentMaterializationRecords(source)
+	if err != nil {
+		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
+	}
+	if len(staticRecords) != 0 {
+		t.Fatalf("standing static agent records = %#v, want none before materialized activation", staticRecords)
+	}
+	requiredRecords, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	if err != nil {
+		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
+	}
+	if len(requiredRecords) != 0 {
+		t.Fatalf("standing required-agent records = %#v, want none before materialized activation", requiredRecords)
 	}
 }
 
@@ -1687,9 +1731,6 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 	store := &flowActivationTestStore{}
 	var captured []models.AgentConfig
 	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
-		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
-			return nil, err
-		}
 		captured = append(captured, cfg)
 		return flowActivationStubAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{}, store)
@@ -1703,8 +1744,8 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 	if captured[0].FlowPath != "support" {
 		t.Fatalf("FlowPath = %q, want support", captured[0].FlowPath)
 	}
-	if captured[0].Mode != "support" {
-		t.Fatalf("Mode = %q, want support", captured[0].Mode)
+	if captured[0].FlowID != "support" {
+		t.Fatalf("FlowID = %q, want support", captured[0].FlowID)
 	}
 	if captured[0].ID != "backend-{vertical_id}" {
 		t.Fatalf("ID = %q, want backend-{vertical_id}", captured[0].ID)
@@ -1720,9 +1761,6 @@ func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t
 	store := &flowActivationTestStore{}
 	var captured []models.AgentConfig
 	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
-		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
-			return nil, err
-		}
 		captured = append(captured, cfg)
 		return flowActivationStubAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{}, store)
@@ -1736,8 +1774,8 @@ func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t
 	if captured[0].FlowPath != "support" {
 		t.Fatalf("FlowPath = %q, want support", captured[0].FlowPath)
 	}
-	if captured[0].Mode != "support" {
-		t.Fatalf("Mode = %q, want support", captured[0].Mode)
+	if captured[0].FlowID != "support" {
+		t.Fatalf("FlowID = %q, want support", captured[0].FlowID)
 	}
 	if captured[0].ID != "backend-{vertical_id}" {
 		t.Fatalf("ID = %q, want backend-{vertical_id}", captured[0].ID)
@@ -1803,7 +1841,7 @@ backend:
   type: generic
   role: backend
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 `)
@@ -1866,7 +1904,7 @@ backend:
   type: generic
   role: backend
   model: regular
-  mode: session
+  memory: true
   subscriptions:
     - support/item.created
 `)
@@ -1968,11 +2006,8 @@ func assertMaterializedAgentPlatformDefaults(t *testing.T, cfg models.AgentConfi
 	if cfg.Type != runtimecontracts.DefaultAgentType {
 		t.Fatalf("Type = %q, want %q", cfg.Type, runtimecontracts.DefaultAgentType)
 	}
-	if cfg.ConversationMode != runtimecontracts.DefaultAgentMode {
-		t.Fatalf("ConversationMode = %q, want %q", cfg.ConversationMode, runtimecontracts.DefaultAgentMode)
-	}
-	if cfg.SessionScope != "" {
-		t.Fatalf("SessionScope = %q, want empty for task default", cfg.SessionScope)
+	if cfg.Memory != agentmemory.PlatformDefault() {
+		t.Fatalf("Memory = %+v, want platform default false", cfg.Memory)
 	}
 	if cfg.MaxTurnsPerTask != runtimecontracts.DefaultAgentMaxTurnsPerTask {
 		t.Fatalf("MaxTurnsPerTask = %d, want %d", cfg.MaxTurnsPerTask, runtimecontracts.DefaultAgentMaxTurnsPerTask)

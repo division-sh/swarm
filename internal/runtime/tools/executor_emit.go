@@ -336,7 +336,7 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 			return strings.TrimSpace(candidate)
 		}
 	}
-	flowID := strings.TrimSpace(actor.Mode)
+	flowID := strings.TrimSpace(actor.FlowID)
 	if flowID == "" {
 		return eventType
 	}

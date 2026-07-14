@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
@@ -61,10 +62,8 @@ type Session struct {
 	ID                   string
 	ProviderSessionID    string
 	AgentID              string
-	RuntimeMode          string
-	ConversationMode     string
-	SessionScope         string
-	ScopeKey             string
+	Memory               agentmemory.Plan
+	MemoryIdentity       agentmemory.Identity
 	RetryReason          string
 	RetriesFromSessionID string
 	Watchdog             *ConversationWatchdog

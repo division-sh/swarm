@@ -1,7 +1,6 @@
 audit-agent:
   id: audit-agent
   model: regular
-  mode: task
   subscriptions:
     - task.completed
   emit_events:

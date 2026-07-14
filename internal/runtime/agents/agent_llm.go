@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -19,7 +20,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/sharedjson"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -83,25 +83,10 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	tools = composeConversationTools(cfg, modelRuntime, toolExecutor, tools, precomposed, authority, emitRegistry)
 
 	maxTurns := 100
-	mode := llm.TaskScoped
-	if strings.TrimSpace(cfg.ConversationMode) != "" {
-		overrideMode, ok := parseConversationMode(cfg.ConversationMode)
-		if !ok {
-			agentLabel := strings.TrimSpace(cfg.ID)
-			if agentLabel == "" {
-				agentLabel = strings.TrimSpace(cfg.Role)
-			}
-			if agentLabel == "" {
-				agentLabel = "unknown-agent"
-			}
-			return nil, fmt.Errorf("invalid conversation_mode %q for agent %s", strings.TrimSpace(cfg.ConversationMode), agentLabel)
-		}
-		mode = overrideMode
-	}
 	if cfg.MaxTurnsPerTask > 0 {
 		maxTurns = cfg.MaxTurnsPerTask
 	}
-	if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
+	if err := agentmemory.ValidateFlowOwnership(cfg.Memory, cfg.CanonicalFlowPath()); err != nil {
 		agentLabel := strings.TrimSpace(cfg.ID)
 		if agentLabel == "" {
 			agentLabel = strings.TrimSpace(cfg.Role)
@@ -109,9 +94,9 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		if agentLabel == "" {
 			agentLabel = "unknown-agent"
 		}
-		return nil, fmt.Errorf("invalid session scope for agent %s: %w", agentLabel, err)
+		return nil, fmt.Errorf("invalid memory plan for agent %s: %w", agentLabel, err)
 	}
-	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, modelRuntime)
+	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, cfg.Memory, maxTurns, modelRuntime)
 	c.SetToolExecutor(toolExecutor)
 	promptCache := map[string]string{}
 	if systemPrompt != "" {
@@ -142,19 +127,6 @@ func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, 
 	return tools
 }
 
-func parseConversationMode(raw string) (llm.ConversationMode, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "task", "stateless":
-		return llm.TaskScoped, true
-	case "session":
-		return llm.SessionScoped, true
-	case "session_per_entity":
-		return llm.SessionPerEntityScoped, true
-	default:
-		return llm.TaskScoped, false
-	}
-}
-
 func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
@@ -183,12 +155,12 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	defer a.mu.Unlock()
 
 	a.applyPromptForEvent(evt)
-	a.resetConversationScopeIfNeeded(evt)
+	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), AgentID: a.cfg.ID, FlowInstance: a.cfg.CanonicalFlowPath()})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	a.applyTurnToolDefinitions(ctx)
@@ -205,7 +177,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	resp, err := a.conversation.Step(ctx, input)
 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
 		a.conversation.Reset()
-		scopeKey := strings.TrimSpace(conversationScopeKeyForEvent(a.conversation.Mode, evt))
+		scopeKey := strings.TrimSpace(taskScopeKeyForEvent(evt))
 		if scopeKey != "" {
 			a.conversation.TaskID = scopeKey
 			a.scopeKey = scopeKey
@@ -385,21 +357,15 @@ func promptHasEnvironmentPostambleContract(prompt string) bool {
 	return true
 }
 
-func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {
+func (a *LLMAgent) prepareConversationForInvocation(evt events.Event) {
 	if a == nil || a.conversation == nil {
 		return
 	}
-	scopeKey := strings.TrimSpace(conversationScopeKeyForEvent(a.conversation.Mode, evt))
-	if scopeKey == "" {
-		return
-	}
-	if a.conversation.Mode == llm.SessionScoped {
-		return
-	}
-	if a.scopeKey == scopeKey {
+	if a.cfg.Memory.Enabled {
 		return
 	}
 	a.conversation.Reset()
+	scopeKey := strings.TrimSpace(taskScopeKeyForEvent(evt))
 	a.conversation.TaskID = scopeKey
 	a.scopeKey = scopeKey
 }
@@ -412,20 +378,8 @@ func taskScopeKeyForEvent(evt events.Event) string {
 	return strings.TrimSpace(entityID)
 }
 
-func conversationScopeKeyForEvent(mode llm.ConversationMode, evt events.Event) string {
-	switch mode {
-	case llm.TaskScoped:
-		return taskScopeKeyForEvent(evt)
-	case llm.SessionPerEntityScoped:
-		entityID, _ := extractContextIDs(evt)
-		return strings.TrimSpace(entityID)
-	default:
-		return ""
-	}
-}
-
 func (a *LLMAgent) shouldRetryAfterTaskScopeReset(err error) bool {
-	if a == nil || a.conversation == nil || a.conversation.Mode != llm.TaskScoped || err == nil {
+	if a == nil || a.conversation == nil || a.cfg.Memory.Enabled || err == nil {
 		return false
 	}
 	failure, ok := runtimefailures.As(err)
@@ -506,12 +460,12 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	directiveText := strings.TrimSpace(directive.Directive)
 	evt := directive.Event
 	a.applyPromptForEvent(evt)
-	a.resetConversationScopeIfNeeded(evt)
+	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), AgentID: a.cfg.ID, FlowInstance: a.cfg.CanonicalFlowPath()})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	beforeMessages := len(a.conversation.Messages)
@@ -697,7 +651,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.T
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.%s",
 		cfg.ID,
 		cfg.Role,
-		cfg.Mode,
+		cfg.FlowID,
 		evt.ID(),
 		evt.Type(),
 		evt.SourceAgent(),

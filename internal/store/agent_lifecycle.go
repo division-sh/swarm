@@ -263,11 +263,7 @@ func lifecycleResult(req runtimemanager.AgentLifecycleTransition, previous lifec
 type lifecycleSessionRow struct {
 	SessionID    string
 	RunID        string
-	EntityID     string
 	FlowInstance string
-	ScopeKey     string
-	Scope        string
-	RuntimeMode  string
 	Status       string
 }
 
@@ -277,8 +273,7 @@ func applyPostgresLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runt
 		return outcome, nil
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT session_id::text, COALESCE(run_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
-		       scope_key, scope, runtime_mode, status
+		SELECT session_id::text, run_id::text, flow_instance, status
 		FROM agent_sessions
 		WHERE agent_id = $1 AND status IN ('active', 'suspended')
 		ORDER BY session_id
@@ -291,7 +286,7 @@ func applyPostgresLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runt
 	var selected []lifecycleSessionRow
 	for rows.Next() {
 		var row lifecycleSessionRow
-		if err := rows.Scan(&row.SessionID, &row.RunID, &row.EntityID, &row.FlowInstance, &row.ScopeKey, &row.Scope, &row.RuntimeMode, &row.Status); err != nil {
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.FlowInstance, &row.Status); err != nil {
 			return outcome, err
 		}
 		selected = append(selected, row)
@@ -314,7 +309,7 @@ func applyPostgresLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runt
 
 func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, row lifecycleSessionRow) (runtimesessions.LifecycleSessionMutation, error) {
 	mutation := runtimesessions.LifecycleSessionMutation{
-		PreviousSessionID: row.SessionID, ScopeKey: row.ScopeKey, RuntimeMode: row.RuntimeMode, PreviousStatus: row.Status,
+		PreviousSessionID: row.SessionID, RunID: row.RunID, FlowInstance: row.FlowInstance, PreviousStatus: row.Status,
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
@@ -338,14 +333,14 @@ func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req 
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, lease_holder, lease_expires_at,
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
 			status, created_at, updated_at
 		) VALUES (
-			$1::uuid, NULLIF($2, '')::uuid, $3, NULLIF($4, '')::uuid, NULLIF($5, ''), $6, $7,
-			'[]'::jsonb, 0, $8, $9::jsonb, NULL, NULL, $10, $11, $11
+			$1::uuid, $2::uuid, $3, $4, TRUE, 'authored',
+			'[]'::jsonb, 0, $5::jsonb, NULL, NULL, $6, $7, $7
 		)
-	`, mutation.SuccessorSessionID, row.RunID, req.AgentID, row.EntityID, row.FlowInstance, row.ScopeKey, row.Scope, row.RuntimeMode, string(runtimeState), row.Status, req.Now.UTC()); err != nil {
+	`, mutation.SuccessorSessionID, row.RunID, req.AgentID, row.FlowInstance, string(runtimeState), row.Status, req.Now.UTC()); err != nil {
 		return mutation, fmt.Errorf("insert lifecycle subordinate successor for %s: %w", row.SessionID, err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = $2::uuid, updated_at = $3 WHERE session_id = $1::uuid AND status = 'terminated'`, row.SessionID, mutation.SuccessorSessionID, req.Now.UTC()); err != nil {
@@ -360,8 +355,7 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 		return outcome, nil
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT session_id, COALESCE(run_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
-		       scope_key, scope, runtime_mode, status
+		SELECT session_id, run_id, flow_instance, status
 		FROM agent_sessions
 		WHERE agent_id = ? AND status IN ('active', 'suspended')
 		ORDER BY session_id
@@ -372,7 +366,7 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 	var selected []lifecycleSessionRow
 	for rows.Next() {
 		var row lifecycleSessionRow
-		if err := rows.Scan(&row.SessionID, &row.RunID, &row.EntityID, &row.FlowInstance, &row.ScopeKey, &row.Scope, &row.RuntimeMode, &row.Status); err != nil {
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.FlowInstance, &row.Status); err != nil {
 			_ = rows.Close()
 			return outcome, err
 		}
@@ -387,7 +381,7 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 	}
 	for _, row := range selected {
 		mutation := runtimesessions.LifecycleSessionMutation{
-			PreviousSessionID: row.SessionID, ScopeKey: row.ScopeKey, RuntimeMode: row.RuntimeMode, PreviousStatus: row.Status,
+			PreviousSessionID: row.SessionID, RunID: row.RunID, FlowInstance: row.FlowInstance, PreviousStatus: row.Status,
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE agent_sessions
@@ -409,12 +403,12 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO agent_sessions (
-					session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-					conversation, turn_count, runtime_mode, runtime_state, lease_holder, lease_expires_at,
+					session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+					conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
 					status, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, NULL, NULL, ?, ?, ?)
-			`, mutation.SuccessorSessionID, sqliteNullUUID(row.RunID), req.AgentID, sqliteNullUUID(row.EntityID), sqliteNullString(row.FlowInstance),
-				row.ScopeKey, row.Scope, row.RuntimeMode, string(runtimeState), row.Status, req.Now.UTC(), req.Now.UTC()); err != nil {
+				) VALUES (?, ?, ?, ?, 1, 'authored', '[]', 0, ?, NULL, NULL, ?, ?, ?)
+			`, mutation.SuccessorSessionID, row.RunID, req.AgentID, row.FlowInstance,
+				string(runtimeState), row.Status, req.Now.UTC(), req.Now.UTC()); err != nil {
 				return outcome, fmt.Errorf("insert sqlite lifecycle subordinate successor for %s: %w", row.SessionID, err)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = ?, updated_at = ? WHERE session_id = ? AND status = 'terminated'`, mutation.SuccessorSessionID, req.Now.UTC(), row.SessionID); err != nil {
@@ -497,20 +491,20 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 			startedAt = req.Now
 		}
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, conversation_mode, parent_agent_id, entity_id,
+			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
 				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id)
-			VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, NULLIF($7,''), NULLIF($8,'')::uuid, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
-				$13::jsonb, $14::jsonb, $15, 0, $16, $17, $18, $19, $20, $21, $22, $23::uuid)
+			VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,'')::uuid, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb,
+				$14::jsonb, $15::jsonb, $16, 0, $17, $18, $19, $20, $21, $22, $23, $24::uuid)
 			ON CONFLICT (agent_id) DO UPDATE SET flow_instance=EXCLUDED.flow_instance, role=EXCLUDED.role, model=EXCLUDED.model,
-				llm_backend=EXCLUDED.llm_backend, conversation_mode=EXCLUDED.conversation_mode, parent_agent_id=EXCLUDED.parent_agent_id,
+				llm_backend=EXCLUDED.llm_backend, memory_enabled=EXCLUDED.memory_enabled, memory_source=EXCLUDED.memory_source, parent_agent_id=EXCLUDED.parent_agent_id,
 				entity_id=EXCLUDED.entity_id, config=EXCLUDED.config, subscriptions=EXCLUDED.subscriptions, emit_events=EXCLUDED.emit_events,
 				tools=EXCLUDED.tools, permissions=EXCLUDED.permissions, runtime_descriptor=EXCLUDED.runtime_descriptor, status=EXCLUDED.status,
 				last_active_at=EXCLUDED.last_active_at, lifecycle_phase=EXCLUDED.lifecycle_phase,
 				lifecycle_generation=EXCLUDED.lifecycle_generation, lifecycle_runtime_epoch=EXCLUDED.lifecycle_runtime_epoch,
 				lifecycle_config_revision=EXCLUDED.lifecycle_config_revision, lifecycle_run_mode=EXCLUDED.lifecycle_run_mode,
 				lifecycle_last_transition_id=EXCLUDED.lifecycle_last_transition_id
-		`, projection.AgentID, projection.FlowInstance, projection.Role, projection.Model, projection.LLMBackend, projection.ConversationMode,
+		`, projection.AgentID, projection.FlowInstance, projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
 			projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
 			string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req), req.Now.UTC(), startedAt.UTC(),
 			string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID)
@@ -531,19 +525,19 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 			startedAt = req.Now
 		}
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, conversation_mode, parent_agent_id, entity_id,
+			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
 				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(agent_id) DO UPDATE SET flow_instance=excluded.flow_instance, role=excluded.role, model=excluded.model,
-				llm_backend=excluded.llm_backend, conversation_mode=excluded.conversation_mode, parent_agent_id=excluded.parent_agent_id,
+				llm_backend=excluded.llm_backend, memory_enabled=excluded.memory_enabled, memory_source=excluded.memory_source, parent_agent_id=excluded.parent_agent_id,
 				entity_id=excluded.entity_id, config=excluded.config, subscriptions=excluded.subscriptions, emit_events=excluded.emit_events,
 				tools=excluded.tools, permissions=excluded.permissions, runtime_descriptor=excluded.runtime_descriptor, status=excluded.status,
 				last_active_at=excluded.last_active_at, lifecycle_phase=excluded.lifecycle_phase,
 				lifecycle_generation=excluded.lifecycle_generation, lifecycle_runtime_epoch=excluded.lifecycle_runtime_epoch,
 				lifecycle_config_revision=excluded.lifecycle_config_revision, lifecycle_run_mode=excluded.lifecycle_run_mode,
 				lifecycle_last_transition_id=excluded.lifecycle_last_transition_id
-		`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.ConversationMode,
+		`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
 			sqliteNullString(projection.ParentAgentID), sqliteNullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req),
 			req.Now.UTC(), startedAt.UTC(), string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID)

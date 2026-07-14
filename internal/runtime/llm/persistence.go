@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -14,9 +15,8 @@ import (
 
 type AgentTurnRecord struct {
 	AgentID          string
-	RuntimeMode      string
+	Memory           agentmemory.Plan
 	SessionID        string
-	ScopeKey         string
 	RunID            string
 	EntityID         string
 	FlowInstance     string
@@ -45,8 +45,12 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if strings.TrimSpace(rec.SessionID) == "" {
 			rec.SessionID = strings.TrimSpace(s.ID)
 		}
-		if strings.TrimSpace(rec.ScopeKey) == "" {
-			rec.ScopeKey = strings.TrimSpace(s.ScopeKey)
+		rec.Memory = s.Memory
+		if strings.TrimSpace(rec.RunID) == "" {
+			rec.RunID = s.MemoryIdentity.RunID
+		}
+		if strings.TrimSpace(rec.FlowInstance) == "" {
+			rec.FlowInstance = s.MemoryIdentity.FlowInstance
 		}
 		if len(rec.MCPToolsListed) == 0 {
 			rec.MCPToolsListed = mcpListedToolsForSession(actor, s.Tools)
@@ -139,14 +143,13 @@ const runtimeToolsMCPPrefix = "mcp__runtime-tools__"
 type ConversationRecord struct {
 	SessionID            string
 	AgentID              string
-	SessionScope         string
-	ScopeKey             string
+	Identity             agentmemory.Identity
+	Memory               agentmemory.Plan
 	RetryReason          string
 	RetriesFromSessionID string
 	Watchdog             *ConversationWatchdog
 	RunID                string
 	TaskID               string
-	Mode                 string
 	Messages             []Message
 	Summary              string
 	TurnCount            int
@@ -163,12 +166,10 @@ type ConversationWatchdog struct {
 }
 
 type ConversationWatchdogUpdate struct {
-	SessionID    string
-	AgentID      string
-	SessionScope string
-	ScopeKey     string
-	Mode         string
-	Watchdog     *ConversationWatchdog
+	SessionID string
+	AgentID   string
+	Identity  agentmemory.Identity
+	Watchdog  *ConversationWatchdog
 }
 
 type ConversationPersistence interface {
@@ -177,5 +178,5 @@ type ConversationPersistence interface {
 }
 
 type LiveSessionAcquirer interface {
-	AcquireLiveSession(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, lockOwner, scopeKey string) (*runtimesessions.Lease, ConversationRecord, error)
+	AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*runtimesessions.Lease, ConversationRecord, error)
 }

@@ -1552,9 +1552,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
-						session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'active', $3, $3)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', 'fork-state', TRUE, 'authored', 'active', $3, $3)
 				`, uuid.NewString(), forkRunID, at)
 				return err
 			},
@@ -1566,9 +1566,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
-						session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'active', $3, $3)
+					VALUES ($1::uuid, $2::uuid, 'agent-task', 'fork-state', FALSE, 'authored', '{}'::jsonb, 'active', $3, $3)
 				`, uuid.NewString(), forkRunID, at)
 				return err
 			},
@@ -1580,9 +1580,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, runtime_mode, created_at
+						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session', $4)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', $4)
 				`, uuid.NewString(), forkRunID, uuid.NewString(), at)
 				return err
 			},
@@ -1607,9 +1607,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			}
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO agents (
-					agent_id, role, model, llm_backend, conversation_mode, created_at
+					agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, created_at
 				)
-				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+				VALUES ('agent-a', 'fork-state', 'worker', 'regular', 'mock', TRUE, 'authored', $1)
 			`, at); err != nil {
 				t.Fatalf("seed agent: %v", err)
 			}

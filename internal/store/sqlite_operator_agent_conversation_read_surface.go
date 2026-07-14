@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type sqliteOperatorAgentConversationReadSurface struct {
@@ -248,9 +246,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 			conversations.agent_id,
 			conversations.run_id,
 			conversations.kind,
-			COALESCE(conversations.scope_key, ''),
-			COALESCE(conversations.scope, ''),
-			COALESCE(conversations.runtime_mode, ''),
+			COALESCE(conversations.flow_instance, ''),
+			conversations.memory_enabled,
+			conversations.memory_source,
 			COALESCE(conversations.status, ''),
 			COALESCE(conversations.turn_count, 0),
 			COALESCE(conversations.message_count, 0),
@@ -368,13 +366,13 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			FROM agent_sessions s
 			WHERE s.agent_id = a.agent_id
 			  AND s.status = 'active'
-			  AND s.runtime_mode IN (?, ?)
+			  AND s.memory_enabled = 1
 			ORDER BY s.updated_at DESC, s.created_at DESC, s.session_id ASC
 			LIMIT 1
 		)
 			WHERE a.status NOT IN ('terminated', 'ephemeral')
 			ORDER BY a.created_at ASC, a.agent_id ASC
-		`, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+		`)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite agent operator projections: %w", err)
 	}
@@ -467,9 +465,9 @@ func scanSQLiteOperatorConversationSummary(scanner operatorRowScanner) (Operator
 		&item.AgentID,
 		&item.RunID,
 		&item.Kind,
-		&item.ScopeKey,
-		&item.Scope,
-		&item.RuntimeMode,
+		&item.FlowInstance,
+		&item.Memory,
+		&item.MemorySource,
 		&item.Status,
 		&item.TurnCount,
 		&item.MessageCount,
@@ -517,9 +515,9 @@ func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []stri
 				agent_id,
 				%s AS run_id,
 				'live_session' AS kind,
-				scope_key,
-				scope,
-				runtime_mode,
+				flow_instance,
+				memory_enabled,
+				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				turn_count,
 				json_array_length(COALESCE(conversation, '[]')) AS message_count,
@@ -530,8 +528,7 @@ func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []stri
 				updated_at,
 				created_at
 			FROM agent_sessions
-			WHERE status IN ('active', 'terminated')
-			  AND runtime_mode IN ('session', 'session_per_entity')
+			WHERE status IN ('active', 'terminated') AND memory_enabled = 1
 		`, sessionRunID))
 	}
 	if caps.Conversations.Audits == SchemaFlavorCanonical {
@@ -545,9 +542,9 @@ func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []stri
 				agent_id,
 				%s AS run_id,
 				'turn_audit' AS kind,
-				COALESCE(scope_key, '') AS scope_key,
-				COALESCE(scope, '') AS scope,
-				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(flow_instance, '') AS flow_instance,
+				memory_enabled,
+				memory_source,
 				CASE WHEN status = 'terminated' THEN 'terminated' ELSE 'active' END AS status,
 				COALESCE(turn_count, 0) AS turn_count,
 				json_array_length(COALESCE(conversation, '[]')) AS message_count,

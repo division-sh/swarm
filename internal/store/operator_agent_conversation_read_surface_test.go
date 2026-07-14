@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -124,63 +124,61 @@ func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ co
 	return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
 }
 
-func TestOperatorAgentSummaryPublishesModeWithoutLegacyConversationMode(t *testing.T) {
-	sessionSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
+	memorySummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "session-agent",
-			Role:             "worker",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeSession.String(),
-			SessionScope:     runtimesessions.SessionScopeFlow.String(),
+			ID:       "memory-agent",
+			Role:     "worker",
+			Type:     "managed",
+			Model:    "cheap",
+			Memory:   agentmemory.Authored(true),
+			FlowPath: "support/chat-1",
 		},
 	}, operatorAgentProjection{LifecycleState: "active"}, 0)
-	if sessionSummary.Mode != runtimesessions.RuntimeModeSession.String() {
-		t.Fatalf("Mode = %q, want session", sessionSummary.Mode)
+	if !memorySummary.Memory || memorySummary.MemorySource != string(agentmemory.SourceAuthored) {
+		t.Fatalf("memory summary = enabled:%v source:%q, want authored true", memorySummary.Memory, memorySummary.MemorySource)
 	}
-	if sessionSummary.SessionScope != runtimesessions.SessionScopeFlow.String() {
-		t.Fatalf("SessionScope = %q, want flow", sessionSummary.SessionScope)
+	if memorySummary.FlowInstance != "support/chat-1" {
+		t.Fatalf("FlowInstance = %q, want support/chat-1", memorySummary.FlowInstance)
 	}
-	raw, err := json.Marshal(sessionSummary)
+	raw, err := json.Marshal(memorySummary)
 	if err != nil {
 		t.Fatalf("marshal summary: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, `"mode":"session"`) {
-		t.Fatalf("summary json = %s, want mode", text)
+	if !strings.Contains(text, `"memory":true`) || !strings.Contains(text, `"memory_source":"authored"`) {
+		t.Fatalf("summary json = %s, want canonical memory facts", text)
 	}
-	if strings.Contains(text, "conversation_mode") {
-		t.Fatalf("summary json = %s, must not expose legacy conversation_mode", text)
+	for _, retired := range []string{"conversation_mode", "session_scope", `"mode"`} {
+		if strings.Contains(text, retired) {
+			t.Fatalf("summary json = %s, must not expose retired %s", text, retired)
+		}
 	}
 
-	taskSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+	defaultSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "task-agent",
-			Role:             "worker",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			ID:     "stateless-agent",
+			Role:   "worker",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
 		},
 	}, operatorAgentProjection{}, 0)
-	if taskSummary.Mode != runtimesessions.RuntimeModeTask.String() {
-		t.Fatalf("task Mode = %q, want task", taskSummary.Mode)
+	if defaultSummary.Memory || defaultSummary.MemorySource != string(agentmemory.SourcePlatformDefault) {
+		t.Fatalf("default memory summary = enabled:%v source:%q, want platform-default false", defaultSummary.Memory, defaultSummary.MemorySource)
 	}
-	if taskSummary.SessionScope != "" {
-		t.Fatalf("task SessionScope = %q, want empty runtime scope", taskSummary.SessionScope)
-	}
-	raw, err = json.Marshal(taskSummary)
+	raw, err = json.Marshal(defaultSummary)
 	if err != nil {
 		t.Fatalf("marshal task summary: %v", err)
 	}
 	text = string(raw)
-	if !strings.Contains(text, `"mode":"task"`) {
-		t.Fatalf("task summary json = %s, want mode", text)
+	if !strings.Contains(text, `"memory":false`) || !strings.Contains(text, `"memory_source":"platform_default"`) {
+		t.Fatalf("default summary json = %s, want platform-default memory facts", text)
 	}
-	if strings.Contains(text, "session_scope") {
-		t.Fatalf("task summary json = %s, must omit absent session_scope", text)
-	}
-	if strings.Contains(text, "conversation_mode") {
-		t.Fatalf("task summary json = %s, must not expose legacy conversation_mode", text)
+	for _, retired := range []string{"conversation_mode", "session_scope", `"mode"`} {
+		if strings.Contains(text, retired) {
+			t.Fatalf("default summary json = %s, must not expose retired %s", text, retired)
+		}
 	}
 }
 
@@ -206,8 +204,8 @@ func operatorAgentProjectionColumns() []string {
 	}
 }
 
-func TestCanonicalTaskConversationVisibilitySourceProjectsRunIDByCapability(t *testing.T) {
-	withRunID := CanonicalTaskConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
+func TestCanonicalStatelessConversationVisibilitySourceProjectsRunIDByCapability(t *testing.T) {
+	withRunID := CanonicalStatelessConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
 		Audits:     SchemaFlavorCanonical,
 		AuditRunID: true,
 	})
@@ -215,7 +213,7 @@ func TestCanonicalTaskConversationVisibilitySourceProjectsRunIDByCapability(t *t
 		t.Fatalf("audit run_id projection missing from canonical source:\n%s", withRunID)
 	}
 
-	withoutRunID := CanonicalTaskConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
+	withoutRunID := CanonicalStatelessConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
 		Audits: SchemaFlavorCanonical,
 	})
 	if !strings.Contains(withoutRunID, "'' AS run_id") {
@@ -324,11 +322,11 @@ func TestOperatorConversationReadSurfaceSanitizesRunIDProjectionDriverError(t *t
 func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
 	return runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               agentID,
-			Role:             "researcher",
-			Type:             "managed",
-			ConversationMode: runtimesessions.RuntimeModeSession.String(),
-			SessionScope:     runtimesessions.SessionScopeGlobal.String(),
+			ID:       agentID,
+			Role:     "researcher",
+			Type:     "managed",
+			Memory:   agentmemory.Authored(true),
+			FlowPath: "global",
 		},
 		Status:    "active",
 		StartedAt: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC),
@@ -359,8 +357,8 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
 		WithArgs("agent-1", runID, 3).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
-		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
+			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
+		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", true, "authored", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
 
 	result, err := reader.ListOperatorConversations(context.Background(), OperatorConversationListOptions{
 		AgentID: "agent-1",
@@ -407,7 +405,6 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 		},
 	}, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
 
@@ -457,7 +454,6 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
@@ -537,7 +533,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0))
 
@@ -606,12 +601,12 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:     "agent-1",
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -739,12 +734,12 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:     "agent-1",
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -753,12 +748,12 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-2",
-			Role:             "other",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:     "agent-2",
+			Role:   "other",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -923,12 +918,12 @@ func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLit
 	t.Helper()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               agentID,
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:     agentID,
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    status,
 		StartedAt: time.Now().UTC(),
@@ -949,12 +944,12 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:     "agent-1",
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1007,12 +1002,12 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 			Config: runtimeactors.AgentConfig{
-				ID:               agent.id,
-				Role:             agent.role,
-				Type:             "managed",
-				Model:            "cheap",
-				ConversationMode: runtimesessions.RuntimeModeTask.String(),
-				Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+				ID:     agent.id,
+				Role:   agent.role,
+				Type:   "managed",
+				Model:  "cheap",
+				Memory: agentmemory.PlatformDefault(),
+				Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
 			},
 			Status:    "active",
 			StartedAt: time.Now().UTC(),
@@ -1193,12 +1188,12 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+			ID:     "agent-1",
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1207,12 +1202,12 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-2",
-			Role:             "reviewer",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+			ID:     "agent-2",
+			Role:   "reviewer",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1448,12 +1443,12 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:     "agent-1",
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Memory: agentmemory.PlatformDefault(),
+			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1504,7 +1499,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
@@ -1652,7 +1646,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
@@ -1684,7 +1677,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
@@ -1720,7 +1712,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
@@ -1752,7 +1743,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0))
 
@@ -1781,7 +1771,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	}, 0)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
@@ -1874,7 +1863,6 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	}
 	reader := NewOperatorAgentConversationReadSurface(db, source, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0))
 

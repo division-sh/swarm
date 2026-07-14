@@ -32,7 +32,7 @@ func ResolveAgentRegistryEntry(source Source, cfg models.AgentConfig) (string, r
 	if role == "" {
 		return "", runtimecontracts.AgentRegistryEntry{}, false
 	}
-	mode := canonicalLookupValue(cfg.Mode)
+	mode := canonicalLookupValue(cfg.FlowID)
 	for _, record := range agentRecords(source) {
 		if canonicalLookupValue(record.entry.Role) != role {
 			continue

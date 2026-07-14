@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 type noopMonitorWriter struct{}
@@ -65,9 +65,8 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
-		ScopeKey:                 "global",
-		SessionScope:             "global",
-		ConversationMode:         sessions.RuntimeModeSession.String(),
+		Memory:                   testMemory(),
+		MemoryIdentity:           testMemoryIdentity("agent-1", "support/inst-1"),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    60 * time.Millisecond,
 	})
@@ -95,19 +94,17 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 	}
 }
 
-func TestSessionWatchdogMonitorWriter_SkipsStatelessModes(t *testing.T) {
+func TestSessionWatchdogMonitorWriter_SkipsStatelessMemory(t *testing.T) {
 	base := &noopMonitorWriterPtr{}
 	writer := newSessionWatchdogMonitorWriter(context.Background(), base, &captureConversationStore{}, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
-		ScopeKey:                 "task-1",
-		SessionScope:             "",
-		ConversationMode:         sessions.RuntimeModeTask.String(),
+		Memory:                   agentmemory.Authored(false),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
 	if writer != base {
-		t.Fatalf("expected stateless mode to return base writer, got %T", writer)
+		t.Fatalf("expected stateless memory to return base writer, got %T", writer)
 	}
 }
 
@@ -119,9 +116,8 @@ func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *test
 	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
-		ScopeKey:                 "global",
-		SessionScope:             "global",
-		ConversationMode:         sessions.RuntimeModeSession.String(),
+		Memory:                   testMemory(),
+		MemoryIdentity:           testMemoryIdentity("agent-1", "support/inst-1"),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
@@ -157,9 +153,8 @@ func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *
 	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
-		ScopeKey:                 "global",
-		SessionScope:             "global",
-		ConversationMode:         sessions.RuntimeModeSession.String(),
+		Memory:                   testMemory(),
+		MemoryIdentity:           testMemoryIdentity("agent-1", "support/inst-1"),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})

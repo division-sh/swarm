@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -234,6 +235,9 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 	if got := bus.restoredRequests[0].ActivationVariables["vertical_id"]; got != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("restored activation variable vertical_id = %q, want persisted config value", got)
+	}
+	if len(workflowInstances.routeLoads) != 1 || workflowInstances.routeLoads[0] != runtimeflowidentity.DeriveRoute("review", "inst-1") {
+		t.Fatalf("route recovery projection loads = %#v, want exact review/inst-1 route", workflowInstances.routeLoads)
 	}
 }
 
@@ -479,26 +483,24 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
 			Config: models.AgentConfig{
-				ID:               "reviewer-inst-1",
-				Type:             "review-worker",
-				Role:             "reviewer",
-				Mode:             "review",
-				Model:            "regular",
-				LLMBackend:       "anthropic",
-				ConversationMode: "session_per_entity",
-				SessionScope:     "entity",
-				Subscriptions:    []string{"review.ready"},
-				EmitEvents:       []string{"review.completed"},
-				WorkspaceClass:   "shared_flow",
-				ManagerFallback:  "control-plane",
-				FlowPath:         "review/inst-1",
-				EntityID:         "ent-1",
-				ParentAgent:      "control-plane",
+				ID:              "reviewer-inst-1",
+				Type:            "review-worker",
+				Role:            "reviewer",
+				FlowID:          "review",
+				Model:           "regular",
+				LLMBackend:      "anthropic",
+				Memory:          agentmemory.Authored(true),
+				Subscriptions:   []string{"review.ready"},
+				EmitEvents:      []string{"review.completed"},
+				WorkspaceClass:  "shared_flow",
+				ManagerFallback: "control-plane",
+				FlowPath:        "review/inst-1",
+				EntityID:        "ent-1",
+				ParentAgent:     "control-plane",
 				Config: mustRecoveryJSON(t, map[string]any{
 					"system_prompt":      "x",
 					"subscriptions":      []string{"wrong.subscription"},
 					"manager_fallback":   "wrong-manager",
-					"conversation_mode":  "task",
 					"workspace_class":    "wrong-workspace",
 					"max_turns_per_task": 99,
 				}),
@@ -518,8 +520,8 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	if hydrated.ID != "reviewer-inst-1" {
 		t.Fatalf("hydrated id = %q, want reviewer-inst-1", hydrated.ID)
 	}
-	if hydrated.ConversationMode != "session_per_entity" {
-		t.Fatalf("conversation_mode = %q, want session_per_entity", hydrated.ConversationMode)
+	if hydrated.Memory != agentmemory.Authored(true) {
+		t.Fatalf("memory = %+v, want authored true", hydrated.Memory)
 	}
 	if len(hydrated.Subscriptions) != 1 || hydrated.Subscriptions[0] != "review.ready" {
 		t.Fatalf("subscriptions = %#v, want [review.ready]", hydrated.Subscriptions)
@@ -532,38 +534,6 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	}
 	if strings.TrimSpace(hydrated.FlowPath) != "review/inst-1" {
 		t.Fatalf("flow_path = %q, want review/inst-1", hydrated.FlowPath)
-	}
-}
-
-func TestRecover_AllowsPlatformInternalGlobalSessionScope(t *testing.T) {
-	bus := &recoveryTestBus{}
-	store := &recoveryTestStore{
-		agents: []PersistedAgent{{
-			Config: models.AgentConfig{
-				ID:                    "platform-global-agent",
-				Type:                  "platform-service",
-				Role:                  "platform",
-				Model:                 "regular",
-				LLMBackend:            "anthropic",
-				ConversationMode:      "session",
-				SessionScope:          "global",
-				SessionScopeAuthority: models.SessionScopeAuthorityPlatformInternal,
-				Config:                mustRecoveryJSON(t, map[string]any{"system_prompt": "x"}),
-			},
-			StartedAt: time.Now().UTC(),
-		}},
-	}
-	var hydrated models.AgentConfig
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
-		hydrated = cfg
-		return recoveryTestAgent{id: cfg.ID}, nil
-	}, store)
-
-	if err := am.Recover(context.Background()); err != nil {
-		t.Fatalf("Recover(platform internal global): %v", err)
-	}
-	if hydrated.SessionScope != "global" || !hydrated.HasPlatformInternalSessionScopeAuthority() {
-		t.Fatalf("hydrated cfg = %+v, want platform internal global session", hydrated)
 	}
 }
 

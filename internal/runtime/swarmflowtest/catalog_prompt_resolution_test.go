@@ -126,7 +126,7 @@ support-agent:
   id: support-agent
   prompt_ref: shared
   model: regular
-  mode: session
+  memory: true
 `)
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "events.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "nodes.yaml"), "{}\n")

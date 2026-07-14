@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -95,8 +96,8 @@ type CompletionAgentTurn struct {
 	RunID            string
 	AgentID          string
 	SessionID        string
-	RuntimeMode      string
-	ScopeKey         string
+	Memory           agentmemory.Plan
+	FlowInstance     string
 	EntityID         string
 	TriggerEventID   string
 	TriggerEventType string
@@ -120,8 +121,15 @@ func (t CompletionAgentTurn) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(t.TurnID)); err != nil {
 		return fmt.Errorf("completion agent turn id is invalid: %w", err)
 	}
-	if strings.TrimSpace(t.AgentID) == "" || strings.TrimSpace(t.SessionID) == "" || strings.TrimSpace(t.RuntimeMode) == "" {
-		return fmt.Errorf("completion agent turn requires agent, session, and runtime mode")
+	if strings.TrimSpace(t.AgentID) == "" || strings.TrimSpace(t.SessionID) == "" || strings.TrimSpace(t.RunID) == "" {
+		return fmt.Errorf("completion agent turn requires run, agent, and session identity")
+	}
+	memory, err := t.Memory.Normalize()
+	if err != nil {
+		return fmt.Errorf("completion agent turn memory plan: %w", err)
+	}
+	if memory.Enabled && strings.TrimSpace(t.FlowInstance) == "" {
+		return fmt.Errorf("memory-enabled completion agent turn requires flow instance identity")
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(t.SessionID)); err != nil {
 		return fmt.Errorf("completion agent turn session id is invalid: %w", err)
@@ -189,10 +197,8 @@ type CompletionSpendProjector interface {
 }
 
 type CompletionProviderHead struct {
-	AgentID              string
-	RuntimeMode          string
+	Identity             agentmemory.Identity
 	SessionID            string
-	ScopeKey             string
 	LockOwner            string
 	ExpectedProviderHead string
 	NewProviderHead      string
@@ -231,8 +237,11 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	}
 	if s.ProviderHead != nil {
 		if attempt.Authority.Kind != AuthorityNormalAgent || s.Settlement.State != StateSettled ||
-			!nonEmpty(s.ProviderHead.AgentID, s.ProviderHead.RuntimeMode, s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.NewProviderHead) {
+			!nonEmpty(s.ProviderHead.Identity.RunID, s.ProviderHead.Identity.AgentID, s.ProviderHead.Identity.FlowInstance, s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.NewProviderHead) {
 			return fmt.Errorf("completion provider-head promotion requires a successful normal-agent settlement and complete lease identity")
+		}
+		if err := s.ProviderHead.Identity.Validate(); err != nil {
+			return fmt.Errorf("completion provider-head identity: %w", err)
 		}
 	}
 	if s.Settlement.State == StateSettled && s.Settlement.Failure != nil {

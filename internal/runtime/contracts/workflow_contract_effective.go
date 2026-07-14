@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 const (
@@ -19,7 +19,6 @@ const (
 	AgentFieldSourceDerived         = "derived"
 
 	DefaultAgentType            = "generic"
-	DefaultAgentMode            = "task"
 	DefaultAgentMaxTurnsPerTask = 100
 )
 
@@ -50,22 +49,13 @@ func EffectiveAgentRegistryEntry(logicalID string, entry AgentRegistryEntry) Age
 		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "type", AgentFieldSourceAuthored)
 	}
 
-	modeValue := firstNonEmpty(effective.Mode, effective.ConversationMode)
-	if modeValue == "" {
-		modeValue = DefaultAgentMode
-		effective.EffectiveFieldSources["mode"] = AgentFieldSourcePlatformDefault
-	} else {
-		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "mode", AgentFieldSourceAuthored)
+	memorySource := agentmemory.SourcePlatformDefault
+	if effective.AuthoredFields["memory"] {
+		memorySource = agentmemory.SourceAuthored
 	}
-	mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(modeValue)
-	if err == nil {
-		effective.Mode = mode.String()
-		effective.ConversationMode = mode.String()
-		effective.SessionScope = scope.String()
-	}
-	if strings.TrimSpace(effective.SessionScope) != "" {
-		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "session_scope", AgentFieldSourceDerived)
-	}
+	effective.MemoryPlan, _ = agentmemory.NewPlan(effective.Memory, memorySource)
+	effective.EffectiveFieldSources["memory"] = string(memorySource)
+	effective.EffectiveFieldSources["memory_source"] = string(memorySource)
 
 	if effective.MaxTurnsPerTask <= 0 {
 		effective.MaxTurnsPerTask = DefaultAgentMaxTurnsPerTask

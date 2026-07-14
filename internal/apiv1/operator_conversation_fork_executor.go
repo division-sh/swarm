@@ -7,12 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -35,10 +35,9 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	actor := conversationForkChatActor(prepared)
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
-	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, runtimellm.TaskScoped, 8, e.Runtime)
+	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, e.Runtime)
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", prepared.Fork.ForkID)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, prepared.RequestOccurrenceID)
 	ctx = runtimeeffects.WithAuthority(ctx, runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
@@ -68,13 +67,12 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 
 func conversationForkChatActor(prepared store.ConversationForkChatPrepared) runtimeactors.AgentConfig {
 	return runtimeactors.AgentConfig{
-		ID:               strings.TrimSpace(prepared.Fork.SourceAgentID),
-		Type:             "forkchat",
-		Role:             "forkchat",
-		Model:            llmselection.ModelAliasRegular,
-		ConversationMode: sessions.RuntimeModeTask.String(),
-		SessionScope:     "",
-		Tools:            append([]string(nil), prepared.AvailableTools...),
+		ID:     strings.TrimSpace(prepared.Fork.SourceAgentID),
+		Type:   "forkchat",
+		Role:   "forkchat",
+		Model:  llmselection.ModelAliasRegular,
+		Memory: agentmemory.PlatformDefault(),
+		Tools:  append([]string(nil), prepared.AvailableTools...),
 	}
 }
 

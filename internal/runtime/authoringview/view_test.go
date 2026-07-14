@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
@@ -558,7 +559,8 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 
 	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
 	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
-	assertDefaultedAgentField(t, rootAgent, "mode", runtimecontracts.DefaultAgentMode)
+	assertDefaultedAgentField(t, rootAgent, "memory", false)
+	assertDefaultedAgentField(t, rootAgent, "memory_source", agentmemory.SourcePlatformDefault)
 	assertDefaultedAgentField(t, rootAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
 	assertDefaultedAgentField(t, rootAgent, "workspace_class", "")
 	if got := rootAgent.Fields["model"].Source; got != runtimecontracts.AgentFieldSourceAuthored {
@@ -568,7 +570,8 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	analysis := flowByID(t, view, "analysis")
 	flowAgent := agentByID(t, analysis.Agents, "analyzer")
 	assertDefaultedAgentField(t, flowAgent, "type", runtimecontracts.DefaultAgentType)
-	assertDefaultedAgentField(t, flowAgent, "mode", runtimecontracts.DefaultAgentMode)
+	assertDefaultedAgentField(t, flowAgent, "memory", false)
+	assertDefaultedAgentField(t, flowAgent, "memory_source", agentmemory.SourcePlatformDefault)
 	assertDefaultedAgentField(t, flowAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
 	assertDefaultedAgentField(t, flowAgent, "workspace_class", "")
 }

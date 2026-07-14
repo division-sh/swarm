@@ -170,17 +170,13 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 	caps := StoreSchemaCapabilities{}
 	caps.Agents = detectSchemaFlavor(catalog, "agents",
 		[]string{
-			"agent_id", "flow_instance", "role", "model", "llm_backend", "conversation_mode",
+			"agent_id", "flow_instance", "role", "model", "llm_backend", "memory_enabled", "memory_source",
 			"parent_agent_id", "entity_id", "config", "subscriptions", "emit_events", "tools",
 			"permissions", "runtime_descriptor", "lifecycle_phase", "lifecycle_generation",
 			"lifecycle_runtime_epoch", "lifecycle_config_revision", "lifecycle_run_mode",
 			"lifecycle_last_transition_id", "status", "turn_count", "last_active_at", "created_at",
 		},
-		[]string{
-			"id", "type", "role", "mode", "entity_id", "parent_agent_id", "status",
-			"coordinator_id", "config", "budget_envelope", "hired_by", "template_version",
-			"started_at", "last_active_at",
-		},
+		nil,
 	)
 	caps.EntityState = detectSchemaFlavor(catalog, "entity_state",
 		[]string{
@@ -252,8 +248,8 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 	caps.Conversations = ConversationSchemaCapabilities{
 		Sessions: detectSchemaFlavor(catalog, "agent_sessions",
 			[]string{
-				"session_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
-				"conversation", "turn_count", "runtime_mode", "runtime_state", "lease_holder",
+				"session_id", "run_id", "agent_id", "flow_instance", "memory_enabled", "memory_source",
+				"conversation", "turn_count", "runtime_state", "lease_holder",
 				"lease_expires_at", "status", "termination_reason", "termination_detail",
 				"successor_session_id", "terminated_at", "created_at", "updated_at",
 			},
@@ -261,15 +257,15 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		),
 		Audits: detectSchemaFlavor(catalog, "agent_conversation_audits",
 			[]string{
-				"session_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
-				"conversation", "turn_count", "runtime_mode", "runtime_state", "status",
+				"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "memory_enabled", "memory_source",
+				"conversation", "turn_count", "runtime_state", "status",
 				"created_at", "updated_at",
 			},
 			nil,
 		),
 		Turns: detectSchemaFlavor(catalog, "agent_turns",
 			[]string{
-				"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id",
+				"turn_id", "run_id", "agent_id", "session_id", "flow_instance", "memory_enabled", "memory_source", "entity_id",
 				"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
 				"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
 				"request_payload", "response_payload", "parse_ok", "latency_ms", "retry_count",
@@ -425,7 +421,7 @@ func unsupportedSchemaCapability(subject string, flavor SchemaFlavor) error {
 	case SchemaFlavorUnavailable:
 		return fmt.Errorf("store: %s schema is unavailable", strings.TrimSpace(subject))
 	case SchemaFlavorUnsupported, SchemaFlavorLegacy:
-		return fmt.Errorf("store: %s schema is unsupported by the explicit capability boundary", strings.TrimSpace(subject))
+		return fmt.Errorf("store: %s schema is unsupported; select a fresh store created by this Swarm version", strings.TrimSpace(subject))
 	default:
 		return fmt.Errorf("store: %s schema capability is invalid (%s)", strings.TrimSpace(subject), strings.TrimSpace(string(flavor)))
 	}

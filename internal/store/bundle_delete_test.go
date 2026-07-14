@@ -31,7 +31,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'bundle-delete', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
@@ -56,8 +56,8 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $2::text, 'flow', 'session', 'active')
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'bundle-delete', TRUE, 'authored', 'active')
 	`, sessionID, activeRunID); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}

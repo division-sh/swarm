@@ -189,7 +189,7 @@ func TestProviderContractHelpersUseCanonicalContract(t *testing.T) {
 			SessionLifecycle: ProviderSessionLifecycleContract{
 				StartsSessions:            true,
 				ContinuesSessions:         true,
-				SupportsConversationModes: true,
+				SupportsMemoryPlans:       true,
 				ProviderSessionIDStrategy: "stub",
 				RotatesSessions:           true,
 			},
@@ -205,8 +205,8 @@ func TestProviderContractHelpersUseCanonicalContract(t *testing.T) {
 				StrictProviderNativeSupport: true,
 			},
 			Persistence: ProviderPersistenceContract{
-				PersistsTurns:         true,
-				PersistsTaskModeAudit: true,
+				PersistsTurns:          true,
+				PersistsStatelessAudit: true,
 			},
 			Budget: ProviderBudgetContract{
 				UsageAccounting: BudgetUsageEstimated,

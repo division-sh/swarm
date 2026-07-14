@@ -11,8 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
@@ -20,34 +18,18 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 	if r.conversations == nil || s == nil {
 		return
 	}
-	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
+	record, persist, err := memoryConversationRecord(s)
 	if err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_invalid_mode", "Persisting the CLI conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
-			"mode":         strings.TrimSpace(s.ConversationMode),
-			"runtime_mode": strings.TrimSpace(s.RuntimeMode),
-			"scope_key":    strings.TrimSpace(s.ScopeKey),
-		}, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_invalid_memory", "Persisting the CLI conversation was skipped because the memory identity was invalid", s.AgentID, s.ID, "", nil, err)
 		return
 	}
-	if !shouldPersistConversationMode(mode) {
+	if !persist {
 		return
 	}
-	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID:    s.ID,
-		AgentID:      s.AgentID,
-		SessionScope: strings.TrimSpace(s.SessionScope),
-		ScopeKey:     strings.TrimSpace(s.ScopeKey),
-		Watchdog:     s.Watchdog,
-		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:         mode.String(),
-		Messages:     s.Messages,
-		Summary:      BuildSessionSummary(s),
-		TurnCount:    s.TurnCount,
-		Status:       "active",
-	}); err != nil {
+	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"mode":      mode.String(),
-			"scope_key": strings.TrimSpace(s.ScopeKey),
+			"run_id":        record.Identity.RunID,
+			"flow_instance": record.Identity.FlowInstance,
 		}, err)
 	}
 }
@@ -171,21 +153,6 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 		out = append(out, c)
 	}
 	return out
-}
-
-type sessionIDAdopter interface {
-	AdoptSessionID(ctx context.Context, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, newSessionID, scopeKey string) error
-}
-
-func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, newSessionID, scopeKey string) error {
-	if reg == nil {
-		return nil
-	}
-	adopter, ok := reg.(sessionIDAdopter)
-	if !ok {
-		return nil
-	}
-	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey)
 }
 
 func claudeToolsArg(tools []ToolDefinition) string {

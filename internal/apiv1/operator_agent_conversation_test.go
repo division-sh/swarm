@@ -127,8 +127,9 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			Role:         "researcher",
 			Type:         "managed",
 			Model:        "cheap",
-			Mode:         "session",
-			SessionScope: "global",
+			Memory:       true,
+			MemorySource: "authored",
+			FlowInstance: "research/inst-1",
 			Status:       "running",
 		}}},
 		agentResult: store.OperatorAgentDetail{Agent: store.OperatorAgentSummary{AgentID: "agent-1", Role: "researcher"}},
@@ -548,8 +549,9 @@ func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T
 		Role:         "researcher",
 		Type:         "managed",
 		Model:        "cheap",
-		Mode:         "session",
-		SessionScope: "global",
+		Memory:       true,
+		MemorySource: "authored",
+		FlowInstance: "research/inst-1",
 		Status:       "idle",
 	}
 	reads := &fakeAgentConversationReadStore{

@@ -23,7 +23,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 
 	addColumns("runs", "run_id", "status", "bundle_hash", "bundle_source", "bundle_fingerprint")
 	addColumns("agents",
-		"agent_id", "flow_instance", "role", "model", "llm_backend", "conversation_mode",
+		"agent_id", "flow_instance", "role", "model", "llm_backend", "memory_enabled", "memory_source",
 		"parent_agent_id", "entity_id", "config", "subscriptions", "emit_events", "tools",
 		"permissions", "runtime_descriptor", "lifecycle_phase", "lifecycle_generation",
 		"lifecycle_runtime_epoch", "lifecycle_config_revision", "lifecycle_run_mode",
@@ -56,17 +56,17 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"entered_state_at", "created_at", "updated_at",
 	)
 	addColumns("agent_sessions",
-		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
-		"conversation", "turn_count", "runtime_mode", "runtime_state", "lease_holder",
+		"session_id", "run_id", "agent_id", "flow_instance", "memory_enabled", "memory_source",
+		"conversation", "turn_count", "runtime_state", "lease_holder",
 		"lease_expires_at", "status", "termination_reason", "termination_detail",
 		"successor_session_id", "terminated_at", "created_at", "updated_at",
 	)
 	addColumns("agent_conversation_audits",
-		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
-		"conversation", "turn_count", "runtime_mode", "runtime_state", "status", "created_at", "updated_at",
+		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "memory_enabled", "memory_source",
+		"conversation", "turn_count", "runtime_state", "status", "created_at", "updated_at",
 	)
 	addColumns("agent_turns",
-		"turn_id", "run_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id",
+		"turn_id", "run_id", "agent_id", "session_id", "flow_instance", "memory_enabled", "memory_source", "entity_id",
 		"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
 		"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
 		"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms",
@@ -172,8 +172,8 @@ func TestPostgresStore_BindSchemaCapabilities_DetectsLegacyShapes(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
-	if caps.Agents != SchemaFlavorLegacy {
-		t.Fatalf("agents flavor = %s", caps.Agents)
+	if caps.Agents != SchemaFlavorUnsupported {
+		t.Fatalf("agents flavor = %s, want legacy agent schema rejected", caps.Agents)
 	}
 	if caps.Events.Log != SchemaFlavorLegacy || caps.Events.Deliveries != SchemaFlavorLegacy || caps.Events.Receipts != SchemaFlavorLegacy {
 		t.Fatalf("events caps = %+v", caps.Events)

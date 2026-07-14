@@ -69,7 +69,6 @@ func (r *scriptedLLMRuntime) StartSession(_ context.Context, agentID, systemProm
 	return &llm.Session{
 		ID:           sessionID,
 		AgentID:      strings.TrimSpace(agentID),
-		RuntimeMode:  "scripted",
 		SystemPrompt: systemPrompt,
 		Tools:        append([]llm.ToolDefinition(nil), tools...),
 	}, nil

@@ -512,7 +512,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 
 func lifecycleTestPersistedAgent() PersistedAgent {
 	return PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", Mode: "global"},
+		Config: runtimeactors.AgentConfig{ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global"},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}
 }

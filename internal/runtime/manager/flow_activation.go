@@ -28,6 +28,7 @@ type flowInstancePersistence interface {
 	Create(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
 type flowInstanceRouteInstaller interface {
@@ -362,12 +363,13 @@ func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedA
 	if source == nil {
 		return nil, nil
 	}
+	standingFlows := standingActivatedFlowIDs(source)
 	records := []PersistedAgent{}
 	for _, scope := range source.ProjectScopes() {
 		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
 		packageFlowAgents := map[string]staticAgentFlowGroup{}
 		for logicalID, entry := range scope.Agents {
-			proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+			proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
 				AgentID:         logicalID,
 				ProjectScopeKey: scope.Key,
 			})
@@ -412,7 +414,10 @@ func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedA
 		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
-		proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+		if _, standing := standingFlows[flowID]; standing {
+			continue
+		}
+		proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
 			FlowID: flowID,
 		})
 		scopeRecords, err := staticAgentsForScope(source, proof.OwningFlowID, proof.FlowPath, scope.Agents)
@@ -430,6 +435,7 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 	if source == nil {
 		return nil, nil
 	}
+	standingFlows := standingActivatedFlowIDs(source)
 	records := []PersistedAgent{}
 	if rootScope, ok := runtimerequiredagents.RootScope(source); ok {
 		scopeRecords, err := staticRequiredAgentsForScope(source, "", "", rootScope.Agents, rootScope.Required)
@@ -443,6 +449,9 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
+		if _, standing := standingFlows[flowID]; standing {
+			continue
+		}
 		scopeRecords, err := staticRequiredAgentsForScope(source, flowID, strings.Trim(scope.Path, "/"), scope.Agents, source.FlowRequiredAgents(flowID))
 		if err != nil {
 			return nil, err
@@ -450,6 +459,23 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 		records = append(records, scopeRecords...)
 	}
 	return records, nil
+}
+
+func standingActivatedFlowIDs(source semanticview.Source) map[string]struct{} {
+	out := map[string]struct{}{}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return out
+	}
+	for _, pkg := range bundle.PackageTree {
+		for _, ref := range pkg.Manifest.Flows {
+			flowID := strings.TrimSpace(ref.ID)
+			if flowID != "" && ref.HasStandingActivation() {
+				out[flowID] = struct{}{}
+			}
+		}
+	}
+	return out
 }
 
 type staticAgentFlowGroup struct {
@@ -652,28 +678,27 @@ func buildFlowAgentConfig(
 	}
 
 	cfg := models.AgentConfig{
-		ID:               agentID,
-		Type:             strings.TrimSpace(entry.Type),
-		Role:             strings.TrimSpace(entry.Role),
-		Mode:             templateID,
-		Model:            strings.TrimSpace(entry.Model),
-		LLMBackend:       "",
-		ConversationMode: strings.TrimSpace(entry.ConversationMode),
-		SessionScope:     strings.TrimSpace(entry.SessionScope),
-		MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-		Subscriptions:    rendered,
-		EmitEvents:       normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
-		Tools:            normalizedConfiguredToolList(entry.ConfiguredTools()),
-		Permissions:      permissions,
-		NativeTools:      nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
-		FlowDataAccess:   normalizedConfiguredToolList(entry.FlowDataAccess),
-		Criteria:         normalizedConfiguredToolList(entry.Criteria),
-		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
-		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
-		FlowPath:         strings.Trim(flowPath, "/"),
-		EntityID:         entityID,
-		ParentAgent:      strings.TrimSpace(entry.ManagerFallback),
-		Config:           rawConfig,
+		ID:              agentID,
+		Type:            strings.TrimSpace(entry.Type),
+		Role:            strings.TrimSpace(entry.Role),
+		FlowID:          templateID,
+		Model:           strings.TrimSpace(entry.Model),
+		LLMBackend:      "",
+		Memory:          entry.MemoryPlan,
+		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		Subscriptions:   rendered,
+		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
+		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
+		Permissions:     permissions,
+		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
+		FlowDataAccess:  normalizedConfiguredToolList(entry.FlowDataAccess),
+		Criteria:        normalizedConfiguredToolList(entry.Criteria),
+		WorkspaceClass:  strings.TrimSpace(entry.WorkspaceClass),
+		ManagerFallback: strings.TrimSpace(entry.ManagerFallback),
+		FlowPath:        strings.Trim(flowPath, "/"),
+		EntityID:        entityID,
+		ParentAgent:     strings.TrimSpace(entry.ManagerFallback),
+		Config:          rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil
@@ -838,28 +863,27 @@ func buildStaticFlowAgentConfig(
 		role = strings.TrimSpace(logicalID)
 	}
 	cfg := models.AgentConfig{
-		ID:               agentID,
-		Type:             strings.TrimSpace(entry.Type),
-		Role:             role,
-		Mode:             flowID,
-		Model:            strings.TrimSpace(entry.Model),
-		LLMBackend:       "",
-		ConversationMode: strings.TrimSpace(entry.ConversationMode),
-		SessionScope:     strings.TrimSpace(entry.SessionScope),
-		MaxTurnsPerTask:  entry.MaxTurnsPerTask,
-		Subscriptions:    rendered,
-		EmitEvents:       normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
-		Tools:            normalizedConfiguredToolList(entry.ConfiguredTools()),
-		Permissions:      permissions,
-		NativeTools:      nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
-		FlowDataAccess:   normalizedConfiguredToolList(entry.FlowDataAccess),
-		Criteria:         normalizedConfiguredToolList(entry.Criteria),
-		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
-		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
-		FlowPath:         flowPath,
-		EntityID:         "",
-		ParentAgent:      strings.TrimSpace(entry.ManagerFallback),
-		Config:           rawConfig,
+		ID:              agentID,
+		Type:            strings.TrimSpace(entry.Type),
+		Role:            role,
+		FlowID:          flowID,
+		Model:           strings.TrimSpace(entry.Model),
+		LLMBackend:      "",
+		Memory:          entry.MemoryPlan,
+		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		Subscriptions:   rendered,
+		EmitEvents:      normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
+		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
+		Permissions:     permissions,
+		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
+		FlowDataAccess:  normalizedConfiguredToolList(entry.FlowDataAccess),
+		Criteria:        normalizedConfiguredToolList(entry.Criteria),
+		WorkspaceClass:  strings.TrimSpace(entry.WorkspaceClass),
+		ManagerFallback: strings.TrimSpace(entry.ManagerFallback),
+		FlowPath:        flowPath,
+		EntityID:        "",
+		ParentAgent:     strings.TrimSpace(entry.ManagerFallback),
+		Config:          rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil

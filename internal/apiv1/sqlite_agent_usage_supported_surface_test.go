@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -134,12 +133,11 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 	t.Helper()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:               agentID,
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: runtimesessions.RuntimeModeTask.String(),
-			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:     agentID,
+			Role:   "researcher",
+			Type:   "managed",
+			Model:  "cheap",
+			Config: json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),

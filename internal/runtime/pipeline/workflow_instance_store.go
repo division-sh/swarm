@@ -1855,7 +1855,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 		control.StorageRef = strings.TrimSpace(configStorageRef)
 	}
 	if strings.TrimSpace(control.StorageRef) != "" && strings.TrimSpace(configStorageRef) != "" && strings.TrimSpace(control.StorageRef) != strings.TrimSpace(configStorageRef) {
-		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config storage_ref %q disagrees with entity_state.flow_instance %q", configStorageRef, control.StorageRef)
+		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config storage_ref %q disagrees with canonical storage_ref %q", configStorageRef, control.StorageRef)
 	}
 	control.InstanceKind = strings.TrimSpace(instanceKind)
 	control.TemplateVersion = strings.TrimSpace(templateVersion)

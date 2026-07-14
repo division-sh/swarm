@@ -9,20 +9,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
 type Registry interface {
-	Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error)
+	Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*Lease, error)
 	Release(ctx context.Context, lease *Lease) error
-	Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner string, rotation RotationMetadata, scopeKey string) (*Lease, error)
-	IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error
+	Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error)
+	IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error
 }
 
 type Resetter interface {
-	ResetAll(runtimeMode RuntimeMode, metadata ResetMetadata) (ResetSummary, error)
+	ResetAll(metadata ResetMetadata) (ResetSummary, error)
 }
 
 type ResetMetadata struct {
@@ -32,8 +33,8 @@ type ResetMetadata struct {
 type ResetDisposition struct {
 	SessionID         string
 	AgentID           string
-	RuntimeMode       RuntimeMode
-	ScopeKey          string
+	RunID             string
+	FlowInstance      string
 	PreviousStatus    string
 	TerminationReason string
 	TerminationDetail string
@@ -50,13 +51,10 @@ func (s ResetSummary) OrphanedCount() int {
 type Lease struct {
 	SessionID            string
 	ProviderSessionID    string
-	AgentID              string
-	RuntimeMode          RuntimeMode
-	SessionScope         SessionScope
+	Identity             agentmemory.Identity
 	RetryReason          string
 	RetriesFromSessionID string
 	LockOwner            string
-	ScopeKey             string
 	ExpiresAt            time.Time
 }
 
@@ -120,8 +118,8 @@ func (p LifecycleMutationPlan) Normalize() (LifecycleMutationPlan, error) {
 type LifecycleSessionMutation struct {
 	PreviousSessionID  string `json:"previous_session_id"`
 	SuccessorSessionID string `json:"successor_session_id,omitempty"`
-	ScopeKey           string `json:"scope_key"`
-	RuntimeMode        string `json:"runtime_mode"`
+	RunID              string `json:"run_id"`
+	FlowInstance       string `json:"flow_instance"`
 	PreviousStatus     string `json:"previous_status"`
 	SuccessorStatus    string `json:"successor_status,omitempty"`
 }
@@ -153,9 +151,7 @@ func LifecycleSuccessorSessionID(operationID, previousSessionID string) string {
 type Record struct {
 	SessionID            string
 	ProviderSessionID    string
-	AgentID              string
-	RuntimeMode          RuntimeMode
-	ScopeKey             string
+	Identity             agentmemory.Identity
 	Status               string
 	TurnCount            int
 	CheckpointSummary    string
@@ -214,41 +210,36 @@ func NewRegistry(lockTTL time.Duration) Registry {
 	return NewInMemoryRegistry(lockTTL)
 }
 
-func registryKey(agentID string, runtimeMode RuntimeMode, scopeKey string) string {
-	return strings.TrimSpace(agentID) + "|" + runtimeMode.String() + "|" + strings.TrimSpace(scopeKey)
+func registryKey(identity agentmemory.Identity) string {
+	return identity.Key()
 }
 
-func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error) {
-	if agentID == "" || runtimeMode == "" || lockOwner == "" {
-		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
-	}
-	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
-	if err != nil {
+func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*Lease, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
-	if resolved.Stateless {
-		return nil, errors.New("task-scoped sessions are stateless")
+	if strings.TrimSpace(lockOwner) == "" {
+		return nil, errors.New("lockOwner is required")
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, agentID, "acquire"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity.AgentID, "acquire"); err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
-	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
+	key := registryKey(identity)
 	rec, ok := sr.byKey[key]
 	if ok && rec != nil && rec.Status == "suspended" {
 		return nil, ErrSessionSuspended
 	}
 	if !ok || rec.Status == "" {
 		rec = &Record{
-			SessionID:   uuid.NewString(),
-			AgentID:     agentID,
-			RuntimeMode: resolved.RuntimeMode,
-			ScopeKey:    resolved.ScopeKey,
-			Status:      "active",
+			SessionID: uuid.NewString(),
+			Identity:  identity,
+			Status:    "active",
 		}
 		sr.byKey[key] = rec
 	}
@@ -264,13 +255,10 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID string, runtime
 	return &Lease{
 		SessionID:            rec.SessionID,
 		ProviderSessionID:    rec.ProviderSessionID,
-		AgentID:              rec.AgentID,
-		RuntimeMode:          rec.RuntimeMode,
-		SessionScope:         resolved.Scope,
+		Identity:             rec.Identity,
 		RetryReason:          rec.RetryReason,
 		RetriesFromSessionID: rec.RetriesFromSessionID,
 		LockOwner:            rec.LockOwner,
-		ScopeKey:             rec.ScopeKey,
 		ExpiresAt:            rec.LockExpiresAt,
 	}, nil
 }
@@ -283,10 +271,10 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	key := registryKey(lease.AgentID, lease.RuntimeMode, lease.ScopeKey)
+	key := registryKey(lease.Identity)
 	rec, ok := sr.byKey[key]
 	if !ok {
-		return fmt.Errorf("session for agent %s not found", lease.AgentID)
+		return fmt.Errorf("session for agent %s not found", lease.Identity.AgentID)
 	}
 	if rec.LockOwner != lease.LockOwner {
 		return fmt.Errorf("lease owner mismatch: have=%s want=%s", rec.LockOwner, lease.LockOwner)
@@ -298,33 +286,29 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner string, rotation RotationMetadata, scopeKey string) (*Lease, error) {
-	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
-	if err != nil {
+func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return nil, err
-	}
-	if resolved.Stateless {
-		return nil, errors.New("task-scoped sessions are stateless")
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, agentID, "rotate"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity.AgentID, "rotate"); err != nil {
 		return nil, err
 	}
 
-	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
+	key := registryKey(identity)
 	rec, ok := sr.byKey[key]
 	if !ok {
-		return nil, fmt.Errorf("session for agent %s not found", agentID)
+		return nil, fmt.Errorf("session for agent %s not found", identity.AgentID)
 	}
 	operationID := strings.TrimSpace(rotation.OperationID)
 	if operationID != "" && rec.RotationOperationID == operationID && rec.Status == "active" {
 		return &Lease{
-			SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, AgentID: rec.AgentID,
-			RuntimeMode: rec.RuntimeMode, SessionScope: resolved.Scope, RetryReason: rec.RetryReason,
+			SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, Identity: rec.Identity, RetryReason: rec.RetryReason,
 			RetriesFromSessionID: rec.RetriesFromSessionID, LockOwner: rec.LockOwner,
-			ScopeKey: rec.ScopeKey, ExpiresAt: rec.LockExpiresAt,
+			ExpiresAt: rec.LockExpiresAt,
 		}, nil
 	}
 
@@ -376,32 +360,26 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	return &Lease{
 		SessionID:            rec.SessionID,
 		ProviderSessionID:    rec.ProviderSessionID,
-		AgentID:              rec.AgentID,
-		RuntimeMode:          rec.RuntimeMode,
-		SessionScope:         resolved.Scope,
+		Identity:             rec.Identity,
 		RetryReason:          rec.RetryReason,
 		RetriesFromSessionID: rec.RetriesFromSessionID,
 		LockOwner:            rec.LockOwner,
-		ScopeKey:             rec.ScopeKey,
 		ExpiresAt:            rec.LockExpiresAt,
 	}, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error {
-	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
-	if err != nil {
+func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return err
-	}
-	if resolved.Stateless {
-		return errors.New("task-scoped sessions are stateless")
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, agentID, "increment_turn"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity.AgentID, "increment_turn"); err != nil {
 		return err
 	}
-	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
+	key := registryKey(identity)
 	if rec, ok := sr.byKey[key]; ok {
 		if rec.SessionID != sessionID {
 			return fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
@@ -410,7 +388,7 @@ func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID string, r
 		rec.LastUsedAt = time.Now()
 		return nil
 	}
-	return fmt.Errorf("session for agent %s not found", agentID)
+	return fmt.Errorf("session for agent %s not found", identity.AgentID)
 }
 
 func (sr *InMemoryRegistry) requireCurrentLifecycleLocked(ctx context.Context, agentID, operation string) error {
@@ -467,13 +445,13 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 		sort.Strings(keys)
 		for _, key := range keys {
 			rec := sr.byKey[key]
-			if rec == nil || rec.AgentID != req.AgentID || (rec.Status != "active" && rec.Status != "suspended") {
+			if rec == nil || rec.Identity.AgentID != req.AgentID || (rec.Status != "active" && rec.Status != "suspended") {
 				continue
 			}
 			previous := *rec
 			mutation := LifecycleSessionMutation{
-				PreviousSessionID: previous.SessionID, ScopeKey: previous.ScopeKey,
-				RuntimeMode: previous.RuntimeMode.String(), PreviousStatus: previous.Status,
+				PreviousSessionID: previous.SessionID, RunID: previous.Identity.RunID,
+				FlowInstance: previous.Identity.FlowInstance, PreviousStatus: previous.Status,
 			}
 			terminated := previous
 			terminated.Status = "terminated"
@@ -488,8 +466,7 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 				mutation.SuccessorStatus = previous.Status
 				terminated.SuccessorSessionID = mutation.SuccessorSessionID
 				successor := &Record{
-					SessionID: mutation.SuccessorSessionID, AgentID: previous.AgentID,
-					RuntimeMode: previous.RuntimeMode, ScopeKey: previous.ScopeKey, Status: previous.Status,
+					SessionID: mutation.SuccessorSessionID, Identity: previous.Identity, Status: previous.Status,
 					CheckpointSummary: plan.CheckpointSummary, RetriesFromSessionID: previous.SessionID,
 					LastUsedAt: req.Now, RotationOperationID: req.OperationID,
 				}
@@ -506,24 +483,20 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 	return outcome, false, nil
 }
 
-func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, newSessionID, scopeKey string) error {
-	agentID = strings.TrimSpace(agentID)
+func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner, newSessionID string) error {
+	identity = identity.Normalize()
 	lockOwner = strings.TrimSpace(lockOwner)
 	newSessionID = strings.TrimSpace(newSessionID)
-	if agentID == "" || runtimeMode == "" || lockOwner == "" || newSessionID == "" {
-		return errors.New("agentID, runtimeMode, lockOwner, and newSessionID are required")
-	}
-	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
-	if err != nil {
+	if err := identity.Validate(); err != nil {
 		return err
 	}
-	if resolved.Stateless {
-		return nil
+	if lockOwner == "" || newSessionID == "" {
+		return errors.New("lockOwner and newSessionID are required")
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, agentID, "adopt_provider_session"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity.AgentID, "adopt_provider_session"); err != nil {
 		return err
 	}
 
@@ -535,10 +508,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID string, 
 		if candidate == nil {
 			continue
 		}
-		if candidate.AgentID != agentID || candidate.RuntimeMode != resolved.RuntimeMode {
-			continue
-		}
-		if resolved.ScopeKey != "" && candidate.ScopeKey != resolved.ScopeKey {
+		if candidate.Identity != identity {
 			continue
 		}
 		if candidate.LockOwner == lockOwner {
@@ -552,7 +522,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID string, 
 		}
 	}
 	if !ok {
-		return fmt.Errorf("session for agent %s not found", agentID)
+		return fmt.Errorf("session for agent %s not found", identity.AgentID)
 	}
 	now := time.Now()
 	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
@@ -569,7 +539,7 @@ func (sr *InMemoryRegistry) Snapshot(agentID string) (*Record, bool) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	for _, rec := range sr.byKey {
-		if rec == nil || rec.AgentID != agentID {
+		if rec == nil || rec.Identity.AgentID != agentID {
 			continue
 		}
 		copy := *rec
@@ -584,7 +554,7 @@ func (sr *InMemoryRegistry) History(agentID string) []Record {
 	out := make([]Record, 0)
 	for _, entries := range sr.history {
 		for _, rec := range entries {
-			if rec == nil || rec.AgentID != agentID {
+			if rec == nil || rec.Identity.AgentID != agentID {
 				continue
 			}
 			out = append(out, *rec)
@@ -593,69 +563,33 @@ func (sr *InMemoryRegistry) History(agentID string) []Record {
 	return out
 }
 
-func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode, metadata ResetMetadata) (ResetSummary, error) {
+func (sr *InMemoryRegistry) ResetAll(metadata ResetMetadata) (ResetSummary, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	summary := ResetSummary{}
 	source := strings.TrimSpace(metadata.Source)
-	if runtimeMode == "" {
-		now := time.Now()
-		for key, rec := range sr.byKey {
-			if rec == nil {
-				continue
-			}
-			terminated := *rec
-			terminated.Status = "terminated"
-			terminated.TerminationReason = TerminationReasonOrphaned.String()
-			terminated.TerminationDetail = source
-			terminated.TerminatedAt = now
-			terminated.LockOwner = ""
-			terminated.LockExpiresAt = time.Time{}
-			terminated.SuccessorSessionID = ""
-			sr.history[key] = append(sr.history[key], &terminated)
-			summary.OrphanedSessions = append(summary.OrphanedSessions, ResetDisposition{
-				SessionID:         terminated.SessionID,
-				AgentID:           terminated.AgentID,
-				RuntimeMode:       terminated.RuntimeMode,
-				ScopeKey:          terminated.ScopeKey,
-				PreviousStatus:    rec.Status,
-				TerminationReason: terminated.TerminationReason,
-				TerminationDetail: terminated.TerminationDetail,
-			})
-		}
-		sr.byKey = make(map[string]*Record)
-		return summary, nil
-	}
-	if runtimeMode == RuntimeModeTask {
-		return summary, nil
-	}
 	now := time.Now()
 	for key, rec := range sr.byKey {
 		if rec == nil {
 			delete(sr.byKey, key)
 			continue
 		}
-		if rec.RuntimeMode == runtimeMode {
-			terminated := *rec
-			terminated.Status = "terminated"
-			terminated.TerminationReason = TerminationReasonOrphaned.String()
-			terminated.TerminationDetail = source
-			terminated.TerminatedAt = now
-			terminated.LockOwner = ""
-			terminated.LockExpiresAt = time.Time{}
-			terminated.SuccessorSessionID = ""
-			sr.history[key] = append(sr.history[key], &terminated)
-			summary.OrphanedSessions = append(summary.OrphanedSessions, ResetDisposition{
-				SessionID:         terminated.SessionID,
-				AgentID:           terminated.AgentID,
-				RuntimeMode:       terminated.RuntimeMode,
-				ScopeKey:          terminated.ScopeKey,
-				PreviousStatus:    rec.Status,
-				TerminationReason: terminated.TerminationReason,
-				TerminationDetail: terminated.TerminationDetail,
-			})
-			delete(sr.byKey, key)
-		}
+		terminated := *rec
+		terminated.Status = "terminated"
+		terminated.TerminationReason = TerminationReasonOrphaned.String()
+		terminated.TerminationDetail = source
+		terminated.TerminatedAt = now
+		terminated.LockOwner = ""
+		terminated.LockExpiresAt = time.Time{}
+		terminated.SuccessorSessionID = ""
+		sr.history[key] = append(sr.history[key], &terminated)
+		summary.OrphanedSessions = append(summary.OrphanedSessions, ResetDisposition{
+			SessionID: terminated.SessionID, AgentID: terminated.Identity.AgentID,
+			RunID: terminated.Identity.RunID, FlowInstance: terminated.Identity.FlowInstance,
+			PreviousStatus: rec.Status, TerminationReason: terminated.TerminationReason,
+			TerminationDetail: terminated.TerminationDetail,
+		})
+		delete(sr.byKey, key)
 	}
 	return summary, nil
 }

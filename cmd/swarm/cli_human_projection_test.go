@@ -32,9 +32,9 @@ func TestCLIHumanCodePhrasesMatchCurrentCanonicalValues(t *testing.T) {
 func TestCLIHumanCodePhraseParityRejectsSpecOnlyDrift(t *testing.T) {
 	projection := loadCLIHumanCodeProjectionSpec(t)
 	families := driftMappingValue(projection, "families")
-	conversationMode := driftMappingValue(families, "conversation_mode")
-	phrases := driftMappingValue(conversationMode, "phrases")
-	driftMappingValue(phrases, "session_per_entity").Value = "one session per entity"
+	memorySource := driftMappingValue(families, "memory_source")
+	phrases := driftMappingValue(memorySource, "phrases")
+	driftMappingValue(phrases, "platform_default").Value = "platform supplied"
 
 	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(cliHumanCodePhrases, got) {
 		t.Fatal("spec-only phrase drift did not break implementation parity")
@@ -126,7 +126,7 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHum
 	}
 	knownSpecFamilies := map[string]bool{
 		"run_status": true, "operational_state": true, "agent_status": true,
-		"conversation_mode": true, "session_scope": true, "delivery_status": true,
+		"memory_source": true, "delivery_status": true,
 		"provider_subject_kind": true, "provider_subject_status": true, "provider_capability": true,
 		"provider_guarantee": true, "provider_requirement_status": true,
 		"run_blocking_tuples": true, "agent_lifecycle_tuples": true, "watchdog_tuples": true,
@@ -141,8 +141,7 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHum
 		"run_status":                  cliHumanCodeRunStatus,
 		"operational_state":           cliHumanCodeOperationalState,
 		"agent_status":                cliHumanCodeAgentStatus,
-		"conversation_mode":           cliHumanCodeConversationMode,
-		"session_scope":               cliHumanCodeSessionScope,
+		"memory_source":               cliHumanCodeMemorySource,
 		"delivery_status":             cliHumanCodeDeliveryStatus,
 		"provider_subject_kind":       cliHumanCodeProviderSubjectKind,
 		"provider_subject_status":     cliHumanCodeProviderSubjectStatus,
@@ -249,11 +248,11 @@ func TestCLIHumanCodeUnknownValuesRemainVerbatim(t *testing.T) {
 
 func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	required := map[string][]string{
-		"agents.go\x00writeAgentListResult":                            {string(cliHumanCodeAgentStatus), string(cliHumanCodeConversationMode), string(cliHumanCodeSessionScope)},
+		"agents.go\x00writeAgentListResult":                            {string(cliHumanCodeAgentStatus), string(cliHumanCodeMemorySource)},
 		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(cliHumanCodeDeliveryStatus)},
 		"agents.go\x00writeAgentDiagnosisResult":                       {string(cliHumanCodeAgentLifecycleBlockingLayer), string(cliHumanCodeAgentLifecycleState), string(cliHumanCodeAgentStatus), string(cliHumanCodeWatchdogAction), string(cliHumanCodeWatchdogBlockingLayer), string(cliHumanCodeWatchdogOutcome), string(cliHumanCodeWatchdogState)},
-		"agents.go\x00writeAgentDetailResult":                          {string(cliHumanCodeAgentStatus), string(cliHumanCodeConversationMode), string(cliHumanCodeSessionScope)},
-		"bundle.go\x00writeBundleAgentsHuman":                          {string(cliHumanCodeConversationMode), string(cliHumanCodeSessionScope)},
+		"agents.go\x00writeAgentDetailResult":                          {string(cliHumanCodeAgentStatus), string(cliHumanCodeMemorySource)},
+		"bundle.go\x00writeBundleAgentsHuman":                          {string(cliHumanCodeMemorySource)},
 		"cli_identifier_resolver.go\x00newCLIIdentifierAmbiguousError": {"<dynamic>"},
 		"diagnostics.go\x00writeDiagnosticRunList":                     {string(cliHumanCodeRunStatus)},
 		"diagnostics.go\x00writeDiagnosticRunHeader":                   {string(cliHumanCodeRunStatus)},
@@ -278,8 +277,7 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"cliHumanCodeRunBlockingLayer":            string(cliHumanCodeRunBlockingLayer),
 		"cliHumanCodeRunBlockingReason":           string(cliHumanCodeRunBlockingReason),
 		"cliHumanCodeAgentStatus":                 string(cliHumanCodeAgentStatus),
-		"cliHumanCodeConversationMode":            string(cliHumanCodeConversationMode),
-		"cliHumanCodeSessionScope":                string(cliHumanCodeSessionScope),
+		"cliHumanCodeMemorySource":                string(cliHumanCodeMemorySource),
 		"cliHumanCodeDeliveryStatus":              string(cliHumanCodeDeliveryStatus),
 		"cliHumanCodeAgentLifecycleState":         string(cliHumanCodeAgentLifecycleState),
 		"cliHumanCodeAgentLifecycleBlockingLayer": string(cliHumanCodeAgentLifecycleBlockingLayer),

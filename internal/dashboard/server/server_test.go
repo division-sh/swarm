@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -30,7 +31,6 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -155,25 +155,26 @@ func (s stubAgents) ListOperatorAgents(_ context.Context, opts store.OperatorAge
 			continue
 		}
 		item := store.OperatorAgentSummary{
-			AgentID:               row.Config.ID,
-			Role:                  row.Config.Role,
-			Type:                  row.Config.Type,
-			Model:                 row.Config.Model,
-			Mode:                  row.Config.ConversationMode,
-			SessionScope:          row.Config.SessionScope,
-			Status:                row.Status,
-			RuntimeDescriptorMode: row.Config.Mode,
-			EntityID:              row.Config.EffectiveEntityID(),
-			ParentAgentID:         row.ParentAgentID,
-			CoordinatorID:         row.CoordinatorID,
-			HiredBy:               row.HiredBy,
-			TemplateVersion:       row.TemplateVersion,
-			BudgetEnvelope:        row.Config.BudgetEnvelope,
-			Subscriptions:         append([]string(nil), row.Config.Subscriptions...),
-			Permissions:           append([]string(nil), row.Config.Permissions...),
-			StartedAt:             row.StartedAt,
-			DashboardStatus:       row.Status,
-			DashboardState:        row.Status,
+			AgentID:         row.Config.ID,
+			Role:            row.Config.Role,
+			Type:            row.Config.Type,
+			Model:           row.Config.Model,
+			Memory:          row.Config.Memory.Enabled,
+			MemorySource:    string(row.Config.Memory.Source),
+			Status:          row.Status,
+			RuntimeFlowID:   row.Config.FlowID,
+			FlowInstance:    row.Config.CanonicalFlowPath(),
+			EntityID:        row.Config.EffectiveEntityID(),
+			ParentAgentID:   row.ParentAgentID,
+			CoordinatorID:   row.CoordinatorID,
+			HiredBy:         row.HiredBy,
+			TemplateVersion: row.TemplateVersion,
+			BudgetEnvelope:  row.Config.BudgetEnvelope,
+			Subscriptions:   append([]string(nil), row.Config.Subscriptions...),
+			Permissions:     append([]string(nil), row.Config.Permissions...),
+			StartedAt:       row.StartedAt,
+			DashboardStatus: row.Status,
+			DashboardState:  row.Status,
 		}
 		out.Agents = append(out.Agents, item)
 	}
@@ -382,12 +383,12 @@ func TestHandler_AgentHandlersDoNotExposeUnsupportedMetricStubs(t *testing.T) {
 	h := &Handler{
 		agents: stubAgents{rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:               "agent-1",
-				Role:             "worker",
-				Type:             "managed",
-				Model:            "cheap",
-				ConversationMode: "session",
-				SessionScope:     "global",
+				ID:       "agent-1",
+				Role:     "worker",
+				Type:     "managed",
+				Model:    "cheap",
+				Memory:   agentmemory.Authored(true),
+				FlowPath: "research/inst-1",
 			},
 			Status:    "active",
 			StartedAt: now,
@@ -1028,13 +1029,10 @@ type directiveSurfaceRuntime struct {
 
 func (r *directiveSurfaceRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	return &runtimellm.Session{
-		ID:               "sess-1",
-		AgentID:          agentID,
-		RuntimeMode:      "api",
-		ConversationMode: "session",
-		SessionScope:     "flow",
-		SystemPrompt:     systemPrompt,
-		Tools:            tools,
+		ID:           "sess-1",
+		AgentID:      agentID,
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
 	}, nil
 }
 
@@ -1230,7 +1228,7 @@ func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
 		ID:         "review-coordinator-inst-1",
 		Role:       "review_coordinator",
-		Mode:       "review",
+		FlowID:     "review",
 		FlowPath:   "review/inst-1",
 		EmitEvents: []string{"review/inst-1/scan.requested"},
 		Config:     runtimemanager.MustJSON(map[string]any{"system_prompt": "Coordinate review startup."}),
@@ -1450,8 +1448,8 @@ func TestDashboardConversationDetailHTTPUsesCompactSafeCursorPages(t *testing.T)
 
 func TestDashboardAgentListHTTPExposesOnlySafeLatestTurn(t *testing.T) {
 	row := store.OperatorAgentSummary{
-		AgentID: "agent-1", Role: "researcher", Type: "managed", Mode: "session", Status: "active",
-		RuntimeDescriptorMode: "private-runtime-mode", FlowInstance: "private-flow-instance",
+		AgentID: "agent-1", Role: "researcher", Type: "managed", Memory: true, MemorySource: "authored", Status: "active",
+		FlowInstance: "research/inst-1",
 		LiveTurn: &store.OperatorLiveTurn{
 			TurnID: "turn-1", TaskID: "task-1", ParseOK: true, AssistantVisibleOutput: "safe output", Outcome: "completed",
 			LastTool: &store.OperatorAgentTool{Name: "inspect", ToolUseID: "toolu-1", OK: true},
@@ -1465,8 +1463,8 @@ func TestDashboardAgentListHTTPExposesOnlySafeLatestTurn(t *testing.T) {
 
 func TestDashboardAgentDetailHTTPExposesOnlySafeLatestTurn(t *testing.T) {
 	row := store.OperatorAgentSummary{
-		AgentID: "agent-1", Role: "researcher", Type: "managed", Mode: "session", Status: "active",
-		RuntimeDescriptorMode: "private-runtime-mode", FlowInstance: "private-flow-instance",
+		AgentID: "agent-1", Role: "researcher", Type: "managed", Memory: true, MemorySource: "authored", Status: "active",
+		FlowInstance: "research/inst-1",
 		LiveTurn: &store.OperatorLiveTurn{
 			TurnID: "turn-1", TaskID: "task-1", ParseOK: true, AssistantVisibleOutput: "safe output", Outcome: "completed",
 			LastTool: &store.OperatorAgentTool{Name: "inspect", ToolUseID: "toolu-1", OK: true},
@@ -1482,10 +1480,10 @@ func TestDashboardAgentDetailHTTPExposesOnlySafeLatestTurn(t *testing.T) {
 
 func assertDashboardAgentHTTPSafe(t *testing.T, rec *httptest.ResponseRecorder, wantTurn string) {
 	t.Helper()
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"turn_id":"`+wantTurn+`"`) || !strings.Contains(rec.Body.String(), `"assistant_visible_output":"safe output"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"turn_id":"`+wantTurn+`"`) || !strings.Contains(rec.Body.String(), `"assistant_visible_output":"safe output"`) || !strings.Contains(rec.Body.String(), `"memory":true`) || !strings.Contains(rec.Body.String(), `"memory_source":"authored"`) || !strings.Contains(rec.Body.String(), `"flow_instance":"research/inst-1"`) {
 		t.Fatalf("dashboard agent response status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, forbidden := range []string{"private-runtime-mode", "private-flow-instance", "request_payload", "response_payload", "available_tools", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible", `"result":`} {
+	for _, forbidden := range []string{"request_payload", "response_payload", "available_tools", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible", `"result":`} {
 		if strings.Contains(rec.Body.String(), forbidden) {
 			t.Fatalf("dashboard agent response leaked %q: %s", forbidden, rec.Body.String())
 		}
@@ -1503,10 +1501,10 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1520,7 +1518,6 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 3, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
 
@@ -1564,10 +1561,10 @@ func TestSQLAgentReader_ListGenericAgents_ConsumesSafeTurnWithoutSummaryBlock(t 
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1578,7 +1575,6 @@ func TestSQLAgentReader_ListGenericAgents_ConsumesSafeTurnWithoutSummaryBlock(t 
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 3, "", nil, []byte(`{}`), 0, 0))
 
@@ -1604,10 +1600,10 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesSafeTurnProjectionFailure(t 
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1616,7 +1612,6 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesSafeTurnProjectionFailure(t 
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 3, "", nil, []byte(`{}`), 0, 0))
 
@@ -1639,10 +1634,10 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesMalformedPublicActivityFailu
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1651,7 +1646,6 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesMalformedPublicActivityFailu
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 3, "", nil, []byte(`{}`), 0, 0))
 
@@ -1674,10 +1668,10 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "terminated",
 		}},
@@ -1694,7 +1688,6 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-7", time.Now(), 7, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-7"}`), 2, 45))
 
@@ -1738,10 +1731,10 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1755,7 +1748,6 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 3, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
 
@@ -1790,10 +1782,10 @@ func TestSQLAgentReader_ListGenericAgents_DoesNotDeriveLifecycleFromActiveLeaseW
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1807,7 +1799,6 @@ func TestSQLAgentReader_ListGenericAgents_DoesNotDeriveLifecycleFromActiveLeaseW
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
@@ -1843,10 +1834,10 @@ func TestSQLAgentReader_GetGenericAgent_DoesNotDeriveLifecycleFromActiveLeaseWhe
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1860,7 +1851,6 @@ func TestSQLAgentReader_GetGenericAgent_DoesNotDeriveLifecycleFromActiveLeaseWhe
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Now(), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
@@ -1908,10 +1898,10 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1922,7 +1912,6 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing agent operator projection") {
@@ -1946,10 +1935,10 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapa
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -1973,10 +1962,10 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCapabilityOwner(t *t
 
 	reader := NewSQLAgentReader(db, stubAgents{rows: []runtimemanager.PersistedAgent{{
 		Config: runtimeactors.AgentConfig{
-			ID:   "agent-1",
-			Role: "researcher",
-			Mode: "global",
-			Type: "managed",
+			ID:     "agent-1",
+			Role:   "researcher",
+			FlowID: "global",
+			Type:   "managed",
 		},
 		Status: "active",
 	}}}, 12)
@@ -1999,10 +1988,10 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnCapabil
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -2027,10 +2016,10 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t
 	reader := NewSQLAgentReader(db, stubSQLAgentsWithoutLifecycle{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:   "agent-1",
-				Role: "researcher",
-				Mode: "global",
-				Type: "managed",
+				ID:     "agent-1",
+				Role:   "researcher",
+				FlowID: "global",
+				Type:   "managed",
 			},
 			Status: "active",
 		}},
@@ -2041,7 +2030,6 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
-		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
@@ -2068,7 +2056,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 		Config: runtimeactors.AgentConfig{
 			ID:     "agent-1",
 			Role:   "researcher",
-			Mode:   "global",
+			FlowID: "global",
 			Type:   "managed",
 			Model:  "regular",
 			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
@@ -2177,7 +2165,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 		Config: runtimeactors.AgentConfig{
 			ID:     "agent-1",
 			Role:   "researcher",
-			Mode:   "global",
+			FlowID: "global",
 			Type:   "managed",
 			Model:  "regular",
 			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
@@ -2255,11 +2243,13 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:    "agent-1",
-			Role:  "researcher",
-			Mode:  "entity",
-			Type:  "managed",
-			Model: "regular",
+			ID:       "agent-1",
+			Role:     "researcher",
+			FlowID:   "entity",
+			FlowPath: "entity",
+			Type:     "managed",
+			Model:    "regular",
+			Memory:   agentmemory.Authored(true),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -2269,15 +2259,19 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 
 	sessionOlder := uuid.NewString()
 	sessionSelected := uuid.NewString()
+	runID := uuid.NewString()
 	olderUpdatedAt := time.Date(2026, 4, 15, 3, 0, 0, 0, time.UTC)
 	selectedUpdatedAt := olderUpdatedAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, olderUpdatedAt); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES
-			($1::uuid, 'agent-1', 'entity-1', 'entity', '[]'::jsonb, 1, 'session_per_entity', '{"provider_session_id":"provider-older"}'::jsonb, 'active', $3, $3),
-			($2::uuid, 'agent-1', 'entity-2', 'entity', '[]'::jsonb, 7, 'session_per_entity', '{"provider_session_id":"provider-selected"}'::jsonb, 'active', $4, $4)
-	`, sessionOlder, sessionSelected, olderUpdatedAt, selectedUpdatedAt); err != nil {
+			($1::uuid, $3::uuid, 'agent-1', 'entity/older', TRUE, 'authored', '[]'::jsonb, 1, '{"provider_session_id":"provider-older"}'::jsonb, 'active', $4, $4),
+			($2::uuid, $3::uuid, 'agent-1', 'entity/selected', TRUE, 'authored', '[]'::jsonb, 7, '{"provider_session_id":"provider-selected"}'::jsonb, 'active', $5, $5)
+	`, sessionOlder, sessionSelected, runID, olderUpdatedAt, selectedUpdatedAt); err != nil {
 		t.Fatalf("seed agent_sessions: %v", err)
 	}
 
@@ -2285,11 +2279,11 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	selectedTurnBlocks := `[{"kind":"tool_result","tool_name":"selected_tool","output":{"status":"selected"},"data":{"tool_use_id":"toolu-selected"}},{"kind":"turn_summary","data":{"assistant_visible_output":"selected session turn","outcome":"waiting","tool_results":[{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, agent_id, session_id, runtime_mode, scope_key, task_id, turn_blocks, parse_ok, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, task_id, turn_blocks, parse_ok, created_at
 		) VALUES
-			($1::uuid, 'agent-1', $2::uuid, 'session_per_entity', 'entity-1', 'task-older', $3::jsonb, true, $5),
-			($4::uuid, 'agent-1', $6::uuid, 'session_per_entity', 'entity-2', 'task-selected', $7::jsonb, true, $8)
-	`, uuid.NewString(), sessionOlder, olderTurnBlocks, uuid.NewString(), selectedUpdatedAt.Add(2*time.Minute), sessionSelected, selectedTurnBlocks, selectedUpdatedAt.Add(-1*time.Minute)); err != nil {
+			($1::uuid, $8::uuid, 'agent-1', $2::uuid, 'entity/older', TRUE, 'authored', 'task-older', $3::jsonb, true, $5),
+			($4::uuid, $8::uuid, 'agent-1', $6::uuid, 'entity/selected', TRUE, 'authored', 'task-selected', $7::jsonb, true, $9)
+	`, uuid.NewString(), sessionOlder, olderTurnBlocks, uuid.NewString(), selectedUpdatedAt.Add(2*time.Minute), sessionSelected, selectedTurnBlocks, runID, selectedUpdatedAt.Add(-1*time.Minute)); err != nil {
 		t.Fatalf("seed agent_turns: %v", err)
 	}
 
@@ -2356,8 +2350,8 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalSessionWatchdogState
 	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
 		WithArgs(11).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
-		}).AddRow("sess-1", "agent-1", "", "live_session", "global", "global", "session", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
+			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
+		}).AddRow("sess-1", "agent-1", "", "live_session", "global", true, "authored", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
 
 	if _, err := reader.ListOperatorConversations(context.Background(), store.OperatorConversationListOptions{Limit: 10}); err == nil {
 		t.Fatal("expected malformed canonical session watchdog state to fail")
@@ -2386,8 +2380,8 @@ func TestSQLConversationReader_ListProjectsCanonicalSessionWatchdogState(t *test
 	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
 		WithArgs(11).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
-		}).AddRow("sess-1", "agent-1", "", "live_session", "global", "global", "session", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
+			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
+		}).AddRow("sess-1", "agent-1", "", "live_session", "global", true, "authored", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
 
 	page, err := reader.ListOperatorConversations(context.Background(), store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
@@ -2937,12 +2931,15 @@ func TestHandler_RunTraceUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
 				ActiveSessionID:      "sess-1",
 				SessionID:            "sess-1",
 				SessionKind:          "live_session",
-				SessionRuntimeMode:   "session",
+				SessionMemory:        true,
+				SessionMemorySource:  "authored",
 				SessionStatus:        "active",
 				TurnID:               "turn-1",
 				TurnTriggerEventID:   "evt-1",
 				TurnTriggerEventType: "scan.requested",
-				TurnRuntimeMode:      "session",
+				TurnFlowInstance:     "research/inst-1",
+				TurnMemory:           true,
+				TurnMemorySource:     "authored",
 				TurnTaskID:           "task-1",
 				TurnCreatedAt:        ptrTime(now.Add(2 * time.Second)),
 			}},

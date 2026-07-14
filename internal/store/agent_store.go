@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -24,8 +24,8 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	}
 	rec.Config.NormalizeEntityID()
 	rec.Config.NormalizeRuntimeDescriptor()
-	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
-		return fmt.Errorf("invalid agent session scope: %w", err)
+	if err := agentmemory.ValidateFlowOwnership(rec.Config.Memory, rec.Config.FlowPath); err != nil {
+		return fmt.Errorf("invalid agent memory plan: %w", err)
 	}
 	projection, err := projectPersistedAgentConfig(rec.Config, rec.ParentAgentID)
 	if err != nil {
@@ -60,21 +60,22 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
 	const q = `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status, turn_count, last_active_at, created_at
 		)
 		VALUES (
-			$1, NULLIF($2,''), $3, $4, $5, $6,
-			NULLIF($7,''), NULLIF($8,'')::uuid, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb,
-			$14::jsonb, $15, 0, now(), COALESCE($16, now())
+			$1, NULLIF($2,''), $3, $4, $5, $6, $7,
+			NULLIF($8,''), NULLIF($9,'')::uuid, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
+			$15::jsonb, $16, 0, now(), COALESCE($17, now())
 		)
 		ON CONFLICT (agent_id) DO UPDATE SET
 			flow_instance = EXCLUDED.flow_instance,
 			role = EXCLUDED.role,
 			model = EXCLUDED.model,
 			llm_backend = EXCLUDED.llm_backend,
-			conversation_mode = EXCLUDED.conversation_mode,
+			memory_enabled = EXCLUDED.memory_enabled,
+			memory_source = EXCLUDED.memory_source,
 			parent_agent_id = EXCLUDED.parent_agent_id,
 			entity_id = EXCLUDED.entity_id,
 			config = EXCLUDED.config,
@@ -92,7 +93,8 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 		projection.Role,
 		projection.Model,
 		projection.LLMBackend,
-		projection.ConversationMode,
+		projection.MemoryEnabled,
+		projection.MemorySource,
 		projection.ParentAgentID,
 		projection.EntityID,
 		string(projection.ConfigJSON),
@@ -115,7 +117,8 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			role,
 			model,
 			llm_backend,
-			conversation_mode,
+			memory_enabled,
+			memory_source,
 			COALESCE(parent_agent_id, ''),
 			COALESCE(entity_id::text, ''),
 			config,
@@ -148,7 +151,8 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			&row.Role,
 			&row.Model,
 			&row.LLMBackend,
-			&row.ConversationMode,
+			&row.MemoryEnabled,
+			&row.MemorySource,
 			&row.ParentAgentID,
 			&row.EntityID,
 			&row.ConfigJSON,
@@ -197,13 +201,6 @@ func agentPersistedType(cfg runtimeactors.AgentConfig, modelAlias string) string
 		return v
 	}
 	return "generic"
-}
-
-func agentConversationMode(cfg runtimeactors.AgentConfig) (runtimesessions.RuntimeMode, error) {
-	if v := strings.TrimSpace(cfg.ConversationMode); v != "" {
-		return runtimesessions.ParseConversationRuntimeMode(v)
-	}
-	return runtimesessions.RuntimeModeTask, nil
 }
 
 func agentFlowInstance(cfg runtimeactors.AgentConfig) string {

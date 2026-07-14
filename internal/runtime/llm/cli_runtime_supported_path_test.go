@@ -132,7 +132,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 			{Name: "emit_category_assessed"},
 			{Name: "read_file"},
 		},
-		SessionScoped,
+		testMemory(),
 		4,
 		runtime,
 	)
@@ -140,19 +140,14 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(
-		sessions.WithScope(
-			runtimeactors.WithActor(effects.Context("claude-supported-read-file"), runtimeactors.AgentConfig{
-				ID:       "market-research-agent",
-				FlowPath: "market/inst-1",
-				NativeTools: runtimeactors.NativeToolConfig{
-					FileIO: true,
-				},
-				SessionScope: sessions.SessionScopeFlow.String(),
-			}),
-			sessions.RuntimeModeSession.String(),
-			sessions.SessionScopeFlow.String(),
-			"market/inst-1",
-		),
+		withTestMemory(runtimeactors.WithActor(effects.Context("claude-supported-read-file"), runtimeactors.AgentConfig{
+			ID:       "market-research-agent",
+			FlowPath: "market/inst-1",
+			Memory:   testMemory(),
+			NativeTools: runtimeactors.NativeToolConfig{
+				FileIO: true,
+			},
+		}), "market-research-agent", "market/inst-1"),
 		recorder,
 	)
 

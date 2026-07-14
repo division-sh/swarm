@@ -27,11 +27,11 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, NULL, 'flow/operator-read', 'global', 'global',
-			'[{"role":"assistant","content":"ready"}]', 1, 'session', '{}', 'active', ?, ?
+			?, ?, ?, 'flow/operator-read', 1, 'authored',
+			'[{"role":"assistant","content":"ready"}]', 1, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
@@ -47,12 +47,12 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
 		) VALUES (
-			?, ?, ?, ?, 'session', 'global', NULL,
+			?, ?, ?, ?, 'flow/operator-read', 1, 'authored', NULL,
 			?, 'operator.read', 'task-operator-read', '[]', '[]',
 			'[]', '{}', '[]', '[]',
 			'{}', '{}', '[]', 1, 10, 0, NULL, ?
@@ -109,23 +109,23 @@ func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *test
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, NULL, 'flow/legacy-turns', 'global', 'global',
-			'[{"role":"assistant","content":"ready"}]', 1, 'session', '{}', 'active', ?, ?
+			?, ?, ?, 'flow/legacy-turns', 1, 'authored',
+			'[{"role":"assistant","content":"ready"}]', 1, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		) VALUES (
-			?, ?, ?, ?, 'session', 'global', NULL,
+			?, ?, ?, ?, 'flow/legacy-turns', 1, 'authored', NULL,
 			?, 'operator.read', 'task-legacy-turns', '[]', '[]',
 			'[]', '{}', '[]', '[]',
 			'{}', '{}', 1, 10, 0, NULL, ?

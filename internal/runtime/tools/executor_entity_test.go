@@ -445,7 +445,6 @@ validation_case:
 validation-orchestrator:
   id: validation-orchestrator
   role: validation_orchestrator
-  mode: task
   tools:
     - save_entity_field
   entity_writes:
@@ -2946,7 +2945,7 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
-	builder.WriteString("  mode: task\n")
+	builder.WriteString("  memory: false\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {
@@ -3108,7 +3107,7 @@ func entityToolAgentYAML(actor models.AgentConfig) string {
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
-	builder.WriteString("  mode: task\n")
+	builder.WriteString("  memory: false\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {
