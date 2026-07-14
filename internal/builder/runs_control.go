@@ -17,6 +17,7 @@ import (
 )
 
 var runCompletionTimeout = 30 * time.Second
+var runCompletionObservationInterval = 50 * time.Millisecond
 
 func newRunHub(runtimeProvider func() *runtimepkg.Runtime, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
 	if runtimeProvider == nil {
@@ -349,6 +350,9 @@ func (h *runHub) awaitCompletion(runID string) {
 		if session == nil || session.runtime == nil || session.runtime.Bus == nil {
 			return
 		}
+		if h.isTerminal(runID) {
+			return
+		}
 		if h.isPaused(runID) {
 			time.Sleep(50 * time.Millisecond)
 			continue
@@ -389,28 +393,44 @@ func (h *runHub) awaitCompletion(runID string) {
 			h.syncCanonical(context.Background(), runID)
 			return
 		}
-		if h.isTerminal(runID) {
-			return
-		}
-		snapshot, err := h.persistTerminalState(runID, "completed", nil, time.Now().UTC())
+		snapshot, err := h.loadCanonicalRunLifecycle(runID)
 		if err != nil {
 			h.markTerminal(runID)
-			persistenceFailure := runTerminalPersistenceFailure("completed")
+			observationFailure := runCompletionObservationFailure()
 			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
 				"type":      "run.failed",
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
 				"payload": map[string]any{
 					"run_id":  runID,
-					"failure": builderFailureValue(persistenceFailure),
+					"failure": builderFailureValue(observationFailure),
 				},
 			})
 			return
 		}
-		h.markTerminal(runID)
-		_ = snapshot
-		h.syncCanonical(context.Background(), runID)
-		return
+		switch strings.TrimSpace(strings.ToLower(snapshot.Status)) {
+		case "completed", "failed", "cancelled", "forked":
+			h.markTerminal(runID)
+			h.syncCanonical(context.Background(), runID)
+			return
+		case "running", "paused":
+			h.syncCanonical(context.Background(), runID)
+			time.Sleep(runCompletionObservationInterval)
+			continue
+		default:
+			h.markTerminal(runID)
+			observationFailure := runCompletionObservationFailure()
+			h.emitControl(runID, map[string]any{
+				"id":        uuid.NewString(),
+				"type":      "run.failed",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+				"payload": map[string]any{
+					"run_id":  runID,
+					"failure": builderFailureValue(observationFailure),
+				},
+			})
+			return
+		}
 	}
 }
 
@@ -478,6 +498,18 @@ func (h *runHub) persistTerminalState(runID, status string, failure *runtimefail
 	return writer.MarkRunTerminal(context.Background(), runID, status, failure, endedAt)
 }
 
+func (h *runHub) loadCanonicalRunLifecycle(runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	session := h.session(runID)
+	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not configured")
+	}
+	reader, ok := session.runtime.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
+	if !ok || reader == nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not supported")
+	}
+	return reader.LoadRunLifecycleSnapshot(context.Background(), runID)
+}
+
 func runTerminalPersistenceFailure(attemptedStatus string) runtimefailures.Envelope {
 	return runtimefailures.Normalize(
 		runtimefailures.New(
@@ -489,6 +521,20 @@ func runTerminalPersistenceFailure(attemptedStatus string) runtimefailures.Envel
 		),
 		"builder.run_hub",
 		"mark_run_terminal",
+	)
+}
+
+func runCompletionObservationFailure() runtimefailures.Envelope {
+	return runtimefailures.Normalize(
+		runtimefailures.New(
+			runtimefailures.ClassOutcomeUncertain,
+			"run_completion_observation_unavailable",
+			"builder.run_hub",
+			"observe_run_completion",
+			nil,
+		),
+		"builder.run_hub",
+		"observe_run_completion",
 	)
 }
 

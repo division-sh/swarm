@@ -2148,8 +2148,8 @@ superseded_terminal_decision_card_evidence_reaudit:
   blocking_condition: fresh_independent_gate_required_before_runtime_or_spec_implementation
 
 terminal_run_decision_card_supersession_reaudit:
-  status: proposed_binding_pending_fresh_independent_gate
-  audit_base: 69320f3ce394e185ac7b07370c0fa90dbca1eea8
+  status: approved_implementation_review_repair_active
+  audit_base: 94035056
   architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
   migration_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
   superseded_migration_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
@@ -2166,11 +2166,14 @@ terminal_run_decision_card_supersession_reaudit:
     represented by domain state and its resumable change cursor.
   exact_semantic_concepts:
     - terminal_run_decision_card_state_and_change_atomicity
+    - store_owned_normal_run_completion_eligibility
+    - builder_observation_without_completion_interpretation
     - decision_card_changes_as_resumable_terminal_notification_authority
     - terminal_supersession_event_non_creation
     - obsolete_lifecycle_outbox_and_releaser_retirement
     - unused_standalone_run_supersession_capability_removal
     - pre_1_0_obsolete_outbox_hard_schema_cutoff
+    - ordered_batch_event_append_outcome_handoff
     - sqlite_postgres_atomicity_and_observation_parity
   chosen_working_failure_class: terminal_run_decision_card_supersession_state_and_change_atomicity
   immediate_parent_failure_class: status_specific_terminal_run_state_change_atomicity
@@ -2323,8 +2326,13 @@ terminal_run_decision_card_supersession_reaudit:
       classification: different_supported_surface_with_binding_spec_proof
       proof: runtime_nuke_remains_explicitly_postgres_only
     natural_completed_run:
-      classification: different_semantic_concept_with_proof
-      proof: completed_does_not_call_run_supersession_and_open_or_committed_gate_blocks_successful_completion
+      classification: same_parent_class_and_absorbed_review_manifestation
+      proof: >-
+        ConvergeNormalRunCompletion is the only successful-completion writer;
+        it checks open and decision_committed gates in the selected-store
+        transaction. Generic MarkRunTerminal rejects completed, and the builder
+        observes canonical run state without deriving completion from local
+        quiescence.
     active_stage_or_flow_supersession:
       classification: different_semantic_concept_with_proof
       proof: SupersedeDecisionCardsForStage_and_workflow_gate_owner_keep_normal_routable_event_semantics
@@ -2436,6 +2444,14 @@ terminal_run_decision_card_supersession_reaudit:
       disposition: no_terminal_supersession_consumer_and_no_special_case
     historical_published_lifecycle_rows:
       disposition: not_consulted_for_compatibility_and_cannot_make_a_nonempty_legacy_table_startable
+    normal_run_completion_convergence:
+      disposition: single_successful_completion_authority_on_both_stores
+    generic_MarkRunTerminal_completed:
+      disposition: reject_as_non_authoritative_completion_bypass
+    builder_awaitCompletion:
+      disposition: observe_canonical_store_terminal_state_without_writing_completed
+    engine_outbox_append_outcomes:
+      disposition: preserve_every_ordered_intent_outcome_until_one_post_commit_consumption
 
   old_non_authoritative_or_invalid_paths:
     - decision_card_lifecycle_outbox_as_terminal_notification_owner
@@ -2492,8 +2508,17 @@ terminal_run_decision_card_supersession_reaudit:
       - normal_destructive_cleanup_deletes_card_change_and_any_historical_event_rows_by_existing_run_scope
     generic_event_sibling:
       - exact_duplicate_event_side_effect_expansion_remains_owned_by_the_existing_terminal_event_admission_class
-      - no_terminal_card_fix_is_claimed_as_proof_for_generic_event_operation_idempotency
+      - inserted_then_exact_duplicate_in_one_committed_batch_dispatches_once
+      - multiple_preexisting_exact_duplicates_in_one_batch_dispatch_zero_times
+      - conflicting_same_ID_facts_roll_back_the_whole_batch
+      - ordinary_distinct_intents_each_dispatch_once
       - generic_terminal_event_admission_and_dispatch_remain_closed_under_their_own_manifestation_matrix
+    natural_completion_review_repair:
+      - open_gate_prevents_completion_with_run_gate_card_and_change_state_unchanged_on_both_stores
+      - decision_committed_gate_prevents_completion_with_state_unchanged_on_both_stores
+      - eligible_no_gate_run_completes_only_through_ConvergeNormalRunCompletion
+      - generic_MarkRunTerminal_completed_fails_closed_on_both_stores
+      - builder_waiting_decision_remains_running_without_synthetic_failure_or_local_terminal_projection
 
   parent_and_tracker_decisions:
     parent_sibling_probe: >-
@@ -2516,8 +2541,10 @@ terminal_run_decision_card_supersession_reaudit:
     remaining_parent_tail:
       - issue_2020_forked_freeze_invariant
       - issue_2008_reusable_full_lifecycle_conformance_tier
-      - existing_PR_2047_generic_exact_duplicate_event_operation_idempotency_manifestation
-    remaining_tail_estimate: two_explicit_sibling_classes_plus_one_existing_PR_review_manifestation_with_high_confidence
+    absorbed_review_blockers:
+      - completed_terminal_bypass_of_store_owned_gate_eligibility
+      - same_ID_intents_losing_append_outcomes_inside_one_outbox_batch
+    remaining_tail_estimate: two_explicit_non_blocking_sibling_classes_with_high_confidence
 
   closure_and_supported_surface_proof:
     intended_closure_level: selected_failure_class_eliminated
@@ -2548,6 +2575,8 @@ terminal_run_decision_card_supersession_reaudit:
       - hard_schema_cutoff_fresh_empty_and_nonempty_store_proof_on_both_backends
       - repository_wide_removed_symbol_and_schema_reference_guard
       - unchanged_generic_terminal_admission_dispatch_and_exact_duplicate_operation_matrix
+      - dual_backend_normal_completion_gate_eligibility_and_builder_observation_proof
+      - inserted_duplicate_all_duplicate_conflict_and_distinct_outbox_batch_matrix
       - full_go_test_all_with_host_postgres
     parity_issue: true
 
@@ -2561,15 +2590,17 @@ terminal_run_decision_card_supersession_reaudit:
       Terminal domain transitions publish through their domain change ledger in
       the same transaction. EventBus is reserved for active executable events,
       and public store interfaces expose only capabilities with real independent
-      semantic ownership.
+      semantic ownership. Normal completion is decided only by selected-store
+      convergence, while the engine outbox carries each append result through
+      exactly one post-commit batch dispatch instead of reconstructing it from
+      event identity.
     tracking_decision: update_issue_2007_and_existing_watchlist_node_now
     effort_and_roi: medium_broad_PR_with_lower_complexity_and_high_correctness_ROI
-  blocking_condition: fresh_independent_gate_required_before_runtime_or_spec_implementation
+  blocking_condition: none_gate_approved_review_repair_required_before_merge
 
 closure:
   intended_level: selected_failure_class_eliminated
   remaining_parent_tail:
     - issue_2020_forked_freeze_invariant
     - issue_2008_reusable_full_lifecycle_conformance_tier
-    - existing_PR_2047_generic_exact_duplicate_event_operation_idempotency_manifestation
-  implementation_blocked_until_independent_gate: true
+  implementation_blocked_until_independent_gate: false

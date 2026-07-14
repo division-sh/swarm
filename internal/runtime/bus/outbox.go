@@ -23,8 +23,9 @@ type engineDispatcher struct {
 }
 
 type pendingOutboxOperation struct {
-	intent  runtimeengine.EmitIntent
-	outcome EventAppendOutcome
+	sequence uint64
+	intent   runtimeengine.EmitIntent
+	outcome  EventAppendOutcome
 }
 
 func (eb *EventBus) EngineOutbox() runtimeengine.OutboxWriter {
@@ -394,12 +395,12 @@ func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runt
 		return
 	}
 	eb.mu.Lock()
-	if existing, ok := eb.pendingOutboxByID[eventID]; !ok || existing.outcome != EventAppendInserted {
-		eb.pendingOutboxByID[eventID] = pendingOutboxOperation{intent: intent, outcome: outcome}
-	}
+	eb.pendingOutboxSequence++
+	sequence := eb.pendingOutboxSequence
+	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{sequence: sequence, intent: intent, outcome: outcome})
 	eb.mu.Unlock()
 	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
-		eb.clearPendingOutboxOperation(eventID)
+		eb.removePendingOutboxOperation(eventID, sequence)
 	})
 }
 
@@ -410,11 +411,39 @@ func (eb *EventBus) takePendingOutboxOperation(eventID string) (pendingOutboxOpe
 	eventID = strings.TrimSpace(eventID)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	operation, ok := eb.pendingOutboxByID[eventID]
-	if ok {
-		delete(eb.pendingOutboxByID, eventID)
+	operations := eb.pendingOutboxByID[eventID]
+	if len(operations) == 0 {
+		return pendingOutboxOperation{}, false
 	}
-	return operation, ok
+	operation := operations[0]
+	if len(operations) == 1 {
+		delete(eb.pendingOutboxByID, eventID)
+	} else {
+		eb.pendingOutboxByID[eventID] = operations[1:]
+	}
+	return operation, true
+}
+
+func (eb *EventBus) removePendingOutboxOperation(eventID string, sequence uint64) {
+	if eb == nil {
+		return
+	}
+	eventID = strings.TrimSpace(eventID)
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	operations := eb.pendingOutboxByID[eventID]
+	for i := range operations {
+		if operations[i].sequence != sequence {
+			continue
+		}
+		operations = append(operations[:i], operations[i+1:]...)
+		if len(operations) == 0 {
+			delete(eb.pendingOutboxByID, eventID)
+		} else {
+			eb.pendingOutboxByID[eventID] = operations
+		}
+		return
+	}
 }
 
 func (eb *EventBus) clearPendingOutboxOperation(eventID string) {

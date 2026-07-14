@@ -782,6 +782,12 @@ contract_formats:
           planning or any delivery, route, replay-scope, receipt, outbox, state, counter, convergence, log, or
           process-local dispatch mutation. This rule applies while the run is active and after it is terminal: retry may
           neither create a missing side-effect set nor expand the side-effect set already associated with the event.
+        transactional_batch_handoff: >
+          A transactional outbox preserves the append outcome of every intent in operation order until post-commit
+          dispatch consumes that outcome exactly once. It MUST NOT reconstruct an omitted outcome from event identity or
+          fall through to a fresh dispatch after consuming another same-ID intent. An inserted intent followed by exact
+          duplicates in one committed batch dispatches once; an all-duplicate batch dispatches zero times; conflicting
+          same-ID facts roll back the batch; and distinct inserted intents each dispatch once.
         terminal_evidence: >
           Executable terminal outcome events persist before the terminal transition in the same owner transaction.
           There is no generic post-terminal event bypass. Only typed platform.runtime_log evidence may persist after
@@ -12042,7 +12048,16 @@ platform_tables:
             failure: forbidden
             ended_at: required
             control_reason: historical control evidence only; fork lineage explains the status
-        persistence_operation: MarkRunTerminal accepts a typed failure and returns the authoritative persisted snapshot from one store-owned transaction. Builder and other callers must not perform a second semantic readback.
+        explicit_terminalization_operation: >
+          MarkRunTerminal accepts only failed, cancelled, and forked transitions, with typed failure evidence where the
+          status requires it, and returns the authoritative persisted snapshot from one store-owned transaction. It
+          rejects completed because generic terminalization does not own successful-completion eligibility.
+        normal_completion_operation: >
+          ConvergeNormalRunCompletion is the sole successful-completion writer. In one selected-store transaction it
+          requires terminal workflow entities, successful pipeline receipts, settled deliveries, timers, and session
+          leases, and no open or decision_committed gate. Local runtime or builder quiescence is observational only: the
+          builder may project a completed state already committed by this owner, but MUST NOT derive or write completed
+          from local quiescence and MUST leave a waiting decision run running without a synthetic failure.
         immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
         migration:
           failed_rows: Migrate only a strictly valid platform.failure/v1 value. Empty or prose-only evidence aborts with status, count, and run IDs; no text heuristic exists.

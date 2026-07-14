@@ -97,6 +97,13 @@ func (h *runHub) syncCanonical(ctx context.Context, runID string) {
 		h.mu.Unlock()
 		return
 	}
+	if snapshotOK {
+		switch strings.TrimSpace(strings.ToLower(snapshot.Status)) {
+		case "completed", "failed", "cancelled", "forked":
+			session.terminal = true
+			session.paused = false
+		}
+	}
 	delta := projectCanonicalRunDebugDelta(snapshot, events, runtimeLogs, &session.debug)
 	listeners := make([]func(RunEventEnvelope), 0, len(session.subs))
 	for _, listener := range session.subs {

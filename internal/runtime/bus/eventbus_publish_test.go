@@ -60,10 +60,10 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
-		t.Fatalf("mark run completed: %v", err)
+	if _, err := pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
+		t.Fatalf("mark run cancelled: %v", err)
 	}
-	assertEventBusTerminalRunRefusal(t, pg, runID, pg.RunEventMutation, func(eventID string) (string, int, int, error) {
+	assertEventBusTerminalRunRefusal(t, pg, runID, "cancelled", pg.RunEventMutation, func(eventID string) (string, int, int, error) {
 		var status string
 		var eventCount, deliveryCount int
 		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
@@ -86,10 +86,10 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := sqliteStore.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
-		t.Fatalf("mark run completed: %v", err)
+	if _, err := sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
+		t.Fatalf("mark run cancelled: %v", err)
 	}
-	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, sqliteStore.RunEventMutation, func(eventID string) (string, int, int, error) {
+	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, "cancelled", sqliteStore.RunEventMutation, func(eventID string) (string, int, int, error) {
 		var status string
 		var eventCount, deliveryCount int
 		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
@@ -148,7 +148,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		`, evt.ID()); err != nil {
 			return err
 		}
-		_, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC())
+		_, err := pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
 		return err
 	})
 }
@@ -187,7 +187,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		`, time.Now().UTC(), evt.ID()); err != nil {
 			return err
 		}
-		_, err := sqliteStore.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC())
+		_, err := sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
 		return err
 	})
 }
@@ -331,6 +331,7 @@ func assertEventBusTerminalRunRefusal(
 	t *testing.T,
 	eventStore runtimebus.EventStore,
 	runID string,
+	wantStatus string,
 	runMutation func(context.Context, func(runtimebus.EventMutation) error) error,
 	loadState func(string) (string, int, int, error),
 ) {
@@ -375,7 +376,7 @@ func assertEventBusTerminalRunRefusal(
 			if err != nil {
 				t.Fatalf("load state: %v", err)
 			}
-			if status != "completed" || eventCount != 0 || deliveryCount != 0 {
+			if status != wantStatus || eventCount != 0 || deliveryCount != 0 {
 				t.Fatalf("state after refusal = status=%s events=%d deliveries=%d", status, eventCount, deliveryCount)
 			}
 		})
