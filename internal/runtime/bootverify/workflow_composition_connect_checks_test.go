@@ -77,6 +77,19 @@ func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
 	}
 }
 
+func TestCreateSyntheticCarryRejectsStaticallyAuthoredProducerCollision(t *testing.T) {
+	root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{
+		Mint:       canonicalrouting.CreateMintUUID,
+		Invalidity: canonicalrouting.CreateResolutionProducerCollision,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "composition_connect_validation", "producer producer-node emit field validation_case_id conflicts with receiver-owned carry instance.key.validation_case_id") {
+		t.Fatalf("expected producer/synthetic carry collision blocker, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsSelectInputResolutionCompositionConnect(t *testing.T) {
 	root := writeSelectResolutionCompositionConnectFixture(t, selectResolutionCompositionFixtureOptions{})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))

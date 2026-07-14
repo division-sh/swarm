@@ -1,3 +1,6 @@
 validation.requested:
   candidate: text
   validation_case_id: uuid
+validation.started:
+  candidate: text
+  validation_case_id: uuid

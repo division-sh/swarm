@@ -368,6 +368,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
@@ -694,6 +695,7 @@ seam_families:
       - internal/runtime/bus/sealed_flow_package_fixture_test.go
       - internal/runtime/conformance/sealed_flow_package_conformance_test.go
       - internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go
+      - internal/runtime/conformance/empire_routing_counterparts_test.go
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go

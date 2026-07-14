@@ -11,3 +11,5 @@ flows:
 connect:
   - from: producer.validation_requested
     to: validator.validation_requested
+  - from: validator.validation_started
+    to: producer.validation_started

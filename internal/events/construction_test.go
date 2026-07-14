@@ -27,7 +27,6 @@ var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsMissingPipelineReceipt"}:      1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsWithPendingDeliveriesForRun"}: 1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLitePendingAgentDeliveryRecords"}:       1,
-	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.deliverLiveRecipientsWithRoutes"}:                               1,
 	{Path: "internal/runtime/bus/eventbus_publish.go", Scope: "projectEventForDeliveryRoute"}:                                           1,
 	{Path: "internal/runtime/bus/outbox.go", Scope: "clonePostCommitEvent"}:                                                             1,
 	{Path: "internal/runtime/core/pinrouting/pinrouting.go", Scope: "Resolve"}:                                                          1,

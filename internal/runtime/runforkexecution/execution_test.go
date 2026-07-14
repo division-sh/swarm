@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -29,9 +31,12 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -242,6 +247,181 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if sourceStatus != store.RunForkSourceFrozenStatus || forkStatus != store.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
+}
+
+func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey)
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          store.RunForkContractSelectionModeSelectedContracts,
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, sourceRunID); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	var manager *runtimemanager.AgentManager
+	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
+		ContractBundle: loaded.Source,
+		InterceptorProvider: func() []bus.EventInterceptor {
+			return nil
+		},
+		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("source lifecycle manager is not initialized")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	manager = runtimemanager.NewAgentManagerWithOptions(sourceBus, nil, runtimemanager.AgentManagerOptions{
+		SemanticSource:    loaded.Source,
+		WorkflowInstances: workflowStore,
+	}, pg)
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{}, workflowStore, manager.ActivateFlowInstance)
+
+	sourceEventID := uuid.NewString()
+	payload := json.RawMessage(`{"candidate":"candidate-1"}`)
+	sourceEvent := eventtest.RootIngress(
+		sourceEventID,
+		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
+		sourceRunID,
+		"",
+		payload,
+		0,
+		sourceRunID,
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	sourceCtx := runtimecorrelation.WithRunID(ctx, sourceRunID)
+	preflight, err := sourceBus.CheckPublishRecipientPlan(sourceCtx, sourceEvent)
+	if err != nil {
+		t.Fatalf("plan source create event: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) == 0 {
+		t.Fatalf("source root preflight = failure:%s routes:%#v", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if err := pg.PersistEventWithDeliveryRouteSetAndScope(sourceCtx, sourceEvent, preflight.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("persist source fork frontier event: %v", err)
+	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if len(result.ForkEvents) != 1 {
+		t.Fatalf("fork events = %#v, want one", result.ForkEvents)
+	}
+	forkEventID := result.ForkEvents[0].ForkEventID
+	var forkRequestedEventID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_id::text
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'producer/validation.requested'
+	`, result.Materialization.ForkRunID).Scan(&forkRequestedEventID); err != nil {
+		t.Fatalf("load fork request event: %v", err)
+	}
+	forkRoute := requireSyntheticProjectionRoute(t, pg, forkRequestedEventID, "validator-node")
+	forkKey := forkRoute.PayloadProjection.Fields()["validation_case_id"]
+	if _, err := uuid.Parse(forkKey); err != nil {
+		t.Fatalf("fork projection key = %q, want UUID: %v", forkKey, err)
+	}
+
+	// Execute the original pending delivery only after the fork committed. The
+	// source and fork now traverse the same canonical constructor independently.
+	sourceBus.SetInterceptors(sourcePipeline)
+	if err := sourceBus.RecoverPersistedPipeline(sourceCtx, sourceEvent, nil); err != nil {
+		t.Fatalf("execute source pending delivery: %v", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := sourceBus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("wait for source pending delivery: %v", err)
+	}
+	var sourceRequestedEventID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_id::text
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'producer/validation.requested'
+	`, sourceRunID).Scan(&sourceRequestedEventID); err != nil {
+		t.Fatalf("load source request event: %v", err)
+	}
+	sourceRoute := requireSyntheticProjectionRoute(t, pg, sourceRequestedEventID, "validator-node")
+	sourceKey := sourceRoute.PayloadProjection.Fields()["validation_case_id"]
+	if _, err := uuid.Parse(sourceKey); err != nil {
+		t.Fatalf("source projection key = %q, want UUID: %v", sourceKey, err)
+	}
+	if forkKey == sourceKey || forkRoute.Target.FlowInstance == sourceRoute.Target.FlowInstance {
+		t.Fatalf("fork reused source stamped identity: source=%s/%s fork=%s/%s", sourceKey, sourceRoute.Target.FlowInstance, forkKey, forkRoute.Target.FlowInstance)
+	}
+	var forkPayloadRaw string
+	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id = $1::uuid`, forkEventID).Scan(&forkPayloadRaw); err != nil {
+		t.Fatalf("load fork event payload: %v", err)
+	}
+	var forkPayload map[string]any
+	if err := json.Unmarshal([]byte(forkPayloadRaw), &forkPayload); err != nil {
+		t.Fatalf("decode fork event payload: %v", err)
+	}
+	if _, exists := forkPayload["validation_case_id"]; exists {
+		t.Fatalf("fork event payload was mutated with route projection: %#v", forkPayload)
+	}
+	var downstreamPayloadRaw string
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload::text
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name LIKE 'validator/%/validation.started'
+	`, result.Materialization.ForkRunID).Scan(&downstreamPayloadRaw); err != nil {
+		t.Fatalf("load fork downstream event: %v", err)
+	}
+	var downstreamPayload map[string]any
+	if err := json.Unmarshal([]byte(downstreamPayloadRaw), &downstreamPayload); err != nil {
+		t.Fatalf("decode fork downstream event: %v", err)
+	}
+	if downstreamPayload["validation_case_id"] != forkKey {
+		t.Fatalf("fork downstream payload = %#v, want fresh key %s", downstreamPayload, forkKey)
+	}
+}
+
+func requireSyntheticProjectionRoute(t *testing.T, pg *store.PostgresStore, eventID, subscriberID string) events.DeliveryRoute {
+	t.Helper()
+	routes, err := pg.ListEventDeliveryRoutes(context.Background(), eventID)
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRoutes(%s): %v", eventID, err)
+	}
+	for _, route := range routes {
+		if route.SubscriberType == "node" && route.SubscriberID == subscriberID && !route.PayloadProjection.Empty() {
+			return route
+		}
+	}
+	t.Fatalf("delivery routes for %s = %#v, want projected node %s", eventID, routes, subscriberID)
+	return events.DeliveryRoute{}
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {
@@ -963,6 +1143,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	}
 
 	_, err = startSelectedContractAgentRuntime(context.Background(), publishSelectedContractForkEventsRequest{
+		Store: &store.PostgresStore{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{
 				AgentRecipients: []string{"bad-agent"},

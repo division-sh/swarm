@@ -174,7 +174,11 @@ func selectedContractAgentRuntimeUnsupportedError(agents []string, reason string
 
 func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (*selectedContractAgentRuntime, error) {
 	if len(req.AgentRuntime.Records) == 0 {
-		return nil, nil
+		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+			SemanticSource:    req.LoadedSource.Source,
+			WorkflowInstances: runtimepipeline.NewWorkflowInstanceStore(req.Store.DB),
+		}, req.Store)
+		return &selectedContractAgentRuntime{manager: manager}, nil
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus)
 	if err != nil {
@@ -222,6 +226,9 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	managerOptions := options.AgentManagerOptions
 	if managerOptions.SemanticSource == nil {
 		managerOptions.SemanticSource = source
+	}
+	if managerOptions.WorkflowInstances == nil {
+		managerOptions.WorkflowInstances = runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
 	}
 	if managerOptions.PromptResolver == nil {
 		managerOptions.PromptResolver = promptResolver

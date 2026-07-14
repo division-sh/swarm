@@ -185,12 +185,13 @@ func (a liveRecipientAuthority) Normalized() liveRecipientAuthority {
 }
 
 type RoutePlanDeliveryIntent struct {
-	SubscriberType string
-	SubscriberID   string
-	Target         events.RouteIdentity
-	Context        events.DeliveryContext
-	Producer       routeIntentProducer
-	Persist        bool
+	SubscriberType    string
+	SubscriberID      string
+	Target            events.RouteIdentity
+	Context           events.DeliveryContext
+	PayloadProjection events.DeliveryPayloadProjection
+	Producer          routeIntentProducer
+	Persist           bool
 }
 
 func newRoutePlan(evt events.Event) RoutePlan {
@@ -351,10 +352,11 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 			continue
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: intent.SubscriberType,
-			SubscriberID:   intent.SubscriberID,
-			Target:         intent.Target,
-			Context:        intent.Context,
+			SubscriberType:    intent.SubscriberType,
+			SubscriberID:      intent.SubscriberID,
+			Target:            intent.Target,
+			Context:           intent.Context,
+			PayloadProjection: intent.PayloadProjection,
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
@@ -446,12 +448,13 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, producer 
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
 		out = append(out, RoutePlanDeliveryIntent{
-			SubscriberType: route.SubscriberType,
-			SubscriberID:   route.SubscriberID,
-			Target:         route.Target,
-			Context:        route.Context,
-			Producer:       producer,
-			Persist:        true,
+			SubscriberType:    route.SubscriberType,
+			SubscriberID:      route.SubscriberID,
+			Target:            route.Target,
+			Context:           route.Context,
+			PayloadProjection: route.PayloadProjection,
+			Producer:          producer,
+			Persist:           true,
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)
@@ -548,11 +551,12 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		intent.SubscriberID = strings.TrimSpace(intent.SubscriberID)
 		intent.Target = intent.Target.Normalized()
 		intent.Context = intent.Context.Normalized()
+		intent.PayloadProjection = intent.PayloadProjection.Normalized()
 		intent.Producer = intent.Producer.Normalized()
 		if intent.SubscriberType == "" || intent.SubscriberID == "" {
 			continue
 		}
-		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID, intent.Context.ReplyContextID()}, "\x00")
+		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID, intent.Context.ReplyContextID(), intent.PayloadProjection.Fingerprint()}, "\x00")
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
 			if out[idx].Producer.Empty() {

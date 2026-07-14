@@ -36,6 +36,8 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	addColumns("event_deliveries",
 		"run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count",
 		"reason_code", "failure", "active_session_id", "started_at", "delivered_at", "created_at",
+		"delivery_target_route", "delivery_context",
+		"delivery_payload_projection",
 	)
 	addColumns("event_receipts",
 		"receipt_id", "event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
@@ -96,7 +98,11 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource || !caps.Events.RunBundleFingerprint {
 		t.Fatalf("events caps = %+v", caps.Events)
 	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
+	if caps.Events.Deliveries != SchemaFlavorCanonical ||
+		!caps.Events.DeliveryRunID ||
+		!caps.Events.DeliveryTargetRoute ||
+		!caps.Events.DeliveryContext ||
+		!caps.Events.DeliveryPayloadProjection {
 		t.Fatalf("delivery caps = %+v", caps.Events)
 	}
 	if caps.Events.Receipts != SchemaFlavorCanonical || !caps.Events.ReceiptTypedIdentity {

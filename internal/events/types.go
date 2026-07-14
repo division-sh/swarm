@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -92,11 +93,105 @@ func (c DeliveryContext) ReplyContextID() string {
 	return c.Reply.ID
 }
 
+// DeliveryPayloadProjection is receiver-owned synthetic payload material
+// stamped on one concrete delivery route. The journal event payload remains
+// immutable; only the selected route observes these fields.
+type DeliveryPayloadProjection struct {
+	canonical string
+}
+
+func NewDeliveryPayloadProjection(fields map[string]string) (DeliveryPayloadProjection, error) {
+	canonicalFields := make(map[string]string, len(fields))
+	for rawField, rawValue := range fields {
+		field := strings.TrimSpace(rawField)
+		value := strings.TrimSpace(rawValue)
+		if field == "" || value == "" {
+			return DeliveryPayloadProjection{}, fmt.Errorf("delivery payload projection requires non-empty field names and values")
+		}
+		if _, exists := canonicalFields[field]; exists {
+			return DeliveryPayloadProjection{}, fmt.Errorf("delivery payload projection field %q is declared more than once", field)
+		}
+		canonicalFields[field] = value
+	}
+	if len(canonicalFields) == 0 {
+		return DeliveryPayloadProjection{}, nil
+	}
+	raw, err := json.Marshal(canonicalFields)
+	if err != nil {
+		return DeliveryPayloadProjection{}, fmt.Errorf("encode delivery payload projection: %w", err)
+	}
+	return DeliveryPayloadProjection{canonical: string(raw)}, nil
+}
+
+func (p DeliveryPayloadProjection) Canonical() (DeliveryPayloadProjection, error) {
+	if p.Empty() {
+		return DeliveryPayloadProjection{}, nil
+	}
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(p.canonical), &fields); err != nil {
+		return DeliveryPayloadProjection{}, fmt.Errorf("decode delivery payload projection: %w", err)
+	}
+	return NewDeliveryPayloadProjection(fields)
+}
+
+func (p DeliveryPayloadProjection) Normalized() DeliveryPayloadProjection {
+	return DeliveryPayloadProjection{canonical: p.canonical}
+}
+
+func (p DeliveryPayloadProjection) Empty() bool {
+	return strings.TrimSpace(p.canonical) == ""
+}
+
+func (p DeliveryPayloadProjection) Fingerprint() string {
+	return p.canonical
+}
+
+func (p DeliveryPayloadProjection) Fields() map[string]string {
+	if p.Empty() {
+		return nil
+	}
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(p.canonical), &fields); err != nil {
+		return nil
+	}
+	return fields
+}
+
+func (p DeliveryPayloadProjection) MarshalJSON() ([]byte, error) {
+	if p.Empty() {
+		return []byte(`{}`), nil
+	}
+	return json.Marshal(struct {
+		Fields map[string]string `json:"fields"`
+	}{Fields: p.Fields()})
+}
+
+func (p *DeliveryPayloadProjection) UnmarshalJSON(raw []byte) error {
+	if p == nil {
+		return fmt.Errorf("delivery payload projection destination is nil")
+	}
+	var decoded struct {
+		Fields map[string]string `json:"fields"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("decode delivery payload projection: %w", err)
+	}
+	canonical, err := NewDeliveryPayloadProjection(decoded.Fields)
+	if err != nil {
+		return err
+	}
+	*p = canonical
+	return nil
+}
+
 type DeliveryRoute struct {
-	SubscriberType string          `json:"subscriber_type"`
-	SubscriberID   string          `json:"subscriber_id"`
-	Target         RouteIdentity   `json:"delivery_target_route,omitempty"`
-	Context        DeliveryContext `json:"delivery_context,omitempty"`
+	SubscriberType    string                    `json:"subscriber_type"`
+	SubscriberID      string                    `json:"subscriber_id"`
+	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
+	Context           DeliveryContext           `json:"delivery_context,omitempty"`
+	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 }
 
 type Event struct {
@@ -601,10 +696,11 @@ func (r RouteIdentity) Empty() bool {
 
 func (r DeliveryRoute) Normalized() DeliveryRoute {
 	return DeliveryRoute{
-		SubscriberType: strings.TrimSpace(r.SubscriberType),
-		SubscriberID:   strings.TrimSpace(r.SubscriberID),
-		Target:         r.Target.Normalized(),
-		Context:        r.Context.Normalized(),
+		SubscriberType:    strings.TrimSpace(r.SubscriberType),
+		SubscriberID:      strings.TrimSpace(r.SubscriberID),
+		Target:            r.Target.Normalized(),
+		Context:           r.Context.Normalized(),
+		PayloadProjection: r.PayloadProjection.Normalized(),
 	}
 }
 
@@ -627,6 +723,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 			target.FlowInstance,
 			target.EntityID,
 			route.Context.ReplyContextID(),
+			route.PayloadProjection.Fingerprint(),
 		}, "\x00")
 		if _, ok := seen[key]; ok {
 			continue
@@ -635,6 +732,32 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		out = append(out, route)
 	}
 	return out
+}
+
+func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {
+	seen := make(map[string]string, len(in))
+	for _, route := range in {
+		route = route.Normalized()
+		projection, err := route.PayloadProjection.Canonical()
+		if err != nil {
+			return fmt.Errorf("delivery route %s=%s has invalid payload projection: %w", route.SubscriberType, route.SubscriberID, err)
+		}
+		target := route.Target
+		key := strings.Join([]string{
+			route.SubscriberType,
+			route.SubscriberID,
+			target.FlowID,
+			target.FlowInstance,
+			target.EntityID,
+			route.Context.ReplyContextID(),
+		}, "\x00")
+		fingerprint := projection.Fingerprint()
+		if previous, exists := seen[key]; exists && previous != fingerprint {
+			return fmt.Errorf("delivery route %s=%s has conflicting synthetic payload projections", route.SubscriberType, route.SubscriberID)
+		}
+		seen[key] = fingerprint
+	}
+	return nil
 }
 
 func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {

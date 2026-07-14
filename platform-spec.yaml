@@ -9746,6 +9746,27 @@ flow_model:
                 `instance.on_missing/on_conflict` remains authoritative only for
                 legacy addressless template instance-key composition; it does
                 not override `resolution.mode:create`.
+              delivery_projection: >
+                Lifecycle-produced `instance.key.<as>` material is stamped on
+                each concrete DeliveryRoute as a normalized synthetic payload
+                projection. Only synthetic values without another
+                authoritative home may be stored there; `payload.*` carries
+                continue to consume the immutable journal event payload and
+                MUST NOT be duplicated. The canonical route projector exposes
+                the stamped value to that receiver handler as ordinary
+                `payload.<as>` while leaving the persisted event payload
+                unchanged. Downstream propagation remains an explicit authored
+                `fields:` mapping. Committed replay consumes the exact persisted
+                projection and never remints; a genuine fork creates a fresh
+                event identity and therefore a fresh projection. A producer
+                payload field that competes with the receiver-owned synthetic
+                field is statically rejected when authored emit evidence is
+                available and otherwise fails closed before handler mutation.
+                Silent override and value-agreement handling are invalid. The
+                selected store schema MUST contain
+                `event_deliveries.delivery_payload_projection`; old stores are
+                unsupported and no migration, fallback, export, or dual-write
+                path is defined.
               fail_closed:
               - missing, empty, or unsupported mint
               - missing instance_key.as
@@ -9756,6 +9777,8 @@ flow_model:
               - combined connect.using.instance or connect.map
               - delivery topology other than one
               - unavailable template lifecycle activator
+              - producer-authored payload collision with the synthetic carry
+              - malformed, missing, or conflicting persisted route projection
             select:
               status: runnable_in_1835_pr2
               contract: >
@@ -10969,7 +10992,9 @@ platform_tables:
         Tracks delivery of events to subscribers (nodes and agents). One row per event x subscriber. run_id inherited
         from the parent event for run-scoped queries. delivery_target_route stores the concrete target_set member assigned
         to this subscriber when fan-out routing materializes multiple target identities. delivery_context stores opaque
-        platform-only route-scoped continuation references and is never part of the business event envelope. status is the canonical lifecycle
+        platform-only route-scoped continuation references and is never part of the business event envelope.
+        delivery_payload_projection stores receiver-owned synthetic instance-key carries for exactly one concrete route;
+        it never duplicates payload-owned carries or mutates the journal event payload. status is the canonical lifecycle
         owner for both agent and node deliveries: pending means queued/not started; in_progress means the delivery has been
         claimed or handler execution has started; delivered means successfully settled; failed means a retry-visible
         handler/dispatch failure; dead_letter means terminal failure. Agent and system-node execution paths must mark
@@ -10978,7 +11003,7 @@ platform_tables:
       ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    event_id          UUID NOT NULL REFERENCES events(event_id),\n\
         \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
-        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    delivery_context JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
+        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    delivery_context JSONB NOT NULL DEFAULT '{}',\n    delivery_payload_projection JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
         \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
         \    failure           JSONB,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
         \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\

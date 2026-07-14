@@ -141,6 +141,9 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutes(ctx context.Context, even
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
 	eventID = strings.TrimSpace(eventID)
+	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
+		return err
+	}
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if eventID == "" || len(deliveryRoutes) == 0 {
 		return nil
@@ -159,35 +162,27 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 	if err != nil {
 		return err
 	}
+	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
+		return fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
+	}
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
-		if !caps.Events.DeliveryContext {
-			if !route.Context.Empty() {
-				return fmt.Errorf("event_deliveries.delivery_context required for route-scoped reply context")
-			}
-			if _, err := tx.ExecContext(ctx, `
-				INSERT OR IGNORE INTO event_deliveries (
-					delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route,
-					status, reason_code, created_at
-				)
-				VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-			`, uuid.NewString(), sqliteNullString(runID.String), eventID, route.SubscriberType, route.SubscriberID,
-				string(routeIdentityJSON(route.Target)), deliveryRouteReasonCode(route), s.now()); err != nil {
-				return fmt.Errorf("insert sqlite event delivery route (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
-			}
-			continue
+		projectionRaw, err := deliveryPayloadProjectionJSON(route.PayloadProjection)
+		if err != nil {
+			return fmt.Errorf("encode sqlite event delivery projection (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, delivery_context,
+				delivery_id, run_id, event_id, subscriber_type, subscriber_id,
+				delivery_target_route, delivery_context, delivery_payload_projection,
 				status, reason_code, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
 		`, uuid.NewString(), sqliteNullString(runID.String), eventID, route.SubscriberType, route.SubscriberID,
-			string(routeIdentityJSON(route.Target)), string(deliveryContextJSON(route.Context)), deliveryRouteReasonCode(route), s.now()); err != nil {
+			string(routeIdentityJSON(route.Target)), string(deliveryContextJSON(route.Context)), string(projectionRaw), deliveryRouteReasonCode(route), s.now()); err != nil {
 			return fmt.Errorf("insert sqlite event delivery route (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
 		}
 	}
@@ -337,17 +332,17 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventI
 	if err != nil {
 		return nil, err
 	}
-	contextSelect := `'{}'`
-	if caps.Events.DeliveryContext {
-		contextSelect = `COALESCE(delivery_context, '{}')`
+	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
+		return nil, fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
 	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT subscriber_type, subscriber_id, COALESCE(delivery_target_route, '{}'), %s
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT subscriber_type, subscriber_id, COALESCE(delivery_target_route, '{}'),
+		       COALESCE(delivery_context, '{}'), COALESCE(delivery_payload_projection, '{}')
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND NOT (subscriber_type = ? AND subscriber_id = ?)
 		ORDER BY created_at ASC, delivery_id ASC
-	`, contextSelect), eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite event delivery routes: %w", err)
 	}
@@ -355,14 +350,19 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventI
 	out := make([]events.DeliveryRoute, 0, 8)
 	for rows.Next() {
 		var route events.DeliveryRoute
-		var rawValue, contextValue any
-		if err := rows.Scan(&route.SubscriberType, &route.SubscriberID, &rawValue, &contextValue); err != nil {
+		var rawValue, contextValue, projectionValue any
+		if err := rows.Scan(&route.SubscriberType, &route.SubscriberID, &rawValue, &contextValue, &projectionValue); err != nil {
 			return nil, fmt.Errorf("scan sqlite event delivery route: %w", err)
 		}
 		raw := jsonRawMessageValue(rawValue)
 		contextRaw := jsonRawMessageValue(contextValue)
 		route.Target = decodeRouteIdentityJSON(raw)
 		route.Context = decodeDeliveryContextJSON(contextRaw)
+		projection, err := decodeDeliveryPayloadProjectionJSON(jsonRawMessageValue(projectionValue))
+		if err != nil {
+			return nil, fmt.Errorf("decode sqlite event delivery route projection (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
+		}
+		route.PayloadProjection = projection
 		out = append(out, route)
 	}
 	if err := rows.Err(); err != nil {

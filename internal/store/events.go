@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -675,21 +676,19 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	if caps.Events.Deliveries != SchemaFlavorCanonical {
 		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	}
-	routeSelect := `'{}'::jsonb`
-	if caps.Events.DeliveryTargetRoute {
-		routeSelect = `COALESCE(delivery_target_route, '{}'::jsonb)`
+	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
+		return nil, fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
 	}
-	contextSelect := `'{}'::jsonb`
-	if caps.Events.DeliveryContext {
-		contextSelect = `COALESCE(delivery_context, '{}'::jsonb)`
-	}
-	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, fmt.Sprintf(`
-		SELECT subscriber_type, subscriber_id, %s, %s
+	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
+		SELECT subscriber_type, subscriber_id,
+		       COALESCE(delivery_target_route, '{}'::jsonb),
+		       COALESCE(delivery_context, '{}'::jsonb),
+		       COALESCE(delivery_payload_projection, '{}'::jsonb)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND NOT (subscriber_type = $2 AND subscriber_id = $3)
 		ORDER BY created_at ASC, delivery_id ASC
-	`, routeSelect, contextSelect), eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery routes: %w", err)
 	}
@@ -697,15 +696,20 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	out := make([]events.DeliveryRoute, 0, 8)
 	for rows.Next() {
 		var subscriberType, subscriberID string
-		var raw, contextRaw json.RawMessage
-		if err := rows.Scan(&subscriberType, &subscriberID, &raw, &contextRaw); err != nil {
+		var raw, contextRaw, projectionRaw json.RawMessage
+		if err := rows.Scan(&subscriberType, &subscriberID, &raw, &contextRaw, &projectionRaw); err != nil {
 			return nil, fmt.Errorf("scan event delivery route: %w", err)
 		}
+		projection, err := decodeDeliveryPayloadProjectionJSON(projectionRaw)
+		if err != nil {
+			return nil, fmt.Errorf("decode event delivery route projection (%s=%s): %w", subscriberType, subscriberID, err)
+		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: subscriberType,
-			SubscriberID:   subscriberID,
-			Target:         decodeRouteIdentityJSON(raw),
-			Context:        decodeDeliveryContextJSON(contextRaw),
+			SubscriberType:    subscriberType,
+			SubscriberID:      subscriberID,
+			Target:            decodeRouteIdentityJSON(raw),
+			Context:           decodeDeliveryContextJSON(contextRaw),
+			PayloadProjection: projection,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1045,6 +1049,9 @@ func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql
 }
 
 func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
+		return err
+	}
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if len(deliveryRoutes) == 0 {
 		return nil
@@ -1053,72 +1060,41 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	withTarget := caps.Events.DeliveryTargetRoute
-	withContext := caps.Events.DeliveryContext
+	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
+		return fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
+	}
 	q := `
-		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
-		VALUES ($1::uuid, $2, $3, $4, now())
+		INSERT INTO event_deliveries (
+			event_id, subscriber_type, subscriber_id, reason_code,
+			delivery_target_route, delivery_context, delivery_payload_projection, created_at
+		)
+		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, now())
 		ON CONFLICT DO NOTHING
 	`
-	if withTarget {
-		q = `
-			INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
-			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, now())
-			ON CONFLICT DO NOTHING
-		`
-	}
 	if caps.Events.DeliveryRunID {
 		q = `
-			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, created_at)
-			SELECT e.run_id, e.event_id, $2, $3, $4, now()
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, reason_code,
+				delivery_target_route, delivery_context, delivery_payload_projection, created_at
+			)
+			SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, now()
 			FROM events e
 			WHERE e.event_id = $1::uuid
 			ON CONFLICT DO NOTHING
 		`
-		if withTarget {
-			q = `
-				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
-				SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, now()
-				FROM events e
-				WHERE e.event_id = $1::uuid
-				ON CONFLICT DO NOTHING
-			`
-		}
-	}
-	if withContext {
-		if !withTarget {
-			return fmt.Errorf("event_deliveries.delivery_target_route required with delivery_context")
-		}
-		q = `
-			INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, delivery_context, created_at)
-			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, now())
-			ON CONFLICT DO NOTHING
-		`
-		if caps.Events.DeliveryRunID {
-			q = `
-				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, delivery_context, created_at)
-				SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, $6::jsonb, now()
-				FROM events e
-				WHERE e.event_id = $1::uuid
-				ON CONFLICT DO NOTHING
-			`
-		}
 	}
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
-		args := []any{eventID, route.SubscriberType, route.SubscriberID, deliveryRouteReasonCode(route)}
-		if withTarget {
-			args = append(args, string(routeIdentityJSON(route.Target)))
-		} else if !route.Target.Empty() {
-			return fmt.Errorf("event_deliveries.delivery_target_route required for target-routed delivery")
+		projectionRaw, err := deliveryPayloadProjectionJSON(route.PayloadProjection)
+		if err != nil {
+			return fmt.Errorf("encode event delivery projection (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
 		}
-		if withContext {
-			args = append(args, string(deliveryContextJSON(route.Context)))
-		} else if !route.Context.Empty() {
-			return fmt.Errorf("event_deliveries.delivery_context required for route-scoped reply context")
+		args := []any{
+			eventID, route.SubscriberType, route.SubscriberID, deliveryRouteReasonCode(route),
+			string(routeIdentityJSON(route.Target)), string(deliveryContextJSON(route.Context)), string(projectionRaw),
 		}
 		if _, err := execFn(ctx, q, args...); err != nil {
 			return fmt.Errorf("insert event delivery (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
@@ -1148,6 +1124,29 @@ func decodeDeliveryContextJSON(raw []byte) events.DeliveryContext {
 		return events.DeliveryContext{}
 	}
 	return deliveryContext.Normalized()
+}
+
+func deliveryPayloadProjectionJSON(projection events.DeliveryPayloadProjection) (json.RawMessage, error) {
+	canonical, err := projection.Canonical()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := canonicaljson.Bytes(canonical)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
+
+func decodeDeliveryPayloadProjectionJSON(raw []byte) (events.DeliveryPayloadProjection, error) {
+	if len(raw) == 0 {
+		return events.DeliveryPayloadProjection{}, nil
+	}
+	var projection events.DeliveryPayloadProjection
+	if err := canonicaljson.DecodeInto(raw, &projection); err != nil {
+		return events.DeliveryPayloadProjection{}, err
+	}
+	return projection.Canonical()
 }
 
 func deliveryRouteReasonCode(route events.DeliveryRoute) string {

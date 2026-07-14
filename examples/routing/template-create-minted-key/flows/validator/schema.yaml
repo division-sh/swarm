@@ -17,4 +17,8 @@ pins:
             from: instance.key.validation_case_id
             type: uuid
   outputs:
-    events: []
+    events:
+      - name: validation_started
+        event: validation.started
+        key: validation_case_id
+        carries: [validation_case_id]

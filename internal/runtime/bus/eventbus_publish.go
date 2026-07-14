@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -617,6 +618,9 @@ func splitDeliveryRouteInterceptors(interceptors []EventInterceptor) ([]EventInt
 }
 
 func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, interceptors []DeliveryRouteInterceptor) (bool, []events.Event, error) {
+	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
+		return true, nil, err
+	}
 	deliveryRoutes = nodeDeliveryRoutes(deliveryRoutes)
 	if len(deliveryRoutes) == 0 || len(interceptors) == 0 {
 		return true, nil, nil
@@ -631,12 +635,17 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 			target.FlowID,
 			target.FlowInstance,
 			target.EntityID,
+			route.Context.ReplyContextID(),
+			route.PayloadProjection.Fingerprint(),
 		}, "\x00")
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		projected := projectEventForDeliveryRoute(evt, route)
+		projected, err := projectEventForDeliveryRoute(evt, route)
+		if err != nil {
+			return passthrough, nil, err
+		}
 		for _, it := range interceptors {
 			pass, out, err := it.InterceptDeliveryRoute(ctx, projected, route)
 			if err != nil {
@@ -655,14 +664,38 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 	return passthrough, deferred, nil
 }
 
-func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) events.Event {
+func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) (events.Event, error) {
+	payload := evt.Payload()
+	projection, err := route.PayloadProjection.Canonical()
+	if err != nil {
+		return events.EmptyEvent(), fmt.Errorf("delivery route for %s has invalid synthetic payload projection: %w", strings.TrimSpace(route.SubscriberID), err)
+	}
+	if !projection.Empty() {
+		var fields map[string]any
+		if err := canonicaljson.DecodeInto(payload, &fields); err != nil {
+			return events.EmptyEvent(), fmt.Errorf("delivery route for %s cannot project synthetic fields into a non-object payload: %w", strings.TrimSpace(route.SubscriberID), err)
+		}
+		if fields == nil {
+			return events.EmptyEvent(), fmt.Errorf("delivery route for %s cannot project synthetic fields into a non-object payload", strings.TrimSpace(route.SubscriberID))
+		}
+		for field, value := range projection.Fields() {
+			if _, exists := fields[field]; exists {
+				return events.EmptyEvent(), fmt.Errorf("delivery route for %s rejects payload field %q: the producer payload and receiver-owned synthetic carry both declare it; remove or rename the producer field, or choose a different carry 'as' field", strings.TrimSpace(route.SubscriberID), field)
+			}
+			fields[field] = value
+		}
+		payload, err = canonicaljson.Bytes(fields)
+		if err != nil {
+			return events.EmptyEvent(), fmt.Errorf("encode synthetic delivery payload for %s: %w", strings.TrimSpace(route.SubscriberID), err)
+		}
+	}
 	envelope := evt.NormalizedEnvelope()
 	target := route.Target.Normalized()
-	if target.Empty() {
+	if target.Empty() && strings.TrimSpace(route.SubscriberType) == "node" {
 		envelope.Target = events.RouteIdentity{}
 		envelope.TargetSet = nil
 		envelope = envelope.Normalized()
-	} else {
+	} else if !target.Empty() {
 		envelope = events.EnvelopeForTargetRoute(envelope, target)
 	}
 	return events.NewProjectionEvent(
@@ -670,13 +703,13 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 		evt.Type(),
 		evt.SourceAgent(),
 		evt.TaskID(),
-		evt.Payload(),
+		payload,
 		evt.ChainDepth(),
 		evt.RunID(),
 		evt.ParentEventID(),
 		envelope,
 		evt.CreatedAt(),
-	)
+	).WithDeliveryContext(route.Context), nil
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {

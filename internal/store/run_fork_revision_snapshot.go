@@ -58,19 +58,20 @@ type runForkRevisionEntityMetadata struct {
 
 type runForkRevisionDelivery struct {
 	runForkRevisionedFact
-	DeliveryID          string          `json:"delivery_id"`
-	EventID             string          `json:"event_id"`
-	SubscriberType      string          `json:"subscriber_type"`
-	SubscriberID        string          `json:"subscriber_id"`
-	DeliveryTargetRoute json.RawMessage `json:"delivery_target_route"`
-	DeliveryContext     json.RawMessage `json:"delivery_context"`
-	Status              string          `json:"status"`
-	RetryCount          int             `json:"retry_count"`
-	ReasonCode          string          `json:"reason_code"`
-	ActiveSessionID     string          `json:"active_session_id"`
-	StartedAt           *time.Time      `json:"started_at"`
-	DeliveredAt         *time.Time      `json:"delivered_at"`
-	CreatedAt           time.Time       `json:"created_at"`
+	DeliveryID                string          `json:"delivery_id"`
+	EventID                   string          `json:"event_id"`
+	SubscriberType            string          `json:"subscriber_type"`
+	SubscriberID              string          `json:"subscriber_id"`
+	DeliveryTargetRoute       json.RawMessage `json:"delivery_target_route"`
+	DeliveryContext           json.RawMessage `json:"delivery_context"`
+	DeliveryPayloadProjection json.RawMessage `json:"delivery_payload_projection"`
+	Status                    string          `json:"status"`
+	RetryCount                int             `json:"retry_count"`
+	ReasonCode                string          `json:"reason_code"`
+	ActiveSessionID           string          `json:"active_session_id"`
+	StartedAt                 *time.Time      `json:"started_at"`
+	DeliveredAt               *time.Time      `json:"delivered_at"`
+	CreatedAt                 time.Time       `json:"created_at"`
 }
 
 type runForkRevisionReceipt struct {

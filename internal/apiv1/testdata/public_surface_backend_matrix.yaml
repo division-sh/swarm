@@ -898,6 +898,8 @@ rows:
         name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite
       - kind: go_test
         name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres
+      - kind: go_test
+        name: TestCreateMintedCarryProjectionReachesHandlerFromPublicIngressOnBothBackends
     notes: >
       #1384 adds the served dynamic auto_emit_on_create parity row missing from
       the simpler existing-run follow-up proof. The proof runs the same fixture
@@ -905,7 +907,9 @@ rows:
       including parent workflow-node delivery terminalization, dynamic child
       dispatch/readback, trace/status/diagnose surfaces, and durable
       event.publish acceptance. This row is a served lifecycle proof, not a
-      complete public mutating API parity ledger by itself.
+      complete public mutating API parity ledger by itself. #2025 adds the
+      canonical create proof for route-scoped minted carry projection through
+      the real handler and explicit downstream emission.
 
   - id: runtime_log_readback_api
     surface: runtime logs, log subscription, and run trace readback over selected stores
