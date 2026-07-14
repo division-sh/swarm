@@ -121,6 +121,11 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456789", "append first block")
+	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456789")
+	firstAttempt := waitForNotionManagedConnectorTerminalActivityAttempt(t, backend, firstInboundEventID)
+	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
+		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
+	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "refresh-before-use")
 	if firstCall.auth != "Bearer fresh-token" {
 		t.Fatalf("%s first Notion auth = %q, want Bearer fresh-token", backend.name, firstCall.auth)
@@ -128,25 +133,20 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	if got := notionManagedConnectorString(firstCall.body["children"]); !strings.Contains(got, "hello from swarm") {
 		t.Fatalf("%s first Notion children = %#v, want static block body", backend.name, firstCall.body["children"])
 	}
-	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456789")
-	firstAttempt := waitForNotionManagedConnectorTerminalActivityAttempt(t, backend, firstInboundEventID)
-	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s first activity attempt status = %q, want succeeded", backend.name, firstAttempt.Status)
-	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.refreshCount(); got != 1 {
 		t.Fatalf("%s refresh-before-use token refreshes = %d, want 1", backend.name, got)
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456790", "needs 401 refresh")
-	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
-	if secondCall.auth != "Bearer after-401-token" {
-		t.Fatalf("%s second Notion auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
-	}
 	secondInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456790")
 	secondAttempt := waitForNotionManagedConnectorTerminalActivityAttempt(t, backend, secondInboundEventID)
 	if secondAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s second activity attempt status = %q, want succeeded", backend.name, secondAttempt.Status)
+		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
+	}
+	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
+	if secondCall.auth != "Bearer after-401-token" {
+		t.Fatalf("%s second Notion auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
 	}
 	if got := fake.refreshCount(); got != 2 {
 		t.Fatalf("%s token refreshes after 401 = %d, want 2", backend.name, got)
@@ -169,9 +169,9 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456791", "provider 429 fixture")
-	fake.requireNoSideEffectCall(t, backend.name, "429 fixture")
 	rateLimitInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456791")
 	rateLimitAttempt := waitForNotionManagedConnectorTerminalActivityAttempt(t, backend, rateLimitInboundEventID)
+	fake.requireNoSideEffectCall(t, backend.name, "429 fixture")
 	if rateLimitAttempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
 		t.Fatalf("%s 429 activity attempt status = %q, want failed", backend.name, rateLimitAttempt.Status)
 	}

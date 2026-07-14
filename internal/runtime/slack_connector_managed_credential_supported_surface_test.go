@@ -130,6 +130,11 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456789", "hello from telegram")
+	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456789")
+	firstAttempt := waitForSlackManagedConnectorTerminalActivityAttempt(t, backend, firstInboundEventID)
+	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
+		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
+	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "refresh-before-use")
 	if firstCall.auth != "Bearer fresh-token" {
 		t.Fatalf("%s first Slack auth = %q, want Bearer fresh-token", backend.name, firstCall.auth)
@@ -140,25 +145,20 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	if got := slackManagedConnectorString(firstCall.body["text"]); got != "hello from telegram" {
 		t.Fatalf("%s first Slack text = %#v, want inbound text", backend.name, firstCall.body["text"])
 	}
-	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456789")
-	firstAttempt := waitForSlackManagedConnectorTerminalActivityAttempt(t, backend, firstInboundEventID)
-	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s first activity attempt status = %q, want succeeded", backend.name, firstAttempt.Status)
-	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.refreshCount(); got != 1 {
 		t.Fatalf("%s refresh-before-use token refreshes = %d, want 1", backend.name, got)
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456790", "needs 401 refresh")
-	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
-	if secondCall.auth != "Bearer after-401-token" {
-		t.Fatalf("%s second Slack auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
-	}
 	secondInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456790")
 	secondAttempt := waitForSlackManagedConnectorTerminalActivityAttempt(t, backend, secondInboundEventID)
 	if secondAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s second activity attempt status = %q, want succeeded", backend.name, secondAttempt.Status)
+		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
+	}
+	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
+	if secondCall.auth != "Bearer after-401-token" {
+		t.Fatalf("%s second Slack auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
 	}
 	if got := fake.refreshCount(); got != 2 {
 		t.Fatalf("%s token refreshes after 401 = %d, want 2", backend.name, got)
@@ -181,9 +181,9 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456792", "provider ok false")
-	fake.requireNoSideEffectCall(t, backend.name, "response_success ok false")
 	okFalseInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456792")
 	okFalseAttempt := waitForSlackManagedConnectorTerminalActivityAttempt(t, backend, okFalseInboundEventID)
+	fake.requireNoSideEffectCall(t, backend.name, "response_success ok false")
 	if okFalseAttempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
 		t.Fatalf("%s ok:false activity attempt status = %q, want failed", backend.name, okFalseAttempt.Status)
 	}
@@ -320,7 +320,6 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status for update %s = %d, want 202 body=%s", backend.name, updateID, rec.Code, rec.Body.String())
 	}
-	waitForInboundBusQuiescence(t, bus)
 }
 
 func slackManagedConnectorSource(t *testing.T, baseURL string) semanticview.Source {
