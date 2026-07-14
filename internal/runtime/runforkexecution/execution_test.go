@@ -2295,6 +2295,97 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	}
 }
 
+func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreateProjection(t *testing.T) {
+	planning := store.RunForkSelectedContractRecipientPlanning{
+		Owner:                      store.RunForkSelectedContractRecipientPlanningOwner,
+		FutureExecutionOwner:       store.RunForkSelectedContractExecutionOwner,
+		NonMutating:                true,
+		RecipientPlanningSupported: true,
+		DeliveryWritesSupported:    false,
+		RecipientPlanEvents: []store.RunForkSelectedContractRecipientPlanEvent{{
+			SourceEventID: "source-event",
+			EventName:     "validation.requested",
+			Recipients: []store.RunForkContractFrontierRecipient{{
+				SubscriberType: "node",
+				SubscriberID:   "validator-node",
+				Path:           "validator/source-instance",
+				RouteSource:    "canonical_connect",
+			}},
+			Disposition: store.RunForkSelectedContractDispositionForkLocalTruth,
+		}},
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	if err != nil {
+		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
+	}
+	guard.ExpectForkEvent("fork-event", "source-event")
+	evt := eventtest.RootIngress("fork-event",
+		"validation.requested",
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	projection, err := events.NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "fork-case"})
+	if err != nil {
+		t.Fatalf("NewDeliveryPayloadProjection: %v", err)
+	}
+	base := bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "validator-node",
+			Path:        "validator/fork-instance",
+			RouteSource: "canonical_connect",
+		}},
+	}
+
+	tests := []struct {
+		name    string
+		routes  []events.DeliveryRoute
+		wantErr bool
+	}{
+		{
+			name: "create fresh projected route accepts fork-local path",
+			routes: []events.DeliveryRoute{{
+				SubscriberType:    "node",
+				SubscriberID:      "validator-node",
+				Target:            events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
+				PayloadProjection: projection,
+			}},
+		},
+		{
+			name: "select canonical path drift is rejected",
+			routes: []events.DeliveryRoute{{
+				SubscriberType: "node",
+				SubscriberID:   "validator-node",
+				Target:         events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "select-or-create canonical path drift is rejected",
+			routes: []events.DeliveryRoute{{
+				SubscriberType: "node",
+				SubscriberID:   "validator-node",
+				Target:         events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
+			}},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := base
+			actual.DeliveryRoutes = tc.routes
+			err := guard.Authorize(context.Background(), evt, actual)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
+					t.Fatalf("Authorize error = %v, want concrete-path mismatch", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Authorize fresh create projection: %v", err)
+			}
+		})
+	}
+}
+
 func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
 	planning := store.RunForkSelectedContractRecipientPlanning{
 		Owner:                      store.RunForkSelectedContractRecipientPlanningOwner,

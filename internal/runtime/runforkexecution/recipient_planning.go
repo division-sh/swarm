@@ -378,10 +378,13 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	}
 	expectedKeys := expectedRecipientKeys(expected.Recipients)
 	actualKeys := actualRecipientKeys(actual.RoutedRecipients)
-	if actual.UsesCanonicalRouteAuthority() {
-		// Canonical connect routing owns fork-local instance selection. The
-		// source plan authorizes the subscriber identity, never the source-run
-		// concrete path that create must replace with a fresh fork decision.
+	freshCreateProjection, err := hasFreshCreateRecipientProjection(actual)
+	if err != nil {
+		return err
+	}
+	if freshCreateProjection {
+		// A fresh create projection proves that canonical lifecycle routing
+		// replaced the source-run path with a new fork-local instance decision.
 		expectedKeys = expectedRecipientIdentityKeys(expected.Recipients)
 		actualKeys = actualRecipientIdentityKeys(actual.RoutedRecipients)
 	}
@@ -389,6 +392,57 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", store.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
 	}
 	return nil
+}
+
+func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bool, error) {
+	if len(plan.RoutedRecipients) == 0 || len(plan.DeliveryRoutes) == 0 {
+		return false, nil
+	}
+	if err := events.ValidateDeliveryRouteProjections(plan.DeliveryRoutes); err != nil {
+		return false, fmt.Errorf("selected-contract publish path has invalid delivery projection evidence: %w", err)
+	}
+
+	projectedPaths := make(map[string]string, len(plan.DeliveryRoutes))
+	for _, route := range plan.DeliveryRoutes {
+		route = route.Normalized()
+		if route.PayloadProjection.Empty() {
+			continue
+		}
+		key := recipientIdentityKey(route.SubscriberType, route.SubscriberID)
+		path := route.Target.FlowInstance
+		if key == "" || path == "" {
+			return false, nil
+		}
+		if previous, exists := projectedPaths[key]; exists && previous != path {
+			return false, nil
+		}
+		projectedPaths[key] = path
+	}
+	if len(projectedPaths) == 0 {
+		return false, nil
+	}
+
+	actualPaths := make(map[string]string, len(plan.RoutedRecipients))
+	for _, recipient := range plan.RoutedRecipients {
+		key := recipientIdentityKey(recipient.Type, recipient.ID)
+		path := strings.Trim(strings.TrimSpace(recipient.Path), "/")
+		if key == "" || path == "" {
+			return false, nil
+		}
+		if previous, exists := actualPaths[key]; exists && previous != path {
+			return false, nil
+		}
+		actualPaths[key] = path
+	}
+	if len(projectedPaths) != len(actualPaths) {
+		return false, nil
+	}
+	for key, path := range actualPaths {
+		if projectedPaths[key] != path {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
