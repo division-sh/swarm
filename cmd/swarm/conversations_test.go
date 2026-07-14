@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -89,6 +90,52 @@ func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "No conversations match the current filters.") {
 		t.Fatalf("stdout = %q, want empty-state text", stdout.String())
+	}
+}
+
+func TestConversationViewLongSessionUsesBoundedCompactListOnly(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	const turnCount = 27
+	turns := make([]map[string]any, 0, turnCount)
+	for i := 1; i <= turnCount; i++ {
+		turns = append(turns, validConversationTurn(i, fmt.Sprintf("turn-%03d", i), fmt.Sprintf("event-%03d", i), "task.completed"))
+	}
+	methods := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		methods = append(methods, request.Method)
+		if request.Method != conversationListTurnsMethod {
+			t.Fatalf("unexpected long-session method %q", request.Method)
+		}
+		if request.Params["session_id"] != "sess-long" || request.Params["limit"] != float64(turnCount) {
+			t.Fatalf("long-session params = %#v", request.Params)
+		}
+		summary := validConversationSummary("sess-long")
+		summary["turn_count"] = turnCount
+		writeJSONRPCResult(t, w, request.ID, map[string]any{"conversation": summary, "turns": turns})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"conversation", "view", "sess-long", "--limit", fmt.Sprintf("%d", turnCount),
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != cliExitOK {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if got := strings.Join(methods, ","); got != conversationListTurnsMethod {
+		t.Fatalf("long-session methods = %q, want only %s", got, conversationListTurnsMethod)
+	}
+	if stdout.Len() >= 1<<20 {
+		t.Fatalf("compact 27-turn output = %d bytes, want below 1 MiB", stdout.Len())
+	}
+	for _, want := range []string{"turn-001", "turn-027", "ACTIVITY", "1 output"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("long-session stdout missing %q:\n%s", want, stdout.String())
+		}
 	}
 }
 
@@ -271,6 +318,21 @@ func validConversationDetail(sessionID string) map[string]any {
 
 func validConversationTurn(index int, turnID, eventID, eventType string) map[string]any {
 	return map[string]any{
+		"ordinal":            index,
+		"turn_id":            turnID,
+		"completed_at":       "2026-05-20T01:01:01Z",
+		"duration_ms":        150,
+		"trigger_event_id":   eventID,
+		"trigger_event_type": eventType,
+		"parse_ok":           true,
+		"activity_counts": map[string]any{
+			"dispatch": 0, "tool": 0, "tool_result": 0, "publish": 0, "output": 1, "failure": 0,
+		},
+	}
+}
+
+func validConversationTurnFull(index int, turnID, eventID, eventType string) map[string]any {
+	return map[string]any{
 		"ordinal":                  index,
 		"turn_id":                  turnID,
 		"completed_at":             "2026-05-20T01:01:01Z",
@@ -286,7 +348,7 @@ func validConversationTurn(index int, turnID, eventID, eventType string) map[str
 func validConversationTurnDetail(sessionID string, index int) map[string]any {
 	return map[string]any{
 		"session": validConversationSummary(sessionID),
-		"turn":    validConversationTurn(index, "turn-2", "event-2", "task.completed"),
+		"turn":    validConversationTurnFull(index, "turn-2", "event-2", "task.completed"),
 	}
 }
 

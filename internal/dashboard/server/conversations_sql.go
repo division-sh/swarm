@@ -10,13 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 )
 
-const (
-	conversationKindLiveSession = "live_session"
-	conversationKindTurnAudit   = "turn_audit"
-)
-
 type SQLConversationReader struct {
-	db        *sql.DB
 	capSource schemaCapabilitySource
 	owner     *store.OperatorAgentConversationReadSurface
 }
@@ -26,7 +20,6 @@ func NewSQLConversationReader(db *sql.DB, capSource schemaCapabilitySource) *SQL
 		return nil
 	}
 	return &SQLConversationReader{
-		db:        db,
 		capSource: capSource,
 		owner:     store.NewOperatorConversationReadSurface(db, capSource),
 	}
@@ -43,72 +36,23 @@ func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, o
 }
 
 func (r *SQLConversationReader) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
-	if r == nil {
+	if r == nil || r.owner == nil {
 		if _, err := r.resolveCapabilities(ctx); err != nil {
 			return store.OperatorConversationTurnListResult{}, err
 		}
-		return store.OperatorConversationTurnListResult{}, store.ErrSessionNotFound
-	}
-	owner, ok := r.capSource.(interface {
-		ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
-	})
-	if !ok {
 		return store.OperatorConversationTurnListResult{}, errors.New("conversation reader is not configured with the canonical turn owner")
 	}
-	return owner.ListOperatorConversationTurns(ctx, opts)
+	return r.owner.ListOperatorConversationTurns(ctx, opts)
 }
 
-func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]ConversationSummary, error) {
-	if r == nil || r.db == nil {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 100
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireConversationSurfaceCapabilities(caps); err != nil {
-		return nil, err
-	}
-	if err := requireConversationTurnCapabilities(caps); err != nil {
-		return nil, err
-	}
-	page, err := r.owner.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: limit})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ConversationSummary, 0, len(page.Conversations))
-	for _, item := range page.Conversations {
-		out = append(out, conversationSummaryFromOperator(item))
-	}
-	return out, nil
-}
-
-func (r *SQLConversationReader) Get(ctx context.Context, sessionID string) (ConversationDetail, bool, error) {
-	if r == nil || r.db == nil {
-		return ConversationDetail{}, false, nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ConversationDetail{}, false, nil
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return ConversationDetail{}, false, err
-	}
-	if err := requireConversationSurfaceCapabilities(caps); err != nil {
-		return ConversationDetail{}, false, err
-	}
-	page, err := r.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 500})
-	if err != nil {
-		if errors.Is(err, store.ErrSessionNotFound) {
-			return ConversationDetail{}, false, nil
+func (r *SQLConversationReader) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
+	if r == nil || r.owner == nil {
+		if _, err := r.resolveCapabilities(ctx); err != nil {
+			return store.OperatorPublicConversationTurnDetail{}, err
 		}
-		return ConversationDetail{}, false, err
+		return store.OperatorPublicConversationTurnDetail{}, errors.New("conversation reader is not configured with the canonical exact-turn owner")
 	}
-	return conversationDetailFromOperator(page), true, nil
+	return r.owner.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
 func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
@@ -139,9 +83,9 @@ func conversationDetailFromOperator(item store.OperatorConversationTurnListResul
 		Conversation: conversationSummaryFromOperator(item.Conversation),
 		NextCursor:   strings.TrimSpace(item.NextCursor),
 	}
-	out.Turns = make([]ConversationTurn, 0, len(item.Turns))
+	out.Turns = make([]ConversationTurnListItem, 0, len(item.Turns))
 	for _, turn := range item.Turns {
-		out.Turns = append(out.Turns, conversationTurnFromOperator(turn))
+		out.Turns = append(out.Turns, conversationTurnListItemFromOperator(turn))
 	}
 	return out
 }
@@ -170,25 +114,22 @@ func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) 
 	}
 }
 
-func conversationTurnFromOperator(item store.OperatorPublicConversationTurn) ConversationTurn {
-	activity := make([]ConversationActivity, 0, len(item.Activity))
-	for _, fact := range item.Activity {
-		activity = append(activity, ConversationActivity{
-			Kind: fact.Kind, ToolName: fact.ToolName, ToolUseID: fact.ToolUseID,
-			EventID: fact.EventID, EventType: fact.EventType, Text: fact.Text, OK: fact.OK,
-		})
-	}
+func conversationTurnListItemFromOperator(item store.OperatorConversationTurnListItem) ConversationTurnListItem {
 	var tokens *ConversationTokenUsage
 	if item.Tokens != nil {
 		tokens = &ConversationTokenUsage{Input: item.Tokens.Input, Output: item.Tokens.Output, Exactness: item.Tokens.Exactness}
 	}
-	return ConversationTurn{
+	return ConversationTurnListItem{
 		TurnID: item.TurnID, Ordinal: item.Ordinal, CompletedAt: formatTime(item.CompletedAt),
 		DurationMS: item.DurationMS, TriggerEventID: item.TriggerEventID,
-		TriggerEventType: item.TriggerEventType, EntityID: item.EntityID, TaskID: item.TaskID,
-		Activity: activity, Tokens: tokens, Outcome: item.Outcome, ParseOK: item.ParseOK,
-		Failure: runtimefailures.CloneEnvelope(item.Failure), AssistantVisibleOutput: item.AssistantVisibleOutput,
-		RetryCount: item.RetryCount,
+		TriggerEventType: item.TriggerEventType,
+		ActivityCounts: ConversationActivityCounts{
+			Dispatch: item.ActivityCounts.Dispatch, Tool: item.ActivityCounts.Tool,
+			ToolResult: item.ActivityCounts.ToolResult, Publish: item.ActivityCounts.Publish,
+			Output: item.ActivityCounts.Output, Failure: item.ActivityCounts.Failure,
+		},
+		Tokens: tokens, Outcome: item.Outcome, ParseOK: item.ParseOK,
+		Failure: runtimefailures.CloneEnvelope(item.Failure),
 	}
 }
 

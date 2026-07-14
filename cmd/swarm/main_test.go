@@ -5245,17 +5245,17 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	}
 
 	missingKey := keyPrefix + "-missing-turn"
-	missingTurnID := uuid.NewString()
+	missingTurnID := fixture.Turn1ID[:12]
 	missing := requireServedJSONRPCError(t, rt.Endpoint, "conversation.fork", map[string]any{
 		"source_session_id": fixture.SessionID,
 		"fork_point":        map[string]any{"kind": "turn", "turn_id": missingTurnID},
 		"idempotency_key":   missingKey,
 	})
 	if missing.Data["code"] != apiv1.TurnNotFoundCode {
-		t.Fatalf("%s missing exact turn error = %#v", rt.Backend, missing.Data)
+		t.Fatalf("%s prefix-shaped exact turn error = %#v", rt.Backend, missing.Data)
 	}
 	if got := servedConversationForkRequestArtifactCounts(t, rt.DB, rt.Backend, fixture.SessionID, missingKey); got != ([4]int{}) {
-		t.Fatalf("%s missing exact turn persisted request artifacts = %#v, want none", rt.Backend, got)
+		t.Fatalf("%s prefix-shaped exact turn persisted request artifacts = %#v, want none", rt.Backend, got)
 	}
 
 	turnKey := keyPrefix + "-turn"

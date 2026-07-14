@@ -27,9 +27,9 @@ type OperatorConversationTurnListOptions struct {
 }
 
 type OperatorConversationTurnListResult struct {
-	Conversation OperatorConversationSummary      `json:"conversation"`
-	Turns        []OperatorPublicConversationTurn `json:"turns"`
-	NextCursor   string                           `json:"next_cursor,omitempty"`
+	Conversation OperatorConversationSummary        `json:"conversation"`
+	Turns        []OperatorConversationTurnListItem `json:"turns"`
+	NextCursor   string                             `json:"next_cursor,omitempty"`
 }
 
 type OperatorConversationTokenUsage struct {
@@ -46,6 +46,31 @@ type OperatorConversationActivity struct {
 	EventType string `json:"event_type,omitempty"`
 	Text      string `json:"text,omitempty"`
 	OK        *bool  `json:"ok,omitempty"`
+}
+
+type OperatorConversationActivityCounts struct {
+	Dispatch   int `json:"dispatch"`
+	Tool       int `json:"tool"`
+	ToolResult int `json:"tool_result"`
+	Publish    int `json:"publish"`
+	Output     int `json:"output"`
+	Failure    int `json:"failure"`
+}
+
+// OperatorConversationTurnListItem is the bounded ledger projection. Ordered
+// activity and author-visible text are available only from exact turn detail.
+type OperatorConversationTurnListItem struct {
+	TurnID           string                             `json:"turn_id"`
+	Ordinal          int                                `json:"ordinal"`
+	CompletedAt      time.Time                          `json:"completed_at"`
+	DurationMS       int                                `json:"duration_ms"`
+	TriggerEventID   string                             `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                             `json:"trigger_event_type,omitempty"`
+	ActivityCounts   OperatorConversationActivityCounts `json:"activity_counts"`
+	Tokens           *OperatorConversationTokenUsage    `json:"tokens,omitempty"`
+	Outcome          string                             `json:"outcome,omitempty"`
+	ParseOK          bool                               `json:"parse_ok"`
+	Failure          *runtimefailures.Envelope          `json:"failure,omitempty"`
 }
 
 // OperatorPublicConversationTurn is the closed public projection of one persisted
@@ -78,6 +103,7 @@ type OperatorPublicConversationTurnDetail struct {
 
 type operatorPublicConversationProjectionSource interface {
 	ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
 }
 
 type conversationTurnCursor struct {
@@ -150,7 +176,11 @@ func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPubl
 	if len(page.Turns) == 0 {
 		return nil, nil
 	}
-	turn := page.Turns[0]
+	detail, err := source.LoadOperatorPublicConversationTurn(ctx, sessionID, page.Turns[0].TurnID)
+	if err != nil {
+		return nil, err
+	}
+	turn := detail.Turn
 	return &turn, nil
 }
 
@@ -332,13 +362,13 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 	}
 	defer rows.Close()
 
-	turns := make([]OperatorPublicConversationTurn, 0, opts.Limit+1)
+	turns := make([]OperatorConversationTurnListItem, 0, opts.Limit+1)
 	for rows.Next() {
 		record, err := scanConversationTurnRecord(rows)
 		if err != nil {
 			return OperatorConversationTurnListResult{}, err
 		}
-		turn, err := projectPublicConversationTurn(record)
+		turn, err := projectPublicConversationTurnListItem(record)
 		if err != nil {
 			return OperatorConversationTurnListResult{}, err
 		}
@@ -682,6 +712,47 @@ func projectPublicConversationTurn(record conversationTurnRecord) (OperatorPubli
 	return turn, nil
 }
 
+func projectPublicConversationTurnListItem(record conversationTurnRecord) (OperatorConversationTurnListItem, error) {
+	turn, err := projectPublicConversationTurn(record)
+	if err != nil {
+		return OperatorConversationTurnListItem{}, err
+	}
+	return operatorConversationTurnListItemFromPublic(turn), nil
+}
+
+func operatorConversationTurnListItemFromPublic(turn OperatorPublicConversationTurn) OperatorConversationTurnListItem {
+	counts := OperatorConversationActivityCounts{}
+	for _, item := range turn.Activity {
+		switch item.Kind {
+		case "dispatch":
+			counts.Dispatch++
+		case "tool":
+			counts.Tool++
+		case "tool_result":
+			counts.ToolResult++
+		case "publish":
+			counts.Publish++
+		case "output":
+			counts.Output++
+		case "failure":
+			counts.Failure++
+		}
+	}
+	return OperatorConversationTurnListItem{
+		TurnID:           turn.TurnID,
+		Ordinal:          turn.Ordinal,
+		CompletedAt:      turn.CompletedAt,
+		DurationMS:       turn.DurationMS,
+		TriggerEventID:   turn.TriggerEventID,
+		TriggerEventType: turn.TriggerEventType,
+		ActivityCounts:   counts,
+		Tokens:           turn.Tokens,
+		Outcome:          turn.Outcome,
+		ParseOK:          turn.ParseOK,
+		Failure:          runtimefailures.CloneEnvelope(turn.Failure),
+	}
+}
+
 func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) ([]OperatorConversationActivity, string, string, error) {
 	activity := make([]OperatorConversationActivity, 0, len(blocks))
 	assistantOutput := ""
@@ -746,9 +817,6 @@ func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) 
 		default:
 			// Unknown/private block kinds fail closed by omission.
 		}
-	}
-	if outcome == "" {
-		outcome = assistantOutput
 	}
 	return activity, assistantOutput, outcome, nil
 }

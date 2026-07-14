@@ -24594,6 +24594,73 @@ api_specification:
             enum:
             - active
             - terminated
+      ConversationActivityCounts:
+        type: object
+        additionalProperties: false
+        description: Compact owner-derived counts for the closed public activity kinds in one turn.
+        required:
+        - dispatch
+        - tool
+        - tool_result
+        - publish
+        - output
+        - failure
+        properties:
+          dispatch:
+            type: integer
+            minimum: 0
+          tool:
+            type: integer
+            minimum: 0
+          tool_result:
+            type: integer
+            minimum: 0
+          publish:
+            type: integer
+            minimum: 0
+          output:
+            type: integer
+            minimum: 0
+          failure:
+            type: integer
+            minimum: 0
+      ConversationTurnListItem:
+        type: object
+        additionalProperties: false
+        description: Compact single-row ledger projection. Ordered activity and author-visible text exist only in ConversationTurnDetail.
+        required:
+        - turn_id
+        - ordinal
+        - completed_at
+        - duration_ms
+        - activity_counts
+        - parse_ok
+        properties:
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          ordinal:
+            type: integer
+            minimum: 1
+            description: Stable 1-based display position in canonical ascending order; never accepted as identity.
+          completed_at:
+            $ref: '#/components/schemas/Timestamp'
+          duration_ms:
+            type: integer
+            minimum: 0
+          trigger_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          trigger_event_type:
+            type: string
+          activity_counts:
+            $ref: '#/components/schemas/ConversationActivityCounts'
+          tokens:
+            $ref: '#/components/schemas/ConversationTokenUsage'
+          outcome:
+            type: string
+          parse_ok:
+            type: boolean
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       Turn:
         type: object
         additionalProperties: false
@@ -24710,7 +24777,7 @@ api_specification:
           turns:
             type: array
             items:
-              $ref: '#/components/schemas/Turn'
+              $ref: '#/components/schemas/ConversationTurnListItem'
           next_cursor:
             $ref: '#/components/schemas/Cursor'
       ConversationForkPointSelector:
@@ -27866,10 +27933,11 @@ api_specification:
     conversation.list_turns:
       tier: should_have
       description: >
-        List the closed author-safe turn projection for one conversation. Pages
-        are newest first, bounded to 500 rows, and use an opaque cursor over the
-        canonical persisted created_at plus turn_id order. Ordinal is a stable
-        display projection and is never an input identity.
+        List compact closed author-safe turn rows for one conversation. Pages are
+        newest first, bounded to 500 rows, and use an opaque cursor over the
+        canonical persisted created_at plus turn_id order. Rows contain owner-derived
+        activity counts and never contain ordered activity or author-visible text.
+        Ordinal is a stable display projection and is never an input identity.
       scope:
         required:
         - read:conversations

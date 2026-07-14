@@ -836,12 +836,57 @@ type stubConversationCaps struct {
 	err  error
 }
 
+type stubDashboardConversationHTTPReader struct {
+	listResult store.OperatorConversationListResult
+	turnPages  map[string]store.OperatorConversationTurnListResult
+	listOpts   store.OperatorConversationListOptions
+	turnOpts   []store.OperatorConversationTurnListOptions
+}
+
+func (s *stubDashboardConversationHTTPReader) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
+	s.listOpts = opts
+	return s.listResult, nil
+}
+
+func (s *stubDashboardConversationHTTPReader) ListOperatorConversationTurns(_ context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+	s.turnOpts = append(s.turnOpts, opts)
+	return s.turnPages[strings.TrimSpace(opts.Cursor)], nil
+}
+
+func (s *stubDashboardConversationHTTPReader) LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error) {
+	return store.OperatorPublicConversationTurnDetail{}, store.ErrTurnNotFound
+}
+
+type stubDashboardAgentHTTPReader struct {
+	result store.OperatorAgentListResult
+	detail store.OperatorAgentDetail
+}
+
+func (s stubDashboardAgentHTTPReader) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return nil, nil
+}
+
+func (s stubDashboardAgentHTTPReader) ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
+	return s.result, nil
+}
+
+func (s stubDashboardAgentHTTPReader) LoadOperatorAgent(_ context.Context, agentID string) (store.OperatorAgentDetail, error) {
+	if s.detail.Agent.AgentID != strings.TrimSpace(agentID) {
+		return store.OperatorAgentDetail{}, store.ErrAgentNotFound
+	}
+	return s.detail, nil
+}
+
 func (s stubConversationCaps) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
 	return s.caps, s.err
 }
 
 func (s stubConversationCaps) ListOperatorConversationTurns(_ context.Context, _ store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
-	return store.OperatorConversationTurnListResult{Turns: []store.OperatorPublicConversationTurn{}}, nil
+	return store.OperatorConversationTurnListResult{Turns: []store.OperatorConversationTurnListItem{}}, nil
+}
+
+func (s stubConversationCaps) LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error) {
+	return store.OperatorPublicConversationTurnDetail{}, store.ErrTurnNotFound
 }
 
 type stubSQLAgents struct {
@@ -850,7 +895,7 @@ type stubSQLAgents struct {
 	err            error
 	facts          map[string]store.PendingAgentDeliveryFacts
 	lifecycleFacts map[string]store.AgentDeliveryLifecycleFacts
-	turns          map[string]store.OperatorConversationTurnListResult
+	turns          map[string][]store.OperatorPublicConversationTurn
 	turnErr        error
 }
 
@@ -861,7 +906,11 @@ type stubSQLAgentsWithoutLifecycle struct {
 }
 
 func (s stubSQLAgentsWithoutLifecycle) ListOperatorConversationTurns(_ context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
-	return store.OperatorConversationTurnListResult{Turns: []store.OperatorPublicConversationTurn{}}, nil
+	return store.OperatorConversationTurnListResult{Turns: []store.OperatorConversationTurnListItem{}}, nil
+}
+
+func (s stubSQLAgentsWithoutLifecycle) LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error) {
+	return store.OperatorPublicConversationTurnDetail{}, store.ErrTurnNotFound
 }
 
 func (s stubSQLAgentsWithoutLifecycle) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -908,14 +957,29 @@ func (s stubSQLAgents) ListOperatorConversationTurns(_ context.Context, opts sto
 	if s.turnErr != nil {
 		return store.OperatorConversationTurnListResult{}, s.turnErr
 	}
-	page, ok := s.turns[strings.TrimSpace(opts.SessionID)]
-	if !ok {
-		page = store.OperatorConversationTurnListResult{Turns: []store.OperatorPublicConversationTurn{}}
-	}
-	if page.Turns == nil {
-		page.Turns = []store.OperatorPublicConversationTurn{}
+	publicTurns := s.turns[strings.TrimSpace(opts.SessionID)]
+	page := store.OperatorConversationTurnListResult{Turns: []store.OperatorConversationTurnListItem{}}
+	for _, turn := range publicTurns {
+		page.Turns = append(page.Turns, store.OperatorConversationTurnListItem{
+			TurnID: turn.TurnID, Ordinal: turn.Ordinal, CompletedAt: turn.CompletedAt,
+			DurationMS: turn.DurationMS, TriggerEventID: turn.TriggerEventID,
+			TriggerEventType: turn.TriggerEventType, Tokens: turn.Tokens,
+			Outcome: turn.Outcome, ParseOK: turn.ParseOK, Failure: turn.Failure,
+		})
 	}
 	return page, nil
+}
+
+func (s stubSQLAgents) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
+	if s.turnErr != nil {
+		return store.OperatorPublicConversationTurnDetail{}, s.turnErr
+	}
+	for _, turn := range s.turns[strings.TrimSpace(sessionID)] {
+		if turn.TurnID == strings.TrimSpace(turnID) {
+			return store.OperatorPublicConversationTurnDetail{Turn: turn}, nil
+		}
+	}
+	return store.OperatorPublicConversationTurnDetail{}, store.ErrTurnNotFound
 }
 
 func (s stubObservability) ListEvents(context.Context, EventFilter, int) ([]eventRecord, error) {
@@ -1312,6 +1376,122 @@ func TestHandler_DashboardRoutesFailClosedWhenAuthIsNotConfigured(t *testing.T) 
 	}
 }
 
+func TestDashboardConversationListHTTPUsesCanonicalPageAndCursor(t *testing.T) {
+	reader := &stubDashboardConversationHTTPReader{listResult: store.OperatorConversationListResult{
+		Conversations: []store.OperatorConversationSummary{{SessionID: "sess-1", AgentID: "agent-1", Status: "active"}},
+		NextCursor:    "conversation-page-3",
+	}}
+	handler := NewHandler(Options{Conversations: reader}).(*Handler)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations?agent_id=agent-1&run_id=run-1&limit=7&cursor=conversation-page-2", nil)
+	handler.handleConversations(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conversation list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if reader.listOpts.AgentID != "agent-1" || reader.listOpts.RunID != "run-1" || reader.listOpts.Limit != 7 || reader.listOpts.Cursor != "conversation-page-2" {
+		t.Fatalf("conversation list options = %#v", reader.listOpts)
+	}
+	if !strings.Contains(rec.Body.String(), `"next_cursor":"conversation-page-3"`) {
+		t.Fatalf("conversation list body = %s, want consumable next cursor", rec.Body.String())
+	}
+}
+
+func TestDashboardConversationDetailHTTPUsesCompactSafeCursorPages(t *testing.T) {
+	completedAt := time.Date(2026, 7, 14, 1, 2, 3, 0, time.UTC)
+	reader := &stubDashboardConversationHTTPReader{turnPages: map[string]store.OperatorConversationTurnListResult{
+		"": {
+			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
+			Turns: []store.OperatorConversationTurnListItem{{
+				TurnID: "turn-2", Ordinal: 2, CompletedAt: completedAt, DurationMS: 42,
+				ActivityCounts: store.OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1},
+				ParseOK:        false, Outcome: "failed",
+			}},
+			NextCursor: "turn-page-2",
+		},
+		"turn-page-2": {
+			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
+			Turns:        []store.OperatorConversationTurnListItem{{TurnID: "turn-1", Ordinal: 1, CompletedAt: completedAt.Add(-time.Minute), DurationMS: 21, ParseOK: true}},
+		},
+	}}
+	handler := NewHandler(Options{Conversations: reader}).(*Handler)
+
+	requestPage := func(rawURL, cursor, wantTurn string) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		req.SetPathValue("sessionID", "sess-1")
+		handler.handleConversationDetail(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("conversation detail status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		last := reader.turnOpts[len(reader.turnOpts)-1]
+		if last.SessionID != "sess-1" || last.Limit != 1 || last.Cursor != cursor {
+			t.Fatalf("conversation detail options = %#v", last)
+		}
+		if !strings.Contains(rec.Body.String(), `"turn_id":"`+wantTurn+`"`) {
+			t.Fatalf("conversation detail body = %s, want %s", rec.Body.String(), wantTurn)
+		}
+		return rec.Body.String()
+	}
+
+	first := requestPage("/api/conversations/sess-1?limit=1", "", "turn-2")
+	if !strings.Contains(first, `"next_cursor":"turn-page-2"`) || !strings.Contains(first, `"activity_counts"`) {
+		t.Fatalf("conversation detail first page = %s", first)
+	}
+	second := requestPage("/api/conversations/sess-1?limit=1&cursor=turn-page-2", "turn-page-2", "turn-1")
+	for _, body := range []string{first, second} {
+		for _, forbidden := range []string{`"activity":`, `"assistant_visible_output":`, `"entity_id":`, `"task_id":`, `"retry_count":`, "request_payload", "response_payload", "available_tools", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("conversation detail leaked %q: %s", forbidden, body)
+			}
+		}
+	}
+}
+
+func TestDashboardAgentListHTTPExposesOnlySafeLatestTurn(t *testing.T) {
+	row := store.OperatorAgentSummary{
+		AgentID: "agent-1", Role: "researcher", Type: "managed", Mode: "session", Status: "active",
+		RuntimeDescriptorMode: "private-runtime-mode", FlowInstance: "private-flow-instance",
+		LiveTurn: &store.OperatorLiveTurn{
+			TurnID: "turn-1", TaskID: "task-1", ParseOK: true, AssistantVisibleOutput: "safe output", Outcome: "completed",
+			LastTool: &store.OperatorAgentTool{Name: "inspect", ToolUseID: "toolu-1", OK: true},
+		},
+	}
+	handler := NewHandler(Options{Agents: stubDashboardAgentHTTPReader{result: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{row}}}}).(*Handler)
+	rec := httptest.NewRecorder()
+	handler.handleAgents(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	assertDashboardAgentHTTPSafe(t, rec, "turn-1")
+}
+
+func TestDashboardAgentDetailHTTPExposesOnlySafeLatestTurn(t *testing.T) {
+	row := store.OperatorAgentSummary{
+		AgentID: "agent-1", Role: "researcher", Type: "managed", Mode: "session", Status: "active",
+		RuntimeDescriptorMode: "private-runtime-mode", FlowInstance: "private-flow-instance",
+		LiveTurn: &store.OperatorLiveTurn{
+			TurnID: "turn-1", TaskID: "task-1", ParseOK: true, AssistantVisibleOutput: "safe output", Outcome: "completed",
+			LastTool: &store.OperatorAgentTool{Name: "inspect", ToolUseID: "toolu-1", OK: true},
+		},
+	}
+	handler := NewHandler(Options{Agents: stubDashboardAgentHTTPReader{detail: store.OperatorAgentDetail{Agent: row}}}).(*Handler)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-1", nil)
+	req.SetPathValue("id", "agent-1")
+	handler.handleAgentDetail(rec, req)
+	assertDashboardAgentHTTPSafe(t, rec, "turn-1")
+}
+
+func assertDashboardAgentHTTPSafe(t *testing.T, rec *httptest.ResponseRecorder, wantTurn string) {
+	t.Helper()
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"turn_id":"`+wantTurn+`"`) || !strings.Contains(rec.Body.String(), `"assistant_visible_output":"safe output"`) {
+		t.Fatalf("dashboard agent response status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, forbidden := range []string{"private-runtime-mode", "private-flow-instance", "request_payload", "response_payload", "available_tools", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible", `"result":`} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("dashboard agent response leaked %q: %s", forbidden, rec.Body.String())
+		}
+	}
+}
+
 func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1331,11 +1511,11 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 			Status: "active",
 		}},
 		caps: canonicalEventAndConversationCaps(),
-		turns: map[string]store.OperatorConversationTurnListResult{
-			"sess-1": {Turns: []store.OperatorPublicConversationTurn{{
+		turns: map[string][]store.OperatorPublicConversationTurn{
+			"sess-1": {{
 				TurnID: "turn-1", TaskID: "task-1", ParseOK: true, CompletedAt: time.Now(),
 				Activity: []store.OperatorConversationActivity{{Kind: "tool_result", ToolName: "schedule", ToolUseID: "toolu_1", OK: &toolOK}},
-			}}},
+			}},
 		},
 	}, 12)
 
@@ -1392,8 +1572,8 @@ func TestSQLAgentReader_ListGenericAgents_ConsumesSafeTurnWithoutSummaryBlock(t 
 			Status: "active",
 		}},
 		caps: canonicalEventAndConversationCaps(),
-		turns: map[string]store.OperatorConversationTurnListResult{
-			"sess-1": {Turns: []store.OperatorPublicConversationTurn{{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, CompletedAt: time.Now(), Activity: []store.OperatorConversationActivity{{Kind: "output", Text: "safe output"}}}}},
+		turns: map[string][]store.OperatorPublicConversationTurn{
+			"sess-1": {{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, CompletedAt: time.Now(), Activity: []store.OperatorConversationActivity{{Kind: "output", Text: "safe output"}}}},
 		},
 	}, 12)
 
@@ -1508,8 +1688,8 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 		lifecycleFacts: map[string]store.AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "launching", BlockingLayer: "session_launch"},
 		},
-		turns: map[string]store.OperatorConversationTurnListResult{
-			"sess-7": {Turns: []store.OperatorPublicConversationTurn{{TurnID: "turn-7", TaskID: "task-7", ParseOK: false, CompletedAt: time.Now(), Activity: []store.OperatorConversationActivity{}}}},
+		turns: map[string][]store.OperatorPublicConversationTurn{
+			"sess-7": {{TurnID: "turn-7", TaskID: "task-7", ParseOK: false, CompletedAt: time.Now(), Activity: []store.OperatorConversationActivity{}}},
 		},
 	}, 12)
 
@@ -2179,7 +2359,7 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalSessionWatchdogState
 			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
 		}).AddRow("sess-1", "agent-1", "", "live_session", "global", "global", "session", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
 
-	if _, err := reader.List(context.Background(), 10); err == nil {
+	if _, err := reader.ListOperatorConversations(context.Background(), store.OperatorConversationListOptions{Limit: 10}); err == nil {
 		t.Fatal("expected malformed canonical session watchdog state to fail")
 	}
 
@@ -2209,10 +2389,11 @@ func TestSQLConversationReader_ListProjectsCanonicalSessionWatchdogState(t *test
 			"session_id", "agent_id", "run_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
 		}).AddRow("sess-1", "agent-1", "", "live_session", "global", "global", "session", "active", 3, 0, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC(), nil, time.Now().UTC()))
 
-	items, err := reader.List(context.Background(), 10)
+	page, err := reader.ListOperatorConversations(context.Background(), store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf("ListOperatorConversations: %v", err)
 	}
+	items := page.Conversations
 	if len(items) != 1 || items[0].Metadata.Watchdog == nil {
 		t.Fatalf("expected one watchdog-bearing row, got %+v", items)
 	}

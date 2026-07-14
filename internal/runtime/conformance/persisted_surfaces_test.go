@@ -134,17 +134,18 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	if reader == nil {
 		t.Fatal("NewSQLConversationReader returned nil")
 	}
-	item, ok, err := reader.Get(ctx, sessionID)
+	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
 	if err != nil {
-		t.Fatalf("Get conversation: %v", err)
+		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
-	if !ok {
-		t.Fatalf("conversation %s not found", sessionID)
+	if len(page.Turns) != 1 {
+		t.Fatalf("conversation turns = %d, want 1", len(page.Turns))
 	}
-	if len(item.Turns) != 1 {
-		t.Fatalf("conversation turns = %d, want 1", len(item.Turns))
+	item, err := reader.LoadOperatorPublicConversationTurn(ctx, sessionID, page.Turns[0].TurnID)
+	if err != nil {
+		t.Fatalf("LoadOperatorPublicConversationTurn: %v", err)
 	}
-	turn := item.Turns[0]
+	turn := item.Turn
 	if turn.AssistantVisibleOutput != "Parking for manual review." {
 		t.Fatalf("assistant_visible_output = %q, want %q", turn.AssistantVisibleOutput, "Parking for manual review.")
 	}
@@ -214,23 +215,21 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	if reader == nil {
 		t.Fatal("NewSQLConversationReader returned nil")
 	}
-	item, ok, err := reader.Get(ctx, sessionID)
+	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
-		t.Fatalf("Get conversation: %v", err)
+		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
-	if !ok {
-		t.Fatalf("conversation %s not found", sessionID)
-	}
-	if item.Conversation.Metadata.Watchdog == nil {
+	if page.Conversation.Metadata.Watchdog == nil {
 		t.Fatal("expected runtime_state.watchdog to round-trip")
 	}
-	if item.Conversation.Metadata.Watchdog.State != "no_output" || item.Conversation.Metadata.Watchdog.Action != "session_no_output" {
-		t.Fatalf("unexpected runtime_state.watchdog: %+v", item.Conversation.Metadata.Watchdog)
+	if page.Conversation.Metadata.Watchdog.State != "no_output" || page.Conversation.Metadata.Watchdog.Action != "session_no_output" {
+		t.Fatalf("unexpected runtime_state.watchdog: %+v", page.Conversation.Metadata.Watchdog)
 	}
-	items, err := reader.List(ctx, 10)
+	list, err := reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("List conversations: %v", err)
+		t.Fatalf("ListOperatorConversations: %v", err)
 	}
+	items := list.Conversations
 	if len(items) == 0 || items[0].Metadata.Watchdog == nil {
 		t.Fatalf("expected list metadata watchdog, got %#v", items)
 	}
@@ -598,10 +597,11 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	if reader == nil {
 		t.Fatal("NewSQLConversationReader returned nil")
 	}
-	items, err := reader.List(ctx, 10)
+	page, err := reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("List conversations: %v", err)
+		t.Fatalf("ListOperatorConversations: %v", err)
 	}
+	items := page.Conversations
 	if len(items) != 1 {
 		t.Fatalf("conversation count = %d, want 1", len(items))
 	}
@@ -646,20 +646,18 @@ func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *test
 	if reader == nil {
 		t.Fatal("NewSQLConversationReader returned nil")
 	}
-	items, err := reader.List(ctx, 10)
+	page, err := reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("List conversations: %v", err)
+		t.Fatalf("ListOperatorConversations: %v", err)
 	}
+	items := page.Conversations
 	if len(items) != 0 {
 		t.Fatalf("conversation count = %d, want 0", len(items))
 	}
 
-	item, ok, err := reader.Get(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("Get conversation: %v", err)
-	}
-	if ok {
-		t.Fatalf("expected legacy-only task conversation %s to stay hidden, got %+v", sessionID, item)
+	_, err = reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
+	if !errors.Is(err, store.ErrSessionNotFound) {
+		t.Fatalf("expected legacy-only task conversation %s to stay hidden, got %v", sessionID, err)
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -676,10 +674,11 @@ func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *test
 		t.Fatalf("UpsertConversation(task): %v", err)
 	}
 
-	items, err = reader.List(ctx, 10)
+	page, err = reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("List conversations after canonical write: %v", err)
+		t.Fatalf("ListOperatorConversations after canonical write: %v", err)
 	}
+	items = page.Conversations
 	if len(items) != 1 {
 		t.Fatalf("conversation count after canonical write = %d, want 1", len(items))
 	}
@@ -687,17 +686,14 @@ func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *test
 		t.Fatalf("unexpected canonical summary: %+v", items[0])
 	}
 
-	item, ok, err = reader.Get(ctx, sessionID)
+	detail, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
-		t.Fatalf("Get conversation after canonical write: %v", err)
+		t.Fatalf("ListOperatorConversationTurns after canonical write: %v", err)
 	}
-	if !ok {
-		t.Fatalf("canonical conversation %s not found", sessionID)
+	if detail.Conversation.Summary != "canonical task" || detail.Conversation.TurnCount != 2 || len(detail.Turns) != 0 {
+		t.Fatalf("unexpected canonical detail: %+v", detail)
 	}
-	if item.Conversation.Summary != "canonical task" || item.Conversation.TurnCount != 2 || len(item.Turns) != 0 {
-		t.Fatalf("unexpected canonical detail: %+v", item)
-	}
-	raw, err := json.Marshal(item)
+	raw, err := json.Marshal(detail)
 	if err != nil {
 		t.Fatalf("marshal canonical detail: %v", err)
 	}
@@ -1978,17 +1974,18 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	if reader == nil {
 		t.Fatal("NewSQLConversationReader returned nil")
 	}
-	item, ok, err := reader.Get(ctx, sessionID)
+	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
-		t.Fatalf("Get conversation: %v", err)
+		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
-	if !ok {
-		t.Fatalf("conversation %s not found", sessionID)
+	if len(page.Turns) != 1 {
+		t.Fatalf("conversation turns = %d, want 1", len(page.Turns))
 	}
-	if len(item.Turns) != 1 {
-		t.Fatalf("conversation turns = %d, want 1", len(item.Turns))
+	detail, err := reader.LoadOperatorPublicConversationTurn(ctx, sessionID, page.Turns[0].TurnID)
+	if err != nil {
+		t.Fatalf("LoadOperatorPublicConversationTurn: %v", err)
 	}
-	turn := item.Turns[0]
+	turn := detail.Turn
 	if len(turn.Activity) != 0 {
 		t.Fatalf("public activity exposed runtime log block: %#v", turn.Activity)
 	}

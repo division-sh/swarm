@@ -66,9 +66,32 @@ type conversationSummary struct {
 }
 
 type conversationTurnPage struct {
-	Conversation conversationSummary `json:"conversation"`
-	Turns        []conversationTurn  `json:"turns"`
-	NextCursor   string              `json:"next_cursor,omitempty"`
+	Conversation conversationSummary        `json:"conversation"`
+	Turns        []conversationTurnListItem `json:"turns"`
+	NextCursor   string                     `json:"next_cursor,omitempty"`
+}
+
+type conversationTurnListItem struct {
+	Ordinal          int                        `json:"ordinal"`
+	TurnID           string                     `json:"turn_id"`
+	CompletedAt      string                     `json:"completed_at"`
+	DurationMS       *int                       `json:"duration_ms"`
+	TriggerEventID   string                     `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                     `json:"trigger_event_type,omitempty"`
+	ActivityCounts   conversationActivityCounts `json:"activity_counts"`
+	Tokens           *conversationTokenUsage    `json:"tokens,omitempty"`
+	Outcome          string                     `json:"outcome,omitempty"`
+	ParseOK          *bool                      `json:"parse_ok"`
+	Failure          *runtimefailures.Envelope  `json:"failure,omitempty"`
+}
+
+type conversationActivityCounts struct {
+	Dispatch   int `json:"dispatch"`
+	Tool       int `json:"tool"`
+	ToolResult int `json:"tool_result"`
+	Publish    int `json:"publish"`
+	Output     int `json:"output"`
+	Failure    int `json:"failure"`
 }
 
 type conversationTurn struct {
@@ -407,7 +430,7 @@ func validateConversationTurnPageResult(prefix string, result conversationTurnPa
 		return fmt.Errorf("malformed %s: turns is required", prefix)
 	}
 	for i, turn := range result.Turns {
-		if err := validateConversationTurn(fmt.Sprintf("%s.turns[%d]", prefix, i), turn); err != nil {
+		if err := validateConversationTurnListItem(fmt.Sprintf("%s.turns[%d]", prefix, i), turn); err != nil {
 			return err
 		}
 	}
@@ -522,6 +545,49 @@ func validateConversationTurn(prefix string, turn conversationTurn) error {
 	return nil
 }
 
+func validateConversationTurnListItem(prefix string, turn conversationTurnListItem) error {
+	if turn.Ordinal < 1 {
+		return fmt.Errorf("malformed %s: ordinal must be at least 1", prefix)
+	}
+	if err := validateConversationOpaqueIDArg(prefix+".turn_id", turn.TurnID); err != nil {
+		return fmt.Errorf("malformed %s: %w", prefix, err)
+	}
+	if err := validateRequiredTimestamp(prefix+".completed_at", turn.CompletedAt); err != nil {
+		return err
+	}
+	if turn.DurationMS == nil || *turn.DurationMS < 0 {
+		return fmt.Errorf("malformed %s: duration_ms must be non-negative", prefix)
+	}
+	if turn.ParseOK == nil {
+		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
+	}
+	if strings.TrimSpace(turn.TriggerEventID) != "" {
+		if err := validateConversationOpaqueIDArg(prefix+".trigger_event_id", turn.TriggerEventID); err != nil {
+			return fmt.Errorf("malformed %s: %w", prefix, err)
+		}
+	}
+	for name, count := range map[string]int{
+		"dispatch": turn.ActivityCounts.Dispatch, "tool": turn.ActivityCounts.Tool,
+		"tool_result": turn.ActivityCounts.ToolResult, "publish": turn.ActivityCounts.Publish,
+		"output": turn.ActivityCounts.Output, "failure": turn.ActivityCounts.Failure,
+	} {
+		if count < 0 {
+			return fmt.Errorf("malformed %s: activity_counts.%s must be non-negative", prefix, name)
+		}
+	}
+	if turn.Tokens != nil {
+		if turn.Tokens.Input < 0 || turn.Tokens.Output < 0 {
+			return fmt.Errorf("malformed %s: token totals must be non-negative", prefix)
+		}
+		switch turn.Tokens.Exactness {
+		case "exact", "estimated":
+		default:
+			return fmt.Errorf("malformed %s: token exactness is invalid", prefix)
+		}
+	}
+	return nil
+}
+
 func writeConversationListResult(out io.Writer, result conversationListResult) {
 	if out == nil {
 		return
@@ -581,11 +647,11 @@ func writeConversationDetailResult(out io.Writer, result conversationTurnPage) {
 			turn.TurnID,
 			fmt.Sprintf("%d", turn.Ordinal),
 			turn.CompletedAt,
-			conversationTriggerSummary(turn),
-			conversationActivitySummary(turn.Activity),
+			conversationListTriggerSummary(turn),
+			conversationActivityCountsSummary(turn.ActivityCounts),
 			conversationTokenSummary(turn.Tokens),
 			fmt.Sprintf("%dms", *turn.DurationMS),
-			conversationOutcomeSummary(turn),
+			conversationListOutcomeSummary(turn),
 		})
 	}
 	footers := []string{}
@@ -631,7 +697,7 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 			{Label: "Run", Value: session.RunID},
 			{Label: "Completed", Value: turn.CompletedAt},
 			{Label: "Duration", Value: fmt.Sprintf("%dms", *turn.DurationMS)},
-			{Label: "Trigger", Value: conversationTriggerSummary(turn)},
+			{Label: "Trigger", Value: conversationTurnTriggerSummary(turn)},
 			{Label: "Entity", Value: turn.EntityID},
 			{Label: "Task", Value: turn.TaskID},
 			{Label: "Tokens", Value: conversationTokenSummary(turn.Tokens)},
@@ -642,26 +708,30 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 	})
 }
 
-func conversationTriggerSummary(turn conversationTurn) string {
+func conversationTurnTriggerSummary(turn conversationTurn) string {
 	return firstNonEmpty(strings.TrimSpace(turn.TriggerEventType), strings.TrimSpace(turn.TriggerEventID))
 }
 
-func conversationActivitySummary(activity []conversationActivity) string {
-	counts := map[string]int{}
-	order := []string{}
-	for _, item := range activity {
-		kind := strings.TrimSpace(item.Kind)
-		if kind == "" {
-			continue
+func conversationListTriggerSummary(turn conversationTurnListItem) string {
+	return firstNonEmpty(strings.TrimSpace(turn.TriggerEventType), strings.TrimSpace(turn.TriggerEventID))
+}
+
+func conversationActivityCountsSummary(counts conversationActivityCounts) string {
+	parts := make([]string, 0, 6)
+	for _, item := range []struct {
+		count int
+		label string
+	}{
+		{counts.Dispatch, "dispatch"},
+		{counts.Tool, "tool"},
+		{counts.ToolResult, "result"},
+		{counts.Publish, "emit"},
+		{counts.Output, "output"},
+		{counts.Failure, "failure"},
+	} {
+		if item.count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", item.count, item.label))
 		}
-		if counts[kind] == 0 {
-			order = append(order, kind)
-		}
-		counts[kind]++
-	}
-	parts := make([]string, 0, len(order))
-	for _, kind := range order {
-		parts = append(parts, fmt.Sprintf("%d %s", counts[kind], strings.ReplaceAll(kind, "_", " ")))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -691,6 +761,19 @@ func conversationTokenSummary(tokens *conversationTokenUsage) string {
 }
 
 func conversationOutcomeSummary(turn conversationTurn) string {
+	if turn.Failure != nil {
+		return conversationFailureSummary(turn.Failure)
+	}
+	if strings.TrimSpace(turn.Outcome) != "" {
+		return strings.TrimSpace(turn.Outcome)
+	}
+	if turn.ParseOK != nil && !*turn.ParseOK {
+		return "invalid response"
+	}
+	return ""
+}
+
+func conversationListOutcomeSummary(turn conversationTurnListItem) string {
 	if turn.Failure != nil {
 		return conversationFailureSummary(turn.Failure)
 	}
