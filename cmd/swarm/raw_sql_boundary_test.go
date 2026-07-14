@@ -213,6 +213,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
 		},
+		"internal/runtime/runforkexecution/agent_runtime_materialization.go": {
+			Classification: rawSQLOptionalProductBoundary,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
+			Reason:         "selected-contract fork agent runtime binds the Postgres-backed workflow instance owner used by fork-local lifecycle activation; this remains inside the explicit optional run.fork product seam",
+		},
 		"internal/runtime/runforkexecution/runtime_container.go": {
 			Classification: rawSQLOptionalProductBoundary,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",

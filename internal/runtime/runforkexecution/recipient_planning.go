@@ -376,7 +376,16 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if len(actual.SubscriptionRecipients) > 0 {
 		return fmt.Errorf("selected-contract publish path cannot use live subscriptions as fork recipient truth")
 	}
-	if !recipientKeysEqual(expectedRecipientKeys(expected.Recipients), actualRecipientKeys(actual.RoutedRecipients)) {
+	expectedKeys := expectedRecipientKeys(expected.Recipients)
+	actualKeys := actualRecipientKeys(actual.RoutedRecipients)
+	if actual.UsesCanonicalRouteAuthority() {
+		// Canonical connect routing owns fork-local instance selection. The
+		// source plan authorizes the subscriber identity, never the source-run
+		// concrete path that create must replace with a fresh fork decision.
+		expectedKeys = expectedRecipientIdentityKeys(expected.Recipients)
+		actualKeys = actualRecipientIdentityKeys(actual.RoutedRecipients)
+	}
+	if !recipientKeysEqual(expectedKeys, actualKeys) {
 		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", store.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
 	}
 	return nil
@@ -481,6 +490,37 @@ func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func expectedRecipientIdentityKeys(in []store.RunForkContractFrontierRecipient) []string {
+	out := make([]string, 0, len(in))
+	for _, recipient := range in {
+		if key := recipientIdentityKey(recipient.SubscriberType, recipient.SubscriberID); key != "" {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func actualRecipientIdentityKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
+	out := make([]string, 0, len(in))
+	for _, recipient := range in {
+		if key := recipientIdentityKey(recipient.Type, recipient.ID); key != "" {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func recipientIdentityKey(subscriberType, subscriberID string) string {
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if subscriberType == "" || subscriberID == "" {
+		return ""
+	}
+	return subscriberType + "\x00" + subscriberID
 }
 
 func recipientKeysEqual(left, right []string) bool {

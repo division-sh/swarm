@@ -408,6 +408,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	turnID := uuid.NewString()
 	entityID := uuid.NewString()
 	replyContextID := "reply-v1:trace-context"
+	projectedInstanceID := uuid.NewString()
 	now := time.Unix(1700000400, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
@@ -442,13 +443,15 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-			retry_count, reason_code, failure, active_session_id, delivery_context, started_at, created_at
+			retry_count, reason_code, failure, active_session_id, delivery_context,
+			delivery_payload_projection, started_at, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'failed',
-			2, 'handler_error', $4::jsonb, $5::uuid, jsonb_build_object('reply', jsonb_build_object('id', $8::text)), $6, $7
+			2, 'handler_error', $4::jsonb, $5::uuid, jsonb_build_object('reply', jsonb_build_object('id', $8::text)),
+			jsonb_build_object('fields', jsonb_build_object('validation_case_id', $9::text)), $6, $7
 		)
-	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)), sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID); err != nil {
+	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)), sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID, projectedInstanceID); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -487,6 +490,9 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	if got.ReplyContextID != replyContextID {
 		t.Fatalf("delivery reply context = %q, want %q", got.ReplyContextID, replyContextID)
+	}
+	if got.DeliveryPayloadProjection == nil || got.DeliveryPayloadProjection.Fields()["validation_case_id"] != projectedInstanceID {
+		t.Fatalf("delivery payload projection = %#v, want validation_case_id %q", got.DeliveryPayloadProjection, projectedInstanceID)
 	}
 	if got.SessionID != sessionID || got.SessionKind != "live_session" || got.SessionRuntimeMode != "session" {
 		t.Fatalf("session trace = %#v", got)

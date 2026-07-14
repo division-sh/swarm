@@ -314,9 +314,18 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 	)
 }
 
-func newSelectedContractPipeline(bus *runtimebus.EventBus, store *store.PostgresStore, loaded LoadedSelectedContractSource, agentRuntime SelectedContractAgentRuntimeOptions) *runtimepipeline.PipelineCoordinator {
+func newSelectedContractPipeline(
+	bus *runtimebus.EventBus,
+	store *store.PostgresStore,
+	loaded LoadedSelectedContractSource,
+	agentRuntime SelectedContractAgentRuntimeOptions,
+	workflowStore *runtimepipeline.WorkflowInstanceStore,
+	instanceActivator runtimepipeline.FlowInstanceActivator,
+) *runtimepipeline.PipelineCoordinator {
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, store.DB, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  loaded.Module,
+		WorkflowStore:           workflowStore,
+		InstanceActivator:       instanceActivator,
 		MailboxMaterializer:     store,
 		DecisionCards:           store,
 		EventReceiptsCapability: store.CanonicalEventReceiptsCapability,

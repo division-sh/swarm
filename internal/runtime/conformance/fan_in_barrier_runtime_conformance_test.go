@@ -97,11 +97,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			seedFanInBarrierRun(t, ctx, backend, db, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
 			seedFanInBarrierPortfolioShell(t, ctx, runtime.workflowStore, bundle)
-			const (
-				periodID = "2026-Q3"
-				memberA  = "operating-a"
-				memberB  = "operating-b"
-			)
+			const periodID = "2026-Q3"
+			memberA := uuid.NewString()
+			memberB := uuid.NewString()
 
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "portfolio", "portfolio.setup", map[string]any{
 				"portfolio_id":           "portfolio",
@@ -123,10 +121,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatalf("activation after setup = %#v, want open 0/2", activation)
 			}
 
-			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "operating", "operating.reported", map[string]any{
-				"operating_id": memberB,
-				"period_id":    periodID,
-				"revenue":      22,
+			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberB, "ingress", "operating.report.requested", map[string]any{
+				"period_id": periodID,
+				"revenue":   22,
 			})
 			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.workflowStore)
 			activation = loadFanInBarrierActivation(t, portfolio, periodID)
@@ -139,10 +136,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			// Reconstruct both EventBus and PipelineCoordinator. The second arrival
 			// must consume the persisted activation rather than in-memory state.
 			runtime = newFanInBarrierRuntime(t, backend, db, source)
-			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "operating", "operating.reported", map[string]any{
-				"operating_id": memberA,
-				"period_id":    periodID,
-				"revenue":      11,
+			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberA, "ingress", "operating.report.requested", map[string]any{
+				"period_id": periodID,
+				"revenue":   11,
 			})
 			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.workflowStore)
 			activation = loadFanInBarrierActivation(t, portfolio, periodID)

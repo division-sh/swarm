@@ -19,24 +19,25 @@ const (
 )
 
 type EventSchemaCapabilities struct {
-	Log                  SchemaFlavor
-	Deliveries           SchemaFlavor
-	Receipts             SchemaFlavor
-	HasRuns              bool
-	RunStartedAt         bool
-	RunTriggerColumns    bool
-	RunCounterColumns    bool
-	RunTerminalFields    bool
-	RunBundleHash        bool
-	RunBundleSource      bool
-	RunBundleFingerprint bool
-	LogRunID             bool
-	DeliveryRunID        bool
-	LogIdempotencyKey    bool
-	LogRouteIdentity     bool
-	DeliveryTargetRoute  bool
-	DeliveryContext      bool
-	ReceiptTypedIdentity bool
+	Log                       SchemaFlavor
+	Deliveries                SchemaFlavor
+	Receipts                  SchemaFlavor
+	HasRuns                   bool
+	RunStartedAt              bool
+	RunTriggerColumns         bool
+	RunCounterColumns         bool
+	RunTerminalFields         bool
+	RunBundleHash             bool
+	RunBundleSource           bool
+	RunBundleFingerprint      bool
+	LogRunID                  bool
+	DeliveryRunID             bool
+	LogIdempotencyKey         bool
+	LogRouteIdentity          bool
+	DeliveryTargetRoute       bool
+	DeliveryContext           bool
+	DeliveryPayloadProjection bool
+	ReceiptTypedIdentity      bool
 }
 
 type ConversationSchemaCapabilities struct {
@@ -219,6 +220,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			[]string{
 				"event_id", "subscriber_type", "subscriber_id", "status", "retry_count",
 				"reason_code", "failure", "active_session_id", "started_at", "delivered_at", "created_at",
+				"delivery_target_route", "delivery_context", "delivery_payload_projection",
 			},
 			[]string{"event_id", "agent_id", "status", "created_at"},
 		),
@@ -230,20 +232,21 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			},
 			[]string{"event_id", "agent_id", "processed_at", "status", "retry_count", "error"},
 		),
-		HasRuns:              catalog.hasColumns("runs", "run_id", "status"),
-		RunStartedAt:         catalog.hasColumns("runs", "started_at"),
-		RunTriggerColumns:    catalog.hasColumns("runs", "trigger_event_id", "trigger_event_type"),
-		RunCounterColumns:    catalog.hasColumns("runs", "event_count", "entity_count"),
-		RunTerminalFields:    catalog.hasColumns("runs", "failure", "ended_at"),
-		RunBundleHash:        catalog.hasColumns("runs", "bundle_hash"),
-		RunBundleSource:      catalog.hasColumns("runs", "bundle_source"),
-		RunBundleFingerprint: catalog.hasColumns("runs", "bundle_fingerprint"),
-		LogRunID:             catalog.hasColumns("events", "run_id"),
-		DeliveryRunID:        catalog.hasColumns("event_deliveries", "run_id"),
-		LogIdempotencyKey:    catalog.hasColumns("events", "idempotency_key"),
-		LogRouteIdentity:     catalog.hasColumns("events", "source_route", "target_route", "target_set"),
-		DeliveryTargetRoute:  catalog.hasColumns("event_deliveries", "delivery_target_route"),
-		DeliveryContext:      catalog.hasColumns("event_deliveries", "delivery_context"),
+		HasRuns:                   catalog.hasColumns("runs", "run_id", "status"),
+		RunStartedAt:              catalog.hasColumns("runs", "started_at"),
+		RunTriggerColumns:         catalog.hasColumns("runs", "trigger_event_id", "trigger_event_type"),
+		RunCounterColumns:         catalog.hasColumns("runs", "event_count", "entity_count"),
+		RunTerminalFields:         catalog.hasColumns("runs", "failure", "ended_at"),
+		RunBundleHash:             catalog.hasColumns("runs", "bundle_hash"),
+		RunBundleSource:           catalog.hasColumns("runs", "bundle_source"),
+		RunBundleFingerprint:      catalog.hasColumns("runs", "bundle_fingerprint"),
+		LogRunID:                  catalog.hasColumns("events", "run_id"),
+		DeliveryRunID:             catalog.hasColumns("event_deliveries", "run_id"),
+		LogIdempotencyKey:         catalog.hasColumns("events", "idempotency_key"),
+		LogRouteIdentity:          catalog.hasColumns("events", "source_route", "target_route", "target_set"),
+		DeliveryTargetRoute:       catalog.hasColumns("event_deliveries", "delivery_target_route"),
+		DeliveryContext:           catalog.hasColumns("event_deliveries", "delivery_context"),
+		DeliveryPayloadProjection: catalog.hasColumns("event_deliveries", "delivery_payload_projection"),
 	}
 
 	caps.Conversations = ConversationSchemaCapabilities{

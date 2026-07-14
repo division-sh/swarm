@@ -14,11 +14,15 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(t *testing.T) {
@@ -29,6 +33,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("fan-in stream hard invalidities = %#v, want none", got)
 	}
+	proveFanInStreamProducerPath(t, source)
 
 	store := &fanInStreamMemoryStore{}
 	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{
@@ -94,6 +99,81 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	}
 	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
+	}
+}
+
+func TestCreateEventIDCarryProjectionReachesHandler(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.FanInStream)
+	proveFanInStreamProducerPath(t, templatefanin.LoadSource(t, templatefanin.Options{}))
+}
+
+func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
+	t.Helper()
+	backend := storetest.StartSQLiteRuntimeStore(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
+	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
+	if err := runtime.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID:      templatefanin.ReceiverFlowInstance,
+		StorageRef:      templatefanin.ReceiverFlowInstance,
+		WorkflowName:    templatefanin.ReceiverFlowID,
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "active",
+		Metadata: map[string]any{
+			"entity_id":     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
+			"portfolio_id":  "portfolio-default",
+			"flow_path":     templatefanin.ReceiverFlowInstance,
+			"instance_id":   templatefanin.ReceiverFlowInstance,
+			"instance_kind": "singleton",
+		},
+	}); err != nil {
+		t.Fatalf("seed fan-in stream singleton: %v", err)
+	}
+
+	requestEventID := uuid.NewString()
+	publishFanInBarrierEvent(t, ctx, runtime.bus, source, requestEventID, "ingress", "operating.report.requested", map[string]any{
+		"period_id": "2026-Q1",
+		"revenue":   100,
+	})
+
+	var requestPayloadRaw, reportPayloadRaw string
+	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
+		t.Fatalf("load producer request payload: %v", err)
+	}
+	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
+		t.Fatalf("load producer-driven report payload: %v", err)
+	}
+	var requestPayload, reportPayload map[string]any
+	if err := json.Unmarshal([]byte(requestPayloadRaw), &requestPayload); err != nil {
+		t.Fatalf("decode producer request payload: %v", err)
+	}
+	if err := json.Unmarshal([]byte(reportPayloadRaw), &reportPayload); err != nil {
+		t.Fatalf("decode producer-driven report payload: %v", err)
+	}
+	if _, exists := requestPayload["operating_id"]; exists {
+		t.Fatalf("producer request payload was mutated with receiver carry: %#v", requestPayload)
+	}
+	if reportPayload["operating_id"] != requestEventID || reportPayload["period_id"] != "2026-Q1" || reportPayload["revenue"] != float64(100) {
+		t.Fatalf("producer-driven report payload = %#v, want minted carry %s", reportPayload, requestEventID)
+	}
+	routes, err := backend.ListEventDeliveryRoutes(ctx, requestEventID)
+	if err != nil {
+		t.Fatalf("load producer request delivery routes: %v", err)
+	}
+	if len(routes) != 1 || routes[0].PayloadProjection.Fields()["operating_id"] != requestEventID {
+		t.Fatalf("producer request delivery routes = %#v, want stamped operating_id %s", routes, requestEventID)
+	}
+	portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.workflowStore)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(portfolio.Metadata, portfolio.StateBuckets)
+	if err != nil {
+		t.Fatalf("load producer-driven stream state: %v", err)
+	}
+	if got := fanInStreamAccumulatorItemCount(t, carrier.StateBuckets, "2026-Q1"); got != 1 {
+		t.Fatalf("producer-driven stream accumulator items = %d, want 1", got)
+	}
+	if got := carrier.Metadata["last_revenue"]; got != float64(100) {
+		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
 	}
 }
 

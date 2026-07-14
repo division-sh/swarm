@@ -311,6 +311,9 @@ func (eb *EventBus) deliverRoutePlanWithRoutes(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt events.Event, liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) error {
+	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
+		return err
+	}
 	liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
 	recipientIDs := make([]string, 0, len(liveRecipients))
 	for _, recipient := range liveRecipients {
@@ -353,21 +356,9 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			routes = []events.DeliveryRoute{{}}
 		}
 		for _, route := range routes {
-			target := route.Target.Normalized()
-			deliverEvent := evt.WithDeliveryContext(route.Context)
-			if !target.Empty() {
-				deliverEvent = events.NewProjectionEvent(
-					evt.ID(),
-					evt.Type(),
-					evt.SourceAgent(),
-					evt.TaskID(),
-					evt.Payload(),
-					evt.ChainDepth(),
-					evt.RunID(),
-					evt.ParentEventID(),
-					events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), target),
-					evt.CreatedAt(),
-				).WithDeliveryContext(route.Context)
+			deliverEvent, err := projectEventForDeliveryRoute(evt, route)
+			if err != nil {
+				return err
 			}
 			switch recipient.send(ctx, deliverEvent) {
 			case agentRouteSendDelivered:

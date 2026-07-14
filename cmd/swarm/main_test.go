@@ -4738,6 +4738,12 @@ func TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle(t *testing.T) {
 	servedparity.Run(t, scenario, runServedDynamicAutoEmitBackendProof)
 }
 
+func TestCreateMintedCarryProjectionReachesHandlerFromPublicIngressOnBothBackends(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
+	scenario := servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle)
+	servedparity.Run(t, scenario, runServedCreateCarryProjectionBackendProof)
+}
+
 func TestServedParityHarnessLiveAgentEventReplayLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle),
@@ -6234,6 +6240,161 @@ func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Bac
 	default:
 		t.Fatalf("unknown served dynamic auto_emit backend %q", backend)
 	}
+}
+
+func runServedCreateCarryProjectionBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		runServedCreateCarryProjectionSQLiteProof(t)
+	case servedparity.BackendExplicitPostgres:
+		runServedCreateCarryProjectionPostgresProof(t)
+	default:
+		t.Fatalf("unknown served create carry projection backend %q", backend)
+	}
+}
+
+func runServedCreateCarryProjectionSQLiteProof(t *testing.T) {
+	t.Helper()
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	contractsPath := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	oldBuildStores := buildStoresForServe
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+	var servedDB *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			servedDB = stores.SQLDB
+		}
+		return stores, err
+	}
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	if servedDB == nil {
+		t.Fatal("served sqlite SQLDB is required for create carry projection proof")
+	}
+	runServedCreateCarryProjectionProof(t, endpoint, servedDB, "sqlite", bundleHash)
+}
+
+func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
+	t.Helper()
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	runServedCreateCarryProjectionProof(t, endpoint, db, "postgres", bundleHash)
+}
+
+func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string) {
+	t.Helper()
+	root := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name":      "producer/validation.triggered",
+		"bundle_hash":     bundleHash,
+		"payload":         map[string]any{"candidate": "candidate-1"},
+		"idempotency_key": "issue-2025-" + backend,
+	})
+	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
+		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
+	}
+	requestedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, "producer/validation.requested")
+
+	requestedPayload := servedEventPayloadObject(t, db, backend, requestedEventID)
+	if requestedPayload["candidate"] != "candidate-1" {
+		t.Fatalf("%s requested payload = %#v, want authored candidate", backend, requestedPayload)
+	}
+	if _, exists := requestedPayload["validation_case_id"]; exists {
+		t.Fatalf("%s persisted source payload mutated with receiver-owned validation_case_id: %#v", backend, requestedPayload)
+	}
+	projection, targetFlow, targetInstance := servedEventDeliveryProjection(t, db, backend, requestedEventID, "validator-node")
+	validationCaseID := strings.TrimSpace(projection["validation_case_id"])
+	if _, err := uuid.Parse(validationCaseID); err != nil {
+		t.Fatalf("%s projected validation_case_id = %q, want UUID: %v", backend, validationCaseID, err)
+	}
+	if targetFlow != "validator" || targetInstance == "" {
+		t.Fatalf("%s projected route target = %s/%s, want concrete validator instance", backend, targetFlow, targetInstance)
+	}
+	startedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, targetInstance+"/validation.started")
+	startedPayload := servedEventPayloadObject(t, db, backend, startedEventID)
+	if startedPayload["candidate"] != "candidate-1" || startedPayload["validation_case_id"] != validationCaseID {
+		t.Fatalf("%s downstream payload = %#v, want explicit candidate and projected validation_case_id %s", backend, startedPayload, validationCaseID)
+	}
+	if current := servedEventPayloadObject(t, db, backend, requestedEventID); !reflect.DeepEqual(current, requestedPayload) {
+		t.Fatalf("%s source payload changed after handler execution: before=%#v after=%#v", backend, requestedPayload, current)
+	}
+
+	requireServedParitySettlementPostconditions(t, endpoint, db, backend, root.RunID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
+}
+
+func servedEventPayloadObject(t *testing.T, db *sql.DB, backend, eventID string) map[string]any {
+	t.Helper()
+	query := "SELECT payload FROM events WHERE event_id = ?"
+	args := []any{eventID}
+	if backend == "postgres" {
+		query = "SELECT payload::text FROM events WHERE event_id = $1::uuid"
+	}
+	var raw string
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("%s decode event payload %s: %v", backend, eventID, err)
+	}
+	return payload
+}
+
+func servedEventDeliveryProjection(t *testing.T, db *sql.DB, backend, eventID, subscriberID string) (map[string]string, string, string) {
+	t.Helper()
+	query := `SELECT delivery_payload_projection, delivery_target_route
+		FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	args := []any{eventID, subscriberID}
+	if backend == "postgres" {
+		query = `SELECT delivery_payload_projection::text, delivery_target_route::text
+			FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var raw, targetRaw string
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw, &targetRaw); err != nil {
+		t.Fatalf("%s load delivery projection for %s/%s: %v", backend, eventID, subscriberID, err)
+	}
+	var projection struct {
+		Fields map[string]string `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(raw), &projection); err != nil {
+		t.Fatalf("%s decode delivery projection for %s/%s: %v", backend, eventID, subscriberID, err)
+	}
+	var target events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetRaw), &target); err != nil {
+		t.Fatalf("%s decode delivery target for %s/%s: %v", backend, eventID, subscriberID, err)
+	}
+	target = target.Normalized()
+	return projection.Fields, target.FlowID, target.FlowInstance
 }
 
 func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {

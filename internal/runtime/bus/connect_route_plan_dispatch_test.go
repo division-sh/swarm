@@ -964,7 +964,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInstanceKey(t *testing.T) {
+func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing.T) {
 	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1022,6 +1022,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInst
 			FlowInstance: activation.Instance.InstancePath,
 			EntityID:     activation.Instance.EntityID,
 		},
+		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": minted}),
 	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want create-resolution route %#v", store.routes[eventID], want)
@@ -1042,6 +1043,20 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInst
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("same-event replay target = flow_instance:%q entity:%q, want persisted %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
+	}
+	var replayedPayload map[string]any
+	if err := json.Unmarshal(replayed.Payload(), &replayedPayload); err != nil {
+		t.Fatalf("decode replayed projected payload: %v", err)
+	}
+	if replayedPayload["candidate"] != "acct-1" || replayedPayload["validation_case_id"] != minted {
+		t.Fatalf("replayed projected payload = %#v, want immutable producer candidate plus stamped validation_case_id %q", replayedPayload, minted)
+	}
+	var sourcePayload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &sourcePayload); err != nil {
+		t.Fatalf("decode immutable source payload: %v", err)
+	}
+	if _, exists := sourcePayload["validation_case_id"]; exists {
+		t.Fatalf("source payload was mutated by route projection: %#v", sourcePayload)
 	}
 }
 
@@ -1119,10 +1134,20 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 			FlowInstance: activation.Instance.InstancePath,
 			EntityID:     activation.Instance.EntityID,
 		},
+		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": eventID}),
 	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want event_id create-resolution route %#v", store.routes[eventID], want)
 	}
+}
+
+func mustDeliveryPayloadProjection(t *testing.T, fields map[string]string) events.DeliveryPayloadProjection {
+	t.Helper()
+	projection, err := events.NewDeliveryPayloadProjection(fields)
+	if err != nil {
+		t.Fatalf("NewDeliveryPayloadProjection: %v", err)
+	}
+	return projection
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute(t *testing.T) {

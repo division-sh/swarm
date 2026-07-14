@@ -120,10 +120,13 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 					}
 					validateCanonicalPublishCommands(t, text)
 					if id == FanInStream || id == FanInBarrier {
-						for _, required := range []string{"Proof boundary:", "#1835", "full producer-driven execution is not claimed here"} {
+						for _, required := range []string{"Proof boundary:", "producer", "project"} {
 							if !strings.Contains(text, required) {
-								t.Fatalf("fan-in README missing honest supported-path accounting %q", required)
+								t.Fatalf("fan-in README missing producer-driven supported-path accounting %q", required)
 							}
+						}
+						if strings.Contains(text, "full producer-driven execution is not claimed here") {
+							t.Fatal("fan-in README retains the retired producer-boundary limitation")
 						}
 					}
 

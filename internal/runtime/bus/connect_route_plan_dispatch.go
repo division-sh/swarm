@@ -141,7 +141,10 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		routes, subscribers := r.deliveryRoutesForMaterialization(plan, materialized)
+		routes, subscribers, err := r.deliveryRoutesForMaterialization(plan, materialized, decision)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
 		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleRequest {
 			routes, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
 			if err != nil {
@@ -384,10 +387,14 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 	return r.loadDescriptors(ctx)
 }
 
-func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization) ([]events.DeliveryRoute, []Subscriber) {
+func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision) ([]events.DeliveryRoute, []Subscriber, error) {
 	targets := connectMaterializedTargets(materialized)
 	if len(targets) == 0 {
-		return nil, nil
+		return nil, nil, nil
+	}
+	projection, err := syntheticDeliveryPayloadProjection(plan, decision)
+	if err != nil {
+		return nil, nil, err
 	}
 	routes := make([]events.DeliveryRoute, 0, len(targets))
 	subscribers := make([]Subscriber, 0, len(targets))
@@ -395,7 +402,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimep
 		target = target.Normalized()
 		matchedSubscribers := r.resolveSelectedReceiverCarriers(plan, target)
 		if len(matchedSubscribers) == 0 {
-			return nil, nil
+			return nil, nil, nil
 		}
 		subscribers = append(subscribers, matchedSubscribers...)
 		for _, subscriber := range matchedSubscribers {
@@ -404,13 +411,32 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimep
 				subscriberType = "node"
 			}
 			routes = append(routes, events.DeliveryRoute{
-				SubscriberType: subscriberType,
-				SubscriberID:   strings.TrimSpace(subscriber.ID),
-				Target:         target,
+				SubscriberType:    subscriberType,
+				SubscriberID:      strings.TrimSpace(subscriber.ID),
+				Target:            target,
+				PayloadProjection: projection,
 			})
 		}
 	}
-	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers)
+	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), nil
+}
+
+func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan, decision TemplateInstanceLifecycleDecision) (events.DeliveryPayloadProjection, error) {
+	if plan.InstanceKey == nil || strings.TrimSpace(plan.InstanceKey.Mint) == "" {
+		return events.DeliveryPayloadProjection{}, nil
+	}
+	if decision.Empty() {
+		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s requires lifecycle key material before delivery route construction", strings.TrimSpace(plan.Receiver.FlowID))
+	}
+	fields := make(map[string]string, len(decision.KeyMaterial))
+	for _, key := range decision.KeyMaterial {
+		fields[key.Field] = key.Value
+	}
+	projection, err := events.NewDeliveryPayloadProjection(fields)
+	if err != nil {
+		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s produced invalid synthetic carry material: %w", strings.TrimSpace(plan.Receiver.FlowID), err)
+	}
+	return projection, nil
 }
 
 func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {

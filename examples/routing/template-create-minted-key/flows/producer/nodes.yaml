@@ -1,7 +1,7 @@
 producer-node:
   id: producer-node
   execution_type: system_node
-  subscribes_to: [validation.triggered]
+  subscribes_to: [validation.triggered, validation.started]
   produces: [validation.requested]
   event_handlers:
     validation.triggered:
@@ -9,3 +9,7 @@ producer-node:
         event: validation.requested
         fields:
           candidate: payload.candidate
+    validation.started:
+      rules:
+        - id: observe_validation_started
+          condition: payload.validation_case_id != ""

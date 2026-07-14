@@ -279,10 +279,16 @@ func TestLowerCompositionConnectRoutePlansUsesCreateInputResolution(t *testing.T
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
+	var createPlans []ConnectRoutePlan
+	for _, candidate := range plans {
+		if candidate.InstanceKey != nil && candidate.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeCreate {
+			createPlans = append(createPlans, candidate)
+		}
 	}
-	plan := plans[0]
+	if len(createPlans) != 1 {
+		t.Fatalf("create plans = %#v in all plans %#v, want exactly one", createPlans, plans)
+	}
+	plan := createPlans[0]
 	if plan.InstanceKey == nil {
 		t.Fatal("InstanceKey = nil, want create resolution instance-key evidence")
 	}

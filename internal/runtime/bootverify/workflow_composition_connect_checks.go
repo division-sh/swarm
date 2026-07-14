@@ -80,6 +80,7 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 			to.FlowID,
 		))
 	}
+	findings = append(findings, validateCompositionConnectSyntheticCarryCollisions(source, connect, from, outputPin, inputPin)...)
 
 	instanceKeyFindings := validateCompositionConnectInstanceKey(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)
 	findings = append(findings, validateCompositionConnectDelivery(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)
@@ -87,6 +88,51 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 		findings = append(findings, instanceKeyFindings...)
 	} else {
 		findings = append(findings, validateCompositionConnectAddress(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)...)
+	}
+	return findings
+}
+
+func validateCompositionConnectSyntheticCarryCollisions(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, from runtimecontracts.FlowPackagePinRef, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin) []Finding {
+	if from.Root || strings.TrimSpace(inputPin.Resolution.Mode) != runtimecontracts.FlowInputResolutionModeCreate {
+		return nil
+	}
+	syntheticFields := map[string]string{}
+	for field, carry := range inputPin.Carries {
+		field = strings.TrimSpace(field)
+		sourceField := strings.TrimSpace(carry.From)
+		if field == "" || !strings.HasPrefix(sourceField, "instance.key.") {
+			continue
+		}
+		syntheticFields[field] = sourceField
+	}
+	if len(syntheticFields) == 0 {
+		return nil
+	}
+	wantEvent := eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputPin.EventType()))
+	var findings []Finding
+	for _, site := range semanticview.AuthoredEmitSites(source) {
+		if strings.TrimSpace(site.FlowID) != strings.TrimSpace(from.FlowID) {
+			continue
+		}
+		siteEvent := eventidentity.Normalize(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType()))
+		if siteEvent == "" || siteEvent != wantEvent {
+			continue
+		}
+		for field, carrySource := range syntheticFields {
+			if _, authored := site.Spec.Fields[field]; !authored {
+				continue
+			}
+			producer := strings.TrimSpace(site.NodeID)
+			if producer == "" {
+				producer = strings.TrimSpace(site.SiteKey)
+			}
+			findings = append(findings, compositionConnectFinding(
+				connect,
+				"synthetic_carry_payload_collision",
+				fmt.Sprintf("producer %s emit field %s conflicts with receiver-owned carry %s -> payload.%s; remove or rename the producer field, or choose a different carry as field", producer, field, carrySource, field),
+				from.FlowID,
+			))
+		}
 	}
 	return findings
 }

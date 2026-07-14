@@ -221,7 +221,7 @@ var currentTransactionFamilySchemas = map[Family]currentTransactionFamilySchema{
 		query:    `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
 	},
 	FamilyEventDeliveries: {
-		required: map[string][]string{"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "delivery_target_route", "delivery_context", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"}},
+		required: map[string][]string{"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "delivery_target_route", "delivery_context", "delivery_payload_projection", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"}},
 		query:    `SELECT run_id::text AS run_id, 'event_deliveries'::text AS family FROM event_deliveries WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
 	},
 	FamilyEventReceipts: {
@@ -595,7 +595,8 @@ const canonicalEventDeliveriesProjectionSQL = `
 	           'delivery_id', d.delivery_id, 'event_id', d.event_id,
 	           'subscriber_type', d.subscriber_type, 'subscriber_id', d.subscriber_id,
 	           'delivery_target_route', d.delivery_target_route,
-	           'delivery_context', d.delivery_context, 'status', d.status,
+	           'delivery_context', d.delivery_context,
+	           'delivery_payload_projection', d.delivery_payload_projection, 'status', d.status,
 	           'retry_count', d.retry_count, 'reason_code', d.reason_code,
 	           'active_session_id', d.active_session_id, 'started_at', d.started_at,
 	           'delivered_at', d.delivered_at, 'created_at', d.created_at) AS fact, d.xmin::text::bigint AS source_transaction_id

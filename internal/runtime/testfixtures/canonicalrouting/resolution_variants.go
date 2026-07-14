@@ -172,6 +172,7 @@ const (
 	CreateResolutionInvalidMint
 	CreateResolutionMissingCarry
 	CreateResolutionLegacyUsingInstance
+	CreateResolutionProducerCollision
 )
 
 type TemplateCreateResolutionOptions struct {
@@ -203,6 +204,9 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		applyClosedReplacement(t, validatorSchema, "        carries:\n          validation_case_id:\n            from: instance.key.validation_case_id\n            type: uuid\n", "")
 	case CreateResolutionLegacyUsingInstance:
 		applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "    to: validator.validation_requested\n", "    to: validator.validation_requested\n    using:\n      instance:\n        source: validation_case_id\n        target: validation_case_id\n")
+	case CreateResolutionProducerCollision:
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text\n", "validation.requested:\n  candidate: text\n  validation_case_id: uuid\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
 	default:
 		t.Fatalf("unsupported create resolution invalidity %d", opts.Invalidity)
 	}

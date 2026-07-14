@@ -16,6 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -186,17 +188,30 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
+	var lifecycleManager *runtimemanager.AgentManager
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
+		TemplateInstanceActivator: func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
+			if lifecycleManager == nil {
+				return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
+			}
+			return lifecycleManager.ActivateFlowInstance(ctx, activation)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource, req.AgentRuntime.Options)
+	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource, req.AgentRuntime.Options, workflowStore, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
+		if lifecycleManager == nil {
+			return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
+		}
+		return lifecycleManager.ActivateFlowInstance(ctx, activation)
+	})
 	bus.SetInterceptors(pipeline)
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
@@ -228,6 +243,10 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
+	if agentRuntime == nil || agentRuntime.manager == nil {
+		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
+	}
+	lifecycleManager = agentRuntime.manager
 	if agentRuntime != nil {
 		defer func() {
 			_ = agentRuntime.Shutdown()

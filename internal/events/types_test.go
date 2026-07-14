@@ -218,3 +218,52 @@ func TestEventProjectionMethodsReturnCopies(t *testing.T) {
 		t.Fatalf("projected FlowInstance() = %q, want flow/inst-1", got)
 	}
 }
+
+func TestDeliveryPayloadProjectionIsCanonicalAndIsolated(t *testing.T) {
+	input := map[string]string{" validation_case_id ": " case-1 "}
+	projection, err := NewDeliveryPayloadProjection(input)
+	if err != nil {
+		t.Fatalf("NewDeliveryPayloadProjection: %v", err)
+	}
+	input[" validation_case_id "] = "mutated"
+	fields := projection.Fields()
+	if fields["validation_case_id"] != "case-1" {
+		t.Fatalf("projection fields = %#v, want canonical copied field", fields)
+	}
+	fields["validation_case_id"] = "mutated-again"
+	if got := projection.Fields()["validation_case_id"]; got != "case-1" {
+		t.Fatalf("projection accessor mutated owner = %q, want case-1", got)
+	}
+	raw, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var roundTrip DeliveryPayloadProjection
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if roundTrip != projection {
+		t.Fatalf("round trip = %#v, want %#v", roundTrip, projection)
+	}
+}
+
+func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
+	first, err := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
+	if err != nil {
+		t.Fatalf("first projection: %v", err)
+	}
+	second, err := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
+	if err != nil {
+		t.Fatalf("second projection: %v", err)
+	}
+	route := DeliveryRoute{SubscriberType: "node", SubscriberID: "validator", Target: RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"}}
+	left, right := route, route
+	left.PayloadProjection = first
+	right.PayloadProjection = second
+	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
+		t.Fatalf("ValidateDeliveryRouteProjections error = %v, want conflict", err)
+	}
+	if got := NormalizeDeliveryRoutes([]DeliveryRoute{left, right}); len(got) != 2 {
+		t.Fatalf("NormalizeDeliveryRoutes merged conflicting projection facts: %#v", got)
+	}
+}
