@@ -23,6 +23,42 @@ func (reconfigureTestAgent) OnEvent(context.Context, events.Event) ([]events.Eve
 	return nil, nil
 }
 
+func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
+	builds := 0
+	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+		builds++
+		return &reconfigureTestAgent{id: cfg.ID}, nil
+	})
+	cfg := models.AgentConfig{ID: "same-current-agent", Tools: []string{"tool-a"}}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	beforeExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
+	if !ok {
+		t.Fatal("spawned execution is absent")
+	}
+	before := beforeExecution.Agent
+	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+
+	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{Tools: []string{"tool-a"}}); err != nil {
+		t.Fatalf("ReconfigureAgent(same current): %v", err)
+	}
+
+	if builds != 1 {
+		t.Fatalf("factory builds = %d, want 1", builds)
+	}
+	afterExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
+	if !ok {
+		t.Fatal("same-current execution is absent")
+	}
+	if got := afterExecution.Agent; got != before {
+		t.Fatalf("execution agent changed on same-current reconfigure: before=%p after=%p", before, got)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
+		t.Fatalf("generation = %d, want unchanged %d", got, beforeGeneration)
+	}
+}
+
 func TestReconfigureAgent_RotatesFlowScopedSession(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
 	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
@@ -122,7 +158,10 @@ func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 		t.Fatalf("ReconfigureAgent(task): %v", err)
 	}
 
-	got := am.agentCfg[cfg.ID]
+	got, ok := am.GetAgentConfig(cfg.ID)
+	if !ok {
+		t.Fatal("reconfigured config is absent")
+	}
 	if got.ConversationMode != sessions.RuntimeModeTask.String() {
 		t.Fatalf("ConversationMode = %q, want %q", got.ConversationMode, sessions.RuntimeModeTask.String())
 	}

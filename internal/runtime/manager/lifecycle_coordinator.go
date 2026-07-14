@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -34,8 +36,52 @@ type agentLifecycleCell struct {
 	phase          AgentLifecyclePhase
 	configRevision string
 	runMode        AgentRunMode
-	cancel         context.CancelFunc
-	done           chan struct{}
+	execution      *agentExecutionProjection
+}
+
+type agentExecutionProjection struct {
+	agent            Agent
+	config           models.AgentConfig
+	subscriptions    []events.EventType
+	startedAt        time.Time
+	token            runtimeeffects.LifecycleToken
+	generationCtx    context.Context
+	cancelGeneration context.CancelFunc
+	loopCancel       context.CancelFunc
+	loopDone         chan struct{}
+	route            <-chan events.Event
+	routeToken       runtimeeffects.LifecycleToken
+	fenced           bool
+	leases           int
+	leaseDrained     chan struct{}
+}
+
+type agentRouteBus interface {
+	ReplaceAgentRoute(runtimeeffects.LifecycleToken, ...events.EventType) <-chan events.Event
+	RemoveAgentRoute(runtimeeffects.LifecycleToken)
+}
+
+type agentExecutionSnapshot struct {
+	Agent         Agent
+	Config        models.AgentConfig
+	Subscriptions []events.EventType
+	StartedAt     time.Time
+	Token         runtimeeffects.LifecycleToken
+}
+
+type agentExecutionLease struct {
+	agentExecutionSnapshot
+	Context context.Context
+	release func()
+}
+
+func (l *agentExecutionLease) Release() {
+	if l == nil {
+		return
+	}
+	if l.release != nil {
+		l.release()
+	}
 }
 
 type agentLifecycleCoordinator struct {
@@ -47,6 +93,7 @@ type agentLifecycleCoordinator struct {
 	runCtx    context.Context
 	cancelRun context.CancelFunc
 	cells     map[string]*agentLifecycleCell
+	routes    agentRouteBus
 }
 
 func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, registry runtimesessions.Registry) *agentLifecycleCoordinator {
@@ -58,6 +105,14 @@ func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, registry runt
 		coordinator.sessions, _ = registry.(runtimesessions.LifecycleProjection)
 	}
 	return coordinator
+}
+
+func (c *agentLifecycleCoordinator) bindRoutes(bus Bus) {
+	if c == nil || bus == nil {
+		return
+	}
+	routes, _ := bus.(agentRouteBus)
+	c.routes = routes
 }
 
 func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
@@ -100,6 +155,10 @@ func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uin
 }
 
 func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedAgent, persist bool) error {
+	return c.registerExecution(ctx, rec, persist, nil)
+}
+
+func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent) error {
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
 	}
@@ -160,7 +219,20 @@ func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedA
 			return err
 		}
 	}
-	c.cells[agentID] = &agentLifecycleCell{epoch: epoch, generation: generation, phase: phase, configRevision: revision, runMode: mode}
+	generationCtx, cancelGeneration := context.WithCancel(context.Background())
+	startedAt := rec.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	execution := &agentExecutionProjection{
+		agent: agent, config: rec.Config, startedAt: startedAt,
+		token:         runtimeeffects.LifecycleToken{RuntimeEpoch: epoch, AgentID: agentID, Generation: generation},
+		generationCtx: generationCtx, cancelGeneration: cancelGeneration,
+	}
+	if agent != nil {
+		execution.subscriptions = append([]events.EventType(nil), agent.Subscriptions()...)
+	}
+	c.cells[agentID] = &agentLifecycleCell{epoch: epoch, generation: generation, phase: phase, configRevision: revision, runMode: mode, execution: execution}
 	return nil
 }
 
@@ -216,11 +288,22 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 	}
 	done := make([]<-chan struct{}, 0, len(c.cells))
 	for _, cell := range c.cells {
-		if cell.cancel != nil {
-			cell.cancel()
+		execution := cell.execution
+		if execution == nil {
+			continue
 		}
-		if cell.done != nil {
-			done = append(done, cell.done)
+		execution.fenced = true
+		if execution.cancelGeneration != nil {
+			execution.cancelGeneration()
+		}
+		if c.routes != nil && execution.routeToken.Valid() {
+			c.routes.RemoveAgentRoute(execution.routeToken)
+		}
+		if execution.loopDone != nil {
+			done = append(done, execution.loopDone)
+		}
+		if execution.leases > 0 && execution.leaseDrained != nil {
+			done = append(done, execution.leaseDrained)
 		}
 	}
 	ctx := c.runCtx
@@ -295,6 +378,107 @@ func (c *agentLifecycleCoordinator) lockAgentOperation(agentID string) (*agentLi
 	return cell, nil
 }
 
+func (c *agentLifecycleCoordinator) executionSnapshot(agentID string) (agentExecutionSnapshot, bool) {
+	if c == nil {
+		return agentExecutionSnapshot{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[strings.TrimSpace(agentID)]
+	if cell == nil || cell.execution == nil || cell.execution.agent == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		return agentExecutionSnapshot{}, false
+	}
+	return snapshotExecution(cell.execution), true
+}
+
+func (c *agentLifecycleCoordinator) executionIDs() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.cells))
+	for agentID, cell := range c.cells {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+			ids = append(ids, agentID)
+		}
+	}
+	return ids
+}
+
+func (c *agentLifecycleCoordinator) executionConfigs() []models.AgentConfig {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	configs := make([]models.AgentConfig, 0, len(c.cells))
+	for _, cell := range c.cells {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+			configs = append(configs, cell.execution.config)
+		}
+	}
+	return configs
+}
+
+func snapshotExecution(execution *agentExecutionProjection) agentExecutionSnapshot {
+	if execution == nil {
+		return agentExecutionSnapshot{}
+	}
+	return agentExecutionSnapshot{
+		Agent: execution.agent, Config: execution.config,
+		Subscriptions: append([]events.EventType(nil), execution.subscriptions...),
+		StartedAt:     execution.startedAt, Token: execution.token,
+	}
+}
+
+func (c *agentLifecycleCoordinator) acquireExecution(ctx context.Context, agentID, purpose string, requireRunning bool) (*agentExecutionLease, error) {
+	cell, err := c.lockAgentOperation(agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer cell.opMu.Unlock()
+	c.mu.Lock()
+	execution := cell.execution
+	running := cell.phase == AgentLifecycleRunning
+	if execution == nil || execution.agent == nil || execution.fenced || (requireRunning && !running) {
+		c.mu.Unlock()
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", purpose, map[string]any{"agent_id": strings.TrimSpace(agentID)})
+	}
+	if execution.leases == 0 {
+		execution.leaseDrained = make(chan struct{})
+	}
+	execution.leases++
+	snapshot := snapshotExecution(execution)
+	generationCtx := execution.generationCtx
+	c.mu.Unlock()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	leaseCtx, cancel := context.WithCancel(ctx)
+	stopGenerationCancel := context.AfterFunc(generationCtx, cancel)
+	leaseCtx = runtimeeffects.WithLifecycleToken(leaseCtx, snapshot.Token)
+	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
+		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(store))
+	}
+	lease := &agentExecutionLease{agentExecutionSnapshot: snapshot, Context: leaseCtx}
+	lease.release = sync.OnceFunc(func() {
+		stopGenerationCancel()
+		cancel()
+		c.mu.Lock()
+		if execution.leases > 0 {
+			execution.leases--
+			if execution.leases == 0 && execution.leaseDrained != nil {
+				close(execution.leaseDrained)
+				execution.leaseDrained = nil
+			}
+		}
+		c.mu.Unlock()
+	})
+	return lease, nil
+}
+
 func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan, lockedCell *agentLifecycleCell) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
@@ -311,7 +495,15 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 		return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 	}
 	previousEpoch, previousGeneration, previousPhase := cell.epoch, cell.generation, cell.phase
-	previousDone, previousCancel := cell.done, cell.cancel
+	previousExecution := cell.execution
+	var previousDone, previousLeasesDone <-chan struct{}
+	var previousCancel context.CancelFunc
+	var previousRouteToken runtimeeffects.LifecycleToken
+	if previousExecution != nil {
+		previousDone = previousExecution.loopDone
+		previousCancel = previousExecution.cancelGeneration
+		previousRouteToken = previousExecution.routeToken
+	}
 	runCtx, mode, running := c.runCtx, c.runMode, c.phase == runtimeLifecycleRunning
 	nextEpoch := runtimebus.CurrentRuntimeEpoch()
 	nextGeneration := previousGeneration + 1
@@ -392,16 +584,24 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode
-	cell.cancel, cell.done = nil, nil
+	if previousExecution != nil {
+		previousExecution.fenced = true
+		if previousExecution.leases > 0 {
+			previousLeasesDone = previousExecution.leaseDrained
+		}
+	}
 	if previousCancel != nil {
 		previousCancel()
 	}
 	c.mu.Unlock()
+	if c.routes != nil && previousRouteToken.Valid() {
+		c.routes.RemoveAgentRoute(previousRouteToken)
+	}
 	if previousDone != nil {
 		<-previousDone
 	}
-	if result.Phase != AgentLifecycleRunning {
-		return nil, runtimeeffects.LifecycleToken{}, nil, nil
+	if previousLeasesDone != nil {
+		<-previousLeasesDone
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -409,20 +609,41 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 	if cell == nil || cell.epoch != result.RuntimeEpoch || cell.generation != result.Generation || cell.phase != result.Phase {
 		return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 	}
-	loopCtx, cancel := context.WithCancel(runCtx)
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: result.RuntimeEpoch, AgentID: agentID, Generation: result.Generation}
-	loopCtx = runtimeeffects.WithLifecycleToken(loopCtx, token)
+	baseCtx := context.Background()
+	if result.Phase == AgentLifecycleRunning {
+		baseCtx = runCtx
+	}
+	generationCtx, cancelGeneration := context.WithCancel(baseCtx)
+	nextExecution := &agentExecutionProjection{token: token, generationCtx: generationCtx, cancelGeneration: cancelGeneration}
+	if previousExecution != nil {
+		nextExecution.agent = previousExecution.agent
+		nextExecution.config = previousExecution.config
+		nextExecution.subscriptions = append([]events.EventType(nil), previousExecution.subscriptions...)
+		nextExecution.startedAt = previousExecution.startedAt
+	}
+	if rec != nil {
+		nextExecution.config = rec.Config
+	}
+	cell.execution = nextExecution
+	if result.Phase != AgentLifecycleRunning {
+		return nil, token, nil, nil
+	}
+	loopCtx := runtimeeffects.WithLifecycleToken(generationCtx, token)
 	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
 		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(store))
 	}
 	done := make(chan struct{})
-	cell.cancel, cell.done = cancel, done
+	nextExecution.loopCancel, nextExecution.loopDone = cancelGeneration, done
 	return loopCtx, token, done, nil
 }
 
 func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleToken, done chan struct{}) error {
 	if c == nil {
 		return nil
+	}
+	if c.routes != nil {
+		c.routes.RemoveAgentRoute(token)
 	}
 	close(done)
 	c.mu.Lock()
@@ -434,9 +655,28 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	cell.opMu.Lock()
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
+	cell = c.cells[token.AgentID]
+	if cell == nil || cell.epoch != token.RuntimeEpoch || cell.generation != token.Generation || cell.execution == nil || cell.execution.loopDone != done {
+		c.mu.Unlock()
+		return nil
+	}
+	execution := cell.execution
+	execution.fenced = true
+	if execution.cancelGeneration != nil {
+		execution.cancelGeneration()
+	}
+	var leasesDone <-chan struct{}
+	if execution.leases > 0 {
+		leasesDone = execution.leaseDrained
+	}
+	c.mu.Unlock()
+	if leasesDone != nil {
+		<-leasesDone
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell = c.cells[token.AgentID]
-	if cell == nil || cell.epoch != token.RuntimeEpoch || cell.generation != token.Generation || cell.done != done {
+	if cell == nil || cell.execution != execution || cell.epoch != token.RuntimeEpoch || cell.generation != token.Generation {
 		return nil
 	}
 	if cell.phase == AgentLifecycleRunning && c.store != nil {
@@ -453,8 +693,10 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		if err != nil {
 			cell.phase = AgentLifecycleFailed
 			cell.runMode = AgentRunModeStopped
-			cell.cancel = nil
-			cell.done = nil
+			cell.execution.loopCancel = nil
+			cell.execution.loopDone = nil
+			cell.execution.route = nil
+			cell.execution.routeToken = runtimeeffects.LifecycleToken{}
 			return fmt.Errorf("persist agent loop self-release: %w", err)
 		}
 		cell.phase = AgentLifecycleRegistered
@@ -476,8 +718,10 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		cell.phase = AgentLifecycleRegistered
 		cell.runMode = AgentRunModeStopped
 	}
-	cell.cancel = nil
-	cell.done = nil
+	cell.execution.loopCancel = nil
+	cell.execution.loopDone = nil
+	cell.execution.route = nil
+	cell.execution.routeToken = runtimeeffects.LifecycleToken{}
 	return nil
 }
 
@@ -499,7 +743,15 @@ func (c *agentLifecycleCoordinator) terminate(ctx context.Context, agentID, trig
 		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
 	epoch, generation, phase, revision := cell.epoch, cell.generation, cell.phase, cell.configRevision
-	done, cancel := cell.done, cell.cancel
+	execution := cell.execution
+	var done, leasesDone <-chan struct{}
+	var cancel context.CancelFunc
+	var routeToken runtimeeffects.LifecycleToken
+	if execution != nil {
+		done = execution.loopDone
+		cancel = execution.cancelGeneration
+		routeToken = execution.routeToken
+	}
 	nextEpoch, nextGeneration := runtimebus.CurrentRuntimeEpoch(), generation+1
 	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{
 		Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonNormal,
@@ -536,14 +788,30 @@ func (c *agentLifecycleCoordinator) terminate(ctx context.Context, agentID, trig
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.runMode = nextEpoch, nextGeneration, target, AgentRunModeStopped
-	cell.cancel, cell.done = nil, nil
+	if execution != nil {
+		execution.fenced = true
+		if execution.leases > 0 {
+			leasesDone = execution.leaseDrained
+		}
+	}
 	if cancel != nil {
 		cancel()
 	}
 	c.mu.Unlock()
+	if c.routes != nil && routeToken.Valid() {
+		c.routes.RemoveAgentRoute(routeToken)
+	}
 	if done != nil {
 		<-done
 	}
+	if leasesDone != nil {
+		<-leasesDone
+	}
+	c.mu.Lock()
+	if current := c.cells[agentID]; current == cell && current.execution == execution && current.phase == target {
+		current.execution = nil
+	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -555,21 +823,4 @@ func (c *agentLifecycleCoordinator) token(agentID string) (runtimeeffects.Lifecy
 		return runtimeeffects.LifecycleToken{}, false
 	}
 	return runtimeeffects.LifecycleToken{RuntimeEpoch: cell.epoch, AgentID: strings.TrimSpace(agentID), Generation: cell.generation}, true
-}
-
-func (c *agentLifecycleCoordinator) effectContext(ctx context.Context, agentID string) (context.Context, error) {
-	// Lightweight managers used by isolated adapters do not own runtime loops.
-	// Served runtimes always provide the selected lifecycle store.
-	if c == nil || (c.store == nil && c.sessions == nil) {
-		return ctx, nil
-	}
-	token, ok := c.token(agentID)
-	if !ok {
-		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", "bind_effect_context", map[string]any{"agent_id": strings.TrimSpace(agentID)})
-	}
-	ctx = runtimeeffects.WithLifecycleToken(ctx, token)
-	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
-		ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(store))
-	}
-	return ctx, nil
 }

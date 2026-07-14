@@ -202,6 +202,13 @@ func (a panicStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, 
 	return nil, nil
 }
 
+func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	if err := am.lifecycle.registerExecution(context.Background(), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test"}, false, panicStubAgent{id: cfg.ID}); err != nil {
+		t.Fatalf("register receipt test agent: %v", err)
+	}
+}
+
 func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	pauseCalls := 0
@@ -217,11 +224,11 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 				}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 		},
 	})
-	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
+	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
 		ID:       "agent-a",
 		EntityID: "ent-123",
 		FlowPath: "review/inst-1",
-	}
+	})
 
 	inbound := eventtest.RootIngress("evt-1",
 		events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
@@ -387,11 +394,11 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 	}
 	am := NewAgentManager(bus, nil)
 	am.store = store
-	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
+	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
 		ID:       "agent-a",
 		EntityID: "ent-123",
 		FlowPath: "review/inst-1",
-	}
+	})
 
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
 		am.maybeEscalateDeadLetter(context.Background(), "evt-1", "agent-a")
@@ -422,11 +429,11 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	am := NewAgentManager(bus, nil)
-	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
+	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
 		ID:       "agent-a",
 		EntityID: "ent-123",
 		FlowPath: "review/inst-1",
-	}
+	})
 
 	am.handleAgentLoopPanic(context.Background(), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
 

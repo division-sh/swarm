@@ -28692,11 +28692,27 @@ agent_lifecycle_authority:
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
+  process_execution_projection:
+    owner: one typed agentExecutionProjection inside the per-agent lifecycle cell
+    fields: [agent, config, exact_subscriptions, lifecycle_token, generation_context, loop_cancel, loop_done, route_handle, direct_execution_leases]
+    rule: Agent code, config, subscriptions, lifecycle authority, loop ownership, and EventBus routing are one generation-owned projection. AgentManager has no parallel agent/config maps and no execution consumer may select one field before independently refreshing another.
+    acquire:
+      rule: Directive and backlog execution acquire one exact generation lease containing Agent, config, subscriptions, token, and generation-cancelled context, then release that lease after execution and settlement. A fenced generation admits no new lease. Refreshing only the token after selecting predecessor code is forbidden.
+      registered_backlog: Startup backlog may lease a registered generation, but its exact token remains present and managed effects still fail closed unless the selected durable lifecycle cell is running.
+    replace:
+      rule: Start, restart, reconfigure, recovery, flow activation, and spawn-during-run enumerate agent IDs only and select the current projection after acquiring the per-agent operation lock. Replacement fences new leases, cancels the predecessor generation, removes its exact route, awaits loop and direct-execution release, installs one successor projection, then starts that successor.
+      same_current: Reconfigure compares the validated candidate revision with the authoritative locked current revision before invoking the Agent factory. Same-current preserves Agent/config identity, loop, route channel/token, generation, sessions, and factory count.
+    route:
+      owner: EventBus ReplaceAgentRoute and RemoveAgentRoute keyed by the complete lifecycle token
+      replacement: Every running successor receives a fresh channel and exactly its declared subscription set. Removed subscriptions disappear, retained/new subscriptions point only to the fresh channel, and buffered predecessor work is abandoned with the detached predecessor channel rather than transferred.
+      removal: Remove is compare-token removal, so delayed predecessor cleanup cannot delete a successor route. Self-release, terminal exit, both Run cancellations, shutdown, teardown, and reset remove the exact generation route.
+      concurrency: Route replacement/removal atomically detaches the old route but never closes a channel that a concurrent publisher may retain. Generic agent-ID Subscribe/Unsubscribe is not an AgentManager lifecycle API.
   transitions:
     operations: [spawn, hydrate, materialize, start, restart, reconfigure, teardown, self_release, shutdown, reset]
     serialization: All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision point.
     ordering:
-      - Validate and build candidate state before transition admission.
+      - Under the per-agent operation lock, read the authoritative current projection, merge and validate any patch, and return same-current before Agent factory invocation.
+      - Materialize any changed candidate only inside that locked replacement decision.
       - Commit the lifecycle cell, immutable transition fact, durable operation outcome, and diagnostic outbox atomically.
       - Fence the predecessor generation before cancellation and await its generation-aware release before starting a successor loop.
       - Persistence failure leaves the prior process-local owner unchanged and cannot be acknowledged as success.
@@ -28736,6 +28752,10 @@ agent_lifecycle_authority:
     other_ordering: Startup preservation cleanup completes before runtime contexts start; manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Compatibility migration/backfill remains test-only unless separately reclassified.
   forbidden:
     - direct lifecycle map writes outside the coordinator
+    - parallel AgentManager agent/config execution maps or map-read-then-token-refresh execution
+    - caller-selected Agent or subscription slices passed into lifecycle transition helpers
+    - generic agent-ID Subscribe/Unsubscribe from AgentManager
+    - predecessor EventBus queue transfer, stale tokenless route removal, or closing a detached route channel
     - memory-only fallback for a selected persistent runtime store
     - best-effort lifecycle persistence or diagnostic ownership
     - tolerant dual lifecycle readers or compatibility aliases

@@ -231,13 +231,14 @@ func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Even
 }
 
 func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event) (bool, string) {
+	execution, ok := am.lifecycle.executionSnapshot(agentID)
 	am.mu.RLock()
-	cfg, ok := am.agentCfg[agentID]
 	tracker := am.budget
 	am.mu.RUnlock()
 	if !ok || tracker == nil {
 		return false, ""
 	}
+	cfg := execution.Config
 	eventType := strings.ToLower(strings.TrimSpace(string(evt.Type())))
 	if eventType == "platform.budget_threshold_crossed" {
 		return false, ""
@@ -384,12 +385,11 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 	now := time.Now().UTC()
 	entityID := ""
 	flowInstance := ""
-	am.mu.RLock()
-	if cfg, ok := am.agentCfg[agentID]; ok {
+	if execution, ok := am.lifecycle.executionSnapshot(agentID); ok {
+		cfg := execution.Config
 		entityID = cfg.EffectiveEntityID()
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
-	am.mu.RUnlock()
 	if authRequired {
 		authEvt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.auth_required"), "runtime", "", mustJSON(map[string]any{
 			"agent_id":      strings.TrimSpace(agentID),
@@ -587,9 +587,8 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	if ReceiptStatus(strings.TrimSpace(string(receipt.Status))) != ReceiptStatusDeadLetter {
 		return
 	}
-	am.mu.RLock()
-	cfg, cfgOK := am.agentCfg[agentID]
-	am.mu.RUnlock()
+	execution, cfgOK := am.lifecycle.executionSnapshot(agentID)
+	cfg := execution.Config
 	entityID := ""
 	flowInstance := ""
 	if cfgOK {
@@ -699,9 +698,8 @@ func (am *AgentManager) recordDeadLetterEscalation(flowInstance string, sample d
 }
 
 func (am *AgentManager) resolveManagerAgentID(agentID string) string {
-	am.mu.RLock()
-	cfg, ok := am.agentCfg[agentID]
-	am.mu.RUnlock()
+	execution, ok := am.lifecycle.executionSnapshot(agentID)
+	cfg := execution.Config
 	if ok {
 		if p := strings.TrimSpace(cfg.ParentAgent); p != "" {
 			return p
