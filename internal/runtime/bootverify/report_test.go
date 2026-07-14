@@ -611,9 +611,10 @@ func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing
 	t.Parallel()
 
 	cases := []struct {
-		name   string
-		target string
-		opts   deadEventSchemaFixtureOptions
+		name          string
+		target        string
+		opts          deadEventSchemaFixtureOptions
+		canonicalRoot bool
 	}{
 		{
 			name:   "same-flow handler emit",
@@ -678,16 +679,9 @@ root-node:
 			},
 		},
 		{
-			name:   "external source metadata",
-			target: "support/ticket.ready",
-			opts: deadEventSchemaFixtureOptions{
-				name: "dead-event-schema-external-source",
-				flows: map[string]deadEventSchemaFlowFiles{
-					"support": {
-						events: "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n",
-					},
-				},
-			},
+			name:          "external source metadata",
+			target:        "support/ticket.ready",
+			canonicalRoot: true,
 		},
 		{
 			name:   "external consumer metadata",
@@ -839,6 +833,9 @@ pins:
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeDeadEventSchemaFixture(t, tc.opts)
+			if tc.canonicalRoot {
+				root = canonicalrouting.CopyDeadEventSchemaExternalSource(t)
+			}
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -7008,109 +7005,48 @@ type timerValidationFixtureOptions struct {
 }
 
 func writeTimerValidationFixture(t *testing.T, startOn, cancelOn string) string {
-	return writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
-		startOn:           startOn,
-		cancelOn:          cancelOn,
-		owner:             "support-node",
-		event:             "timer.reminder",
-		includeTimerEvent: true,
-	})
+	t.Helper()
+	variants := map[[2]string]canonicalrouting.TimerValidationVariant{
+		{"event:ticket.opened", ""}:                     canonicalrouting.TimerValidationDefault,
+		{"ticket.opened", ""}:                           canonicalrouting.TimerValidationUnprefixedStart,
+		{"event:ticket.opened", "boot"}:                 canonicalrouting.TimerValidationCancelBoot,
+		{"state:missing_state", ""}:                     canonicalrouting.TimerValidationUnknownStartState,
+		{"event:ticket.opened", "state:missing_state"}:  canonicalrouting.TimerValidationUnknownCancelState,
+		{"event:ticket.unknown", ""}:                    canonicalrouting.TimerValidationUnknownStartEvent,
+		{"event:ticket.opened", "event:ticket.unknown"}: canonicalrouting.TimerValidationUnknownCancelEvent,
+		{"boot", ""}:                    canonicalrouting.TimerValidationBoot,
+		{"boot", "state:done"}:          canonicalrouting.TimerValidationBootCancelState,
+		{"boot", "event:ticket.closed"}: canonicalrouting.TimerValidationBootCancelEvent,
+	}
+	variant, ok := variants[[2]string{startOn, cancelOn}]
+	if !ok {
+		t.Fatalf("unsupported timer-validation trigger pair %q/%q", startOn, cancelOn)
+	}
+	return canonicalrouting.CopyTimerValidation(t, variant)
 }
 
 func writeTimerValidationFixtureWithOptions(t *testing.T, opts timerValidationFixtureOptions) string {
 	t.Helper()
-	root := t.TempDir()
-	if strings.TrimSpace(opts.event) == "" {
-		opts.event = "timer.reminder"
+	variant := canonicalrouting.TimerValidationDefault
+	switch {
+	case opts.omitTimerHandler && strings.TrimSpace(opts.flowAgents) != "":
+		variant = canonicalrouting.TimerValidationAgentConsumer
+	case opts.omitTimerHandler && strings.TrimSpace(opts.timerEventSwarm) != "":
+		variant = canonicalrouting.TimerValidationExternalConsumer
+	case opts.omitTimerHandler && len(opts.flowOutputs) != 0:
+		variant = canonicalrouting.TimerValidationOutputBoundary
+	case opts.startOn == "event:ticket.closed" && len(opts.externalSourceEvents) == 1:
+		variant = canonicalrouting.TimerValidationMissingStartProducer
+	case opts.cancelOn == "event:ticket.closed" && len(opts.externalSourceEvents) == 1:
+		variant = canonicalrouting.TimerValidationMissingCancelProducer
+	case opts.omitTimerHandler:
+		variant = canonicalrouting.TimerValidationNoConsumer
+	case opts.timerHandlerKey == "timer.*":
+		variant = canonicalrouting.TimerValidationWildcardConsumer
+	default:
+		t.Fatalf("unsupported timer-validation options: %#v", opts)
 	}
-	externalSourceEvents := opts.externalSourceEvents
-	if externalSourceEvents == nil {
-		externalSourceEvents = []string{"ticket.opened", "ticket.closed"}
-	}
-	flowAgents := opts.flowAgents
-	if strings.TrimSpace(flowAgents) == "" {
-		flowAgents = "{}\n"
-	}
-	timerHandlerKey := strings.TrimSpace(opts.timerHandlerKey)
-	if timerHandlerKey == "" {
-		timerHandlerKey = opts.event
-	}
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: timer-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-ticket:
-  ticket_id: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timer-validation\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	flowPinsBlock := ""
-	if len(opts.flowOutputs) > 0 {
-		flowPinsBlock = `
-pins:
-  inputs:
-    events: []
-  outputs:
-    events:
-`
-		for _, output := range opts.flowOutputs {
-			flowPinsBlock += "      - " + output + "\n"
-		}
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-terminal_states: [done]
-states: [waiting, active, done]
-`+flowPinsBlock)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
-	eventsYAML := timerValidationEventEntry("ticket.opened", timerValidationHasExternalSource(externalSourceEvents, "ticket.opened"), "")
-	eventsYAML += timerValidationEventEntry("ticket.closed", timerValidationHasExternalSource(externalSourceEvents, "ticket.closed"), "")
-	if opts.includeTimerEvent {
-		eventsYAML += timerValidationEventEntry(opts.event, false, opts.timerEventSwarm)
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), eventsYAML)
-	timerBlock := `
-    - id: reminder
-      owner: ` + opts.owner + `
-      event: ` + opts.event + `
-      delay: 1m
-      start_on: ` + opts.startOn + "\n"
-	if strings.TrimSpace(opts.cancelOn) != "" {
-		timerBlock += "      cancel_on: " + opts.cancelOn + "\n"
-	}
-	timerHandlerBlock := ""
-	if !opts.omitTimerHandler {
-		timerHandlerBlock = "    " + timerHandlerKey + ":\n      advances_to: done\n"
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
-support-node:
-  id: support-node
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-    - timer.reminder
-  timers:
-`+timerBlock+`  event_handlers:
-    ticket.opened:
-      create_entity: true
-      advances_to: active
-    ticket.closed:
-      advances_to: done
-`+timerHandlerBlock)
-	return root
+	return canonicalrouting.CopyTimerValidation(t, variant)
 }
 
 type timerStateCancelReachabilityFixtureOptions struct {
@@ -7126,154 +7062,26 @@ type timerStateCancelReachabilityFixtureOptions struct {
 
 func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCancelReachabilityFixtureOptions) string {
 	t.Helper()
-	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: timer-state-cancel-reachability
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-ticket:
-  ticket_id: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timer-state-cancel-reachability\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	terminalStates := "[done]"
-	if opts.treatReviewAsTerminalActivation {
-		terminalStates = "[review, done]"
+	variant := canonicalrouting.TimerStateCancelReachableState
+	switch {
+	case opts.startOn == "state:active" && opts.cancelOn == "state:done" && opts.includeClosePath:
+		variant = canonicalrouting.TimerStateCancelReachableState
+	case opts.startOn == "state:active" && opts.cancelOn == "state:done" && opts.includeTimerFireHandler:
+		variant = canonicalrouting.TimerStateCancelTimerFireOnly
+	case opts.startOn == "state:active" && opts.cancelOn == "state:done":
+		variant = canonicalrouting.TimerStateCancelUnreachableState
+	case opts.startOn == "state:active" && opts.cancelOn == "state:review":
+		variant = canonicalrouting.TimerStateCancelGloballyUnreachableReview
+	case opts.startOn == "event:ticket.opened" && opts.cancelOn == "state:done" && opts.includeEventStartReviewBranch:
+		variant = canonicalrouting.TimerStateCancelPartialEventActivation
+	case opts.startOn == "event:ticket.opened" && opts.cancelOn == "state:done":
+		variant = canonicalrouting.TimerStateCancelReachableEvent
+	case opts.startOn == "event:ticket.opened" && opts.cancelOn == "state:review":
+		variant = canonicalrouting.TimerStateCancelUnreachableEvent
+	default:
+		t.Fatalf("unsupported timer state-cancel options: %#v", opts)
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-terminal_states: `+terminalStates+`
-states: [waiting, active, review, done]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
-ticket.opened:
-  swarm:
-    source: external (test)
-ticket.closed:
-  entity_id: string
-admin.done:
-  swarm:
-    source: external (test)
-admin.review:
-  swarm:
-    source: external (test)
-timer.reminder:
-  swarm:
-    consumer: mailbox_system
-`)
-	timerBlock := `
-    - id: reminder
-      owner: support-node
-      event: timer.reminder
-      delay: 1m
-      start_on: ` + opts.startOn + "\n"
-	if strings.TrimSpace(opts.cancelOn) != "" {
-		timerBlock += "      cancel_on: " + opts.cancelOn + "\n"
-	}
-	handlerBlock := ""
-	if opts.includeEventStartReviewBranch {
-		handlerBlock += `
-    ticket.opened:
-      rules:
-        - id: active_path
-          condition: "true"
-          advances_to: active
-        - id: review_path
-          condition: "true"
-          advances_to: review
-`
-	} else {
-		handlerBlock += `
-    ticket.opened:
-      create_entity: true
-      advances_to: active
-`
-	}
-	if opts.includeClosePath {
-		handlerBlock += `
-    ticket.closed:
-      advances_to: done
-`
-	}
-	if opts.includeGlobalDonePath {
-		handlerBlock += `
-    admin.done:
-      create_entity: true
-      advances_to: done
-`
-	}
-	if opts.includeGlobalReviewPath {
-		handlerBlock += `
-    admin.review:
-      create_entity: true
-      advances_to: review
-`
-	}
-	if opts.includeTimerFireHandler {
-		handlerBlock += `
-    timer.reminder:
-      advances_to: done
-`
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
-support-node:
-  id: support-node
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-    - admin.done
-    - admin.review
-    - timer.reminder
-  timers:
-`+timerBlock+`  event_handlers:
-`+handlerBlock)
-	return root
-}
-
-func timerValidationEventEntry(eventType string, externalSource bool, swarmLines string) string {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return ""
-	}
-	out := eventType + ":\n  entity_id: string\n"
-	swarmLines = strings.TrimSpace(swarmLines)
-	if externalSource || swarmLines != "" {
-		out += "  swarm:\n"
-		if externalSource {
-			out += "    source: external\n"
-		}
-		for _, line := range strings.Split(swarmLines, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			out += "    " + line + "\n"
-		}
-	}
-	return out
-}
-
-func timerValidationHasExternalSource(events []string, eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	for _, candidate := range events {
-		if strings.TrimSpace(candidate) == eventType {
-			return true
-		}
-	}
-	return false
+	return canonicalrouting.CopyTimerStateCancelReachability(t, variant)
 }
 
 func artifactRepoTimerResultEventEntry(success bool) runtimecontracts.EventCatalogEntry {

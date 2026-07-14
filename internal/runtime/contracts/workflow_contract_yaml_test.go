@@ -23,7 +23,7 @@ func containsString(values []string, target string) bool {
 func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
 
 	var doc ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte(`
+	snippet := canonicalrouting.NewParserSnippet(t, `
 name: package-boundary
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -64,7 +64,8 @@ connect:
       work_id:
         source: payload.work_id
         target: entity.work_id
-`), &doc); err != nil {
+`)
+	if err := snippet.Decode(&doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := strings.Join(doc.Requires.Inputs, ","); got != "work.requested" {
@@ -729,78 +730,78 @@ func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *te
 
 	tests := []struct {
 		name    string
-		body    string
+		body    canonicalrouting.ParserSnippet
 		wantErr string
 	}{
 		{
 			name: "unknown policy requirement option",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 requires:
   policy:
     provider.threshold:
       fallback: 0.8
-`,
+`),
 			wantErr: `requires.policy field "fallback" is not supported.`,
 		},
 		{
 			name: "policy requirement must be mapping",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 requires:
   policy:
     provider.threshold: 0.8
-`,
+`),
 			wantErr: "policy requirement must be a mapping",
 		},
 		{
 			name: "unknown requires field",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 requires:
   inputz: [work.requested]
-`,
+`),
 			wantErr: `requires field "inputz" is not supported.`,
 		},
 		{
 			name: "bind inputs must be mapping",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 flows:
   - id: worker
     flow: worker
     bind:
       inputs: [work.requested]
-`,
+`),
 			wantErr: "bind.inputs",
 		},
 		{
 			name: "unknown bind field",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 packages:
   - path: packages/child
     bind:
       credential: {}
-`,
+`),
 			wantErr: `bind field "credential" is not supported.`,
 		},
 		{
 			name: "unknown connect field",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid
 connect:
   - from: producer.ready
     to: consumer.ready
     topic: unsupported
-`,
+`),
 			wantErr: `connect field "topic" is not supported.`,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc ProjectPackageDocument
-			err := yaml.Unmarshal([]byte(tc.body), &doc)
+			err := tc.body.Decode(&doc)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
@@ -887,7 +888,7 @@ pins:
 func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T) {
 
 	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
+	snippet := canonicalrouting.NewParserSnippet(t, `
 name: resolution-pins
 pins:
   inputs:
@@ -933,7 +934,8 @@ pins:
           mode: reply
           replies_to: provider_requested
           correlation_key: payload.provider_request_id
-`), &doc); err != nil {
+`)
+	if err := snippet.Decode(&doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	pins := doc.Pins.Inputs.EventPins
@@ -981,11 +983,11 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 
 	tests := []struct {
 		name string
-		body string
+		body canonicalrouting.ParserSnippet
 	}{
 		{
 			name: "resolution",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid-resolution
 pins:
   inputs:
@@ -995,11 +997,11 @@ pins:
         resolution:
           mode: create
           unsupported: true
-`,
+`),
 		},
 		{
 			name: "instance_key",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid-resolution-instance-key
 pins:
   inputs:
@@ -1012,11 +1014,11 @@ pins:
             mint: uuid
             as: work_id
             unsupported: true
-`,
+`),
 		},
 		{
 			name: "carries",
-			body: `
+			body: canonicalrouting.NewParserSnippet(t, `
 name: invalid-resolution-carries
 pins:
   inputs:
@@ -1027,13 +1029,13 @@ pins:
           work_id:
             from: instance.key.work_id
             unsupported: true
-`,
+`),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			err := yaml.Unmarshal([]byte(tc.body), &doc)
+			err := tc.body.Decode(&doc)
 			if err == nil || !strings.Contains(err.Error(), "is not supported") {
 				t.Fatalf("yaml.Unmarshal error = %v, want typed field rejection", err)
 			}

@@ -2,7 +2,6 @@ package bootverify
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,77 +13,49 @@ import (
 func TestEventMetadataAuthorityRejectsInternalSwarmRestatements(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		opts    eventMetadataAuthorityFixtureOptions
+		variant canonicalrouting.EventMetadataAuthorityVariant
 		want    string
 		wantMsg string
 	}{
 		{
 			name:    "producer names emitting node",
-			opts:    eventMetadataAuthorityFixtureOptions{taskDoneSwarm: "producer: worker"},
+			variant: canonicalrouting.EventMetadataAuthorityTaskProducerNode,
 			want:    "swarm.producer",
 			wantMsg: "system node worker handler emits",
 		},
 		{
 			name:    "consumer names subscribing node",
-			opts:    eventMetadataAuthorityFixtureOptions{taskDoneSwarm: "consumer: observer"},
+			variant: canonicalrouting.EventMetadataAuthorityTaskConsumerNode,
 			want:    "swarm.consumer",
 			wantMsg: "system node observer handler subscribes",
 		},
 		{
 			name:    "source names internal producer",
-			opts:    eventMetadataAuthorityFixtureOptions{taskDoneSwarm: "source: worker"},
+			variant: canonicalrouting.EventMetadataAuthorityTaskSourceNode,
 			want:    "swarm.source",
 			wantMsg: "derived internal producer system node worker handler emits",
 		},
 		{
-			name: "producer names agent emit_events role",
-			opts: eventMetadataAuthorityFixtureOptions{
-				taskDoneSwarm: "producer: reviewer",
-				agents: `
-reviewer-agent:
-  id: reviewer-agent
-  role: reviewer
-  mode: task
-  emit_events: [task.done]
-`,
-			},
+			name:    "producer names agent emit_events role",
+			variant: canonicalrouting.EventMetadataAuthorityTaskProducerAgent,
 			want:    "swarm.producer",
 			wantMsg: "agent role reviewer emit_events",
 		},
 		{
-			name: "consumer names agent subscription role",
-			opts: eventMetadataAuthorityFixtureOptions{
-				taskDoneSwarm: "consumer: reviewer",
-				agents: `
-reviewer-agent:
-  id: reviewer-agent
-  role: reviewer
-  mode: task
-  subscriptions: [task.done]
-`,
-			},
+			name:    "consumer names agent subscription role",
+			variant: canonicalrouting.EventMetadataAuthorityTaskConsumerAgent,
 			want:    "swarm.consumer",
 			wantMsg: "agent role reviewer subscriptions",
 		},
 		{
-			name: "producer names timer",
-			opts: eventMetadataAuthorityFixtureOptions{
-				taskDoneSwarm: "producer: reminder",
-				timerBlock: `
-  timers:
-    - id: reminder
-      owner: worker
-      event: task.done
-      delay: 1m
-      start_on: event:task.start
-`,
-			},
+			name:    "producer names timer",
+			variant: canonicalrouting.EventMetadataAuthorityTaskProducerTimer,
 			want:    "swarm.producer",
 			wantMsg: "timer reminder fires event",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadEventMetadataAuthorityFixture(t, tc.opts)
+			source := loadEventMetadataAuthorityFixture(t, tc.variant)
 
 			report := Run(context.Background(), source, Options{})
 
@@ -172,18 +143,7 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
-	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{
-		externalRequestedSwarm: `
-    source: external webhook
-    producer: mailbox_human
-    consumer: external_ui
-`,
-		taskDoneSwarm: `
-    source: platform timer
-    producer: mailbox_human
-    consumer: external_ui
-`,
-	})
+	source := loadEventMetadataAuthorityFixture(t, canonicalrouting.EventMetadataAuthorityExternalProof)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -193,7 +153,7 @@ func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
 }
 
 func TestEventMetadataAuthorityNarrowReadbackExplainsDerivedAndExternalProof(t *testing.T) {
-	source := loadEventMetadataAuthorityFixture(t, eventMetadataAuthorityFixtureOptions{})
+	source := loadEventMetadataAuthorityFixture(t, canonicalrouting.EventMetadataAuthorityDefault)
 	report := Run(context.Background(), source, Options{})
 
 	if reportContains(report.Warnings(), "event_producer_exists", "task.done") ||
@@ -220,52 +180,12 @@ func TestEventMetadataAuthorityNarrowReadbackExplainsDerivedAndExternalProof(t *
 	}
 }
 
-type eventMetadataAuthorityFixtureOptions struct {
-	externalRequestedSwarm string
-	taskDoneSwarm          string
-	agents                 string
-	timerBlock             string
-}
-
-func loadEventMetadataAuthorityFixture(t *testing.T, opts eventMetadataAuthorityFixtureOptions) semanticview.Source {
+func loadEventMetadataAuthorityFixture(t *testing.T, variant canonicalrouting.EventMetadataAuthorityVariant) semanticview.Source {
 	t.Helper()
-	root := writeEventMetadataAuthorityFixture(t, opts)
+	root := canonicalrouting.CopyEventMetadataAuthority(t, variant)
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec))
-}
-
-func writeEventMetadataAuthorityFixture(t *testing.T, opts eventMetadataAuthorityFixtureOptions) string {
-	t.Helper()
-	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: event-metadata-authority
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: event-metadata-authority\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	if strings.TrimSpace(opts.agents) == "" {
-		opts.agents = "{}\n"
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), opts.agents)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), eventMetadataAuthorityEventsYAML(opts))
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-worker:
-  id: worker
-  execution_type: system_node
-`+opts.timerBlock+`  event_handlers:
-    task.start:
-      emit:
-        event: task.done
-observer:
-  id: observer
-  execution_type: system_node
-  event_handlers:
-    task.done: {}
-`)
-	return root
 }
 
 func loadEventMetadataFlowAuthorityFixture(t *testing.T, invalidity canonicalrouting.ParentConnectEventMetadataInvalidity) semanticview.Source {
@@ -274,39 +194,4 @@ func loadEventMetadataFlowAuthorityFixture(t *testing.T, invalidity canonicalrou
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec))
-}
-
-func eventMetadataAuthorityEventsYAML(opts eventMetadataAuthorityFixtureOptions) string {
-	externalSwarm := indentEventMetadataAuthoritySwarm(opts.externalRequestedSwarm)
-	if strings.TrimSpace(externalSwarm) == "" {
-		externalSwarm = "    source: external"
-	}
-	taskDoneSwarm := indentEventMetadataAuthoritySwarm(opts.taskDoneSwarm)
-	events := `external.requested:
-  swarm:
-` + externalSwarm + `
-task.start:
-  swarm:
-    source: external
-task.done:
-`
-	if strings.TrimSpace(taskDoneSwarm) != "" {
-		events += "  swarm:\n" + taskDoneSwarm + "\n"
-	}
-	return events
-}
-
-func indentEventMetadataAuthoritySwarm(raw string) string {
-	raw = strings.Trim(raw, "\n")
-	if strings.TrimSpace(raw) == "" {
-		return ""
-	}
-	lines := strings.Split(raw, "\n")
-	for idx, line := range lines {
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "    ") {
-			continue
-		}
-		lines[idx] = "    " + strings.TrimLeft(line, " ")
-	}
-	return strings.Join(lines, "\n")
 }
